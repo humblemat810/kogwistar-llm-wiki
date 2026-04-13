@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kogwistar-llm-wiki"
+version = "0.0.0"
+description = "Docs and orchestration notes for the Kogwistar LLM-Wiki project."
+requires-python = ">=3.13,<3.15"
+dependencies = [
+  "kogwistar @ git+ssh://git@github.com/humblemat810/graphrag_knowledge_engine_v2.git@main#subdirectory=engine",
+  "graph-knowledge-doc-parser @ git+ssh://git@github.com/humblemat810/kg-doc-parser.git@main",
+  "kogwistar-obsidian-sink @ git+ssh://git@github.com/humblemat810/kogwistar-obsidian-sink.git@main",
+]
+
+[project.optional-dependencies]
+dev = [
+  "kogwistar[test]",
+  "kogwistar[lint]",
+  "kogwistar[typecheck]",
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+test = [
+  "kogwistar[test]",
+  "pytest>=8.0",
+]
+chroma = [
+  "kogwistar[chroma]",
+  "chromadb>=1.0.15",
+]
+pg = [
+  "kogwistar[pgvector]",
+  "SQLAlchemy>=2.0",
+  "pgvector>=0.3.6",
+  "psycopg[binary]>=3.1",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_configs = true
+check_untyped_defs = true
+ignore_missing_imports = true
