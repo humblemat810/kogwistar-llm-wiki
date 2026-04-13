@@ -39,3 +39,7 @@ Thumbs.db
 .env.*
 *.local
 
+# Opt-in local repo bootstraps
+/kogwistar/
+/kg-doc-parser/
+/kogwistar-obsidian-sink/

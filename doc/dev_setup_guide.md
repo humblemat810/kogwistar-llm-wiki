@@ -20,6 +20,7 @@ tooling and future code.
 - Git
 - SSH access to `github.com` if you plan to install the vendored repos directly from GitHub
 - A terminal with access to the repo root
+- `uv` for the install and bootstrap commands below
 
 ## 3. Create a Virtual Environment
 
@@ -35,29 +36,32 @@ or use your preferred local environment workflow.
 ## 4. Install Dev Tools
 
 ```powershell
-pip install -e ".[dev]"
+uv pip install -e ".[dev,test]"
 ```
 
-That installs the baseline developer tools declared in `pyproject.toml`.
+That installs the GitHub-first baseline declared in `pyproject.toml`.
 
-The runtime dependencies are pulled from GitHub via direct references:
+The default runtime dependency is:
 
 - `kogwistar`
 - `graph-knowledge-doc-parser`
 - `kogwistar-obsidian-sink`
 
-Common extra combinations:
+If you want local editable checkouts of the sibling repos, run the bootstrap script manually:
 
-- `pip install -e ".[test]"`
-- `pip install -e ".[chroma]"`
-- `pip install -e ".[pg]"`
+```bash
+bash scripts/bootstrap-dev.sh
+```
+
+That script is opt-in. It clones and editable-installs the local repos only when you run it.
+Windows users can run it from Git Bash or WSL.
 
 ## 5. Common Checks
 
 ```powershell
-ruff check .
-ruff format .
-pytest
+uv run ruff check .
+uv run ruff format .
+uv run pytest
 ```
 
 There may not be any tests yet, so `pytest` can be empty until code lands.
@@ -65,9 +69,9 @@ There may not be any tests yet, so `pytest` can be empty until code lands.
 ## 6. Suggested Working Loop
 
 1. Edit docs or code.
-2. Run `ruff check .` for style and import issues.
-3. Run `ruff format .` if formatting is needed.
-4. Run `pytest` when tests exist.
+2. Run `uv run ruff check .` for style and import issues.
+3. Run `uv run ruff format .` if formatting is needed.
+4. Run `uv run pytest` when tests exist.
 5. Commit once the repo is clean.
 
 ## 7. Notes

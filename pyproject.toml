@@ -6,9 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "kogwistar-llm-wiki"
 version = "0.0.0"
 description = "Docs and orchestration notes for the Kogwistar LLM-Wiki project."
+readme = "README.md"
 requires-python = ">=3.13,<3.15"
 dependencies = [
-  "kogwistar @ git+ssh://git@github.com/humblemat810/graphrag_knowledge_engine_v2.git@main#subdirectory=engine",
+  "kogwistar @ git+https://github.com/humblemat810/kogwistar.git@main",
   "graph-knowledge-doc-parser @ git+ssh://git@github.com/humblemat810/kg-doc-parser.git@main",
   "kogwistar-obsidian-sink @ git+ssh://git@github.com/humblemat810/kogwistar-obsidian-sink.git@main",
 ]
@@ -30,11 +31,44 @@ chroma = [
   "kogwistar[chroma]",
   "chromadb>=1.0.15",
 ]
+pgvector = [
+  "kogwistar[pgvector]",
+  "SQLAlchemy>=2.0",
+  "pgvector>=0.3.6",
+  "psycopg[binary]>=3.1",
+]
 pg = [
   "kogwistar[pgvector]",
   "SQLAlchemy>=2.0",
   "pgvector>=0.3.6",
   "psycopg[binary]>=3.1",
+]
+openai = [
+  "kogwistar[openai]",
+  "langchain-core>=0.3.0",
+  "langchain-openai>=0.3.0",
+]
+gemini = [
+  "kogwistar[gemini]",
+  "langchain-core>=0.3.0",
+  "langchain-google-genai>=2.0.0",
+]
+ingestion-openai = [
+  "kogwistar[ingestion-openai]",
+  "langchain-core>=0.3.0",
+  "langchain-openai>=0.3.0",
+]
+ingestion-gemini = [
+  "kogwistar[ingestion-gemini]",
+  "langchain-core>=0.3.0",
+  "langchain-google-genai>=2.0.0",
+]
+langgraph = [
+  "kogwistar[langgraph]",
+  "langgraph>=0.6.5",
+]
+full = [
+  "kogwistar[full]",
 ]
 
 [tool.pytest.ini_options]

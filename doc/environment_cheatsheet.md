@@ -4,9 +4,10 @@
 
 - Docs-first repository
 - Python tooling scaffold added
-- No runtime package yet
+- GitHub-first default install for `kogwistar`, `graph-knowledge-doc-parser`, and `kogwistar-obsidian-sink`
 - Python target range: 3.13 through 3.14
-- Runtime deps are installed from GitHub via `pyproject.toml`
+- Local editable bootstrap is opt-in
+- `uv` is used for the install commands below
 
 ## 2. Setup Commands
 
@@ -14,15 +15,13 @@
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e ".[dev]"
+uv pip install -e ".[dev,test]"
 ```
 
-Other useful installs:
+Optional local bootstrap:
 
 ```powershell
-pip install -e ".[test]"
-pip install -e ".[chroma]"
-pip install -e ".[pg]"
+bash scripts/bootstrap-dev.sh
 ```
 
 ## 3. Everyday Commands
@@ -30,9 +29,9 @@ pip install -e ".[pg]"
 ```powershell
 git status --short
 rg --files
-ruff check .
-ruff format .
-pytest
+uv run ruff check .
+uv run ruff format .
+uv run pytest
 ```
 
 ## 4. Useful Paths
