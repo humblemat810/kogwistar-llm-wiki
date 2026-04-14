@@ -1,90 +1,25 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kogwistar-llm-wiki"
-version = "0.0.0"
-description = "Docs and orchestration notes for the Kogwistar LLM-Wiki project."
+name = "llm-wiki-first-slice"
+version = "0.1.0"
+description = "Minimal reference implementation of the first LLM-Wiki slice"
 readme = "README.md"
-requires-python = ">=3.13,<3.15"
-dependencies = [
-  "kogwistar @ git+https://github.com/humblemat810/kogwistar.git@main",
-  "graph-knowledge-doc-parser @ git+ssh://git@github.com/humblemat810/kg-doc-parser.git@main",
-  "kogwistar-obsidian-sink @ git+ssh://git@github.com/humblemat810/kogwistar-obsidian-sink.git@main",
-]
+requires-python = ">=3.11"
+dependencies = []
 
 [project.optional-dependencies]
-dev = [
-  "kogwistar[test]",
-  "kogwistar[lint]",
-  "kogwistar[typecheck]",
-  "pytest>=8.0",
-  "ruff>=0.6",
-  "mypy>=1.11",
-]
-test = [
-  "kogwistar[test]",
-  "pytest>=8.0",
-]
-chroma = [
-  "kogwistar[chroma]",
-  "chromadb>=1.0.15",
-]
-pgvector = [
-  "kogwistar[pgvector]",
-  "SQLAlchemy>=2.0",
-  "pgvector>=0.3.6",
-  "psycopg[binary]>=3.1",
-]
-pg = [
-  "kogwistar[pgvector]",
-  "SQLAlchemy>=2.0",
-  "pgvector>=0.3.6",
-  "psycopg[binary]>=3.1",
-]
-openai = [
-  "kogwistar[openai]",
-  "langchain-core>=0.3.0",
-  "langchain-openai>=0.3.0",
-]
-gemini = [
-  "kogwistar[gemini]",
-  "langchain-core>=0.3.0",
-  "langchain-google-genai>=2.0.0",
-]
-ingestion-openai = [
-  "kogwistar[ingestion-openai]",
-  "langchain-core>=0.3.0",
-  "langchain-openai>=0.3.0",
-]
-ingestion-gemini = [
-  "kogwistar[ingestion-gemini]",
-  "langchain-core>=0.3.0",
-  "langchain-google-genai>=2.0.0",
-]
-langgraph = [
-  "kogwistar[langgraph]",
-  "langgraph>=0.6.5",
-]
-full = [
-  "kogwistar[full]",
-]
+test = ["pytest>=8.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
 testpaths = ["tests"]
-pythonpath = ["."]
-
-[tool.ruff]
-line-length = 100
-target-version = "py313"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
-
-[tool.mypy]
-python_version = "3.13"
-warn_unused_configs = true
-check_untyped_defs = true
-ignore_missing_imports = true
+pythonpath = ["src"]
+addopts = "--basetemp=./.pytest_tmp"
