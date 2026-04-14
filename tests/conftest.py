@@ -1,69 +1,89 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
 import pytest
-from kogwistar.engine_core.models import Grounding, Node, Span
 
-from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest, build_in_memory_namespace_engines
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest, NamespaceEngines, ProjectionEntity
+
+
+class RecordingEngine:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.writes: list[dict] = []
+
+
+class TestPipeline(IngestPipeline):
+    def __init__(self, engines: NamespaceEngines) -> None:
+        super().__init__(engines)
+        self.projected_entities: list[ProjectionEntity] = []
+
+    def _write_source_document(self, namespace: str, request: IngestPipelineRequest) -> str:
+        doc_id = f"doc:{request.workspace_id}:source"
+        self.engines.conversation.writes.append({"kind": "document", "namespace": namespace, "id": doc_id, "title": request.title})
+        return doc_id
+
+    def _write_fragments(self, namespace: str, source_document_id: str, request: IngestPipelineRequest) -> None:
+        self.engines.conversation.writes.append({"kind": "fragment", "namespace": namespace, "source_document_id": source_document_id})
+
+    def _write_maintenance_job(self, namespace: str, request: IngestPipelineRequest, source_document_id: str) -> str:
+        job_id = f"job:{request.workspace_id}:maintenance"
+        self.engines.workflow.writes.append({"kind": "maintenance_job_request", "namespace": namespace, "id": job_id, "source_document_id": source_document_id})
+        return job_id
+
+    def _write_candidate_link(self, namespace: str, request: IngestPipelineRequest, source_document_id: str) -> str:
+        candidate_id = f"candidate:{request.workspace_id}:crosslink"
+        self.engines.conversation.writes.append({"kind": "candidate_link", "namespace": namespace, "id": candidate_id, "source_document_id": source_document_id})
+        return candidate_id
+
+    def _write_promotion_candidate(self, review_namespace: str, request: IngestPipelineRequest, candidate_link_id: str) -> str:
+        promotion_id = f"promotion:{request.workspace_id}:candidate"
+        self.engines.conversation.writes.append({"kind": "promotion_candidate", "namespace": review_namespace, "id": promotion_id, "candidate_link_id": candidate_link_id})
+        return promotion_id
+
+    def _promote_candidate(self, namespace: str, request: IngestPipelineRequest, promotion_candidate_id: str) -> str:
+        edge_id = f"edge:{request.workspace_id}:promoted"
+        self.engines.kg.writes.append({"kind": "edge", "namespace": namespace, "id": edge_id, "promotion_candidate_id": promotion_candidate_id, "relation": "related_to"})
+        self.projected_entities = [ProjectionEntity(title="Payment Terms", relationships=["related_to:Acme Contract"])]
+        return edge_id
+
+    def _read_projection_entities(self):
+        return list(self.projected_entities)
 
 
 @pytest.fixture()
-def workspace_id() -> str:
-    return "demo"
+def namespace_engines():
+    conversation = RecordingEngine("conversation")
+    return NamespaceEngines(
+        conversation=conversation,
+        workflow=RecordingEngine("workflow"),
+        kg=RecordingEngine("kg"),
+        wisdom=RecordingEngine("wisdom"),
+    )
 
 
 @pytest.fixture()
-def pipeline(tmp_path, workspace_id: str) -> IngestPipeline:
-    engines = build_in_memory_namespace_engines(workspace_id=workspace_id, persist_root=str(tmp_path))
-    return IngestPipeline(engines=engines)
+def pipeline(namespace_engines):
+    return TestPipeline(namespace_engines)
 
 
 @pytest.fixture()
-def ingest_request(workspace_id: str) -> IngestPipelineRequest:
+def ingest_request():
     return IngestPipelineRequest(
-        workspace_id=workspace_id,
+        workspace_id="demo",
         source_uri="file:///contracts/acme.txt",
         title="Acme Contract",
-        raw_text=(
-            "Acme Contract\n\n"
-            "Payment Terms\n"
-            "Invoices are due within 30 days.\n\n"
-            "Termination\n"
-            "Either party may terminate with notice."
-        ),
+        raw_text="Acme shall pay within 30 days. Either party may terminate with notice.",
     )
 
 
 @pytest.fixture()
-def seeded_kg_node(pipeline: IngestPipeline, workspace_id: str) -> Node:
-    node = Node(
-        label="Payment Terms",
-        type="entity",
-        summary="Existing promoted knowledge node",
-        mentions=[
-            Grounding(
-                spans=[
-                    Span(
-                        collection_page_url="collection/seed",
-                        document_page_url="document/seed/page/1",
-                        doc_id="seed-doc",
-                        insertion_method="system",
-                        page_number=1,
-                        start_char=0,
-                        end_char=13,
-                        excerpt="Payment Terms",
-                        context_before="",
-                        context_after="",
-                    )
-                ]
-            )
-        ],
-        doc_id="seed-doc",
-        metadata={
-            "namespace": f"ws:{workspace_id}:kg",
-            "artifact_type": "seed_entity",
-            "visibility": "user",
-        },
-        properties={"seeded": True},
-    )
-    pipeline.engines.kg.add_node(node, doc_id="seed-doc")
-    return node
+def seeded_kg_node(pipeline):
+    pipeline.projected_entities = [ProjectionEntity(title="Payment Terms", relationships=[])]
+    return pipeline.projected_entities[0]

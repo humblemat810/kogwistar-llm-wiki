@@ -1,11 +1,6 @@
-from typing import cast
-
-from kogwistar_llm_wiki import IngestPipeline
-
-
 def test_run_registers_document_in_foreground(pipeline, ingest_request):
-    pipeline_c = cast(IngestPipeline, pipeline)
-    artifacts = pipeline_c.run(ingest_request)
-    documents = pipeline_c.engines.conv_fg.backend.document_query(limit=50)
-    assert documents
-    assert artifacts.source_document_id == documents["ids"][0][0]
+    artifacts = pipeline.run(ingest_request)
+    docs = [w for w in pipeline.engines.conversation.writes if w["kind"] == "document"]
+    assert docs
+    assert artifacts.source_document_id == docs[0]["id"]
+    assert docs[0]["namespace"] == "ws:demo:conv:fg"

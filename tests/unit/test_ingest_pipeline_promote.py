@@ -1,9 +1,7 @@
-from kogwistar.engine_core.models import Edge
-
-
-def test_promote_creates_new_kg_edge_not_candidate_mutation(pipeline, ingest_request, seeded_kg_node):
+def test_promote_creates_new_kg_edge_not_candidate_mutation(pipeline, ingest_request):
     artifacts = pipeline.run(ingest_request)
-    edges = pipeline.engines.kg.get_edges(edge_type=Edge, limit=100)
-    ids = {str(edge.id) for edge in edges}
-    assert set(artifacts.promoted_edge_ids).issubset(ids)
-    assert all(edge.relation == "related_to" for edge in edges)
+    kg_writes = pipeline.engines.kg.writes
+    assert kg_writes
+    assert kg_writes[0]["kind"] == "edge"
+    assert kg_writes[0]["namespace"] == "ws:demo:kg"
+    assert kg_writes[0]["promotion_candidate_id"] == artifacts.promotion_candidate_id

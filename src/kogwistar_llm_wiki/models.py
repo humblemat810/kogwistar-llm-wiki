@@ -17,8 +17,7 @@ class IngestPipelineRequest:
 @dataclass(frozen=True, slots=True)
 class IngestPipelineArtifacts:
     source_document_id: str
-    source_node_id: str
-    maintenance_request_id: str
-    candidate_link_node_ids: tuple[str, ...]
-    promotion_candidate_node_ids: tuple[str, ...]
-    promoted_edge_ids: tuple[str, ...]
+    maintenance_job_id: str
+    candidate_link_id: str
+    promotion_candidate_id: str
+    promoted_edge_id: str | None
