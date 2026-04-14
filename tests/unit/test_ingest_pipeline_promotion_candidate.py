@@ -1,7 +1,17 @@
-def test_promotion_candidate_is_separate_review_artifact(pipeline, ingest_request):
+def test_promotion_candidate_stays_out_of_workflow_storage(pipeline, ingest_request):
     artifacts = pipeline.run(ingest_request)
-    writes = pipeline.engines.conversation.writes
-    promotion_candidates = [w for w in writes if w["kind"] == "promotion_candidate"]
-    assert promotion_candidates
-    assert promotion_candidates[0]["namespace"] == "ws:demo:review"
-    assert artifacts.promotion_candidate_id == promotion_candidates[0]["id"]
+
+    workflow_candidates = pipeline.engines.workflow.read.get_nodes(
+        where={"artifact_kind": "promotion_candidate"}
+    )
+    assert not workflow_candidates
+
+    review_candidates = pipeline.engines.conversation.read.get_nodes(
+        where={
+            "workspace_id": ingest_request.workspace_id,
+            "artifact_kind": "promotion_candidate",
+            "namespace": "ws:demo:review",
+        }
+    )
+    assert review_candidates
+    assert {node.id for node in review_candidates} == {artifacts.promotion_candidate_id}

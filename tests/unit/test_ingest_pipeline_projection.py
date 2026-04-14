@@ -1,5 +1,48 @@
-def test_projection_reads_kg_visible_state_only(pipeline, ingest_request, seeded_kg_node):
-    pipeline.run(ingest_request)
+from kogwistar.engine_core.models import Grounding, Node, Span
+from kogwistar_llm_wiki import IngestPipelineRequest
+
+
+def test_projection_reads_kg_visible_state_only(pipeline, ingest_request):
+    pipeline.run(
+        IngestPipelineRequest(
+            workspace_id=ingest_request.workspace_id,
+            source_uri=ingest_request.source_uri,
+            title=ingest_request.title,
+            raw_text=ingest_request.raw_text,
+            auto_accept_threshold=0.5,
+        )
+    )
+    empty_snapshot = pipeline.build_projection_snapshot()
+    assert empty_snapshot.entities == []
+
+    source_document_id = pipeline._source_document_id(ingest_request)
+    visible_span = Span.model_validate(
+        {
+            "collection_page_url": f"document_collection/{source_document_id}",
+            "document_page_url": f"document/{source_document_id}",
+            "doc_id": source_document_id,
+            "insertion_method": "manual",
+            "page_number": 1,
+            "start_char": 0,
+            "end_char": 1,
+            "excerpt": "A",
+            "context_before": "",
+            "context_after": "cme",
+            "chunk_id": None,
+            "source_cluster_id": None,
+        }
+    )
+    visible_node = Node(
+        label="Manual Knowledge",
+        type="entity",
+        summary="Manual Knowledge",
+        doc_id=source_document_id,
+        mentions=[Grounding(spans=[visible_span])],
+        metadata={"projection_visible": True, "workspace_id": ingest_request.workspace_id},
+    )
+    pipeline.engines.kg.write.add_node(visible_node)
+
     snapshot = pipeline.build_projection_snapshot()
-    assert snapshot.entities
-    assert "Payment Terms" in {entity.title for entity in snapshot.entities}
+    titles = {entity.title for entity in snapshot.entities}
+    assert "Manual Knowledge" in titles
+    assert ingest_request.title not in titles

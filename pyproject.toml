@@ -22,4 +22,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "--basetemp=./.pytest_tmp"
+norecursedirs = ["kogwistar-llm-wiki-tests-*"]
+markers = [
+    "manual: tests that are opt-in and may require local services",
+]

@@ -1,7 +1,17 @@
-def test_promote_creates_new_kg_edge_not_candidate_mutation(pipeline, ingest_request):
+def test_promote_creates_kg_visible_node_not_workflow_artifact(pipeline, ingest_request):
     artifacts = pipeline.run(ingest_request)
-    kg_writes = pipeline.engines.kg.writes
-    assert kg_writes
-    assert kg_writes[0]["kind"] == "edge"
-    assert kg_writes[0]["namespace"] == "ws:demo:kg"
-    assert kg_writes[0]["promotion_candidate_id"] == artifacts.promotion_candidate_id
+
+    kg_nodes = pipeline.engines.kg.read.get_nodes(
+        where={
+            "workspace_id": ingest_request.workspace_id,
+            "projection_visible": True,
+            "artifact_kind": "promoted_knowledge",
+        }
+    )
+    assert kg_nodes
+    assert {node.id for node in kg_nodes} == {artifacts.promoted_entity_id}
+
+    workflow_nodes = pipeline.engines.workflow.read.get_nodes(
+        where={"artifact_kind": "promoted_knowledge"}
+    )
+    assert not workflow_nodes

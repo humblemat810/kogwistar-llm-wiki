@@ -3,74 +3,67 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+KOGWISTAR_ROOT = ROOT / "kogwistar"
+KG_DOC_PARSER_SRC = ROOT / "kg-doc-parser" / "src"
+OBSIDIAN_SINK_ROOT = ROOT / "kogwistar-obsidian-sink"
+
+# Keep the local src tree first, but do not let vendored repos shadow the repo's own tests.
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+for path in [KG_DOC_PARSER_SRC, KOGWISTAR_ROOT, OBSIDIAN_SINK_ROOT]:
+    if str(path) not in sys.path:
+        sys.path.append(str(path))
 
-from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest, NamespaceEngines, ProjectionEntity
+import pytest
+
+from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
+from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest, NamespaceEngines
 
 
-class RecordingEngine:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.writes: list[dict] = []
+class _TinyEmbeddingFunction:
+    _name = "kogwistar-llm-wiki-tests-embedding"
+
+    def name(self) -> str:
+        return self._name
+
+    def __call__(self, values):
+        vectors = []
+        for value in values:
+            text = str(value or "")
+            vectors.append([float(len(text) + 1), float(sum(ord(ch) for ch in text) % 97 + 1)])
+        return vectors
 
 
-class TestPipeline(IngestPipeline):
-    def __init__(self, engines: NamespaceEngines) -> None:
-        super().__init__(engines)
-        self.projected_entities: list[ProjectionEntity] = []
-
-    def _write_source_document(self, namespace: str, request: IngestPipelineRequest) -> str:
-        doc_id = f"doc:{request.workspace_id}:source"
-        self.engines.conversation.writes.append({"kind": "document", "namespace": namespace, "id": doc_id, "title": request.title})
-        return doc_id
-
-    def _write_fragments(self, namespace: str, source_document_id: str, request: IngestPipelineRequest) -> None:
-        self.engines.conversation.writes.append({"kind": "fragment", "namespace": namespace, "source_document_id": source_document_id})
-
-    def _write_maintenance_job(self, namespace: str, request: IngestPipelineRequest, source_document_id: str) -> str:
-        job_id = f"job:{request.workspace_id}:maintenance"
-        self.engines.workflow.writes.append({"kind": "maintenance_job_request", "namespace": namespace, "id": job_id, "source_document_id": source_document_id})
-        return job_id
-
-    def _write_candidate_link(self, namespace: str, request: IngestPipelineRequest, source_document_id: str) -> str:
-        candidate_id = f"candidate:{request.workspace_id}:crosslink"
-        self.engines.conversation.writes.append({"kind": "candidate_link", "namespace": namespace, "id": candidate_id, "source_document_id": source_document_id})
-        return candidate_id
-
-    def _write_promotion_candidate(self, review_namespace: str, request: IngestPipelineRequest, candidate_link_id: str) -> str:
-        promotion_id = f"promotion:{request.workspace_id}:candidate"
-        self.engines.conversation.writes.append({"kind": "promotion_candidate", "namespace": review_namespace, "id": promotion_id, "candidate_link_id": candidate_link_id})
-        return promotion_id
-
-    def _promote_candidate(self, namespace: str, request: IngestPipelineRequest, promotion_candidate_id: str) -> str:
-        edge_id = f"edge:{request.workspace_id}:promoted"
-        self.engines.kg.writes.append({"kind": "edge", "namespace": namespace, "id": edge_id, "promotion_candidate_id": promotion_candidate_id, "relation": "related_to"})
-        self.projected_entities = [ProjectionEntity(title="Payment Terms", relationships=["related_to:Acme Contract"])]
-        return edge_id
-
-    def _read_projection_entities(self):
-        return list(self.projected_entities)
+def _build_engine(tmp_path: Path, *, kind: str) -> GraphKnowledgeEngine:
+    persist_directory = tmp_path / kind
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    return GraphKnowledgeEngine(
+        persist_directory=str(persist_directory),
+        kg_graph_type=kind,
+        embedding_function=_TinyEmbeddingFunction(),
+        backend_factory=build_in_memory_backend,
+        namespace=kind,
+    )
 
 
 @pytest.fixture()
 def namespace_engines():
-    conversation = RecordingEngine("conversation")
+    root = ROOT / "tests" / "_engine_tmp"
+    root.mkdir(parents=True, exist_ok=True)
     return NamespaceEngines(
-        conversation=conversation,
-        workflow=RecordingEngine("workflow"),
-        kg=RecordingEngine("kg"),
-        wisdom=RecordingEngine("wisdom"),
+        conversation=_build_engine(root, kind="conversation"),
+        workflow=_build_engine(root, kind="workflow"),
+        kg=_build_engine(root, kind="knowledge"),
+        wisdom=_build_engine(root, kind="wisdom"),
     )
 
 
 @pytest.fixture()
 def pipeline(namespace_engines):
-    return TestPipeline(namespace_engines)
+    return IngestPipeline(namespace_engines)
 
 
 @pytest.fixture()
@@ -81,9 +74,3 @@ def ingest_request():
         title="Acme Contract",
         raw_text="Acme shall pay within 30 days. Either party may terminate with notice.",
     )
-
-
-@pytest.fixture()
-def seeded_kg_node(pipeline):
-    pipeline.projected_entities = [ProjectionEntity(title="Payment Terms", relationships=[])]
-    return pipeline.projected_entities[0]

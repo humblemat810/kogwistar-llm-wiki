@@ -20,4 +20,4 @@ class IngestPipelineArtifacts:
     maintenance_job_id: str
     candidate_link_id: str
     promotion_candidate_id: str
-    promoted_edge_id: str | None
+    promoted_entity_id: str | None
