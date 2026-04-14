@@ -27,6 +27,18 @@ Target outcome aligns with Karpathy-style LLM-wiki:
 - Interlinked wiki out
 - Continuously maintained
 
+```mermaid
+flowchart LR
+    A[Source upload] --> B[kg-doc-parser]
+    B --> C[conv:fg<br/>source + parsed working state]
+    C --> D[conv:bg<br/>candidate links]
+    C --> E[wf:maintenance<br/>job request]
+    D --> F[review<br/>promotion candidate view]
+    F --> G[kg<br/>promoted knowledge]
+    G --> H[wisdom<br/>execution-derived reuse]
+    G --> I[Obsidian sink<br/>projection]
+```
+
 ---
 
 ## 2. System Components

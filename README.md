@@ -1,5 +1,7 @@
 # Kogwistar LLM-Wiki
 
+# this also is a dev experiment -> open source, let chatgpt see the opensource and dev in its own sandbox.
+
 Docs-first workspace for the LLM-Wiki orchestration layer built around Kogwistar.
 
 ## Install

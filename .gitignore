@@ -19,6 +19,8 @@ site/
 
 # Test and lint caches
 .pytest_cache/
+.pytest_run/
+.pytest_tmp/
 .ruff_cache/
 .mypy_cache/
 .coverage
@@ -43,3 +45,8 @@ Thumbs.db
 /kogwistar/
 /kg-doc-parser/
 /kogwistar-obsidian-sink/
+
+# Local test-engine caches and discovery scratch space
+/tests/_engine_tmp/
+/tests/_engine_tmp_check/
+/kogwistar-llm-wiki-tests-*/
