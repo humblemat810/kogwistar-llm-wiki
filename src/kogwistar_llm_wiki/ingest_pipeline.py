@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import tempfile
 
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -11,10 +11,12 @@ from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.engine_core.models import Document, GraphExtractionWithIDs, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from kogwistar_obsidian_sink.core.models import ProjectionEntity
+from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuckProvider
+from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 from workflow_ingest.page_index import PageIndexParseResult, parse_page_index_document
 from workflow_ingest.semantics import semantic_tree_to_kge_payload
 
-from .models import IngestPipelineArtifacts, IngestPipelineRequest
+from .models import IngestPipelineArtifacts, IngestPipelineRequest, ObsidianBuildResult
 from .namespaces import WorkspaceNamespaces
 
 
@@ -40,18 +42,13 @@ class NamespaceEngines:
     kg: Any
     wisdom: Any
 
-    @property
-    def conversation_fg(self) -> Any:
-        return self.conversation
-
-    @property
-    def conversation_bg(self) -> Any:
-        return self.conversation
-
 
 @dataclass(slots=True)
 class ProjectionSnapshot:
     entities: list[ProjectionEntity]
+
+
+ParserFn = Callable[..., PageIndexParseResult]
 
 
 def build_in_memory_namespace_engines(base_dir: str | Path | None = None) -> NamespaceEngines:
@@ -92,11 +89,23 @@ def _temporary_namespace(engine: Any, namespace: str):
 
 
 class IngestPipeline:
+    """Thin app-level orchestration over parser -> Kogwistar ingest -> maintenance -> projection.
+
+    This class deliberately avoids owning parser semantics. It coordinates:
+    - source registration in conversation foreground
+    - parser invocation via kg-doc-parser
+    - conversion of parser result into Kogwistar graph extraction payload
+    - persistence via Kogwistar document + graph extraction APIs
+    - workflow request creation
+    - maintenance candidates in conversation lanes
+    - optional KG promotion
+    """
+
     def __init__(
         self,
         engines: NamespaceEngines,
         *,
-        parser=parse_page_index_document,
+        parser: ParserFn = parse_page_index_document,
     ) -> None:
         self.engines = engines
         self.parser = parser
@@ -108,17 +117,42 @@ class IngestPipeline:
         ns = self.namespaces_for(request.workspace_id)
         source_document_id = self._source_document_id(request)
 
-        self._register_source(ns.conv_fg, request=request, source_document_id=source_document_id)
-        parse_result = self._parse(request=request, source_document_id=source_document_id)
-        graph_extraction = self._graph_extraction_from_parse(parse_result, source_document_id=source_document_id)
-        self._ingest_parsed_document(ns.conv_fg, source_document_id=source_document_id, request=request, graph_extraction=graph_extraction)
-        maintenance_job_id = self._create_maintenance_request(ns.workflow_maintenance, request=request, source_document_id=source_document_id)
-        candidate_link_id = self._create_candidate_link(ns.conv_bg, request=request, source_document_id=source_document_id, parse_result=parse_result)
-        promotion_candidate_id = self._create_promotion_candidate(ns.review, request=request, source_document_id=source_document_id, candidate_link_id=candidate_link_id)
+        self.register_source(request=request, source_document_id=source_document_id, namespace=ns.conv_fg)
+        parse_result = self.parse_source(request=request, source_document_id=source_document_id)
+        graph_extraction = self.translate_parse_result(parse_result=parse_result, source_document_id=source_document_id)
+        self.ingest_parse_result(
+            request=request,
+            source_document_id=source_document_id,
+            graph_extraction=graph_extraction,
+            namespace=ns.conv_fg,
+        )
+
+        maintenance_job_id = self.create_maintenance_request(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=ns.workflow_maintenance,
+        )
+        candidate_link_id = self.create_candidate_link(
+            request=request,
+            source_document_id=source_document_id,
+            parse_result=parse_result,
+            namespace=ns.conv_bg,
+        )
+        promotion_candidate_id = self.create_promotion_candidate(
+            request=request,
+            source_document_id=source_document_id,
+            candidate_link_id=candidate_link_id,
+            namespace=ns.review,
+        )
 
         promoted_entity_id: str | None = None
         if request.auto_accept_threshold >= 0.95:
-            promoted_entity_id = self._promote_to_knowledge(ns.kg, request=request, source_document_id=source_document_id, promotion_candidate_id=promotion_candidate_id)
+            promoted_entity_id = self.promote_to_knowledge(
+                request=request,
+                source_document_id=source_document_id,
+                promotion_candidate_id=promotion_candidate_id,
+                namespace=ns.kg,
+            )
 
         return IngestPipelineArtifacts(
             source_document_id=source_document_id,
@@ -128,27 +162,83 @@ class IngestPipeline:
             promoted_entity_id=promoted_entity_id,
         )
 
-    def build_projection_snapshot(self, workspace_id: str | None = None) -> ProjectionSnapshot:
+    # def build_projection_snapshot(self, workspace_id: str | None = None) -> ProjectionSnapshot:
+    #     visible_nodes = self._projection_visible_nodes(workspace_id=workspace_id)
+    #     visible_nodes.sort(key=lambda node: (str(node.label), str(node.id)))
+    #     return ProjectionSnapshot(entities=[self._node_to_projection_entity(node) for node in visible_nodes])
+
+    def build_obsidian_vault(
+        self,
+        vault_root: str | Path,
+        *,
+        workspace_id: str | None = None,
+        version: int | None = None,
+        event_seq: int | None = None,
+    ) -> ObsidianBuildResult:
+        entities = self._projection_visible_nodes(workspace_id=workspace_id)
+        provider = KogwistarDuckProvider(
+            entities=entities,
+            version=version,
+            event_seq=event_seq,
+        )
+        sink = ObsidianVaultSink(vault_root=vault_root)
+        result = sink.build(provider)
+        return ObsidianBuildResult(
+            vault_root=Path(vault_root),
+            notes=int(result.get("notes", 0)),
+            canvases=int(result.get("canvases", 0)),
+            dangling_links=int(result.get("dangling_links", 0)),
+        )
+
+    def sync_obsidian_vault(
+        self,
+        vault_root: str | Path,
+        *,
+        workspace_id: str | None = None,
+        changed_ids: set[str] | None = None,
+        deleted_ids: set[str] | None = None,
+        affected_titles: set[str] | None = None,
+        version: int | None = None,
+        event_seq: int | None = None,
+    ) -> ObsidianBuildResult:
+        entities = self._projection_visible_nodes(workspace_id=workspace_id)
+        provider = KogwistarDuckProvider(
+            entities=entities,
+            version=version,
+            event_seq=event_seq,
+        )
+        sink = ObsidianVaultSink(vault_root=vault_root)
+        result = sink.sync(
+            provider,
+            changed_ids=changed_ids,
+            deleted_ids=deleted_ids,
+            affected_titles=affected_titles,
+        )
+        return ObsidianBuildResult(
+            vault_root=Path(vault_root),
+            notes=int(result.get("notes", 0)),
+            canvases=int(result.get("canvases", 0)),
+            dangling_links=int(result.get("dangling_links", 0)),
+        )
+
+    def _projection_visible_nodes(self, *, workspace_id: str | None = None) -> list[Node]:
         where: dict[str, Any] = {"projection_visible": True}
         if workspace_id is not None:
             where["workspace_id"] = workspace_id
-        visible_nodes = list(self.engines.kg.get_nodes(where=where))
-        visible_nodes.sort(key=lambda node: (str(node.label), str(node.id)))
-        return ProjectionSnapshot(
-            entities=[
-                ProjectionEntity(
-                    kg_id=str(node.id),
-                    title=str(node.label),
-                    entity_type=str(node.type),
-                    summary=str(node.summary),
-                    metadata=dict(node.metadata or {}),
-                    source_ids=list(getattr(node, "source_ids", []) or []),
-                    target_ids=list(getattr(node, "target_ids", []) or []),
-                    relation=getattr(node, "relation", None),
-                    body=str(node.summary),
-                )
-                for node in visible_nodes
-            ]
+        return list(self.engines.kg.get_nodes(where=where))
+
+    @staticmethod
+    def _node_to_projection_entity(node: Node) -> ProjectionEntity:
+        return ProjectionEntity(
+            kg_id=str(node.id),
+            title=str(node.label),
+            entity_type=str(node.type),
+            summary=str(node.summary),
+            metadata=dict(node.metadata or {}),
+            source_ids=list(getattr(node, "source_ids", []) or []),
+            target_ids=list(getattr(node, "target_ids", []) or []),
+            relation=getattr(node, "relation", None),
+            body=str(node.summary),
         )
 
     def _source_document_id(self, request: IngestPipelineRequest) -> str:
@@ -179,7 +269,7 @@ class IngestPipeline:
         payload = semantic_tree_to_kge_payload(parse_result.semantic_tree, doc_id=source_document_id)
         return GraphExtractionWithIDs.model_validate(payload)
 
-    def _register_source(self, namespace: str, *, request: IngestPipelineRequest, source_document_id: str) -> None:
+    def register_source(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> None:
         document = Document(
             id=source_document_id,
             content=request.raw_text,
@@ -195,14 +285,33 @@ class IngestPipeline:
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_document(document)
 
-    def _ingest_parsed_document(
+    def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> PageIndexParseResult:
+        return self.parser(
+            document_id=source_document_id,
+            title=request.title,
+            raw_text=request.raw_text,
+            source_format=request.source_format,
+            mode=request.parser_mode,
+        )
+
+    def translate_parse_result(
         self,
-        namespace: str,
         *,
+        parse_result: PageIndexParseResult,
         source_document_id: str,
+    ) -> GraphExtractionWithIDs:
+        payload = semantic_tree_to_kge_payload(parse_result.semantic_tree, doc_id=source_document_id)
+        return GraphExtractionWithIDs.model_validate(payload)
+
+    def ingest_parse_result(
+        self,
+        *,
         request: IngestPipelineRequest,
+        source_document_id: str,
         graph_extraction: GraphExtractionWithIDs,
+        namespace: str,
     ) -> None:
+        del request  # orchestration passes request for symmetry/future hooks; current Kogwistar ingest uses doc + extraction.
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.persist_document_graph_extraction(
                 doc_id=source_document_id,
@@ -210,13 +319,7 @@ class IngestPipeline:
                 mode="append",
             )
 
-    def _create_maintenance_request(
-        self,
-        namespace: str,
-        *,
-        request: IngestPipelineRequest,
-        source_document_id: str,
-    ) -> str:
+    def create_maintenance_request(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
         node = self._artifact_node(
             request=request,
             source_document_id=source_document_id,
@@ -231,13 +334,13 @@ class IngestPipeline:
             self.engines.workflow.write.add_node(node)
         return str(node.id)
 
-    def _create_candidate_link(
+    def create_candidate_link(
         self,
-        namespace: str,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
         parse_result: PageIndexParseResult,
+        namespace: str,
     ) -> str:
         node = self._artifact_node(
             request=request,
@@ -253,13 +356,13 @@ class IngestPipeline:
             self.engines.conversation.write.add_node(node)
         return str(node.id)
 
-    def _create_promotion_candidate(
+    def create_promotion_candidate(
         self,
-        namespace: str,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
         candidate_link_id: str,
+        namespace: str,
     ) -> str:
         node = self._artifact_node(
             request=request,
@@ -272,17 +375,18 @@ class IngestPipeline:
             summary=f"Promotion candidate linked from {candidate_link_id}",
             extra_metadata={"candidate_link_id": candidate_link_id},
         )
+        # Review is namespace semantics, not a separate engine. Keep the artifact in conversation storage.
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
         return str(node.id)
 
-    def _promote_to_knowledge(
+    def promote_to_knowledge(
         self,
-        namespace: str,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
         promotion_candidate_id: str,
+        namespace: str,
     ) -> str:
         node = self._artifact_node(
             request=request,
@@ -301,6 +405,42 @@ class IngestPipeline:
         with _temporary_namespace(self.engines.kg, namespace):
             self.engines.kg.write.add_node(node)
         return str(node.id)
+
+    def build_projection_snapshot(self, workspace_id: str | None = None) -> ProjectionSnapshot:
+        where: dict[str, Any] = {"projection_visible": True}
+        if workspace_id is not None:
+            where["workspace_id"] = workspace_id
+        visible_nodes = list(self.engines.kg.get_nodes(where=where))
+        visible_nodes.sort(key=lambda node: (str(node.label), str(node.id)))
+        return ProjectionSnapshot(
+            entities=[
+                ProjectionEntity(
+                    kg_id=str(node.id),
+                    title=str(node.label),
+                    entity_type=str(node.type),
+                    summary=str(node.summary),
+                    metadata=dict(node.metadata or {}),
+                    source_ids=list(getattr(node, "source_ids", []) or []),
+                    target_ids=list(getattr(node, "target_ids", []) or []),
+                    relation=getattr(node, "relation", None),
+                    body=str(node.summary),
+                )
+                for node in visible_nodes
+            ]
+        )
+
+    # def build_obsidian_vault(self, vault_root: str | Path) -> ObsidianBuildResult:
+    #     provider = KogwistarDuckProvider(self.engines.kg)
+    #     sink = ObsidianVaultSink.build(provider)
+    #     vault_path = Path(vault_root)
+    #     sink.materialize(vault_path)
+    #     note_count = len(list(vault_path.rglob("*.md")))
+    #     canvas_count = len(list(vault_path.rglob("*.canvas")))
+    #     return ObsidianBuildResult(vault_root=str(vault_path), note_count=note_count, canvas_count=canvas_count)
+
+    # def sync_obsidian_vault(self, vault_root: str | Path) -> ObsidianBuildResult:
+    #     return self.build_obsidian_vault(vault_root)
+
 
     def _artifact_node(
         self,
