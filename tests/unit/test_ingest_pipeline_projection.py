@@ -3,7 +3,7 @@ from kogwistar.engine_core.models import Grounding, Node, Span
 
 def test_projection_reads_kg_visible_state_only(pipeline, ingest_request):
     pipeline.run(ingest_request)
-    empty_snapshot = pipeline.build_projection_snapshot()
+    empty_snapshot = pipeline.build_projection_snapshot(workspace_id=ingest_request.workspace_id)
     assert empty_snapshot.entities == []
 
     source_document_id = pipeline._source_document_id(ingest_request)
@@ -29,11 +29,11 @@ def test_projection_reads_kg_visible_state_only(pipeline, ingest_request):
         summary="Manual Knowledge",
         doc_id=source_document_id,
         mentions=[Grounding(spans=[visible_span])],
-        metadata={"projection_visible": True, "workspace_id": ingest_request.workspace_id},
+        metadata={"visibility": "projection", "workspace_id": ingest_request.workspace_id},
     )
     pipeline.engines.kg.write.add_node(visible_node)
 
-    snapshot = pipeline.build_projection_snapshot()
+    snapshot = pipeline.build_projection_snapshot(workspace_id=ingest_request.workspace_id)
     titles = {entity.title for entity in snapshot.entities}
     assert "Manual Knowledge" in titles
     assert ingest_request.title not in titles

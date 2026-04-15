@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 from types import SimpleNamespace
@@ -26,11 +26,12 @@ def test_parse_source_passes_llm_text_parse_args(pipeline, ingest_request, parse
         return _FakeParseResult(title=kwargs["title"])
 
     pipeline.parser = fake_parser
-    ingest_request = replace(
-        ingest_request,
-        parser_mode=parser_mode,
-        llm_provider=llm_provider,
-        llm_model=llm_model,
+    ingest_request = ingest_request.model_copy(
+        update={
+            "parser_mode": parser_mode,
+            "llm_provider": llm_provider,
+            "llm_model": llm_model,
+        }
     )
 
     result = pipeline.parse_source(request=ingest_request, source_document_id="doc-1")

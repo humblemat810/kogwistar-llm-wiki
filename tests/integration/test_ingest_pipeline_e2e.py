@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+
 import inspect
 import os
 
@@ -34,11 +34,12 @@ def test_ingest_pipeline_e2e(pipeline, ingest_request, parser_mode, llm_provider
     if parser_mode == "gemini" and not _supports_gemini_mode():
         pytest.skip("current kg-doc-parser build does not expose explicit gemini parser args yet")
 
-    ingest_request = replace(
-        ingest_request,
-        parser_mode=parser_mode,
-        llm_provider=llm_provider,
-        llm_model=llm_model,
+    ingest_request = ingest_request.model_copy(
+        update={
+            "parser_mode": parser_mode,
+            "llm_provider": llm_provider,
+            "llm_model": llm_model,
+        }
     )
 
     artifacts = pipeline.run(ingest_request)
@@ -78,5 +79,5 @@ def test_ingest_pipeline_e2e(pipeline, ingest_request, parser_mode, llm_provider
     assert not any(node.metadata.get("artifact_kind") == "promoted_knowledge" for node in kg_nodes)
     assert artifacts.promoted_entity_id is None
 
-    snapshot = pipeline.build_projection_snapshot()
+    snapshot = pipeline.build_projection_snapshot(workspace_id=ingest_request.workspace_id)
     assert snapshot.entities == []

@@ -4,7 +4,7 @@ from kogwistar_llm_wiki import IngestPipeline
 
 
 def test_build_obsidian_vault_materializes_expected_files(pipeline, ingest_request, tmp_path: Path):
-    pipeline = pipeline
+    ingest_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
     pipeline.run(ingest_request)
 
     result = pipeline.build_obsidian_vault(tmp_path / "vault", workspace_id=ingest_request.workspace_id)

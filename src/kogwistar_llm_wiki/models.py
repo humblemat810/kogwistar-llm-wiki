@@ -7,6 +7,9 @@ from typing import Any, Dict
 from pydantic import BaseModel
 from pydantic_extension.model_slicing import ModeSlicingMixin, DtoType, BackendType
 
+from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar_obsidian_sink.core.models import ProjectionEntity
+
 
 @dataclass(frozen=True, slots=True)
 class IngestPipelineArtifacts:
@@ -57,3 +60,16 @@ class IngestPipelineRequest(ModeSlicingMixin, BaseModel):
     auto_accept_threshold: DtoType[float] = 0.95
     llm_provider: DtoType[str | None] = None
     llm_model: DtoType[str | None] = None
+
+
+@dataclass(slots=True)
+class NamespaceEngines:
+    conversation: GraphKnowledgeEngine  # Shared by conv:fg and conv:bg
+    workflow: GraphKnowledgeEngine      # For wf:maintenance
+    kg: GraphKnowledgeEngine            # For kg
+    wisdom: GraphKnowledgeEngine        # For wisdom
+
+
+@dataclass(slots=True)
+class ProjectionSnapshot:
+    entities: list[ProjectionEntity]

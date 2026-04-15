@@ -8,19 +8,23 @@ from pathlib import Path
 import tempfile
 from typing import Any, Callable
 
+from .utils import _temporary_namespace
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.engine_core.models import Document, GraphExtractionWithIDs, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
-from kogwistar_obsidian_sink.core.models import ProjectionEntity
-from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuckProvider
-from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 from kg_doc_parser.workflow_ingest.page_index import PageIndexParseResult, parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
-
-from .models import IngestPipelineArtifacts, IngestPipelineRequest, ObsidianBuildResult
+from .models import (
+    IngestPipelineArtifacts,
+    IngestPipelineRequest,
+    ObsidianBuildResult,
+    NamespaceEngines,
+    ProjectionSnapshot,
+)
 from .namespaces import WorkspaceNamespaces
+from .projection import ProjectionManager
 
 
 class _TinyEmbeddingFunction:
@@ -38,17 +42,7 @@ class _TinyEmbeddingFunction:
         return vectors
 
 
-@dataclass(slots=True)
-class NamespaceEngines:
-    conversation: GraphKnowledgeEngine  # Shared by conv:fg and conv:bg
-    workflow: GraphKnowledgeEngine      # For wf:maintenance
-    kg: GraphKnowledgeEngine            # For kg
-    wisdom: GraphKnowledgeEngine        # For wisdom
 
-
-@dataclass(slots=True)
-class ProjectionSnapshot:
-    entities: list[ProjectionEntity]
 
 
 ParserFn = Callable[..., PageIndexParseResult]
@@ -85,16 +79,6 @@ def _build_engine(
     )
 
 
-@contextmanager
-def _temporary_namespace(engine: Any, namespace: str):
-    previous = getattr(engine, "namespace", None)
-    engine.namespace = namespace
-    try:
-        yield engine
-    finally:
-        engine.namespace = previous
-
-
 class IngestPipeline:
     def __init__(
         self,
@@ -104,6 +88,7 @@ class IngestPipeline:
     ) -> None:
         self.engines = engines
         self.parser = parser
+        self.projection = ProjectionManager(engines)
 
     def namespaces_for(self, workspace_id: str) -> WorkspaceNamespaces:
         return WorkspaceNamespaces(workspace_id)
@@ -134,7 +119,7 @@ class IngestPipeline:
         maintenance_job_id = self.create_maintenance_request(
             request=request,
             source_document_id=source_document_id,
-            namespace=ns.workflow_maintenance,
+            namespace=ns.conv_bg,
         )
         candidate_link_id = self.create_candidate_link(
             request=request,
@@ -171,61 +156,37 @@ class IngestPipeline:
         self,
         vault_root: str | Path,
         *,
-        workspace_id: str | None = None,
+        workspace_id: str,
         version: int | None = None,
         event_seq: int | None = None,
     ) -> ObsidianBuildResult:
-        entities = self._projection_visible_nodes(workspace_id=workspace_id)
-        provider = KogwistarDuckProvider(
-            entities=entities,
+        return self.projection.build_obsidian_vault(
+            vault_root,
+            workspace_id=workspace_id,
             version=version,
             event_seq=event_seq,
-        )
-        sink = ObsidianVaultSink(vault_root=vault_root)
-        result = sink.build(provider)
-        return ObsidianBuildResult(
-            vault_root=Path(vault_root),
-            notes=int(result.get("notes", 0)),
-            canvases=int(result.get("canvases", 0)),
-            dangling_links=int(result.get("dangling_links", 0)),
         )
 
     def sync_obsidian_vault(
         self,
         vault_root: str | Path,
         *,
-        workspace_id: str | None = None,
+        workspace_id: str,
         changed_ids: set[str] | None = None,
         deleted_ids: set[str] | None = None,
         affected_titles: set[str] | None = None,
         version: int | None = None,
         event_seq: int | None = None,
     ) -> ObsidianBuildResult:
-        entities = self._projection_visible_nodes(workspace_id=workspace_id)
-        provider = KogwistarDuckProvider(
-            entities=entities,
-            version=version,
-            event_seq=event_seq,
-        )
-        sink = ObsidianVaultSink(vault_root=vault_root)
-        result = sink.sync(
-            provider,
+        return self.projection.sync_obsidian_vault(
+            vault_root,
+            workspace_id=workspace_id,
             changed_ids=changed_ids,
             deleted_ids=deleted_ids,
             affected_titles=affected_titles,
+            version=version,
+            event_seq=event_seq,
         )
-        return ObsidianBuildResult(
-            vault_root=Path(vault_root),
-            notes=int(result.get("updated_notes", result.get("notes", 0))),
-            canvases=int(result.get("updated_canvases", result.get("canvases", 0))),
-            dangling_links=int(result.get("dangling_links", 0)),
-        )
-
-    def _projection_visible_nodes(self, *, workspace_id: str | None = None) -> list[Node]:
-        where: dict[str, Any] = {"projection_visible": True}
-        if workspace_id is not None:
-            where["workspace_id"] = workspace_id
-        return list(self.engines.kg.get_nodes(where=where))
 
     def _source_document_id(self, request: IngestPipelineRequest) -> str:
         return str(
@@ -345,13 +306,18 @@ class IngestPipeline:
             source_document_id=source_document_id,
             namespace=namespace,
             artifact_kind="maintenance_job_request",
-            lane="workflow",
-            visibility="system",
-            label=f"Maintenance request: {request.title}",
-            summary=f"Queue follow-up maintenance for {request.title}",
+            lane="background",
+            visibility="internal",
+            label="Maintenance Job Request",
+            summary=f"Maintenance requested for {request.title}",
+            extra_metadata={
+                "job_type": "distillation",
+                "trigger_type": "ingest",
+                "status": "pending",
+            },
         )
-        with _temporary_namespace(self.engines.workflow, namespace):
-            self.engines.workflow.write.add_node(node)
+        with _temporary_namespace(self.engines.conversation, namespace):
+            self.engines.conversation.write.add_node(node)
         return str(node.id)
 
     def create_candidate_link(
@@ -433,28 +399,8 @@ class IngestPipeline:
             self.engines.kg.write.add_node(node)
         return str(node.id)
 
-    def build_projection_snapshot(self, workspace_id: str | None = None) -> ProjectionSnapshot:
-        where: dict[str, Any] = {"projection_visible": True}
-        if workspace_id is not None:
-            where["workspace_id"] = workspace_id
-        visible_nodes = list(self.engines.kg.get_nodes(where=where))
-        visible_nodes.sort(key=lambda node: (str(node.label), str(node.id)))
-        return ProjectionSnapshot(
-            entities=[
-                ProjectionEntity(
-                    kg_id=str(node.id),
-                    title=str(node.label),
-                    entity_type=str(node.type),
-                    summary=str(node.summary),
-                    metadata=dict(node.metadata or {}),
-                    source_ids=list(getattr(node, "source_ids", []) or []),
-                    target_ids=list(getattr(node, "target_ids", []) or []),
-                    relation=getattr(node, "relation", None),
-                    body=str(node.summary),
-                )
-                for node in visible_nodes
-            ]
-        )
+    def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
+        return self.projection.build_projection_snapshot(workspace_id=workspace_id)
 
     def _artifact_node(
         self,
