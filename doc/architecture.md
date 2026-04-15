@@ -5,18 +5,16 @@
 This document defines the architecture for **LLM-Wiki**, a knowledge system built on **Kogwistar** as the authoritative substrate.
 
 ### Core Princi- **Graph-authoritative**: All state lives in Kogwistar (events → projections)
-
 - **Projection-based UI**: Obsidian and app UI are views, not sources of truth
-
 - **Deterministic ingestion**: Stable identities for all inputs and derivations
-
 - **Separation of concerns**:
   - Conversation Graph = working memory
   - Knowledge Graph = promoted, durable knowledge
   - **Maintenance Domain = system maintenance semantics across graph kinds (NOT a core graph kind)**
 
-- **Wisdom is not a graph**:
+- **Wisdom is a graph**:
   - Wisdom = reusable, execution-derived knowledge (artifact type)
+  - Represented as nodes and edges in the `wisdom` namespace
 
 - **Continuous compilation**:
   - raw → structured → linked → consolidated → projected
@@ -156,7 +154,7 @@ Contains:
 
 Notes:
 
-- Foreground vs background should be expressed by namespace and metadata, not by introducing new core graph kinds
+- Foreground vs background should be expressed by namespace and metadata, sharing a single conversation engine instance
 - Example namespaces:
   - `ws:{workspace_id}:conv:fg`
   - `ws:{workspace_id}:conv:bg`
@@ -506,7 +504,7 @@ Cross-lane communication should preferably be modeled as:
 - Deterministic IDs everywhere
 - **Maintenance ≠ Wisdom**
 - Maintenance is a semantic domain, not currently a core graph kind
-- Wisdom derived only from execution
+- **Wisdom is a graph** derived from execution
 - No silent promotion of agent output
 - Provenance always preserved
 - Update preserves lineage

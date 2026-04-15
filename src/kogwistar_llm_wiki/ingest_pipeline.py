@@ -40,10 +40,10 @@ class _TinyEmbeddingFunction:
 
 @dataclass(slots=True)
 class NamespaceEngines:
-    conversation: Any
-    workflow: Any
-    kg: Any
-    wisdom: Any
+    conversation: GraphKnowledgeEngine  # Shared by conv:fg and conv:bg
+    workflow: GraphKnowledgeEngine      # For wf:maintenance
+    kg: GraphKnowledgeEngine            # For kg
+    wisdom: GraphKnowledgeEngine        # For wisdom
 
 
 @dataclass(slots=True)
@@ -57,8 +57,12 @@ ParserFn = Callable[..., PageIndexParseResult]
 def build_in_memory_namespace_engines(base_dir: str | Path | None = None) -> NamespaceEngines:
     root = Path(base_dir) if base_dir is not None else Path(tempfile.mkdtemp(prefix="kogwistar-llm-wiki-"))
     embedding = _TinyEmbeddingFunction()
+    
+    # Shared conversation engine (fg/bg lanes)
+    conversation = _build_engine(root / "conversation", kg_graph_type="conversation", embedding_function=embedding)
+    
     return NamespaceEngines(
-        conversation=_build_engine(root / "conversation", kg_graph_type="conversation", embedding_function=embedding),
+        conversation=conversation,
         workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embedding),
         kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embedding),
         wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embedding),

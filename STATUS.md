@@ -17,20 +17,23 @@
 - [x] Ollama smoke case synced to the parser repo's real model choice (`gemma4:e2b`)
 - [x] Docs updated with Mermaid diagrams for storage and namespace flow
 - [x] Repo hygiene improved for Windows/test discovery issues
+- [x] Docs reconciled for Wisdom identity, shared engine instance, and Message Channel
+- [x] Namespace and visibility contract layer formalized (namespaces.py)
+- [x] Model slicing and external View Modes implemented via pydantic-extension
 
 ## Missing
 
 ### Shared prerequisites
 
-- [ ] Namespace and visibility contract layer is still implicit in the app code
-  - [ ] Centralize namespace helpers for conversation, workflow, review, KG, and wisdom
-  - [ ] Centralize visibility / lane metadata helpers
-  - [ ] Add tests for namespace strings, lane aliases, and surfaced-engine shape
+- [x] Namespace and visibility contract layer is still implicit in the app code
+  - [x] Centralize namespace helpers for conversation, workflow, review, KG, and wisdom
+  - [x] Centralize visibility / lane metadata helpers
+  - [x] Add tests for namespace strings, lane aliases, and surfaced-engine shape
 
-- [ ] Shared artifact envelope models are still too local to the ingest pipeline
-  - [ ] Define reusable artifact/result models for maintenance, review, wisdom, and projection inputs
-  - [ ] Keep KG-visible projection payloads separate from conversation/workflow artifacts
-  - [ ] Add tests for field stability and namespace routing metadata
+- [x] Shared artifact envelope models are still too local to the ingest pipeline
+  - [x] Define reusable artifact/result models for maintenance, review, wisdom, and projection inputs (contracts.py / models.py)
+  - [x] Keep KG-visible projection payloads separate from conversation/workflow artifacts (View Modes)
+  - [x] Add tests for field stability and namespace routing metadata
 
 - [ ] Background job request/result contracts are not yet factored out
   - [ ] Define a common worker entrypoint shape

@@ -9,7 +9,8 @@ This document keeps the ontology small:
 - one conversation graph domain
 - two operating lanes
 - namespace-based operational separation
-- metadata-based semantic filtering
+- metadata-based semantic filtering (e.g., inbox/notification intent)
+- generalized message channel targets
 
 ---
 
@@ -21,10 +22,6 @@ Suggested patterns, refer to kogwistar style first, if not, below is a possible 
   - `ws:{workspace_id}:conv:fg`
 - Background maintenance conversation:
   - `ws:{workspace_id}:conv:bg`
-- Foreground inbox / notification:
-  - `ws:{workspace_id}:chan:fg_inbox`
-- Background inbox / request:
-  - `ws:{workspace_id}:chan:bg_inbox`
 - Maintenance workflow:
   - `ws:{workspace_id}:wf:maintenance`
 - Knowledge:
@@ -44,8 +41,8 @@ Recommended `Node.properties` fields:
 
 Notes:
 
-- namespace handles operational partitioning
 - metadata handles semantic meaning
+- "Inbox" or "Notification" intent is expressed through metadata (e.g., `intent: notification`), not namespaces
 - do not rely on namespace alone for user visibility or policy
 
 ---
@@ -60,7 +57,12 @@ Sending a cross-lane message should normally mean:
 - emit authoritative event
 - let workers / UI consume by namespace and metadata
 
-### 4.2 Example
+### 4.2 Generalized Message Channel
+
+To facilitate future external integrations, message passing should be generalized into a "Message Channel" abstraction where:
+- Target is specified as `foreground` or `background`.
+- Shape fixing/normalization is handled by the channel helper.
+- Metadata preserves the specific intent (request, notify, alert).
 
 Foreground requests consolidation:
 

@@ -55,7 +55,7 @@ Examples:
 - `Node["sink"]`
 - `Node["review"]`
 
-Canonical models remain authoritative. Projected views are consumer contracts.
+Canonical models (dataclasses) remain authoritative for in-system data shaping and error prevention. Projected view modes are strictly for external system contracts.
 
 ---
 
@@ -273,7 +273,31 @@ ProjectionStatus["dto"]
 
 ---
 
-## 3.4 `kogwistar-llm-wiki`
+## 3.4 Message Channel (Abstraction)
+
+### Command: `send_message`
+
+**Owner:** `kogwistar-llm-wiki` (orchestration)
+**Called by:** any component needing cross-lane or cross-system messaging
+
+**Purpose**  
+Generalize message passing to targets with shape fixing for future external channels.
+
+**Input**
+```python
+MessageEnvelope["backend"] {
+    target: "foreground" | "background" | "external:{provider}"
+    payload: any
+    metadata: {
+        intent: "request" | "notification" | "alert"
+        provenance_id: str
+    }
+}
+```
+
+---
+
+## 3.5 `kogwistar-llm-wiki`
 
 ### Command: `register_source`
 
@@ -555,7 +579,7 @@ Internal orchestration and repo-to-repo exchange.
 API-safe response/request models.
 
 ### `["frontend"]`
-UI-optimized contract.
+UI-optimized contract. Data should be verified by passing through a class that handles view-mode conversion.
 
 ### `["llm"]`
 LLM structured output response shape.
