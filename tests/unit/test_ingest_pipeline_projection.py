@@ -1,17 +1,8 @@
 from kogwistar.engine_core.models import Grounding, Node, Span
-from kogwistar_llm_wiki import IngestPipelineRequest
 
 
 def test_projection_reads_kg_visible_state_only(pipeline, ingest_request):
-    pipeline.run(
-        IngestPipelineRequest(
-            workspace_id=ingest_request.workspace_id,
-            source_uri=ingest_request.source_uri,
-            title=ingest_request.title,
-            raw_text=ingest_request.raw_text,
-            auto_accept_threshold=0.5,
-        )
-    )
+    pipeline.run(ingest_request)
     empty_snapshot = pipeline.build_projection_snapshot()
     assert empty_snapshot.entities == []
 

@@ -1,8 +1,8 @@
-from pathlib import Path
+from dataclasses import replace
 
 
-def test_obsidian_sink_builds_vault_from_promoted_kg_state(pipeline, ingest_request, tmp_path: Path):
-    artifacts = pipeline.run(ingest_request)
+def test_obsidian_sink_builds_vault_from_promoted_kg_state(pipeline, ingest_request, tmp_path):
+    artifacts = pipeline.run(replace(ingest_request, promotion_mode="sync"))
     assert artifacts.promoted_entity_id is not None
 
     result = pipeline.build_obsidian_vault(tmp_path / "vault", workspace_id=ingest_request.workspace_id)

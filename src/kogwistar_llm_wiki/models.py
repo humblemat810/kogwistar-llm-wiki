@@ -12,7 +12,10 @@ class IngestPipelineRequest:
     raw_text: str
     source_format: str = "text"
     parser_mode: str = "heuristic"
+    promotion_mode: str = "pending"
     auto_accept_threshold: float = 0.95
+    llm_provider: str | None = None
+    llm_model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

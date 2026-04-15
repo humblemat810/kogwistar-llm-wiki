@@ -1,9 +1,12 @@
 from __future__ import annotations
+
 from contextlib import contextmanager
 from dataclasses import dataclass
+import inspect
+import os
 from pathlib import Path
-from typing import Any, Callable
 import tempfile
+from typing import Any, Callable
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
@@ -12,8 +15,9 @@ from kogwistar.id_provider import stable_id
 from kogwistar_obsidian_sink.core.models import ProjectionEntity
 from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuckProvider
 from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
-from workflow_ingest.page_index import PageIndexParseResult, parse_page_index_document
-from workflow_ingest.semantics import semantic_tree_to_kge_payload
+from kg_doc_parser.workflow_ingest.page_index import PageIndexParseResult, parse_page_index_document
+from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
+from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 
 from .models import IngestPipelineArtifacts, IngestPipelineRequest, ObsidianBuildResult
 from .namespaces import WorkspaceNamespaces
@@ -88,18 +92,6 @@ def _temporary_namespace(engine: Any, namespace: str):
 
 
 class IngestPipeline:
-    """Thin app-level orchestration over parser -> Kogwistar ingest -> maintenance -> projection.
-
-    This class deliberately avoids owning parser semantics. It coordinates:
-    - source registration in conversation foreground
-    - parser invocation via kg-doc-parser
-    - conversion of parser result into Kogwistar graph extraction payload
-    - persistence via Kogwistar document + graph extraction APIs
-    - workflow request creation
-    - maintenance candidates in conversation lanes
-    - optional KG promotion
-    """
-
     def __init__(
         self,
         engines: NamespaceEngines,
@@ -115,9 +107,20 @@ class IngestPipeline:
     def run(self, request: IngestPipelineRequest) -> IngestPipelineArtifacts:
         ns = self.namespaces_for(request.workspace_id)
         source_document_id = self._source_document_id(request)
-        self.register_source(request=request, source_document_id=source_document_id, namespace=ns.conv_fg)
-        parse_result = self.parse_source(request=request, source_document_id=source_document_id)
-        graph_extraction = self.translate_parse_result(parse_result=parse_result, source_document_id=source_document_id)
+
+        self.register_source(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=ns.conv_fg,
+        )
+        parse_result = self.parse_source(
+            request=request,
+            source_document_id=source_document_id,
+        )
+        graph_extraction = self.translate_parse_result(
+            parse_result=parse_result,
+            source_document_id=source_document_id,
+        )
         self.ingest_parse_result(
             request=request,
             source_document_id=source_document_id,
@@ -139,12 +142,12 @@ class IngestPipeline:
             request=request,
             source_document_id=source_document_id,
             candidate_link_id=candidate_link_id,
-            namespace=ns.review,
+            namespace=ns.conv_bg,
         )
 
         promoted_entity_id: str | None = None
         promotion_confidence = 0.95
-        if promotion_confidence >= request.auto_accept_threshold:
+        if request.promotion_mode == "sync" and promotion_confidence >= request.auto_accept_threshold:
             promoted_entity_id = self.promote_to_knowledge(
                 request=request,
                 source_document_id=source_document_id,
@@ -220,20 +223,6 @@ class IngestPipeline:
             where["workspace_id"] = workspace_id
         return list(self.engines.kg.get_nodes(where=where))
 
-    @staticmethod
-    def _node_to_projection_entity(node: Node) -> ProjectionEntity:
-        return ProjectionEntity(
-            kg_id=str(node.id),
-            title=str(node.label),
-            entity_type=str(node.type),
-            summary=str(node.summary),
-            metadata=dict(node.metadata or {}),
-            source_ids=list(getattr(node, "source_ids", []) or []),
-            target_ids=list(getattr(node, "target_ids", []) or []),
-            relation=getattr(node, "relation", None),
-            body=str(node.summary),
-        )
-
     def _source_document_id(self, request: IngestPipelineRequest) -> str:
         return str(
             stable_id(
@@ -261,13 +250,65 @@ class IngestPipeline:
             self.engines.conversation.write.add_document(document)
 
     def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> PageIndexParseResult:
-        return self.parser(
-            document_id=source_document_id,
-            title=request.title,
-            raw_text=request.raw_text,
-            source_format=request.source_format,
-            mode=request.parser_mode,
-        )
+        parser_kwargs = self._build_parser_kwargs(request=request, source_document_id=source_document_id)
+        return self.parser(**parser_kwargs)
+
+    def _build_parser_kwargs(self, *, request: IngestPipelineRequest, source_document_id: str) -> dict[str, Any]:
+        parser_kwargs: dict[str, Any] = {
+            "document_id": source_document_id,
+            "title": request.title,
+            "raw_text": request.raw_text,
+            "source_format": request.source_format,
+            "mode": request.parser_mode,
+        }
+
+        if request.parser_mode == "heuristic":
+            return parser_kwargs
+
+        provider = request.llm_provider or self._provider_from_mode(request.parser_mode)
+        model = request.llm_model or self._model_from_env(provider)
+        if provider is None:
+            raise ValueError(f"missing llm provider for parser_mode={request.parser_mode!r}")
+
+        sig = inspect.signature(self.parser)
+        params = sig.parameters
+        supports_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values())
+
+        if "llm_provider" in params or supports_kwargs:
+            parser_kwargs["llm_provider"] = provider
+        if "model" in params or supports_kwargs:
+            parser_kwargs["model"] = model
+        if "provider_settings" in params or supports_kwargs:
+            parser_kwargs["provider_settings"] = WorkflowProviderSettings(
+                parser=ProviderEndpointConfig(
+                    provider=provider,
+                    model=model,
+                )
+            )
+
+        if not supports_kwargs and not any(
+            key in parser_kwargs for key in ("llm_provider", "model", "provider_settings")
+        ):
+            raise ValueError(
+                "Configured parser does not expose llm_provider/model or provider_settings; "
+                "upgrade kg-doc-parser or provide a compatible parser callable."
+            )
+
+        return parser_kwargs
+
+    @staticmethod
+    def _provider_from_mode(mode: str) -> str | None:
+        if mode in {"ollama", "gemini"}:
+            return mode
+        return None
+
+    @staticmethod
+    def _model_from_env(provider: str | None) -> str | None:
+        if provider == "ollama":
+            return os.getenv("OLLAMA_MODEL") or os.getenv("KG_DOC_PARSER_MODEL")
+        if provider == "gemini":
+            return os.getenv("GEMINI_MODEL") or os.getenv("KG_DOC_PARSER_MODEL")
+        return os.getenv("KG_DOC_PARSER_MODEL")
 
     def translate_parse_result(
         self,
@@ -348,7 +389,15 @@ class IngestPipeline:
             visibility="review",
             label=f"Promotion candidate: {request.title}",
             summary=f"Promotion candidate linked from {candidate_link_id}",
-            extra_metadata={"candidate_link_id": candidate_link_id},
+            extra_metadata={
+                "candidate_link_id": candidate_link_id,
+                "promotion_mode": request.promotion_mode,
+                "queue_state": "pending",
+                "queue_previous_id": None,
+                "queue_next_id": None,
+                "lineage_source_ids": [source_document_id, candidate_link_id],
+                "review_namespace": self.namespaces_for(request.workspace_id).review,
+            },
         )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)

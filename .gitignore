@@ -21,6 +21,9 @@ site/
 .pytest_cache/
 .pytest_run/
 .pytest_tmp/
+.pytest-temp/
+.codex-test-temp/
+tests/_tmp/
 .ruff_cache/
 .mypy_cache/
 .coverage
