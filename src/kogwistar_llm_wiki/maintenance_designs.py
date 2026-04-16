@@ -25,7 +25,7 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
             label="Distill Wisdom",
             type="entity",
             summary="Extract reusable lessons from ingestion artifacts.",
-            mentions=[Grounding(spans=[Span.from_dummy_for_workflow()])],
+            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
             metadata={
                 "entity_type": "workflow_node",
                 "workflow_id": workflow_id,
@@ -39,7 +39,7 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
             label="Check Progress",
             type="entity",
             summary="Decide if more distillation passes are needed.",
-            mentions=[Grounding(spans=[Span.from_dummy_for_workflow()])],
+            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
             metadata={
                 "entity_type": "workflow_node",
                 "workflow_id": workflow_id,
@@ -51,7 +51,7 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
             label="Design Complete",
             type="entity",
             summary="Terminal state for distillation.",
-            mentions=[Grounding(spans=[Span.from_dummy_for_workflow()])],
+            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
             metadata={
                 "entity_type": "workflow_node",
                 "workflow_id": workflow_id,
@@ -71,7 +71,7 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
             target_edge_ids=[],
             label="to_check",
             summary="Check if finished.",
-            mentions=[Grounding(spans=[Span.from_dummy_for_workflow()])],
+            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
             metadata={
                 "entity_type": "workflow_edge",
                 "workflow_id": workflow_id,
@@ -88,7 +88,7 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
             target_edge_ids=[],
             label="loop",
             summary="Next pass.",
-            mentions=[Grounding(spans=[Span.from_dummy_for_workflow()])],
+            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
             metadata={
                 "entity_type": "workflow_edge",
                 "workflow_id": workflow_id,
@@ -105,7 +105,7 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
             target_edge_ids=[],
             label="finished",
             summary="Distillation complete.",
-            mentions=[Grounding(spans=[Span.from_dummy_for_workflow()])],
+            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
             metadata={
                 "entity_type": "workflow_edge",
                 "workflow_id": workflow_id,
