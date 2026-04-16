@@ -9,6 +9,19 @@ def test_namespaces_include_wisdom_and_review():
     assert ns.review == "ws:demo:review"
     assert ns.kg == "ws:demo:kg"
     assert ns.wisdom == "ws:demo:wisdom"
+    assert ns.maintenance_jobs == "ws:demo:maintenance_jobs"
+    assert ns.projection_jobs == "ws:demo:projection_jobs"
+    assert ns.projection_manifest == "ws:demo:projection_manifest"
+    assert ns.projection_state == "ws:demo:projection_state"
+
+
+def test_job_and_manifest_namespaces_do_not_collide():
+    ns = WorkspaceNamespaces("demo")
+    assert ns.maintenance_jobs != ns.conv_bg
+    assert ns.projection_jobs != ns.conv_bg
+    assert ns.maintenance_jobs != ns.projection_jobs
+    assert ns.projection_manifest != ns.maintenance_jobs
+    assert ns.projection_manifest != ns.projection_jobs
 
 
 def test_namespace_engines_share_one_conversation_engine(namespace_engines):

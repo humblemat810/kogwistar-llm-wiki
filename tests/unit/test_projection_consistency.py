@@ -1,170 +1,142 @@
 from __future__ import annotations
 
-import os
-import shutil
-from pathlib import Path
-import pytest
-from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+import json
+
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 
 
-@pytest.fixture()
-def sync_request(ingest_request):
-    """Returns a request with promotion_mode='sync' to trigger immediate knowledge promotion."""
-    return ingest_request.model_copy(update={"promotion_mode": "sync"})
+def _job_field(job, name: str):
+    if isinstance(job, dict):
+        return job.get(name)
+    return getattr(job, name, None)
 
 
-def test_sequential_projection_queue_integrity(pipeline, sync_request, tmp_path):
-    workspace_id = sync_request.workspace_id
+def _job_payload(job) -> dict:
+    payload = _job_field(job, "payload_json")
+    if isinstance(payload, str) and payload:
+        return json.loads(payload)
+    return {}
+
+
+def _sync_request(request):
+    return request.model_copy(update={"promotion_mode": "sync"})
+
+
+def test_projection_jobs_are_enqueued_per_sync_promotion(pipeline, ingest_request):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+
+    promoted_ids = set()
+    for index in range(3):
+        request = _sync_request(
+            ingest_request.model_copy(
+                update={
+                    "title": f"Doc {index}",
+                    "source_uri": f"file:///contracts/doc-{index}.txt",
+                }
+            )
+        )
+        artifacts = pipeline.run(request)
+        assert artifacts.promoted_entity_id is not None
+        promoted_ids.add(artifacts.promoted_entity_id)
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.projection_jobs,
+        limit=20,
+    )
+    assert len(jobs) == 3
+    assert {str(_job_field(job, "entity_kind")) for job in jobs} == {"projection_request"}
+    assert {str(_job_field(job, "namespace")) for job in jobs} == {ns.projection_jobs}
+    assert {str(_job_field(job, "entity_id")) for job in jobs} == promoted_ids
+
+
+def test_projection_worker_processes_durable_jobs_and_records_manifest(
+    pipeline, ingest_request, tmp_path
+):
+    workspace_id = ingest_request.workspace_id
     ns = WorkspaceNamespaces(workspace_id)
     vault_root = tmp_path / "obsidian_vault"
     vault_root.mkdir()
-    
+
+    artifacts = pipeline.run(_sync_request(ingest_request))
+    assert artifacts.promoted_entity_id is not None
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.projection_jobs,
+        limit=10,
+    )
+    assert len(jobs) == 1
+    job = jobs[0]
+    payload = _job_payload(job)
+    assert payload["promoted_entity_id"] == artifacts.promoted_entity_id
+
     worker = ProjectionWorker(pipeline.engines)
-    
-    # 1. Ingest 3 documents in sync mode
-    for i in range(1, 4):
-        req = sync_request.model_copy(update={"title": f"Doc {i}", "source_uri": f"file://doc{i}.txt"})
-        pipeline.run(req)
-        
-    # 2. Verify queue structure in conv_bg
-    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
-        reqs = pipeline.engines.conversation.read.get_nodes(
-            where={"artifact_kind": "projection_request", "workspace_id": workspace_id}
-        )
-        
-    assert len(reqs) == 3
-    # Sort by seq to verify chain
-    reqs.sort(key=lambda r: int(r.metadata.get("seq", 0)))
-    
-    assert reqs[0].metadata.get("seq") == 1
-    assert reqs[0].metadata.get("queue_previous_id") is None
-    
-    assert reqs[1].metadata.get("seq") == 2
-    assert reqs[1].metadata.get("queue_previous_id") == str(reqs[0].id)
-    
-    assert reqs[2].metadata.get("seq") == 3
-    assert reqs[2].metadata.get("queue_previous_id") == str(reqs[1].id)
-    
-    # 3. Drain the queue
     worker.process_pending_projections(workspace_id, str(vault_root))
-    
-    # 4. Verify ProjectionState in meta_sqlite (Internal store)
-    latest_seq = worker._get_latest_projected_seq(workspace_id)
-    assert latest_seq == 3
-    
-    # 5. Verify Requests are marked as completed via append-only status events
-    # (The original request nodes are immutable; completion is recorded as a separate event.)
-    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
-        completed_events = pipeline.engines.conversation.read.get_nodes(
-            where={
-                "artifact_kind": "projection_status_event",
-                "workspace_id": workspace_id,
-                "status": "completed",
-            }
-        )
-    assert len(completed_events) == 3
+
+    pending_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.projection_jobs,
+        status="PENDING",
+        limit=10,
+    )
+    done_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.projection_jobs,
+        status="DONE",
+        limit=10,
+    )
+    assert pending_jobs == []
+    assert len(done_jobs) == 1
+    assert _job_field(done_jobs[0], "job_id") == _job_field(job, "job_id")
+
+    manifest = pipeline.engines.conversation.meta_sqlite.get_named_projection(
+        ns.projection_manifest,
+        workspace_id,
+    )
+    assert manifest is not None
+    assert manifest["namespace"] == ns.projection_manifest
+    assert manifest["key"] == workspace_id
+    assert manifest["materialization_status"] == "ready"
+    assert manifest["payload"]["status"] == "ready"
+    assert artifacts.promoted_entity_id in manifest["payload"]["projected_ids"]
+    assert list(vault_root.rglob("*.md")), "Projection worker should write markdown files"
 
 
-def test_projection_handles_failures_and_resumes(pipeline, sync_request, tmp_path, monkeypatch):
-    workspace_id = sync_request.workspace_id
+def test_projection_manager_reads_manifest_written_by_worker(
+    pipeline, ingest_request, tmp_path
+):
+    workspace_id = ingest_request.workspace_id
     ns = WorkspaceNamespaces(workspace_id)
-    vault_root = tmp_path / "obsidian_vault_fail"
+    vault_root = tmp_path / "manifest_vault"
     vault_root.mkdir()
-    
+
+    pipeline.run(_sync_request(ingest_request))
     worker = ProjectionWorker(pipeline.engines)
-    
-    # 1. Ingest 2 docs
-    pipeline.run(sync_request.model_copy(update={"title": "Good Doc", "source_uri": "file://good.txt"}))
-    pipeline.run(sync_request.model_copy(update={"title": "Bad Doc", "source_uri": "file://bad.txt"}))
-    
-    # 2. Mock a failure on the second sync
-    original_sync = worker.manager.sync_obsidian_vault
-    call_count = 0
-    
-    def mock_sync(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 2:
-            raise RuntimeError("Obsidian Sink Crash")
-        return original_sync(*args, **kwargs)
-        
-    monkeypatch.setattr(worker.manager, "sync_obsidian_vault", mock_sync)
-    
-    # 3. Process - should stop at seq=1 after seq=2 fails
-    with pytest.raises(RuntimeError, match="Obsidian Sink Crash"):
-        worker.process_pending_projections(workspace_id, str(vault_root))
-        
-    # 4. Verify state didn't advance to 2 in meta_sqlite
-    latest_seq = worker._get_latest_projected_seq(workspace_id)
-    assert latest_seq == 1
-    
-    # 5. Fix the "sink" and resume
-    monkeypatch.setattr(worker.manager, "sync_obsidian_vault", original_sync)
     worker.process_pending_projections(workspace_id, str(vault_root))
-    
-    # Verify final state
-    latest_seq = worker._get_latest_projected_seq(workspace_id)
-    assert latest_seq == 2
+
+    manifest = pipeline.engines.conversation.meta_sqlite.get_named_projection(
+        ns.projection_manifest,
+        workspace_id,
+    )
+    assert manifest is not None
+
+    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    titles = {entity.title for entity in snapshot.entities}
+    assert ingest_request.title in titles
+    assert manifest["namespace"] == ns.projection_manifest
+    assert manifest["key"] == workspace_id
 
 
-def test_projection_gap_detection(pipeline, sync_request, tmp_path):
-    workspace_id = sync_request.workspace_id
-    vault_root = tmp_path / "obsidian_vault_gap"
+def test_projection_worker_is_noop_for_empty_queue(pipeline, tmp_path):
+    workspace_id = "empty-workspace"
+    vault_root = tmp_path / "empty_vault"
     vault_root.mkdir()
-    
+
     worker = ProjectionWorker(pipeline.engines)
-    
-    # 1. Ingest 3 docs
-    for i in range(1, 4):
-        pipeline.run(sync_request.model_copy(update={"title": f"Doc {i}", "source_uri": f"file://doc{i}.txt"}))
-        
-    # 2. Delete seq=2 from the graph (simulate data corruption or manual deletion)
+    worker.process_pending_projections(workspace_id, str(vault_root))
+
     ns = WorkspaceNamespaces(workspace_id)
-    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
-        nodes = pipeline.engines.conversation.read.get_nodes(
-            where={"artifact_kind": "projection_request"}
-        )
-        target = [n for n in nodes if int(n.metadata.get("seq", 0)) == 2]
-        for n in target:
-            pipeline.engines.conversation.lifecycle.tombstone_node(str(n.id))
-            
-    # 3. Drain the queue - should stop at seq=1 because seq=2 is missing
-    # This verifies the strict-order guarantee: we never skip sequences.
-    worker.process_pending_projections(workspace_id, str(vault_root))
-    
-    latest_seq = worker._get_latest_projected_seq(workspace_id)
-    assert latest_seq == 1
-
-
-def test_projection_rapid_ingestion_stress(pipeline, sync_request, tmp_path):
-    workspace_id = sync_request.workspace_id
-    worker = ProjectionWorker(pipeline.engines)
-    
-    # Rapid ingestion to verify sequential monotonic incrementing under churn
-    for i in range(10):
-        pipeline.run(sync_request.model_copy(update={"title": f"Stress {i}", "source_uri": f"file://stress{i}.txt"}))
-        
-    ns = WorkspaceNamespaces(workspace_id)
-    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
-        reqs = pipeline.engines.conversation.read.get_nodes(
-            where={"artifact_kind": "projection_request", "workspace_id": workspace_id}
-        )
-        
-    assert len(reqs) == 10
-    seqs = sorted([int(r.metadata["seq"]) for r in reqs])
-    assert seqs == list(range(1, 11))
-
-
-def test_projection_empty_workspace_is_noop(pipeline, sync_request, tmp_path):
-    workspace_id = "empty_ws"
-    vault_root = tmp_path / "obsidian_vault_empty"
-    vault_root.mkdir()
-    worker = ProjectionWorker(pipeline.engines)
-    
-    # Drainage on a workspace with zero requests should be a safe no-op
-    worker.process_pending_projections(workspace_id, str(vault_root))
-    
-    latest_seq = worker._get_latest_projected_seq(workspace_id)
-    assert latest_seq == 0
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.projection_jobs,
+        limit=10,
+    )
+    assert jobs == []

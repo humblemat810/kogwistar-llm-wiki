@@ -89,6 +89,8 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 
 ## Docs
 
+### System Documentation
+
 | Document | Purpose |
 |---|---|
 | [QUICKSTART.md](QUICKSTART.md) | Step-by-step tutorial |
@@ -102,11 +104,26 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
 | [STATUS.md](STATUS.md) | Implementation status |
 
+### Ecosystem Analysis
+
+| Document | Purpose |
+|---|---|
+| [doc/engineering_assessment.md](doc/engineering_assessment.md) | Engineering-level assessment of the author and ecosystem |
+| [doc/ai_os_gap_analysis.md](doc/ai_os_gap_analysis.md) | Gap analysis: what is missing to become a genuine AI-native OS |
+| [doc/ai_os_roadmap.md](doc/ai_os_roadmap.md) | Executable plan: polish to production + AI OS build order |
+
 ---
 
 ## Development
 
 ```bash
 pytest tests/unit/          # fast unit tests (in-memory, no services)
-pytest -m manual            # opt-in tests requiring local services
+pytest -m integration       # Obsidian vault + other on-disk integration checks
+pytest -m manual            # opt-in smoke tests requiring local services
 ```
+
+After a successful ingest/projection run, the most useful manual checks are:
+- maintenance jobs in the durable meta-store should be `DONE`
+- projection jobs in the durable meta-store should be `DONE`
+- the projection manifest row should be `ready`
+- the Obsidian vault should contain the expected `.md` files

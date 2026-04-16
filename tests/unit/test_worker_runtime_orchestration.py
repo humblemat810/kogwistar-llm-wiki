@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pathlib import Path
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
@@ -7,6 +9,19 @@ from kogwistar_llm_wiki.worker import MaintenanceWorker
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
+
+
+def _job_field(job, name: str):
+    if isinstance(job, dict):
+        return job.get(name)
+    return getattr(job, name, None)
+
+
+def _job_payload(job) -> dict:
+    payload = _job_field(job, "payload_json")
+    if isinstance(payload, str) and payload:
+        return json.loads(payload)
+    return {}
 
 
 def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, ingest_request: IngestPipelineRequest):
@@ -19,6 +34,15 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     
     workspace_id = sync_request.workspace_id
     ns = WorkspaceNamespaces(workspace_id)
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        limit=10,
+    )
+    assert len(jobs) == 1
+    assert _job_field(jobs[0], "entity_kind") == "maintenance_job"
+    assert _job_field(jobs[0], "entity_id") == artifacts.source_document_id
+    assert _job_payload(jobs[0])["request_node_id"] == artifacts.maintenance_job_id
     
     # Verify request existence in conversation engine
     requests = pipeline.engines.conversation.read.get_nodes(
@@ -35,6 +59,13 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     # 3. Run Worker
     worker = MaintenanceWorker(pipeline.engines)
     worker.process_pending_jobs(workspace_id)
+
+    done_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        status="DONE",
+        limit=10,
+    )
+    assert len(done_jobs) == 1
     
     # 4. Verify Final State - WorkflowRunNode Trace
     # We no longer perform CRUD updates on the request node itself.

@@ -136,9 +136,16 @@ The vault is rebuilt incrementally on each projection cycle — only changed nod
 ## Step 6 — Run the test suite
 
 ```bash
-pytest tests/unit/          # 39 fast unit tests, no external services needed
-pytest -m manual            # opt-in: requires local Obsidian vault or Chroma
+pytest tests/unit/          # fast unit tests, no external services needed
+pytest -m integration       # Obsidian vault + other on-disk integration checks
+pytest -m manual            # opt-in smoke cases that need local services like Ollama
 ```
+
+After a successful run, the next checks are:
+- maintenance jobs in the durable meta-store should be `DONE`
+- projection jobs in the durable meta-store should be `DONE`
+- the projection manifest row should be `ready`
+- the Obsidian vault should contain the expected `.md` files
 
 ---
 

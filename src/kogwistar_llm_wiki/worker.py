@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .models import NamespaceEngines, MaintenanceJobResult
 from .namespaces import WorkspaceNamespaces
@@ -41,7 +42,8 @@ class BaseWorker(ABC):
 
 class MaintenanceWorker(BaseWorker):
     """
-    Worker responsible for processing maintenance job requests using the graph-native runtime.
+    Worker responsible for processing maintenance jobs using the durable job table
+    and the graph-native runtime for the actual distillation work.
     """
 
     def __init__(self, engines: NamespaceEngines, eager_mode: bool = False):
@@ -71,64 +73,36 @@ class MaintenanceWorker(BaseWorker):
 
     def process_pending_jobs(self, workspace_id: str):
         """
-        Finds and processes maintenance job requests for a given workspace.
-        This follows a discovery pattern where jobs are polled from the background conversation namespace.
-        Authoritative Source: maintenance_job_request nodes in conv_bg.
-        Deduplication Strategy: Checks for existing WorkflowStepExecNode traces.
+        Finds and processes maintenance jobs for a given workspace.
+        The durable index job table is authoritative; graph nodes are retained only
+        as audit artifacts.
         """
         ns = WorkspaceNamespaces(workspace_id)
-        # 1. Discover backbone run for this worker instance (or create one)
-        backbone_run_id = self._ensure_backbone_run(workspace_id)
-
-        # 2. Find maintenance requests in the conversation engine (conv_bg)
-        # Filter out those that have already been executed.
-        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
-            requests = self.engines.conversation.read.get_nodes(
-                where={
-                    "workspace_id": workspace_id,
-                    "artifact_kind": "maintenance_job_request",
-                }
+        meta = self.engines.conversation.meta_sqlite
+        while True:
+            jobs = meta.claim_index_jobs(
+                limit=50,
+                lease_seconds=60,
+                namespace=ns.maintenance_jobs,
             )
+            if not jobs:
+                break
+            for job in jobs:
+                self._handle_job(workspace_id, job)
 
-            for req_node in requests:
-                # 1. Find all workflow run attempts for this request (bare keys, no metadata. prefix)
-                run_nodes = self.engines.conversation.read.get_nodes(
-                    where={
-                        "turn_node_id": str(req_node.id),
-                        "entity_type": "workflow_run",
-                    }
-                )
-
-                # 2. Authoritative check: Does any run have a corresponding completion event?
-                is_done = False
-                for rn in run_nodes:
-                    run_id = rn.metadata.get("run_id")
-                    if not run_id:
-                        continue
-                    completions = self.engines.conversation.read.get_nodes(
-                        where={
-                            "entity_type": "workflow_completed",
-                            "run_id": str(run_id),
-                        }
-                    )
-                    if completions:
-                        is_done = True
-                        break
-
-                if not is_done:
-                    logger.info(f"Found pending maintenance request {req_node.id}, starting distillation.")
-                    self._handle_request(workspace_id, req_node)
-                else:
-                    logger.debug(f"Maintenance request {req_node.id} already processed (completion trace found).")
-
-    def _ensure_backbone_run(self, workspace_id: str) -> str:
-        """Pattern: The worker has a persistent backbone run on the graph."""
-        from kogwistar.id_provider import stable_id
-        run_id = str(stable_id("worker_backbone", workspace_id))
-        return run_id
-
-    def _handle_request(self, workspace_id: str, req_node: Any):
-        logger.info(f"Processing maintenance job {req_node.id}")
+    def _handle_job(self, workspace_id: str, job: Any):
+        job_id = str(getattr(job, "job_id", None) or (job.get("job_id") if isinstance(job, dict) else ""))
+        payload = self._decode_payload(job)
+        req_node_id = str(payload.get("request_node_id") or job_id)
+        maintenance_kind = str(payload.get("maintenance_kind") or "distill")
+        request_node = self._load_request_node(workspace_id, req_node_id)
+        if request_node is not None:
+            maintenance_kind = str(
+                payload.get("maintenance_kind")
+                or getattr(request_node, "metadata", {}).get("maintenance_kind")
+                or "distill"
+            )
+        logger.info("Processing maintenance job %s", req_node_id)
         ns = WorkspaceNamespaces(workspace_id)
 
         import warnings
@@ -145,17 +119,56 @@ class MaintenanceWorker(BaseWorker):
                         workflow_id="maintenance.distillation.v1",
                         initial_state={
                             "workspace_id": workspace_id,
-                            "request_id": str(req_node.id),
-                            "maintenance_kind": req_node.metadata.get("maintenance_kind", "distill"),
+                            "request_id": req_node_id,
+                            "maintenance_kind": maintenance_kind,
                             "_deps": self.engines,
                         },
                         conversation_id=ns.conv_bg,
-                        turn_node_id=str(req_node.id),
+                        turn_node_id=req_node_id,
                     )
                     status = result.status if hasattr(result, "status") else "finished"
-                    logger.info(f"Maintenance job {req_node.id} execution finished: {status}")
+                    logger.info(f"Maintenance job {req_node_id} execution finished: {status}")
+                    if job_id:
+                        self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
                 except Exception as e:
-                    logger.error(f"Maintenance job {req_node.id} encountered runtime error: {e}", exc_info=True)
+                    logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
+                    if job_id:
+                        retry_count = int(getattr(job, "retry_count", None) or (job.get("retry_count") if isinstance(job, dict) else 0))
+                        max_retries = int(getattr(job, "max_retries", None) or (job.get("max_retries") if isinstance(job, dict) else 10))
+                        if retry_count + 1 < max_retries:
+                            self.engines.conversation.meta_sqlite.bump_retry_and_requeue(
+                                job_id,
+                                str(e),
+                                next_run_at_seconds=min(300, 2 ** max(retry_count, 0)),
+                            )
+                        else:
+                            self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
+
+    def _decode_payload(self, job: Any) -> dict[str, Any]:
+        payload = getattr(job, "payload_json", None)
+        if payload is None and isinstance(job, dict):
+            payload = job.get("payload_json")
+        if isinstance(payload, str) and payload:
+            try:
+                decoded = json.loads(payload)
+                if isinstance(decoded, dict):
+                    return decoded
+            except Exception:
+                pass
+        return {}
+
+    def _load_request_node(self, workspace_id: str, req_node_id: str) -> Any | None:
+        ns = WorkspaceNamespaces(workspace_id)
+        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            nodes = self.engines.conversation.read.get_nodes(
+                where={
+                    "workspace_id": workspace_id,
+                    "id": req_node_id,
+                }
+            )
+        if nodes:
+            return nodes[0]
+        return None
 
     def _step_distill(self, ctx: StepContext) -> StepRunResult:
         """

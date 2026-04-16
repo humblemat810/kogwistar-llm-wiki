@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, List, Set
@@ -27,9 +28,13 @@ class ProjectionManager:
     def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
         """Returns the current 'KG-visible' state for a workspace."""
         ns = WorkspaceNamespaces(workspace_id)
-        # Authoritative filtering based on contract
         all_nodes = list(self.engines.kg.read.get_nodes(where={"workspace_id": workspace_id}))
-        visible_nodes = [node for node in all_nodes if ns.is_kg_visible(node.metadata or {})]
+        manifest_ids = self._load_projection_manifest_ids(workspace_id)
+
+        if manifest_ids is None:
+            visible_nodes = [node for node in all_nodes if ns.is_kg_visible(node.metadata or {})]
+        else:
+            visible_nodes = [node for node in all_nodes if str(node.id) in manifest_ids]
         
         visible_nodes.sort(key=lambda node: (str(node.label), str(node.id)))
         
@@ -49,6 +54,24 @@ class ProjectionManager:
                 for node in visible_nodes
             ]
         )
+
+    def _load_projection_manifest_ids(self, workspace_id: str) -> set[str] | None:
+        meta = self.engines.conversation.meta_sqlite
+        row = meta.get_named_projection(WorkspaceNamespaces(workspace_id).projection_manifest, workspace_id)
+        if not row:
+            return None
+        payload = row.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return None
+        if not isinstance(payload, dict):
+            return None
+        ids = payload.get("projected_ids")
+        if not isinstance(ids, list):
+            return None
+        return {str(item) for item in ids if str(item)}
 
     def build_obsidian_vault(
         self,

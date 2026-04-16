@@ -1,4 +1,27 @@
+from __future__ import annotations
+
 from kogwistar.engine_core.models import Grounding, Node, Span
+
+from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+
+
+def _projection_span(doc_id: str) -> Span:
+    return Span.model_validate(
+        {
+            "collection_page_url": f"document_collection/{doc_id}",
+            "document_page_url": f"document/{doc_id}",
+            "doc_id": doc_id,
+            "insertion_method": "manual",
+            "page_number": 1,
+            "start_char": 0,
+            "end_char": 1,
+            "excerpt": "A",
+            "context_before": "",
+            "context_after": "cme",
+            "chunk_id": None,
+            "source_cluster_id": None,
+        }
+    )
 
 
 def test_projection_reads_kg_visible_state_only(pipeline, ingest_request):
@@ -37,3 +60,46 @@ def test_projection_reads_kg_visible_state_only(pipeline, ingest_request):
     titles = {entity.title for entity in snapshot.entities}
     assert "Manual Knowledge" in titles
     assert ingest_request.title not in titles
+
+
+def test_projection_manifest_overrides_visibility_metadata(pipeline, ingest_request):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+
+    source_document_id = pipeline._source_document_id(ingest_request)
+    visible_node = Node(
+        label="Visible Knowledge",
+        type="entity",
+        summary="Visible Knowledge",
+        doc_id=source_document_id,
+        mentions=[Grounding(spans=[_projection_span(source_document_id)])],
+        metadata={"visibility": "projection", "workspace_id": workspace_id},
+    )
+    hidden_node = Node(
+        label="Manifest Knowledge",
+        type="entity",
+        summary="Manifest Knowledge",
+        doc_id=source_document_id,
+        mentions=[Grounding(spans=[_projection_span(source_document_id)])],
+        metadata={"visibility": "internal", "workspace_id": workspace_id},
+    )
+    pipeline.engines.kg.write.add_node(visible_node)
+    pipeline.engines.kg.write.add_node(hidden_node)
+
+    pipeline.engines.conversation.meta_sqlite.replace_named_projection(
+        namespace=ns.projection_manifest,
+        key=workspace_id,
+        payload={
+            "workspace_id": workspace_id,
+            "projected_ids": [str(hidden_node.id)],
+            "status": "ready",
+        },
+        last_authoritative_seq=1,
+        last_materialized_seq=1,
+        projection_schema_version=1,
+        materialization_status="ready",
+    )
+
+    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    titles = {entity.title for entity in snapshot.entities}
+    assert titles == {"Manifest Knowledge"}

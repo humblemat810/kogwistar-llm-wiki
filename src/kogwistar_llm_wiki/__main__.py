@@ -24,11 +24,9 @@ logger = logging.getLogger("kogwistar_llm_wiki")
 
 def _build_engines(workspace_id: str, data_dir: str | None):
     """Construct a NamespaceEngines bundle from the given data directory."""
-    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+    from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 
-    # IngestPipeline.build_engines is the canonical factory for NamespaceEngines.
-    pipeline = IngestPipeline(workspace_id=workspace_id, data_dir=data_dir or ".")
-    return pipeline.engines
+    return build_in_memory_namespace_engines(base_dir=data_dir or None)
 
 
 def _cmd_daemon_projection(args: argparse.Namespace) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,22 @@ class WorkspaceNamespaces:
     @property
     def wisdom(self) -> str:
         return f"ws:{self.workspace_id}:wisdom"
+
+    @property
+    def projection_jobs(self) -> str:
+        return f"ws:{self.workspace_id}:projection_jobs"
+
+    @property
+    def maintenance_jobs(self) -> str:
+        return f"ws:{self.workspace_id}:maintenance_jobs"
+
+    @property
+    def projection_state(self) -> str:
+        return f"ws:{self.workspace_id}:projection_state"
+
+    @property
+    def projection_manifest(self) -> str:
+        return f"ws:{self.workspace_id}:projection_manifest"
 
     def is_kg_visible(self, metadata: dict[str, Any]) -> bool:
         """Returns True if the artifact is visible to the Knowledge Graph / Projection."""

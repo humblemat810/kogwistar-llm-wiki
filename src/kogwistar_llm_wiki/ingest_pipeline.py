@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
 import inspect
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -198,7 +197,6 @@ class IngestPipeline:
                 "kogwistar_llm_wiki.source_document",
                 request.workspace_id,
                 request.source_uri,
-                request.title,
             )
         )
 
@@ -302,13 +300,21 @@ class IngestPipeline:
                 doc_id=source_document_id,
                 parsed=graph_extraction,
                 mode="append",
-            )
+        )
 
     def create_maintenance_request(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
+        node_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.maintenance_request",
+                request.workspace_id,
+                source_document_id,
+            )
+        )
         node = self._artifact_node(
             request=request,
             source_document_id=source_document_id,
             namespace=namespace,
+            node_id=node_id,
             artifact_kind="maintenance_job_request",
             lane="background",
             visibility="internal",
@@ -322,6 +328,12 @@ class IngestPipeline:
         )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
+        self._enqueue_maintenance_job(
+            request=request,
+            request_node_id=str(node.id),
+            source_document_id=source_document_id,
+            namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
+        )
         return str(node.id)
 
     def create_candidate_link(
@@ -401,67 +413,68 @@ class IngestPipeline:
         )
         with _temporary_namespace(self.engines.kg, namespace):
             self.engines.kg.write.add_node(node)
-            
-        # 2. Append to Projection Queue (Linked-List with Seq)
-        self._append_to_projection_queue(request, promoted_id=str(node.id))
-        
+        self._enqueue_projection_job(
+            request=request,
+            promoted_id=str(node.id),
+            namespace=self.namespaces_for(request.workspace_id).projection_jobs,
+        )
         return str(node.id)
 
-    def _append_to_projection_queue(self, request: IngestPipelineRequest, promoted_id: str) -> str:
-        """
-        Appends a projection request to a durable, strictly-ordered linked-list queue on the graph.
-        
-        Algorithm:
-        1. Discover all existing 'projection_request' nodes for this workspace in 'conv_bg'.
-        2. Find the monotonic maximum 'seq' (integer stored in metadata).
-        3. Create a new node with seq = max + 1, linking back to the previous request ID.
-        4. If request.promotion_mode is 'sync', immediately trigger the ProjectionWorker to 
-           drain the queue to the Obsidian sink (Eager Projection).
-        """
-        ns = self.namespaces_for(request.workspace_id)
-        
-        # Discover latest request to find next seq and previous link
-        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
-            all_requests = self.engines.conversation.read.get_nodes(
-                where={
-                    "workspace_id": request.workspace_id,
-                    "artifact_kind": "projection_request",
-                }
-            )
-            
-        if all_requests:
-            latest = max(all_requests, key=lambda r: int(r.metadata.get("seq", 0)))
-            prev_id = str(latest.id)
-            next_seq = int(latest.metadata.get("seq", 0)) + 1
-        else:
-            prev_id = None
-            next_seq = 1
-            
-        req_node = self._artifact_node(
-            request=request,
-            source_document_id=promoted_id,
-            namespace=ns.conv_bg,
-            artifact_kind="projection_request",
-            lane="background",
-            visibility="internal",
-            label=f"Projection Request: {request.title} (seq={next_seq})",
-            summary=f"Automated projection request for promoted entity {promoted_id}",
-            extra_metadata={
-                "seq": next_seq,
-                "queue_previous_id": prev_id,
-                "promoted_entity_id": promoted_id,
-                "status": "pending",
-                "immediate": (request.promotion_mode == "sync"),
-            }
+    def _enqueue_maintenance_job(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        request_node_id: str,
+        source_document_id: str,
+        namespace: str,
+    ) -> str:
+        payload = {
+            "workspace_id": request.workspace_id,
+            "request_node_id": request_node_id,
+            "source_document_id": source_document_id,
+            "maintenance_kind": "distill",
+        }
+        job_id = request_node_id
+        self.engines.conversation.meta_sqlite.enqueue_index_job(
+            job_id=job_id,
+            namespace=namespace,
+            entity_kind="maintenance_job",
+            entity_id=source_document_id,
+            index_kind="maintenance_job",
+            op="UPSERT",
+            payload_json=json.dumps(payload, ensure_ascii=False),
         )
-        
-        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
-            self.engines.conversation.write.add_node(req_node)
-            
-        # Eager projection is signalled via the projection_request node itself
-        # (metadata.immediate=True). A live ProjectionWorker watches conv_bg and
-        # drains the queue; no synchronous call is made here to avoid blocking ingest.
-        return str(req_node.id)
+        return job_id
+
+    def _enqueue_projection_job(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        promoted_id: str,
+        namespace: str,
+    ) -> str:
+        job_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.projection_request",
+                request.workspace_id,
+                promoted_id,
+            )
+        )
+        payload = {
+            "workspace_id": request.workspace_id,
+            "promoted_entity_id": promoted_id,
+            "promotion_mode": request.promotion_mode,
+        }
+        self.engines.conversation.meta_sqlite.enqueue_index_job(
+            job_id=job_id,
+            namespace=namespace,
+            entity_kind="projection_request",
+            entity_id=promoted_id,
+            index_kind="projection_request",
+            op="UPSERT",
+            payload_json=json.dumps(payload, ensure_ascii=False),
+        )
+        return job_id
 
     def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
         return self.projection.build_projection_snapshot(workspace_id=workspace_id)
@@ -472,6 +485,7 @@ class IngestPipeline:
         request: IngestPipelineRequest,
         source_document_id: str,
         namespace: str,
+        node_id: str | None = None,
         artifact_kind: str,
         lane: str,
         visibility: str,
@@ -494,6 +508,7 @@ class IngestPipeline:
         if extra_metadata:
             metadata.update(extra_metadata)
         return Node(
+            id=node_id,
             label=label,
             type="entity",
             summary=summary,
