@@ -105,7 +105,7 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
             target_edge_ids=[],
             label="finished",
             summary="Distillation complete.",
-            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
+            mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="auto")])],
             metadata={
                 "entity_type": "workflow_edge",
                 "workflow_id": workflow_id,

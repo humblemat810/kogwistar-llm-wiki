@@ -80,6 +80,10 @@ def _build_engine(
 
 
 class IngestPipeline:
+    # Threshold above which a promotion_candidate is auto-accepted in 'sync' mode.
+    # TODO: make this configurable per-workspace or per-document-type.
+    _AUTO_ACCEPT_THRESHOLD = 0.95
+
     def __init__(
         self,
         engines: NamespaceEngines,
@@ -134,9 +138,9 @@ class IngestPipeline:
             namespace=ns.conv_bg,
         )
 
+
         promoted_entity_id: str | None = None
-        promotion_confidence = 0.95
-        if request.promotion_mode == "sync" and promotion_confidence >= request.auto_accept_threshold:
+        if request.promotion_mode == "sync" and self._AUTO_ACCEPT_THRESHOLD >= request.auto_accept_threshold:
             promoted_entity_id = self.promote_to_knowledge(
                 request=request,
                 source_document_id=source_document_id,
@@ -454,18 +458,9 @@ class IngestPipeline:
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
             self.engines.conversation.write.add_node(req_node)
             
-        # 4. Eager projection if requested
-        if request.promotion_mode == "sync":
-            from .projection_worker import ProjectionWorker
-            # We instantiate a one-off worker to drain the queue synchronously
-            # In a production environment, this might be handled by signaling a long-running process.
-            worker = ProjectionWorker(self.engines)
-            # We need the vault root - in this app it's usually derived from the workspace config
-            # but for now we rely on the caller or a default.
-            # Assuming ObsidianManager handles default vault paths if None.
-            # For now, we only trigger if we have a way to know the vault root.
-            # (Self-correction: The worker needs the vault_root. We'll pass it if available).
-            
+        # Eager projection is signalled via the projection_request node itself
+        # (metadata.immediate=True). A live ProjectionWorker watches conv_bg and
+        # drains the queue; no synchronous call is made here to avoid blocking ingest.
         return str(req_node.id)
 
     def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:

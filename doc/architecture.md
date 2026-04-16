@@ -4,7 +4,9 @@
 
 This document defines the architecture for **LLM-Wiki**, a knowledge system built on **Kogwistar** as the authoritative substrate.
 
-### Core Princi- **Graph-authoritative**: All state lives in Kogwistar (events → projections)
+### Core Principles
+
+- **Graph-authoritative**: All state lives in Kogwistar (events → projections)
 - **Projection-based UI**: Obsidian and app UI are views, not sources of truth
 - **Deterministic ingestion**: Stable identities for all inputs and derivations
 - **Separation of concerns**:
@@ -271,11 +273,7 @@ wisdom artifact
 
 ### 4.5 Representation
 
-
-Wisdom is:
-a collection / namespace / projection of nodes + edges
-with specific semantics
-derived from execution and outcomes
+Wisdom is a collection / namespace / projection of **nodes + edges** with specific semantics, derived from execution and outcomes. It lives in the `wisdom` engine namespace and is the only graph space whose nodes are written by the distillation worker rather than by ingestion.
 
 ---
 
@@ -529,84 +527,6 @@ It is:
 - knowledge = stabilized truth
 - wisdom = reusable experience
 - obsidian = human-facing projection
-s are rebuildable
-* Deterministic IDs everywhere
-* **Maintenance ≠ Wisdom**
-* Wisdom derived only from execution
-* No silent promotion of agent output
-* Provenance always preserved
-
----
-
-## 14. Summary
-
-This system is:
-
-* Not a chatbot
-* Not a note app
-* Not a RAG wrapper
-
-It is:
-
-**A continuously learning knowledge system where:**
-
-* conversation = working memory
-* maintenance = system reasoning
-* knowledge = stabilized truth
-* wisdom = reusable experience
-* obsidian = human-facing projection
-rebuildable
-* Deterministic IDs everywhere
-* **Maintenance ≠ Wisdom**
-* Wisdom derived only from execution
-* No silent promotion of agent output
-* Provenance always preserved
-
----
-
-## 14. Summary
-
-This system is:
-
-* Not a chatbot
-* Not a note app
-* Not a RAG wrapper
-
-It is:
-
-**A continuously learning knowledge system where:**
-
-* conversation = working memory
-* maintenance = system reasoning
-* knowledge = stabilized truth
-* wisdom = reusable experience
-* obsidian = human-facing projection
-e rebuildable
-* Deterministic IDs everywhere
-* **Maintenance ≠ Wisdom**
-* Wisdom derived only from execution
-* No silent promotion of agent output
-* Provenance always preserved
-
----
-
-## 14. Summary
-
-This system is:
-
-* Not a chatbot
-* Not a note app
-* Not a RAG wrapper
-
-It is:
-
-**A continuously learning knowledge system where:**
-
-* conversation = working memory
-* maintenance = system reasoning
-* knowledge = stabilized truth
-* wisdom = reusable experience
-* obsidian = human-facing projection
 
 ---
 

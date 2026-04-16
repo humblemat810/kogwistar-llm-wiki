@@ -6,6 +6,7 @@ from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineReq
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
 def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, ingest_request: IngestPipelineRequest):
@@ -35,28 +36,43 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     worker = MaintenanceWorker(pipeline.engines)
     worker.process_pending_jobs(workspace_id)
     
-    # 4. Verify Final State - Request marked completed
-    updated_requests = pipeline.engines.conversation.read.get_nodes(
-        ids=[str(req_node.id)]
-    )
-    assert len(updated_requests) > 0, f"Request {req_node.id} not found after worker run"
-    assert updated_requests[0].metadata.get("status") == "completed"
-    run_id = updated_requests[0].metadata.get("run_id")
-    assert run_id is not None
+    # 4. Verify Final State - WorkflowRunNode Trace
+    # We no longer perform CRUD updates on the request node itself.
+    # The authoritative state is in the append-only traces.
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        runs = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "turn_node_id": str(req_node.id),
+                "entity_type": "workflow_run",
+            }
+        )
+        assert len(runs) == 1, f"No workflow_run found for request {req_node.id}"
+        run_id = runs[0].metadata.get("run_id")
+        assert run_id is not None
+        
+        # Verify authoritative completion event existence
+        completes = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+                "entity_type": "workflow_completed"
+            }
+        )
+        assert len(completes) == 1, f"No workflow_completed found for run {run_id}"
 
-    # 5. Verify Graph-Native Trace (recorded in conversation engine)
+    # 5. Verify Graph-Native Trace Details
     # The runtime creates WorkflowRunNode and WorkflowStepExecNode
-    traces = pipeline.engines.conversation.read.get_nodes(
-        where={
-            "run_id": run_id,
-        }
-    )
-    # Should find at least the Run node and the Step exec node
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        traces = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+            }
+        )
+    # Should find at least the Run node and the Step exec nodes
     kinds = [t.metadata.get("entity_type") for t in traces]
     assert "workflow_run" in kinds
     assert "workflow_step_exec" in kinds
     
     # Verify the steps were 'distill' and 'check_done'
-    node_types = [t.metadata.get("op") for t in traces if t.metadata.get("entity_type") == "workflow_step_exec"]
-    assert "distill" in node_types
-    assert "check_done" in node_types
+    node_ops = [t.metadata.get("op") for t in traces if t.metadata.get("entity_type") == "workflow_step_exec"]
+    assert "distill" in node_ops
+    assert "check_done" in node_ops

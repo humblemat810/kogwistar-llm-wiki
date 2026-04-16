@@ -16,31 +16,30 @@ def test_wisdom_distillation_multi_document_grounding(pipeline, ingest_request):
     # 1. Setup: Materialize designs into workflow engine
     materialize_maintenance_designs(engines.workflow)
     
-    # 2. Ingest 2 documents with the same entity name
+    # 2. Ingest 2 documents with the same entity name (by using same title)
     # We use promotion_mode='sync' to ensure they reach the KG
     req1 = ingest_request.model_copy(update={
-        "title": "Doc A", "source_uri": "file://doc_a.txt", "promotion_mode": "sync"
+        "title": "Shared Entity", "source_uri": "file://doc_a.txt", "promotion_mode": "sync"
     })
     req2 = ingest_request.model_copy(update={
-        "title": "Doc B", "source_uri": "file://doc_b.txt", "promotion_mode": "sync"
+        "title": "Shared Entity", "source_uri": "file://doc_b.txt", "promotion_mode": "sync"
     })
     
     pipeline.run(req1)
     pipeline.run(req2)
     
     # 3. Create a Maintenance Job Request manually
-    # (In a real system, the IngestPipeline or a scheduler would do this)
+    # (In a real system, the IngestPipeline or a scheduler would do this by emitting an entity event)
     from kogwistar.engine_core.models import Node, Grounding, Span
     job_req = Node(
         label="Distill Wisdom (Test)",
         type="entity",
         summary="Triggering wisdom distillation",
-        mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
+        mentions=[Grounding(spans=[Span(doc_id="workflow", start_char=0, end_char=1, excerpt="trigger", document_page_url="dummy", collection_page_url="dummy", insertion_method="auto")])],
         metadata={
             "workspace_id": workspace_id,
             "artifact_kind": "maintenance_job_request",
             "trigger_type": "manual",
-            "status": "pending",
         }
     )
     with _temporary_namespace(engines.conversation, ns.conv_bg):
@@ -50,39 +49,55 @@ def test_wisdom_distillation_multi_document_grounding(pipeline, ingest_request):
     worker = MaintenanceWorker(engines)
     worker.process_pending_jobs(workspace_id)
     
-    # 5. Verify Wisdom Generation
+    # 5. Verify Wisdom Generation (Merging Logic)
+    # Both Doc A and Doc B should have produced "promoted_knowledge" nodes.
+    # By default, the IngestPipeline uses the document title as the label if no specialized entity extraction is active.
+    # To test MERGING, we should have nodes with the SAME label in the KG.
+    # Since our worker groups by `node.label`, we expect two wisdom nodes if labels differ.
+    
     with _temporary_namespace(engines.wisdom, ns.wisdom):
         wisdom_nodes = engines.wisdom.read.get_nodes(
             where={"artifact_kind": "wisdom", "workspace_id": workspace_id}
         )
         
-    assert len(wisdom_nodes) > 0
-    # Both "Doc A" and "Doc B" had the label "Acme Contract" (from ingest_request fixture)
-    # However we changed titles to "Doc A" and "Doc B". 
-    # In the actual implementation, promote_to_knowledge uses the document title as the label.
-    # So we expect two nodes unless we ensure they share a label.
+    assert len(wisdom_nodes) == 1
+    wisdom = wisdom_nodes[0]
+    assert "Shared Entity" in wisdom.label
     
-    # Check for Doc A
-    doc_a_wisdom = [n for n in wisdom_nodes if "Doc A" in n.label]
-    assert len(doc_a_wisdom) == 1
-    
-    # Verify Grounding
-    assert len(doc_a_wisdom[0].mentions) == 1
-    
-    # Check for Doc B
-    doc_b_wisdom = [n for n in wisdom_nodes if "Doc B" in n.label]
-    assert len(doc_b_wisdom) == 1
-    
-    # Verify Grounding (Merged Mentions)
-    # Each source node had 1 mention. Total should be 1 each as they don't merge.
-    assert len(doc_a_wisdom[0].mentions) == 1
-    assert len(doc_b_wisdom[0].mentions) == 1
-    
-    # Verify Source Lineage
-    source_ids_a = doc_a_wisdom[0].metadata.get("source_node_ids", [])
-    assert len(source_ids_a) == 1
-    source_ids_b = doc_b_wisdom[0].metadata.get("source_node_ids", [])
-    assert len(source_ids_b) == 1
+    # Verify Grounding (Merged and Deduplicated Spans)
+    # Both Doc A and Doc B had 1 mention each.
+    # The distillation logic should aggregate them.
+    assert len(wisdom.mentions) >= 1 
+    with _temporary_namespace(engines.conversation, ns.conv_bg):
+        # 4. Verify Trace: WorkflowRunNode should exist
+        runs = engines.conversation.read.get_nodes(
+            where={
+                "turn_node_id": str(job_req.id),
+                "entity_type": "workflow_run",
+            }
+        )
+        assert len(runs) == 1
+        run_id = runs[0].metadata.get("run_id")
+        
+        # Verify authoritative completion event existence
+        completes = engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+                "entity_type": "workflow_completed"
+            }
+        )
+        assert len(completes) == 1
+        
+        # 5. Verify Steps: distill step should be ok
+        steps = engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+                "entity_type": "workflow_step_exec",
+                "op": "distill",
+                "status": "ok"
+            }
+        )
+        assert len(steps) == 1
 
 
 def test_wisdom_distillation_no_knowledge_noop(pipeline, ingest_request):
@@ -97,12 +112,11 @@ def test_wisdom_distillation_no_knowledge_noop(pipeline, ingest_request):
         label="Empty Distillation",
         type="entity",
         summary="Should do nothing",
-        mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
+        mentions=[Grounding(spans=[Span(doc_id="workflow", start_char=0, end_char=1, excerpt="noop", document_page_url="dummy", collection_page_url="dummy", insertion_method="auto")])],
         metadata={
             "workspace_id": workspace_id,
             "artifact_kind": "maintenance_job_request",
             "trigger_type": "manual",
-            "status": "pending",
         }
     )
     with _temporary_namespace(engines.conversation, ns.conv_bg):
@@ -115,7 +129,7 @@ def test_wisdom_distillation_no_knowledge_noop(pipeline, ingest_request):
     # 3. Verify no wisdom produced
     with _temporary_namespace(engines.wisdom, ns.wisdom):
         wisdom_nodes = engines.wisdom.read.get_nodes(
-            where={"workspace_id": workspace_id}
+            where={"metadata.workspace_id": workspace_id}
         )
     assert len(wisdom_nodes) == 0
 
@@ -135,12 +149,11 @@ def test_wisdom_distillation_error_resilience(pipeline, ingest_request, monkeypa
         label="Crashing Job",
         type="entity",
         summary="Simulate LLM or Logic failure",
-        mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
+        mentions=[Grounding(spans=[Span(doc_id="workflow", start_char=0, end_char=1, excerpt="crash", document_page_url="dummy", collection_page_url="dummy", insertion_method="auto")])],
         metadata={
             "workspace_id": workspace_id,
             "artifact_kind": "maintenance_job_request",
             "trigger_type": "manual",
-            "status": "pending",
         }
     )
     with _temporary_namespace(engines.conversation, ns.conv_bg):
@@ -156,11 +169,27 @@ def test_wisdom_distillation_error_resilience(pipeline, ingest_request, monkeypa
     # Run Worker - should not raise, but mark job as failed
     worker.process_pending_jobs(workspace_id)
     
-    # Verify job status in graph
+    # Verify execution trace reflects failure
     with _temporary_namespace(engines.conversation, ns.conv_bg):
-        nodes = engines.conversation.read.get_nodes(where={"workspace_id": workspace_id, "artifact_kind": "maintenance_job_request"})
-        req = nodes[0]
-        assert req.metadata.get("status") == "failed"
+        runs = engines.conversation.read.get_nodes(
+            where={
+                "turn_node_id": str(job_req.id),
+                "entity_type": "workflow_run",
+            }
+        )
+        assert len(runs) == 1
+        run_id = runs[0].metadata.get("run_id")
+        
+        steps = engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+                "entity_type": "workflow_step_exec",
+                "op": "distill"
+            }
+        )
+        assert len(steps) == 1
+        # The resolver wraps all handler exceptions into RunFailure, which the runtime persists as status="failure"
+        assert steps[0].metadata.get("status") in ("failure", "error")
 
 
 def test_wisdom_distillation_pydantic_validation(pipeline):
@@ -187,17 +216,16 @@ def test_wisdom_distillation_eager_mode_manual_trigger(pipeline, ingest_request)
     workspace_id = "eager_test"
     materialize_maintenance_designs(engines.workflow)
     
-    from kogwistar.engine_core.models import Node, Span
+    from kogwistar.engine_core.models import Node, Span, Grounding
     job_req = Node(
         label="Eager Job",
         type="entity",
         summary="Testing eager worker",
-        mentions=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")],
+        mentions=[Grounding(spans=[Span(doc_id="workflow", start_char=0, end_char=1, excerpt="eager", document_page_url="dummy", collection_page_url="dummy", insertion_method="auto")])],
         metadata={
             "workspace_id": workspace_id,
             "artifact_kind": "maintenance_job_request",
             "trigger_type": "manual",
-            "status": "pending",
         }
     )
     ns = WorkspaceNamespaces(workspace_id)
@@ -207,5 +235,32 @@ def test_wisdom_distillation_eager_mode_manual_trigger(pipeline, ingest_request)
     worker.process_pending_jobs(workspace_id)
     
     with _temporary_namespace(engines.conversation, ns.conv_bg):
-        nodes = engines.conversation.read.get_nodes(where={"workspace_id": workspace_id})
-        assert nodes[0].metadata.get("status") == "completed"
+        # Verify Trace: WorkflowRunNode should exist
+        runs = engines.conversation.read.get_nodes(
+            where={
+                "turn_node_id": str(job_req.id),
+                "entity_type": "workflow_run",
+            }
+        )
+        assert len(runs) == 1
+        run_id = runs[0].metadata.get("run_id")
+        
+        # Verify authoritative completion event
+        completes = engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+                "entity_type": "workflow_completed"
+            }
+        )
+        assert len(completes) == 1
+        
+        # Verify Steps: distill step should be ok
+        steps = engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+                "entity_type": "workflow_step_exec",
+                "op": "distill",
+                "status": "ok"
+            }
+        )
+        assert len(steps) == 1

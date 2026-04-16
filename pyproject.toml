@@ -3,15 +3,61 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-wiki-first-slice"
-version = "0.1.0"
-description = "Minimal reference implementation of the first LLM-Wiki slice"
+name = "kogwistar-llm-wiki"
+version = "0.2.0"
+description = "LLM-Wiki: a continuously-learning knowledge system built on Kogwistar"
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11"
+keywords = ["knowledge-graph", "llm", "obsidian", "kogwistar", "wiki"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+]
+# The three sibling repos are NOT on PyPI and must be installed via the bootstrap:
+#   scripts/bootstrap-dev.sh
+#
+#   kogwistar            — imported at runtime (from kogwistar.engine_core / kogwistar.runtime)
+#   kogwistar-obsidian-sink — called by ProjectionManager at runtime
+#   kg-doc-parser        — upstream ingestion tool; NOT a Python import dep of this package
+#                          (it runs as a separate process/CLI, not imported in src/)
+#
+# Listing kogwistar / kogwistar-obsidian-sink here as hard deps would cause pip to fail
+# on a clean install (not on PyPI). The bootstrap installs all siblings editable first.
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+chromadb = ["chromadb>=0.6"]
+test = [
+    "pytest>=8.0",
+    "pytest-anyio",
+]
+dev = [
+    "kogwistar-llm-wiki[test,chromadb]",
+]
+
+[project.scripts]
+llm-wiki = "kogwistar_llm_wiki.__main__:main"
+
+# ---------------------------------------------------------------------------
+# uv-specific: when using `uv`, resolve sibling packages from local paths.
+# This section is ignored by pip/setuptools.
+# ---------------------------------------------------------------------------
+[tool.uv.sources]
+# uv resolves these from local paths when available. Ignored by pip/setuptools.
+kogwistar               = { path = "kogwistar",               editable = true }
+kogwistar-obsidian-sink = { path = "kogwistar-obsidian-sink", editable = true }
+# kg-doc-parser is a sibling tool (not a Python import dep) but included here
+# so uv users get the local version when working across repos.
+kg-doc-parser           = { path = "kg-doc-parser",           editable = true }
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -25,4 +71,6 @@ pythonpath = ["src"]
 norecursedirs = ["kogwistar-llm-wiki-tests-*"]
 markers = [
     "manual: tests that are opt-in and may require local services",
+    "integration: tests that require real external backends (Chroma, Obsidian vault)",
 ]
+

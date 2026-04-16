@@ -54,12 +54,17 @@ def test_sequential_projection_queue_integrity(pipeline, sync_request, tmp_path)
     latest_seq = worker._get_latest_projected_seq(workspace_id)
     assert latest_seq == 3
     
-    # 5. Verify Requests are marked as completed on the graph
+    # 5. Verify Requests are marked as completed via append-only status events
+    # (The original request nodes are immutable; completion is recorded as a separate event.)
     with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
-        completed_reqs = pipeline.engines.conversation.read.get_nodes(
-            where={"artifact_kind": "projection_request", "workspace_id": workspace_id, "status": "completed"}
+        completed_events = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "projection_status_event",
+                "workspace_id": workspace_id,
+                "status": "completed",
+            }
         )
-    assert len(completed_reqs) == 3
+    assert len(completed_events) == 3
 
 
 def test_projection_handles_failures_and_resumes(pipeline, sync_request, tmp_path, monkeypatch):
@@ -123,7 +128,7 @@ def test_projection_gap_detection(pipeline, sync_request, tmp_path):
         )
         target = [n for n in nodes if int(n.metadata.get("seq", 0)) == 2]
         for n in target:
-            pipeline.engines.conversation.tombstone_node(str(n.id))
+            pipeline.engines.conversation.lifecycle.tombstone_node(str(n.id))
             
     # 3. Drain the queue - should stop at seq=1 because seq=2 is missing
     # This verifies the strict-order guarantee: we never skip sequences.

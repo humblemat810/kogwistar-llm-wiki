@@ -28,7 +28,7 @@ class ProjectionManager:
         """Returns the current 'KG-visible' state for a workspace."""
         ns = WorkspaceNamespaces(workspace_id)
         # Authoritative filtering based on contract
-        all_nodes = list(self.engines.kg.get_nodes(where={"workspace_id": workspace_id}))
+        all_nodes = list(self.engines.kg.read.get_nodes(where={"workspace_id": workspace_id}))
         visible_nodes = [node for node in all_nodes if ns.is_kg_visible(node.metadata or {})]
         
         visible_nodes.sort(key=lambda node: (str(node.label), str(node.id)))

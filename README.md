@@ -1,39 +1,112 @@
 # Kogwistar LLM-Wiki
 
-# this also is a dev experiment -> open source, let chatgpt see the opensource and dev in its own sandbox.
+A **continuously-learning knowledge system** built on [Kogwistar](https://github.com/humblemat810/kogwistar).
 
-Docs-first workspace for the LLM-Wiki orchestration layer built around Kogwistar.
+Feed it documents. It extracts entities, promotes knowledge, distills wisdom, and projects an interlinked Obsidian vault — automatically, in the background.
 
-## Install
-
-Default consumer install:
-
-```bash
-uv pip install -e ".[dev,test]"
+```
+raw sources → kg-doc-parser → conversation graph → promote → knowledge graph → Obsidian vault
+                                                                               → wisdom engine
 ```
 
-This keeps the default dependency source GitHub-first for `kogwistar`, `graph-knowledge-doc-parser`, and `kogwistar-obsidian-sink`.
+---
 
-## Opt-In Local Bootstrap
+## What it is
 
-Run the bootstrap only when you want local editable checkouts of the sibling repos:
+| Layer | Role |
+|---|---|
+| **conversation** | Working memory — parsed artifacts, candidate links, maintenance jobs |
+| **knowledge graph** | Stabilized, promoted truth |
+| **wisdom engine** | Reusable patterns derived from execution history |
+| **Obsidian vault** | Human-facing projection (markdown + canvas) |
+
+> It is **not** a chatbot, a note app, or a RAG wrapper.
+
+---
+
+## Installation
+
+### Option A — Local development (recommended)
 
 ```bash
 bash scripts/bootstrap-dev.sh
 ```
 
-What it does:
+The script:
+1. Clones `kogwistar`, `kogwistar-obsidian-sink`, `kg-doc-parser` from GitHub if not already present locally
+2. Installs all three as **editable** from the local checkout
+3. Installs this package last
 
-- clones `./kogwistar`, `./kg-doc-parser`, and `./kogwistar-obsidian-sink` from GitHub if they are missing
-- installs the local checkouts editable into the active environment
+After running, the venv always uses local editable sources — re-running is safe (existing checkouts are kept).
 
-The bootstrap is manual and opt-in. It does not run during normal installs.
+### Option B — GitHub-only (CI / no local edits needed)
 
-Windows users can run the same script from Git Bash or WSL.
+```bash
+pip install git+https://github.com/humblemat810/kogwistar.git
+pip install git+https://github.com/humblemat810/kogwistar-obsidian-sink.git
+pip install git+https://github.com/humblemat810/kg-doc-parser.git
+pip install -e ".[dev]"
+```
+
+> `kogwistar` and `kogwistar-obsidian-sink` are **not on PyPI** — both options install them from source.
+
+> **Windows**: Run the bootstrap from Git Bash or WSL.
+
+---
+
+## Quick demo
+
+```bash
+# 1. Bootstrap (first time only)
+bash scripts/bootstrap-dev.sh
+
+# 2. Ingest a document
+python -c "
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+p = IngestPipeline(workspace_id='demo')
+p.run('my_document.md')
+"
+
+# 3. Run the background workers
+llm-wiki daemon maintenance --workspace demo
+llm-wiki daemon projection  --workspace demo --vault ~/obsidian/wiki
+```
+
+See [QUICKSTART.md](QUICKSTART.md) for the full step-by-step tutorial.
+
+---
+
+## CLI reference
+
+```
+llm-wiki daemon projection  --workspace <id> --vault <path> [--interval <s>]
+llm-wiki daemon maintenance --workspace <id>                [--interval <s>]
+```
+
+Full reference: [doc/cli_reference.md](doc/cli_reference.md)
+
+---
 
 ## Docs
 
-- [Development setup](doc/dev_setup_guide.md)
-- [Environment cheat sheet](doc/environment_cheatsheet.md)
-- [Architecture](doc/architecture.md)
-- [Core workflows](doc/core_workflows.md)
+| Document | Purpose |
+|---|---|
+| [QUICKSTART.md](QUICKSTART.md) | Step-by-step tutorial |
+| [doc/cli_reference.md](doc/cli_reference.md) | CLI cheatsheet |
+| [doc/diagrams.md](doc/diagrams.md) | CLI spider map, pipeline, algorithm & data-flow diagrams |
+| [doc/architecture.md](doc/architecture.md) | System design |
+| [doc/core_workflows.md](doc/core_workflows.md) | Workflow graph designs |
+| [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
+| [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |
+| [doc/glossary.md](doc/glossary.md) | Term definitions |
+| [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
+| [STATUS.md](STATUS.md) | Implementation status |
+
+---
+
+## Development
+
+```bash
+pytest tests/unit/          # fast unit tests (in-memory, no services)
+pytest -m manual            # opt-in tests requiring local services
+```
