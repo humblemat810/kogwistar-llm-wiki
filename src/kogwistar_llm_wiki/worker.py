@@ -6,21 +6,25 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
-from kogwistar.runtime.analytics import summarize_execution_failure_patterns
-from kogwistar.runtime.artifacts import write_versioned_artifact
 from kogwistar.runtime.models import RunSuccess, StepRunResult
 from kogwistar.runtime.resolvers import MappingStepResolver
 from kogwistar.runtime.runtime import StepContext, WorkflowRuntime
+from kogwistar.maintenance.template import run_grouped_maintenance_template
+from kogwistar.wisdom.template import write_execution_wisdom_artifacts
 
 from .models import NamespaceEngines, MaintenanceJobResult
+from .maintenance_policy import (
+    DERIVED_KNOWLEDGE_WORKFLOW_ID,
+    EXECUTION_WISDOM_WORKFLOW_ID,
+    is_execution_wisdom_kind,
+    workflow_id_for_maintenance_kind,
+)
+from .maintenance_designs import materialize_maintenance_designs
 from .namespaces import WorkspaceNamespaces
 from .utils import _temporary_namespace
 
 
 logger = logging.getLogger(__name__)
-
-DERIVED_KNOWLEDGE_WORKFLOW_ID = "maintenance.derived_knowledge.v1"
-EXECUTION_WISDOM_WORKFLOW_ID = "maintenance.execution_wisdom.v1"
 
 
 class BaseWorker(ABC):
@@ -63,6 +67,7 @@ class MaintenanceWorker(BaseWorker):
         self.eager_mode = eager_mode
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
+        self.resolver.register("check_done")(self._step_check_done)
         self.resolver.register("distill_from_history")(self.derive_problem_solving_wisdom_from_history)
         self.resolver.register("derive_problem_solving_wisdom_from_history")(self.derive_problem_solving_wisdom_from_history)
         self.resolver.register("noop")(self._step_noop)
@@ -107,9 +112,9 @@ class MaintenanceWorker(BaseWorker):
             )
         logger.info("Processing maintenance job %s", req_node_id)
         ns = WorkspaceNamespaces(workspace_id)
-        workflow_id = self._workflow_id_for_kind(maintenance_kind)
+        workflow_id = workflow_id_for_maintenance_kind(maintenance_kind)
 
-        if workflow_id == EXECUTION_WISDOM_WORKFLOW_ID:
+        if is_execution_wisdom_kind(maintenance_kind):
             try:
                 emitted = self._emit_execution_wisdom_from_history(workspace_id, self.engines)
                 logger.info(
@@ -145,6 +150,16 @@ class MaintenanceWorker(BaseWorker):
         with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
             self.engines.workflow, ns.workflow_maintenance
         ):
+            if not self.engines.workflow.read.get_nodes(
+                where={
+                    "$and": [
+                        {"entity_type": "workflow_node"},
+                        {"workflow_id": workflow_id},
+                    ]
+                },
+                limit=1,
+            ):
+                materialize_maintenance_designs(self.engines.workflow)
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore",
@@ -192,17 +207,6 @@ class MaintenanceWorker(BaseWorker):
                         else:
                             self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
 
-    def _workflow_id_for_kind(self, maintenance_kind: str) -> str:
-        normalized = str(maintenance_kind or "distill").strip().lower()
-        if normalized in {
-            "execution_wisdom",
-            "history_wisdom",
-            "distill_from_history",
-            "derive_problem_solving_wisdom_from_history",
-        }:
-            return EXECUTION_WISDOM_WORKFLOW_ID
-        return DERIVED_KNOWLEDGE_WORKFLOW_ID
-
     def _decode_payload(self, job: Any) -> dict[str, Any]:
         payload = getattr(job, "payload_json", None)
         if payload is None and isinstance(job, dict):
@@ -247,41 +251,35 @@ class MaintenanceWorker(BaseWorker):
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(engines.kg, ns.kg):
             promoted_nodes = engines.kg.read.get_nodes(
-                where={"artifact_kind": "promoted_knowledge"}
+                where={"artifact_kind": "promoted_knowledge", "workspace_id": workspace_id}
             )
 
         if not promoted_nodes:
             return RunSuccess(state_update=[("u", {"distillation_complete": True})])
 
-        entity_groups: Dict[str, List[Any]] = {}
-        for node in promoted_nodes:
-            label = node.metadata.get("label") or getattr(node, "label", "Unknown Entity")
-            entity_groups.setdefault(label, []).append(node)
-
         from kogwistar.engine_core.models import Grounding, Node, Span
         from kogwistar.id_provider import stable_id
 
         derived_engine = engines.derived_knowledge_engine()
-        for label, nodes in entity_groups.items():
-            raw_mentions = []
-            for node in nodes:
-                if hasattr(node, "mentions") and node.mentions:
-                    raw_mentions.extend(node.mentions)
-
-            merged_mentions = []
-            seen_mentions = set()
-            for mention in raw_mentions:
-                try:
-                    mention_key = mention.model_dump_json()
-                except (AttributeError, Exception):
-                    mention_key = str(mention)
-
-                if mention_key not in seen_mentions:
-                    merged_mentions.append(mention)
-                    seen_mentions.add(mention_key)
-
-            if not merged_mentions:
-                merged_mentions = [Grounding(spans=[Span(
+        template_result = run_grouped_maintenance_template(
+            engines.kg,
+            target_engine=derived_engine,
+            source_namespace=ns.kg,
+            target_namespace=ns.derived_knowledge,
+            source_where={"artifact_kind": "promoted_knowledge", "workspace_id": workspace_id},
+            group_key_for_node=lambda node: str(node.metadata.get("label") or getattr(node, "label", "Unknown Entity")),
+            match_where_for_group=lambda label: {
+                "artifact_kind": "derived_knowledge",
+                "workspace_id": workspace_id,
+                "label": label,
+            },
+            build_node_for_group=lambda label, nodes, existing, created_at_ms: self._build_derived_node_for_group(
+                workspace_id=workspace_id,
+                label=label,
+                nodes=nodes,
+                existing=existing,
+                created_at_ms=created_at_ms,
+                fallback_span_factory=lambda: Grounding(spans=[Span(
                     collection_page_url=f"conversation/{ns.conv_bg}",
                     document_page_url=f"conversation/{ns.conv_bg}",
                     doc_id=f"conv:{ns.conv_bg}",
@@ -294,138 +292,150 @@ class MaintenanceWorker(BaseWorker):
                     context_after="",
                     chunk_id=None,
                     source_cluster_id=None,
-                )])]
-
-            def _build_derived_node(existing: list[Any], created_at_ms: int) -> Node:
-                return Node(
-                    id=str(stable_id("derived_knowledge", workspace_id, label, str(created_at_ms))),
-                    label=label,
-                    type="entity",
-                    summary=f"Derived knowledge synthesis for {label} aggregated from {len(nodes)} source documents.",
-                    mentions=merged_mentions,
-                    metadata={
-                        "workspace_id": workspace_id,
-                        "artifact_kind": "derived_knowledge",
-                        "source_node_ids": [str(node.id) for node in nodes],
-                        "label": label,
-                        "created_at_ms": created_at_ms,
-                        "replaces_ids": [str(node.id) for node in existing],
-                    },
-                )
-
-            write_versioned_artifact(
-                derived_engine,
-                namespace=ns.derived_knowledge,
-                match_where={
-                    "artifact_kind": "derived_knowledge",
-                    "workspace_id": workspace_id,
-                    "label": label,
-                },
-                build_node=_build_derived_node,
-                replace_existing=True,
-            )
+                )]),
+            ),
+        )
+        for result in template_result.grouped_results:
             logger.info(
-                f"Derived knowledge synthesis for entity '{label}' with {len(merged_mentions)} mentions."
+                "Derived knowledge synthesis for entity '%s' with %s source nodes.",
+                result.group_key,
+                result.source_node_count,
             )
 
         return RunSuccess(
             state_update=[("u", {
                 "distillation_complete": True,
                 "derived_knowledge_complete": True,
-                "distilled_entities": list(entity_groups.keys()),
+                "distilled_entities": list(template_result.emitted_group_keys),
             })]
+        )
+
+    def _step_check_done(self, ctx: StepContext) -> StepRunResult:
+        """Resolver step that cleanly finalizes derived-knowledge maintenance."""
+        workspace_id = ctx.state_view.get("workspace_id")
+        _deps_raw = ctx.state_view.get("_deps")
+        engines = _deps_raw.get("engines") if isinstance(_deps_raw, dict) else _deps_raw
+        if not workspace_id or not engines:
+            logger.error("Missing workspace_id or engines in maintenance completion step context")
+            return RunSuccess(state_update=[("u", {"error": "Missing context"})])
+
+        return RunSuccess(
+            state_update=[("u", {
+                "maintenance_complete": True,
+            })]
+        )
+
+    def _build_derived_node_for_group(
+        self,
+        *,
+        workspace_id: str,
+        label: str,
+        nodes: list[Any],
+        existing: list[Any],
+        created_at_ms: int,
+        fallback_span_factory,
+    ):
+        from kogwistar.engine_core.models import Grounding, Node
+        from kogwistar.id_provider import stable_id
+
+        raw_mentions = []
+        for node in nodes:
+            if hasattr(node, "mentions") and node.mentions:
+                raw_mentions.extend(node.mentions)
+
+        merged_mentions = []
+        seen_mentions = set()
+        for mention in raw_mentions:
+            try:
+                mention_key = mention.model_dump_json()
+            except (AttributeError, Exception):
+                mention_key = str(mention)
+
+            if mention_key not in seen_mentions:
+                merged_mentions.append(mention)
+                seen_mentions.add(mention_key)
+
+        if not merged_mentions:
+            merged_mentions = [fallback_span_factory()]
+
+        return Node(
+            id=str(stable_id("derived_knowledge", workspace_id, label, str(created_at_ms))),
+            label=label,
+            type="entity",
+            summary=f"Derived knowledge synthesis for {label} aggregated from {len(nodes)} source documents.",
+            mentions=merged_mentions,
+            metadata={
+                "workspace_id": workspace_id,
+                "artifact_kind": "derived_knowledge",
+                "source_node_ids": [str(node.id) for node in nodes],
+                "label": label,
+                "created_at_ms": created_at_ms,
+                "replaces_ids": [str(node.id) for node in existing],
+            },
         )
 
     def _emit_execution_wisdom_from_history(self, workspace_id: str, engines: NamespaceEngines) -> list[str]:
         """Analyze completed execution history and emit execution-derived wisdom."""
-        min_failure_signals = 2
-
         if not workspace_id or not engines:
             return []
 
         ns = WorkspaceNamespaces(workspace_id)
-
         from kogwistar.engine_core.models import Grounding, Node, Span
         from kogwistar.id_provider import stable_id
 
-        with _temporary_namespace(engines.conversation, ns.conv_bg):
-            step_exec_nodes = engines.conversation.read.get_nodes(
-                where={"entity_type": "workflow_step_exec"}
-            )
-        step_exec_nodes = [
-            node for node in step_exec_nodes
-            if node.metadata.get("status") in {"failure", "error"}
-        ]
-
-        if not step_exec_nodes:
-            logger.debug("derive_problem_solving_wisdom_from_history: no failure records found - skipping")
-            return []
-
-        patterns = summarize_execution_failure_patterns(
-            step_exec_nodes,
-            min_failure_signals=min_failure_signals,
+        result_items = write_execution_wisdom_artifacts(
+            engines.conversation,
+            target_engine=engines.wisdom,
+            source_namespace=ns.conv_bg,
+            target_namespace=ns.wisdom,
+            source_where={"entity_type": "workflow_step_exec"},
+            min_failure_signals=2,
+            match_where_for_pattern=lambda pattern: {
+                "artifact_kind": "execution_wisdom",
+                "workspace_id": workspace_id,
+                "step_op": pattern.step_op,
+            },
+            build_node_for_pattern=lambda pattern, existing, created_at_ms: Node(
+                id=str(stable_id("execution_wisdom", workspace_id, pattern.step_op, str(created_at_ms))),
+                label=f"execution_failure_pattern:{pattern.step_op}",
+                type="entity",
+                summary=(
+                    f"Repeated failure pattern detected for workflow step '{pattern.step_op}' "
+                    f"({len(pattern.failure_nodes)} occurrences across {len(pattern.run_ids)} runs). "
+                    "Investigate step resolver, input contract, or upstream data quality."
+                ),
+                mentions=[Grounding(spans=[Span(
+                    collection_page_url=f"conversation/{ns.conv_bg}",
+                    document_page_url=f"conversation/{ns.conv_bg}",
+                    doc_id=f"conv:{ns.conv_bg}",
+                    insertion_method="execution_history",
+                    page_number=1,
+                    start_char=0,
+                    end_char=1,
+                    excerpt=f"failure_pattern:{pattern.step_op} n={len(pattern.failure_nodes)}",
+                    context_before="",
+                    context_after="",
+                    chunk_id=None,
+                    source_cluster_id=None,
+                )])],
+                metadata={
+                    "workspace_id": workspace_id,
+                    "artifact_kind": "execution_wisdom",
+                    "step_op": pattern.step_op,
+                    "failure_count": len(pattern.failure_nodes),
+                    "evidence_run_ids": list(pattern.run_ids),
+                    "created_at_ms": created_at_ms,
+                    "replaces_ids": [str(node.id) for node in existing],
+                    "label": f"execution_failure_pattern:{pattern.step_op}",
+                },
+            ),
         )
 
-        emitted: list[str] = []
-        for pattern in patterns:
-            step_op = pattern.step_op
-            failure_nodes = list(pattern.failure_nodes)
-            run_ids = list(pattern.run_ids)
-            label = f"execution_failure_pattern:{step_op}"
-
-            span = Span(
-                collection_page_url=f"conversation/{ns.conv_bg}",
-                document_page_url=f"conversation/{ns.conv_bg}",
-                doc_id=f"conv:{ns.conv_bg}",
-                insertion_method="execution_history",
-                page_number=1,
-                start_char=0,
-                end_char=1,
-                excerpt=f"failure_pattern:{step_op} n={len(failure_nodes)}",
-                context_before="",
-                context_after="",
-                chunk_id=None,
-                source_cluster_id=None,
-            )
-
-            def _build_wisdom_node(existing: list[Any], created_at_ms: int) -> Node:
-                return Node(
-                    id=str(stable_id("execution_wisdom", workspace_id, step_op, str(created_at_ms))),
-                    label=label,
-                    type="entity",
-                    summary=(
-                        f"Repeated failure pattern detected for workflow step '{step_op}' "
-                        f"({len(failure_nodes)} occurrences across {len(run_ids)} runs). "
-                        "Investigate step resolver, input contract, or upstream data quality."
-                    ),
-                    mentions=[Grounding(spans=[span])],
-                    metadata={
-                        "workspace_id": workspace_id,
-                        "artifact_kind": "execution_wisdom",
-                        "step_op": step_op,
-                        "failure_count": len(failure_nodes),
-                        "evidence_run_ids": run_ids,
-                        "created_at_ms": created_at_ms,
-                        "replaces_ids": [str(node.id) for node in existing],
-                        "label": label,
-                    },
-                )
-
-            write_versioned_artifact(
-                engines.wisdom,
-                namespace=ns.wisdom,
-                match_where={
-                    "artifact_kind": "execution_wisdom",
-                    "workspace_id": workspace_id,
-                    "step_op": step_op,
-                },
-                build_node=_build_wisdom_node,
-                replace_existing=True,
-            )
-            emitted.append(step_op)
+        emitted = [result.step_op for result in result_items]
+        for result in result_items:
             logger.info(
-                f"Emitted execution_wisdom for step_op='{step_op}' "
-                f"(failures={len(failure_nodes)}, runs={len(run_ids)})"
+                f"Emitted execution_wisdom for step_op='{result.step_op}' "
+                f"(failures={result.failure_count}, runs={len(result.run_ids)})"
             )
 
         return emitted

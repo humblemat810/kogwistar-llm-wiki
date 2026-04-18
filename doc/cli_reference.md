@@ -21,6 +21,11 @@ llm-wiki [--data-dir <path>] [--split-derived-knowledge] <command>
 | `--data-dir` | `.` | Path to persistent data directory (SQLite meta-store, Chroma data) |
 | `--split-derived-knowledge` | off | Host `derived_knowledge` on a separate engine instead of sharing the KG engine |
 
+Hosting tradeoff for `derived_knowledge`:
+- Default same-engine mode keeps raw KG and `derived_knowledge` on the same backend, but in different namespaces (`ws:{id}:kg` vs `ws:{id}:kg:derived`). This is simpler operationally and keeps one query/search substrate.
+- Split-engine mode isolates `derived_knowledge` onto its own backend instance. That improves workload isolation and makes it easier to tune/index separately, but cross-surface search now has to query two engines explicitly instead of one engine with two namespaces.
+- The semantic contract is the same in both layouts: `derived_knowledge` never lives in the raw KG namespace.
+
 ---
 
 ## `llm-wiki daemon`

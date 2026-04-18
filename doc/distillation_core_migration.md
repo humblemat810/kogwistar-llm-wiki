@@ -102,6 +102,22 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 
 ---
 
+### 4a. `derived_knowledge` hosting tradeoff
+
+**Currently (app layer):**
+- `derived_knowledge` can either share the KG engine with a separate namespace (`ws:{id}:kg:derived`) or live on its own engine selected by `--split-derived-knowledge`
+- The authoring policy is identical in both layouts; only the query/search topology changes
+
+**What is already pinned:**
+- Same-engine mode keeps one backend/query surface, which is simpler for search paths that want to read raw KG and `derived_knowledge` together
+- Split-engine mode isolates storage and indexing cost, but any backend-specific search or scan that wants both surfaces must query two engines deliberately
+
+**Why this matters before a core move:**
+- If core later ships a reusable distillation template, it should not silently assume one backend topology
+- The move point is the artifact authorship helper, not the hosting default; the default must stay app-configurable until the search tradeoff is settled
+
+---
+
 ## What should stay in the application layer
 
 | Concern | Reason to keep in app |

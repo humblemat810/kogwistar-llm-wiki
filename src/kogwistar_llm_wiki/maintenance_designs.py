@@ -71,6 +71,7 @@ def build_derived_knowledge_design(
     workflow_id: str = "maintenance.derived_knowledge.v1",
 ) -> WorkflowDesignArtifact:
     node_distill_id = str(stable_id("wf_node", workflow_id, "distill"))
+    node_check_id = str(stable_id("wf_node", workflow_id, "check_done"))
     node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
 
     nodes = [
@@ -88,6 +89,19 @@ def build_derived_knowledge_design(
                 "default_context_window": 4000,
             },
         ),
+        WorkflowNode(
+            id=node_check_id,
+            label="Check Derived Knowledge Complete",
+            type="entity",
+            summary="Confirm derived-knowledge synthesis is ready to finalize.",
+            mentions=_dummy_grounding(),
+            metadata={
+                "entity_type": "workflow_node",
+                "workflow_id": workflow_id,
+                "wf_op": "check_done",
+                "default_context_window": 4000,
+            },
+        ),
         _terminal_node(
             workflow_id,
             node_id=node_terminal_id,
@@ -101,6 +115,14 @@ def build_derived_knowledge_design(
             workflow_id,
             edge_key="distill_to_done",
             source_id=node_distill_id,
+            target_id=node_check_id,
+            label="check",
+            summary="Derived-knowledge synthesis ready for completion check.",
+        ),
+        _workflow_edge(
+            workflow_id,
+            edge_key="check_to_done",
+            source_id=node_check_id,
             target_id=node_terminal_id,
             label="finished",
             summary="Derived-knowledge synthesis complete.",

@@ -86,6 +86,35 @@ def test_knowledge_derivation_multi_document_grounding(pipeline, ingest_request)
     assert {str(job.job_id) for job in done_jobs} >= {str(art1.maintenance_job_id), str(art2.maintenance_job_id)}
 
 
+def test_same_engine_derived_knowledge_uses_namespace_isolation(pipeline, ingest_request):
+    workspace_id = "same_engine_workspace"
+    ns = WorkspaceNamespaces(workspace_id)
+    engines = pipeline.engines
+    materialize_maintenance_designs(engines.workflow)
+
+    artifacts = _run_sync_ingest(
+        pipeline,
+        _sync_request(
+            ingest_request,
+            workspace_id=workspace_id,
+            title="Same Engine Entity",
+            source_uri="file://same_engine.txt",
+        ),
+    )
+    assert artifacts.promoted_entity_id is not None
+
+    MaintenanceWorker(engines).process_pending_jobs(workspace_id)
+
+    with _temporary_namespace(engines.kg, ns.derived_knowledge):
+        derived_nodes = engines.kg.read.get_nodes(
+            where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id}
+        )
+
+    assert engines.derived_knowledge_engine() is engines.kg
+    assert len(derived_nodes) == 1
+    assert derived_nodes[0].label == "Same Engine Entity"
+
+
 def test_knowledge_derivation_no_knowledge_noop(pipeline, ingest_request):
     workspace_id = "empty_workspace"
     ns = WorkspaceNamespaces(workspace_id)
