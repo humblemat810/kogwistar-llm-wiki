@@ -107,6 +107,28 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
   - companion note added in `doc/wisdom_graph_reference_invariants.md`
   - use that as the implementation guardrail until a fuller ARD lands
 
+### Invariants work to do
+
+The following invariants are now visible, but still need either a stronger ARD
+entry, a test pin, or a small implementation guard:
+
+- [x] execution wisdom is a post-run distillation artifact, not a normal execution step
+  - pinned by a core test that writes from a source graph into the wisdom graph
+- [x] wisdom may guide dynamic workflow selection
+  - pinned by maintenance-policy routing aliases into the execution-wisdom workflow
+- foreground/background worker semantics need a deeper execution-lane decision
+  - current state: namespace convention only
+  - likely future shape: core lane abstraction for worker role, visibility, priority, and cancellation
+  - do not turn foreground/background into a new graph kind
+- [x] wisdom may meta-learn from maintenance outcomes
+  - pinned by execution-wisdom derivation from failed maintenance history
+- [x] derived knowledge is maintained synthesis, not merely a log
+  - pinned by derived-knowledge metadata assertions in the knowledge derivation tests
+- [x] conversation-to-knowledge links remain pointer-first by default
+  - pinned by conversation projection tests that use deterministic pointer nodes
+- conversation-to-wisdom links remain pointer-first by default
+  - only widen this if a future ARD explicitly approves richer links
+
 ### Current checklist
 
 #### Semantic cleanup
@@ -197,6 +219,19 @@ These items are not required for correctness. They are follow-on improvements th
   - decide whether wisdom may only derive from conversation/workflow artifacts or also be directly referenced back from conversation
   - decide whether conversation may hold pointers to wisdom artifacts or whether that direction should remain one-way
   - keep helpers policy-light until that invariant is explicitly written down
+- worker-lane abstraction for a future AI OS shape
+  - keep `conversation`, `workflow`, `knowledge`, and `wisdom` as graph semantics
+  - introduce a separate execution-lane abstraction instead of a new graph kind
+  - likely lane fields:
+    - lane role (`interactive`, `background`, `maintenance`, `projection`, future system lanes)
+    - visibility (`user_visible`, `operator_visible`, `internal_only`)
+    - scheduling / QoS (`priority`, latency budget, retry policy, concurrency class)
+    - control semantics (cancelable, preemptible, resumable)
+    - graph access profile (which graph kinds the lane may read/write)
+  - the first decision is whether lane definitions stay as app policy or become a core registry/type
+  - the safest current direction is:
+    - keep lane names as namespace conventions in app code
+    - extract a core lane abstraction only when more than one app needs multi-lane orchestration
 
 These are intentionally lower priority than bug fixes or correctness issues.
 

@@ -57,6 +57,10 @@ def test_knowledge_derivation_multi_document_grounding(pipeline, ingest_request)
     derived = derived_nodes[0]
     assert "Shared Entity" in derived.label
     assert len(derived.mentions) >= 1
+    assert derived.metadata.get("artifact_kind") == "derived_knowledge"
+    assert derived.metadata.get("created_at_ms")
+    assert derived.metadata.get("source_node_ids")
+    assert derived.metadata.get("replaces_ids") is not None
 
     with _temporary_namespace(engines.conversation, ns.conv_bg):
         runs = engines.conversation.read.get_nodes(
@@ -112,7 +116,12 @@ def test_same_engine_derived_knowledge_uses_namespace_isolation(pipeline, ingest
 
     assert engines.derived_knowledge_engine() is engines.kg
     assert len(derived_nodes) == 1
-    assert derived_nodes[0].label == "Same Engine Entity"
+    derived = derived_nodes[0]
+    assert derived.label == "Same Engine Entity"
+    assert derived.metadata.get("artifact_kind") == "derived_knowledge"
+    assert derived.metadata.get("created_at_ms")
+    assert derived.metadata.get("source_node_ids")
+    assert derived.metadata.get("replaces_ids") is not None
 
 
 def test_knowledge_derivation_no_knowledge_noop(pipeline, ingest_request):
