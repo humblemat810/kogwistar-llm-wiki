@@ -11,6 +11,7 @@ from .namespaces import WorkspaceNamespaces
 
 from .utils import _temporary_namespace
 from kogwistar.runtime.runtime import WorkflowRuntime, StepContext
+from kogwistar.runtime.analytics import summarize_execution_failure_patterns
 from kogwistar.runtime.resolvers import MappingStepResolver
 from kogwistar.runtime.models import RunSuccess, StepRunResult
 
@@ -368,21 +369,18 @@ class MaintenanceWorker(BaseWorker):
             logger.debug("derive_problem_solving_wisdom_from_history: no failure records found — skipping")
             return []
 
-        # 2. Group failures by step_op.
-        from collections import defaultdict
-        failures_by_op: dict[str, list[Any]] = defaultdict(list)
-        for node in step_exec_nodes:
-            step_op = node.metadata.get("step_op") or node.metadata.get("op") or node.metadata.get("wf_op") or "unknown"
-            failures_by_op[step_op].append(node)
+        patterns = summarize_execution_failure_patterns(
+            step_exec_nodes,
+            min_failure_signals=_MIN_FAILURE_SIGNALS,
+        )
 
-        # 3. Emit execution_wisdom nodes for ops with repeated failure evidence.
+        # 2. Emit execution_wisdom nodes for ops with repeated failure evidence.
         emitted: list[str] = []
         with _temporary_namespace(engines.wisdom, ns.wisdom):
-            for step_op, failure_nodes in failures_by_op.items():
-                if len(failure_nodes) < _MIN_FAILURE_SIGNALS:
-                    continue
-
-                run_ids = sorted({n.metadata.get("run_id", "") for n in failure_nodes} - {""})
+            for pattern in patterns:
+                step_op = pattern.step_op
+                failure_nodes = list(pattern.failure_nodes)
+                run_ids = list(pattern.run_ids)
                 label = f"execution_failure_pattern:{step_op}"
 
                 # Tombstone any prior execution_wisdom node for this pattern.

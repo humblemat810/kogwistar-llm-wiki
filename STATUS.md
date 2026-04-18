@@ -50,7 +50,7 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - engine-scoped namespace context handling
   - now implemented as a core-scoped namespace primitive and reused by `llm-wiki`
 - execution-history analytics over workflow step traces
-  - not yet a first-class core subsystem; currently a worker-side helper plus docs proposal
+  - now has a small core grouping helper; wisdom authorship still lives in the app
 - append-only helpers for versioned derived maintenance artifacts
   - partially present as patterns in core and app code; not yet unified
 - generic workflow analytics shared by derived-knowledge and wisdom paths
@@ -64,6 +64,7 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - claim / retry / completion lifecycle
 - backend parity for in-memory, SQLite, and Postgres queue implementations
 - engine-scoped namespace context handling
+- repeated workflow failure grouping by `step_op`
 
 #### Good core generalizations
 
@@ -88,7 +89,7 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - whether `derive_problem_solving_wisdom_from_history` becomes:
   - part of the default workflow,
   - a separate workflow, or
-  - a core analytics consumer later
+  - a thin app-side consumer over core analytics
 - whether core should ship only generic maintenance primitives or also a reusable distillation template
 
 ### Current checklist
@@ -146,16 +147,17 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 
 ### Recommended next slice
 
-Extract a small core execution-history analytics primitive next, then wire `llm-wiki` to consume it for problem-solving wisdom.
+Extract the append-only versioned artifact helper next, then keep `llm-wiki` as the authoring layer on top of it.
 
 Why this next:
-- namespace scoping is now a core primitive
 - queue semantics already live in core
-- execution-history analysis is the next clear reusable substrate-level behavior
+- namespace scoping now lives in core
+- repeated failure grouping now lives in core
+- the next clear reusable substrate piece is the tombstone-before-replace/versioned-write pattern
 
 If you want the shortest possible implementation slice after that, it should be:
-- add a core helper that groups repeated workflow failures by `step_op`
-- keep the authoring policy for `execution_wisdom` in `llm-wiki` until the seam is stable
+- add a core helper for versioned append-only artifact writes
+- keep `derived_knowledge` and `execution_wisdom` policy in `llm-wiki` until the seam is stable
 
 ## Completed
 
