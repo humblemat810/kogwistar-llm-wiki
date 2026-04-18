@@ -226,7 +226,8 @@ class MaintenanceWorker(BaseWorker):
         from kogwistar.engine_core.models import Node
         from kogwistar.id_provider import stable_id
         
-        with _temporary_namespace(engines.kg, ns.derived_knowledge):
+        derived_engine = engines.derived_knowledge_engine()
+        with _temporary_namespace(derived_engine, ns.derived_knowledge):
             for label, nodes in entity_groups.items():
                 # Merge all mentions from all occurrences of this entity
                 raw_mentions = []
@@ -274,12 +275,12 @@ class MaintenanceWorker(BaseWorker):
                 # then write a fresh version. This preserves the history chain
                 # (tombstoned node is still discoverable) and avoids CRUD-style overwrite.
                 import time as _time
-                existing = engines.kg.read.get_nodes(
+                existing = derived_engine.read.get_nodes(
                     where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id, "label": label}
                 )
                 for old_node in existing:
                     try:
-                        engines.kg.lifecycle.tombstone_node(str(old_node.id))
+                        derived_engine.lifecycle.tombstone_node(str(old_node.id))
                     except Exception as e:
                         logger.warning(f"Could not tombstone old derived_knowledge node {old_node.id}: {e}")
 
@@ -302,7 +303,7 @@ class MaintenanceWorker(BaseWorker):
                 )
 
                 # Keep derived knowledge in the knowledge engine, but under its own namespace.
-                engines.kg.write.add_node(derived_node)
+                derived_engine.write.add_node(derived_node)
                 logger.info(
                     f"Derived knowledge synthesis for entity '{label}' with {len(merged_mentions)} mentions."
                 )

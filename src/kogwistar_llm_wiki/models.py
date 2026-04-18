@@ -68,6 +68,10 @@ class NamespaceEngines:
     workflow: GraphKnowledgeEngine      # For wf:maintenance
     kg: GraphKnowledgeEngine            # For kg
     wisdom: GraphKnowledgeEngine        # For wisdom
+    derived_knowledge: GraphKnowledgeEngine | None = None
+
+    def derived_knowledge_engine(self) -> GraphKnowledgeEngine:
+        return self.derived_knowledge or self.kg
 
 
 @dataclass(slots=True)

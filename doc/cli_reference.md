@@ -67,10 +67,10 @@ llm-wiki daemon maintenance \
 1. Scan `conv:bg` for `maintenance_job_request` nodes
 2. Skip any request that already has a `workflow_completed` trace
 3. For each pending request, run `maintenance.distillation.v1` workflow:
-   - `distill` — aggregate promoted knowledge → versioned wisdom nodes
-   - `distill_from_history` *(optional step)* — scan workflow failure patterns → execution_wisdom nodes
-   - `check_done` → loop or finish
-4. Sleep `--interval` seconds before next poll
+   - `distill` aggregates promoted knowledge into versioned `derived_knowledge` nodes
+   - `check_done` finishes or requests another synthesis pass
+4. After the workflow completes, scan execution history for repeated failure patterns and emit `execution_wisdom` nodes
+5. Sleep `--interval` seconds before next poll
 
 Current semantics:
 - `distill` produces versioned `derived_knowledge` nodes from promoted KG knowledge in `ws:{id}:kg:derived`
@@ -159,3 +159,4 @@ pytest -m integration
 # Opt-in manual tests
 pytest -m manual
 ```
+

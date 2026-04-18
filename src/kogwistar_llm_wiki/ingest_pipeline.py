@@ -48,30 +48,42 @@ class _TinyEmbeddingFunction:
 ParserFn = Callable[..., PageIndexParseResult]
 
 
-def build_in_memory_namespace_engines(base_dir: str | Path | None = None) -> NamespaceEngines:
+def build_in_memory_namespace_engines(
+    base_dir: str | Path | None = None,
+    *,
+    split_derived_knowledge: bool = False,
+) -> NamespaceEngines:
     root = Path(base_dir) if base_dir is not None else Path(tempfile.mkdtemp(prefix="kogwistar-llm-wiki-"))
     embedding = _TinyEmbeddingFunction()
     
     # Shared conversation engine (fg/bg lanes)
     conversation = _build_engine(root / "conversation", kg_graph_type="conversation", embedding_function=embedding)
     
+    derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embedding) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=conversation,
         workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embedding),
         kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embedding),
         wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embedding),
+        derived_knowledge=derived_engine,
     )
 
 
-def build_persistent_namespace_engines(base_dir: str | Path) -> NamespaceEngines:
+def build_persistent_namespace_engines(
+    base_dir: str | Path,
+    *,
+    split_derived_knowledge: bool = False,
+) -> NamespaceEngines:
     root = Path(base_dir)
     root.mkdir(parents=True, exist_ok=True)
     embedding = _TinyEmbeddingFunction()
+    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embedding) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_persistent_engine(root / "conversation", kg_graph_type="conversation", embedding_function=embedding),
         workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embedding),
         kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embedding),
         wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embedding),
+        derived_knowledge=derived_engine,
     )
 
 
@@ -81,10 +93,19 @@ def build_postgres_namespace_engines(
     dsn: str,
     embedding_dim: int = 2,
     schema: str = "public",
+    split_derived_knowledge: bool = False,
 ) -> NamespaceEngines:
     root = Path(base_dir)
     root.mkdir(parents=True, exist_ok=True)
     embedding = _TinyEmbeddingFunction()
+    derived_engine = _build_postgres_engine(
+        root / "derived_knowledge",
+        kg_graph_type="derived_knowledge",
+        embedding_function=embedding,
+        dsn=dsn,
+        embedding_dim=embedding_dim,
+        schema=schema,
+    ) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_postgres_engine(
             root / "conversation",
@@ -118,6 +139,7 @@ def build_postgres_namespace_engines(
             embedding_dim=embedding_dim,
             schema=schema,
         ),
+        derived_knowledge=derived_engine,
     )
 
 

@@ -24,8 +24,8 @@ Refactor the current maintenance/distillation stack so that:
 - [x] The live label-merge path is no longer presented as core-style wisdom
 - [x] Execution-history wisdom is wired into the active maintenance path
 - [x] Derived knowledge is isolated from raw KG by namespace
-- [ ] Derived knowledge can be hosted on a separate engine from raw KG
-- [ ] Engine-split mode for derived knowledge is covered by tests
+- [x] Derived knowledge can be hosted on a separate engine from raw KG
+- [x] Engine-split mode for derived knowledge is covered by tests
 - [ ] Generic maintenance capability is factored cleanly enough to move into core
 
 ### Phase A: Semantic Cleanup
@@ -54,7 +54,7 @@ Refactor the current maintenance/distillation stack so that:
   - [ ] artifact semantics for synthesis vs wisdom
 - [ ] Decide the hosting shape for `derived_knowledge`
   - [x] minimum isolation: separate namespace from raw KG
-  - [ ] optional split: dedicated engine separate from raw KG engine
+  - [x] optional split: dedicated engine separate from raw KG engine
   - [ ] document backend/search tradeoffs for same-engine vs separate-engine hosting
 
 ### Phase C: Workflow Refactor Plan
@@ -73,8 +73,8 @@ Refactor the current maintenance/distillation stack so that:
   - [ ] a separate workflow
   - [ ] or a core analytics consumer later
 - [ ] Decouple engine assumptions from maintenance steps
-  - [ ] `derived_knowledge` writer should not be hard-wired to `engines.kg`
-  - [ ] `NamespaceEngines` should be able to represent same-engine and split-engine derived-knowledge layouts
+  - [x] `derived_knowledge` writer should not be hard-wired to `engines.kg`
+  - [x] `NamespaceEngines` can represent same-engine and split-engine derived-knowledge layouts
 
 ### Phase D: Test Migration Plan
 
@@ -86,8 +86,8 @@ Refactor the current maintenance/distillation stack so that:
   - [ ] execution-history wisdom remains execution-derived
   - [ ] cross-repo queue/runtime invariants still hold
 - [ ] Add topology tests for derived-knowledge hosting
-  - [ ] same-engine / separate-namespace mode
-  - [ ] separate-engine mode
+  - [x] same-engine / separate-namespace mode
+  - [x] separate-engine mode
   - [ ] backend-sensitive search behavior documented or pinned where practical
 
 ### Phase E: Documentation Plan
@@ -107,7 +107,6 @@ Refactor the current maintenance/distillation stack so that:
 ### Non-Goals For This Pass
 
 - [x] No code move into `kogwistar` yet
-- [x] No engine split for `derived_knowledge` yet
 - [x] No artifact rename in persisted data beyond the `derived_knowledge` semantic correction
 - [x] No projection behavior rewrite yet
 
@@ -167,7 +166,7 @@ Refactor the current maintenance/distillation stack so that:
   - [x] execution-history failures now produce `execution_wisdom`
   - [x] maintenance runtime orchestration still records graph-native traces
   - [x] namespace contract now distinguishes raw KG (`ws:{id}:kg`) from derived knowledge (`ws:{id}:kg:derived`)
-  - [ ] split-engine hosting for derived knowledge remains future work
+  - [x] split-engine hosting for derived knowledge is supported and tested
 
 ### Remaining polish (non-blocking)
 

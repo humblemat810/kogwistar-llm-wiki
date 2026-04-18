@@ -31,4 +31,5 @@ def test_namespace_engines_share_one_conversation_engine(namespace_engines):
     assert namespace_engines.workflow is not namespace_engines.conversation
     assert namespace_engines.kg is not namespace_engines.conversation
     assert namespace_engines.wisdom is not namespace_engines.conversation
+    assert namespace_engines.derived_knowledge_engine() is namespace_engines.kg
     assert not hasattr(namespace_engines, "review")

@@ -3,6 +3,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from tests.conftest import _build_engine
+
+from kogwistar_llm_wiki import IngestPipeline, NamespaceEngines
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.worker import MaintenanceWorker
@@ -262,3 +265,42 @@ def test_knowledge_derivation_eager_mode_manual_trigger(pipeline, ingest_request
             }
         )
         assert len(steps) == 1
+
+
+def test_knowledge_derivation_can_use_separate_engine(namespace_engines, ingest_request, tmp_path):
+    workspace_id = "split_engine_workspace"
+    ns = WorkspaceNamespaces(workspace_id)
+    split_derived_engine = _build_engine(tmp_path, kind="derived_knowledge")
+    split_engines = NamespaceEngines(
+        conversation=namespace_engines.conversation,
+        workflow=namespace_engines.workflow,
+        kg=namespace_engines.kg,
+        wisdom=namespace_engines.wisdom,
+        derived_knowledge=split_derived_engine,
+    )
+    pipeline = IngestPipeline(split_engines)
+    materialize_maintenance_designs(split_engines.workflow)
+
+    request = _sync_request(
+        ingest_request,
+        workspace_id=workspace_id,
+        title="Split Engine Entity",
+        source_uri="file://split_engine.txt",
+    )
+    artifacts = _run_sync_ingest(pipeline, request)
+    assert artifacts.promoted_entity_id is not None
+
+    MaintenanceWorker(split_engines).process_pending_jobs(workspace_id)
+
+    with _temporary_namespace(split_engines.kg, ns.kg):
+        raw_kg_nodes = split_engines.kg.read.get_nodes(
+            where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id}
+        )
+    with _temporary_namespace(split_engines.derived_knowledge_engine(), ns.derived_knowledge):
+        derived_nodes = split_engines.derived_knowledge_engine().read.get_nodes(
+            where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id}
+        )
+
+    assert len(raw_kg_nodes) == 0
+    assert len(derived_nodes) == 1
+    assert derived_nodes[0].label == "Split Engine Entity"
