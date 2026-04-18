@@ -11,6 +11,7 @@
 - core maintenance plumbing exists and is working
 - core queue claim / retry / completion semantics already exist in `kogwistar`
 - core namespace-scoping primitive now exists and `llm-wiki` delegates to it
+- core append-only replacement helper now exists and `llm-wiki` reuses it
 - namespace isolation and append-only lifecycle invariants are in place
 - the maintenance path now distinguishes:
   - `derived_knowledge` for cross-document synthesis
@@ -39,7 +40,7 @@
   - engine-native namespace scoping primitive
   - maintenance queue / claim / retry protocol
   - workflow analytics over execution history
-  - append-only versioned artifact helpers for generic maintenance outputs
+  - append-only replacement helpers for generic maintenance outputs
 
 ### Core extraction candidates
 
@@ -52,7 +53,7 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - execution-history analytics over workflow step traces
   - now has a small core grouping helper; wisdom authorship still lives in the app
 - append-only helpers for versioned derived maintenance artifacts
-  - partially present as patterns in core and app code; not yet unified
+  - now implemented in core and reused by `llm-wiki`
 - generic workflow analytics shared by derived-knowledge and wisdom paths
   - proposal only; not yet a core subsystem
 
@@ -65,12 +66,13 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - backend parity for in-memory, SQLite, and Postgres queue implementations
 - engine-scoped namespace context handling
 - repeated workflow failure grouping by `step_op`
+- redirect-based append-only replacement for derived runtime artifacts
 
 #### Good core generalizations
 
 - engine-scoped namespace context
 - execution-history analytics over workflow traces
-- append-only versioned artifact helpers
+- append-only replacement helpers with redirect semantics
 - generic workflow analytics for repeated failures, retries, and latency outliers
 
 #### App policy only
@@ -147,17 +149,14 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 
 ### Recommended next slice
 
-Extract the append-only versioned artifact helper next, then keep `llm-wiki` as the authoring layer on top of it.
+Document and pin the behavioral tradeoff for redirect-based replacement versus terminal tombstone, then keep `llm-wiki` as the authoring layer on top of it.
 
 Why this next:
 - queue semantics already live in core
 - namespace scoping now lives in core
 - repeated failure grouping now lives in core
-- the next clear reusable substrate piece is the tombstone-before-replace/versioned-write pattern
-
-If you want the shortest possible implementation slice after that, it should be:
-- add a core helper for versioned append-only artifact writes
-- keep `derived_knowledge` and `execution_wisdom` policy in `llm-wiki` until the seam is stable
+- append-only replacement now lives in core
+- the next uncertainty is semantic clarity, not mechanism
 
 ## Completed
 
@@ -173,7 +172,7 @@ If you want the shortest possible implementation slice after that, it should be:
 - [x] Event-driven distillation pipeline (append-only invariants)
   - [x] `MaintenanceWorker.process_pending_jobs` uses `workflow_completed` event nodes (not CRUD status)
   - [x] `_step_distill` correctly accesses `NamespaceEngines` from `_deps`
-  - [x] Derived-knowledge node creation is append-only: tombstone existing + write versioned new node
+  - [x] Derived-knowledge node creation is append-only: write fresh node + redirect prior ids to it
   - [x] Fallback `Span` provenance matches kogwistar `_make_trace_span` factory
 - [x] Projection worker hardened
   - [x] `_handle_projection_request` emits `projection_status_event` nodes (append-only; no CRUD mutation)
@@ -207,7 +206,8 @@ If you want the shortest possible implementation slice after that, it should be:
 ### Wisdom distillation
 
 - [x] `_step_distill` now aggregates `promoted_knowledge` nodes → deduplicates mentions → writes versioned `derived_knowledge` nodes into the knowledge engine under a separate `ws:{id}:kg:derived` namespace
-- [x] Append-only: tombstone existing derived-knowledge node for the label, then write a fresh versioned node with `replaces_ids` backlink
+- [x] Append-only: prior derived-knowledge ids are redirected to the fresh replacement node, with `replaces_ids` backlink preserved
+- [x] Replacement artifacts now stamp `created_at_ms` instead of an ambiguous `version_ts`
 - [x] Execution-history analysis is active: after each maintenance workflow run, failure traces are scanned and `execution_wisdom` nodes are emitted for repeated failure patterns
 - [x] Runtime workflow simplified back to a truthful synthesis/check DAG; history wisdom is emitted post-run rather than by self-reading the trace lane mid-step
 - [x] Tested via focused semantic-split coverage:
@@ -216,6 +216,7 @@ If you want the shortest possible implementation slice after that, it should be:
   - [x] maintenance runtime orchestration still records graph-native traces
   - [x] namespace contract now distinguishes raw KG (`ws:{id}:kg`) from derived knowledge (`ws:{id}:kg:derived`)
   - [x] split-engine hosting for derived knowledge is supported and tested
+  - [x] runtime artifact replacement now redirects old ids to the new active version and exposes `created_at_ms`
 
 ### Remaining polish (non-blocking)
 

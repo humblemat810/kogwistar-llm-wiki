@@ -6,14 +6,15 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
+from kogwistar.runtime.analytics import summarize_execution_failure_patterns
+from kogwistar.runtime.artifacts import write_versioned_artifact
+from kogwistar.runtime.models import RunSuccess, StepRunResult
+from kogwistar.runtime.resolvers import MappingStepResolver
+from kogwistar.runtime.runtime import StepContext, WorkflowRuntime
+
 from .models import NamespaceEngines, MaintenanceJobResult
 from .namespaces import WorkspaceNamespaces
-
 from .utils import _temporary_namespace
-from kogwistar.runtime.runtime import WorkflowRuntime, StepContext
-from kogwistar.runtime.analytics import summarize_execution_failure_patterns
-from kogwistar.runtime.resolvers import MappingStepResolver
-from kogwistar.runtime.models import RunSuccess, StepRunResult
 
 
 logger = logging.getLogger(__name__)
@@ -63,14 +64,16 @@ class MaintenanceWorker(BaseWorker):
         self.resolver.register("derive_problem_solving_wisdom_from_history")(self.derive_problem_solving_wisdom_from_history)
         self.resolver.register("check_done")(self._step_check_done)
         self.resolver.register("noop")(self._step_noop)
+
         def pred_continue(ctx):
             return True
+
         self.runtime = WorkflowRuntime(
             workflow_engine=self.engines.workflow,
             conversation_engine=self.engines.conversation,
             step_resolver=self.resolver,
             predicate_registry={
-                "continue": pred_continue, # Default to always allowing the loop hint
+                "continue": pred_continue,
             },
         )
 
@@ -109,8 +112,9 @@ class MaintenanceWorker(BaseWorker):
         ns = WorkspaceNamespaces(workspace_id)
 
         import warnings
-        with _temporary_namespace(self.engines.conversation, ns.conv_bg), \
-             _temporary_namespace(self.engines.workflow, ns.workflow_maintenance):
+        with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
+            self.engines.workflow, ns.workflow_maintenance
+        ):
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore",
@@ -137,8 +141,14 @@ class MaintenanceWorker(BaseWorker):
                 except Exception as e:
                     logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
                     if job_id:
-                        retry_count = int(getattr(job, "retry_count", None) or (job.get("retry_count") if isinstance(job, dict) else 0))
-                        max_retries = int(getattr(job, "max_retries", None) or (job.get("max_retries") if isinstance(job, dict) else 10))
+                        retry_count = int(
+                            getattr(job, "retry_count", None)
+                            or (job.get("retry_count") if isinstance(job, dict) else 0)
+                        )
+                        max_retries = int(
+                            getattr(job, "max_retries", None)
+                            or (job.get("max_retries") if isinstance(job, dict) else 10)
+                        )
                         if retry_count + 1 < max_retries:
                             self.engines.conversation.meta_sqlite.bump_retry_and_requeue(
                                 job_id,
@@ -178,118 +188,72 @@ class MaintenanceWorker(BaseWorker):
         """
         Resolver step for distillation: aggregates promoted knowledge into
         derived-knowledge artifacts.
-        
-        The Distillation Algorithm:
-        --------------------------
-        1. Context Acquisition: Resolves the workspace engines and namespaces from the step context.
-        2. Knowledge Discovery: Scans the KG namespace for all nodes marked as 'promoted_knowledge'.
-        3. Canonical Grouping:
-           - Iterates over discovered nodes and groups them by their canonical label (e.g., "Acme Corp").
-           - Normalizes labels to ensure entities from different documents are merged correctly.
-        4. Mentions Aggregation:
-           - For each grouped entity, collects all `mentions` (Grounding + Spans) from every source node.
-           - Ensures that the resulting derived artifact retains the full lineage of every document that mentioned it.
-        5. Derived-Knowledge Materialization:
-           - Constructs a `derived_knowledge` node with a stable ID.
-           - Updates or creates the node in the derived-knowledge namespace.
-           - Injects metadata linking back to the `source_node_ids` for traceability.
         """
         workspace_id = ctx.state_view.get("workspace_id")
-        # _deps is passed directly as a NamespaceEngines object in _handle_request.
-        # Support both: dict{"engines": ...} (resolver-docs pattern) and direct NamespaceEngines.
         _deps_raw = ctx.state_view.get("_deps")
         if isinstance(_deps_raw, dict):
             engines = _deps_raw.get("engines")
         else:
-            engines = _deps_raw  # NamespaceEngines passed directly
+            engines = _deps_raw
         if not workspace_id or not engines:
             logger.error("Missing workspace_id or engines in distillation step context")
             return RunSuccess(state_update=[("u", {"error": "Missing context"})])
 
         ns = WorkspaceNamespaces(workspace_id)
-        
-        # 1. Fetch all promoted knowledge for this workspace
         with _temporary_namespace(engines.kg, ns.kg):
             promoted_nodes = engines.kg.read.get_nodes(
                 where={"artifact_kind": "promoted_knowledge"}
             )
-        
+
         if not promoted_nodes:
             return RunSuccess(state_update=[("u", {"distillation_complete": True})])
 
-        # 2. Group by label (Entity Name)
         entity_groups: Dict[str, List[Any]] = {}
         for node in promoted_nodes:
-            # Prefer label in metadata (canonical entity name), fallback to node attribute
             label = node.metadata.get("label") or getattr(node, "label", "Unknown Entity")
             entity_groups.setdefault(label, []).append(node)
 
-        # 3. Create derived-knowledge nodes with merged grounding
-        from kogwistar.engine_core.models import Node
+        from kogwistar.engine_core.models import Grounding, Node, Span
         from kogwistar.id_provider import stable_id
-        
+
         derived_engine = engines.derived_knowledge_engine()
-        with _temporary_namespace(derived_engine, ns.derived_knowledge):
-            for label, nodes in entity_groups.items():
-                # Merge all mentions from all occurrences of this entity
-                raw_mentions = []
-                for n in nodes:
-                    if hasattr(n, "mentions") and n.mentions:
-                        raw_mentions.extend(n.mentions)
-                
-                # Deduplicate mentions based on span identity
-                # We use a set of serialized spans to detect duplicates
-                merged_mentions = []
-                seen_mentions = set()
-                
-                for m in raw_mentions:
-                    # Create an identity key for the grounding based on its spans
-                    # Since Grounding is a Pydantic model, we can use its JSON representation as a stable key
-                    try:
-                        m_key = m.model_dump_json()
-                    except (AttributeError, Exception):
-                        # Fallback for older models or unexpected structures
-                        m_key = str(m)
-                    
-                    if m_key not in seen_mentions:
-                        merged_mentions.append(m)
-                        seen_mentions.add(m_key)
-                
-                if not merged_mentions:
-                    from kogwistar.engine_core.models import Grounding, Span
-                    ns = WorkspaceNamespaces(workspace_id)
-                    merged_mentions = [Grounding(spans=[Span(
-                        collection_page_url=f"conversation/{ns.conv_bg}",
-                        document_page_url=f"conversation/{ns.conv_bg}",
-                        doc_id=f"conv:{ns.conv_bg}",
-                        insertion_method="workflow_trace",
-                        page_number=1,
-                        start_char=0,
-                        end_char=1,
-                        excerpt=f"distilled:{label}",
-                        context_before="",
-                        context_after="",
-                        chunk_id=None,
-                        source_cluster_id=None,
-                    )])]
+        for label, nodes in entity_groups.items():
+            raw_mentions = []
+            for node in nodes:
+                if hasattr(node, "mentions") and node.mentions:
+                    raw_mentions.extend(node.mentions)
 
-                # Append-only: tombstone any existing wisdom node for this label,
-                # then write a fresh version. This preserves the history chain
-                # (tombstoned node is still discoverable) and avoids CRUD-style overwrite.
-                import time as _time
-                existing = derived_engine.read.get_nodes(
-                    where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id, "label": label}
-                )
-                for old_node in existing:
-                    try:
-                        derived_engine.lifecycle.tombstone_node(str(old_node.id))
-                    except Exception as e:
-                        logger.warning(f"Could not tombstone old derived_knowledge node {old_node.id}: {e}")
+            merged_mentions = []
+            seen_mentions = set()
+            for mention in raw_mentions:
+                try:
+                    mention_key = mention.model_dump_json()
+                except (AttributeError, Exception):
+                    mention_key = str(mention)
 
-                # New versioned ID — unique per distillation run
-                version_ts = int(_time.time() * 1000)
-                derived_node = Node(
-                    id=str(stable_id("derived_knowledge", workspace_id, label, str(version_ts))),
+                if mention_key not in seen_mentions:
+                    merged_mentions.append(mention)
+                    seen_mentions.add(mention_key)
+
+            if not merged_mentions:
+                merged_mentions = [Grounding(spans=[Span(
+                    collection_page_url=f"conversation/{ns.conv_bg}",
+                    document_page_url=f"conversation/{ns.conv_bg}",
+                    doc_id=f"conv:{ns.conv_bg}",
+                    insertion_method="workflow_trace",
+                    page_number=1,
+                    start_char=0,
+                    end_char=1,
+                    excerpt=f"distilled:{label}",
+                    context_before="",
+                    context_after="",
+                    chunk_id=None,
+                    source_cluster_id=None,
+                )])]
+
+            def _build_derived_node(existing: list[Any], created_at_ms: int) -> Node:
+                return Node(
+                    id=str(stable_id("derived_knowledge", workspace_id, label, str(created_at_ms))),
                     label=label,
                     type="entity",
                     summary=f"Derived knowledge synthesis for {label} aggregated from {len(nodes)} source documents.",
@@ -297,18 +261,27 @@ class MaintenanceWorker(BaseWorker):
                     metadata={
                         "workspace_id": workspace_id,
                         "artifact_kind": "derived_knowledge",
-                        "source_node_ids": [str(n.id) for n in nodes],
+                        "source_node_ids": [str(node.id) for node in nodes],
                         "label": label,
-                        "version_ts": version_ts,
-                        "replaces_ids": [str(n.id) for n in existing],
-                    }
+                        "created_at_ms": created_at_ms,
+                        "replaces_ids": [str(node.id) for node in existing],
+                    },
                 )
 
-                # Keep derived knowledge in the knowledge engine, but under its own namespace.
-                derived_engine.write.add_node(derived_node)
-                logger.info(
-                    f"Derived knowledge synthesis for entity '{label}' with {len(merged_mentions)} mentions."
-                )
+            write_versioned_artifact(
+                derived_engine,
+                namespace=ns.derived_knowledge,
+                match_where={
+                    "artifact_kind": "derived_knowledge",
+                    "workspace_id": workspace_id,
+                    "label": label,
+                },
+                build_node=_build_derived_node,
+                replace_existing=True,
+            )
+            logger.info(
+                f"Derived knowledge synthesis for entity '{label}' with {len(merged_mentions)} mentions."
+            )
 
         return RunSuccess(
             state_update=[("u", {
@@ -327,24 +300,8 @@ class MaintenanceWorker(BaseWorker):
             return RunSuccess(state_update=[], next_step_names=["finished"])
 
     def _emit_execution_wisdom_from_history(self, workspace_id: str, engines: NamespaceEngines) -> list[str]:
-        """Analyze completed execution history and emit execution-derived wisdom.
-
-        This is distinct from ``_step_distill`` (which aggregates *promoted knowledge*
-        nodes). This step scans conversation-trace ``WorkflowRunNode`` and
-        ``WorkflowStepExecNode`` records, identifies patterns in outcomes (failures,
-        retries, latency outliers), and appends ``execution_wisdom`` nodes into the
-        ``wisdom`` engine.
-
-        Pattern extraction (current implementation):
-        - Collect all step-level failure records for the workspace.
-        - Group by ``step_op`` (the step resolver key that failed).
-        - For each op with ≥ ``_MIN_FAILURE_SIGNALS`` failures, emit one
-          ``execution_wisdom`` node describing the failure pattern.
-
-        The node is append-only: any previous wisdom node for the same op pattern
-        is tombstoned first.
-        """
-        _MIN_FAILURE_SIGNALS = 2  # only emit wisdom when we have repeated evidence
+        """Analyze completed execution history and emit execution-derived wisdom."""
+        min_failure_signals = 2
 
         if not workspace_id or not engines:
             return []
@@ -353,9 +310,7 @@ class MaintenanceWorker(BaseWorker):
 
         from kogwistar.engine_core.models import Grounding, Node, Span
         from kogwistar.id_provider import stable_id
-        import time as _time
 
-        # 1. Collect step failure records from the conversation trace lane.
         with _temporary_namespace(engines.conversation, ns.conv_bg):
             step_exec_nodes = engines.conversation.read.get_nodes(
                 where={"entity_type": "workflow_step_exec"}
@@ -366,54 +321,39 @@ class MaintenanceWorker(BaseWorker):
         ]
 
         if not step_exec_nodes:
-            logger.debug("derive_problem_solving_wisdom_from_history: no failure records found — skipping")
+            logger.debug("derive_problem_solving_wisdom_from_history: no failure records found - skipping")
             return []
 
         patterns = summarize_execution_failure_patterns(
             step_exec_nodes,
-            min_failure_signals=_MIN_FAILURE_SIGNALS,
+            min_failure_signals=min_failure_signals,
         )
 
-        # 2. Emit execution_wisdom nodes for ops with repeated failure evidence.
         emitted: list[str] = []
-        with _temporary_namespace(engines.wisdom, ns.wisdom):
-            for pattern in patterns:
-                step_op = pattern.step_op
-                failure_nodes = list(pattern.failure_nodes)
-                run_ids = list(pattern.run_ids)
-                label = f"execution_failure_pattern:{step_op}"
+        for pattern in patterns:
+            step_op = pattern.step_op
+            failure_nodes = list(pattern.failure_nodes)
+            run_ids = list(pattern.run_ids)
+            label = f"execution_failure_pattern:{step_op}"
 
-                # Tombstone any prior execution_wisdom node for this pattern.
-                existing = engines.wisdom.read.get_nodes(
-                    where={
-                        "artifact_kind": "execution_wisdom",
-                        "workspace_id": workspace_id,
-                        "step_op": step_op,
-                    }
-                )
-                for old in existing:
-                    try:
-                        engines.wisdom.lifecycle.tombstone_node(str(old.id))
-                    except Exception as e:
-                        logger.warning(f"Could not tombstone old execution_wisdom node {old.id}: {e}")
+            span = Span(
+                collection_page_url=f"conversation/{ns.conv_bg}",
+                document_page_url=f"conversation/{ns.conv_bg}",
+                doc_id=f"conv:{ns.conv_bg}",
+                insertion_method="execution_history",
+                page_number=1,
+                start_char=0,
+                end_char=1,
+                excerpt=f"failure_pattern:{step_op} n={len(failure_nodes)}",
+                context_before="",
+                context_after="",
+                chunk_id=None,
+                source_cluster_id=None,
+            )
 
-                version_ts = int(_time.time() * 1000)
-                span = Span(
-                    collection_page_url=f"conversation/{ns.conv_bg}",
-                    document_page_url=f"conversation/{ns.conv_bg}",
-                    doc_id=f"conv:{ns.conv_bg}",
-                    insertion_method="execution_history",
-                    page_number=1,
-                    start_char=0,
-                    end_char=1,
-                    excerpt=f"failure_pattern:{step_op} n={len(failure_nodes)}",
-                    context_before="",
-                    context_after="",
-                    chunk_id=None,
-                    source_cluster_id=None,
-                )
-                wisdom_node = Node(
-                    id=str(stable_id("execution_wisdom", workspace_id, step_op, str(version_ts))),
+            def _build_wisdom_node(existing: list[Any], created_at_ms: int) -> Node:
+                return Node(
+                    id=str(stable_id("execution_wisdom", workspace_id, step_op, str(created_at_ms))),
                     label=label,
                     type="entity",
                     summary=(
@@ -428,17 +368,28 @@ class MaintenanceWorker(BaseWorker):
                         "step_op": step_op,
                         "failure_count": len(failure_nodes),
                         "evidence_run_ids": run_ids,
-                        "version_ts": version_ts,
-                        "replaces_ids": [str(n.id) for n in existing],
+                        "created_at_ms": created_at_ms,
+                        "replaces_ids": [str(node.id) for node in existing],
                         "label": label,
                     },
                 )
-                engines.wisdom.write.add_node(wisdom_node)
-                emitted.append(step_op)
-                logger.info(
-                    f"Emitted execution_wisdom for step_op='{step_op}' "
-                    f"(failures={len(failure_nodes)}, runs={len(run_ids)})"
-                )
+
+            write_versioned_artifact(
+                engines.wisdom,
+                namespace=ns.wisdom,
+                match_where={
+                    "artifact_kind": "execution_wisdom",
+                    "workspace_id": workspace_id,
+                    "step_op": step_op,
+                },
+                build_node=_build_wisdom_node,
+                replace_existing=True,
+            )
+            emitted.append(step_op)
+            logger.info(
+                f"Emitted execution_wisdom for step_op='{step_op}' "
+                f"(failures={len(failure_nodes)}, runs={len(run_ids)})"
+            )
 
         return emitted
 

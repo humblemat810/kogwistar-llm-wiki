@@ -41,6 +41,23 @@ Preferred pattern:
 - updated relation
 - revised contradiction set
 
+### 3.3 Replacement identity rule
+
+When a structural update writes a new replacement artifact:
+
+- the old record is not silently overwritten
+- the old record becomes `tombstoned`
+- `redirect_to_id` should point to the new active record when the intent is replacement
+
+This matters because:
+
+- `resolve_mode="active_only"` shows only the new live record
+- `resolve_mode="include_tombstones"` shows both the old and new records
+- `resolve_mode="redirect"` lets callers keep resolving the old id to the new one
+
+Use plain tombstone without `redirect_to_id` only when the old record is terminal and
+should no longer resolve to a replacement.
+
 ---
 
 ## 4. Structural Delete
