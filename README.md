@@ -14,7 +14,7 @@ raw sources → kg-doc-parser → conversation graph → promote → knowledge g
 ## What it is
 
 Maintenance currently has two distinct outputs:
-- `derived_knowledge` for cross-document label-merge synthesis
+- `derived_knowledge` for cross-document label-merge synthesis, stored under a separate derived-KG namespace
 - `execution_wisdom` for reusable lessons derived from workflow failures and repeated maintenance outcomes
 
 | Layer | Role |

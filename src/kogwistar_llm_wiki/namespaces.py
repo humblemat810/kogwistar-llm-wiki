@@ -29,6 +29,10 @@ class WorkspaceNamespaces:
         return f"ws:{self.workspace_id}:kg"
 
     @property
+    def derived_knowledge(self) -> str:
+        return f"ws:{self.workspace_id}:kg:derived"
+
+    @property
     def wisdom(self) -> str:
         return f"ws:{self.workspace_id}:wisdom"
 
@@ -60,4 +64,6 @@ class WorkspaceNamespaces:
             return "background"
         if namespace == self.kg:
             return "knowledge"
+        if namespace == self.derived_knowledge:
+            return "derived_knowledge"
         return None

@@ -73,7 +73,7 @@ llm-wiki daemon maintenance \
 4. Sleep `--interval` seconds before next poll
 
 Current semantics:
-- `distill` produces versioned `derived_knowledge` nodes from promoted KG knowledge
+- `distill` produces versioned `derived_knowledge` nodes from promoted KG knowledge in `ws:{id}:kg:derived`
 - execution-history analysis runs immediately after the workflow finishes and emits `execution_wisdom` nodes for repeated failure patterns
 
 **Example:**
