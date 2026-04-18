@@ -13,6 +13,10 @@ raw sources → kg-doc-parser → conversation graph → promote → knowledge g
 
 ## What it is
 
+Maintenance currently has two distinct outputs:
+- `derived_knowledge` for cross-document label-merge synthesis
+- `execution_wisdom` for reusable lessons derived from workflow failures and repeated maintenance outcomes
+
 | Layer | Role |
 |---|---|
 | **conversation** | Working memory — parsed artifacts, candidate links, maintenance jobs |
@@ -40,6 +44,11 @@ The script:
 After running, the venv always uses local editable sources — re-running is safe (existing checkouts are kept).
 
 ### Option B — GitHub-only (CI / no local edits needed)
+
+For cross-repo architectural refactors, those sibling repos are intentionally
+editable from the same project root. Use the documented repo boundaries to
+decide where a concept belongs, but do not treat the sibling checkouts as
+read-only while capability and policy are being moved to their proper homes.
 
 ```bash
 pip install git+https://github.com/humblemat810/kogwistar.git

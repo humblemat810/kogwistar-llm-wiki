@@ -1,5 +1,102 @@
 # Status
 
+## Refactor Plan: Distillation, Wisdom, and Cross-Repo Ownership
+
+**Status:** In progress  
+**Mode:** Runtime refactor active in `kogwistar-llm-wiki`; no cross-repo code move yet  
+**Scope:** `kogwistar`, `kogwistar-llm-wiki`, and supporting docs/tests across the sibling repos
+
+### Goal
+
+Refactor the current maintenance/distillation stack so that:
+
+- core `kogwistar` owns generic maintenance capability
+- `kogwistar-llm-wiki` owns knowledge-maintenance policy
+- "wisdom" regains the core meaning of reusable problem-solving lessons
+- current label-merge aggregation is renamed or reclassified if it is really derived knowledge / synthesis
+- the implementation target explicitly corrects the current misuse of `wisdom`
+
+### Current Assessment
+
+- [x] Durable maintenance job flow exists and is working
+- [x] Namespace isolation and append-only lifecycle invariants are in place
+- [x] A live app-level distillation path exists
+- [x] The live label-merge path is no longer presented as core-style wisdom
+- [x] Execution-history wisdom is wired into the active maintenance path
+- [ ] Generic maintenance capability is factored cleanly enough to move into core
+
+### Phase A: Semantic Cleanup
+
+- [ ] Freeze terminology:
+  - [ ] `knowledge` = promoted durable facts/entities
+  - [ ] `derived_knowledge` or `synthesis` = cross-document consolidation
+  - [ ] `wisdom` = reusable lesson for solving classes of problems
+- [ ] Record the wisdom correction explicitly:
+  - [ ] current live label-merge output is not treated as true wisdom
+  - [ ] true wisdom target is execution-derived / maintenance-outcome-derived
+- [ ] Audit docs that currently blur synthesis and wisdom
+- [ ] Decide whether the current `wisdom` artifact kind should be renamed before any code move
+
+### Phase B: Boundary Decision
+
+- [ ] Confirm the move-down set for `kogwistar`
+  - [ ] maintenance queue / claim / retry protocol
+  - [ ] engine-native namespace scoping API
+  - [ ] workflow analytics over execution history
+  - [ ] append-only versioned artifact helpers for derived maintenance outputs
+- [ ] Confirm the keep-in-app set for `kogwistar-llm-wiki`
+  - [ ] grouping policy
+  - [ ] promotion and review thresholds
+  - [ ] maintenance job selection policy
+  - [ ] artifact semantics for synthesis vs wisdom
+
+### Phase C: Workflow Refactor Plan
+
+- [ ] Split the current maintenance workflow into explicit concerns
+  - [ ] synthesis / derived-knowledge workflow
+  - [ ] execution-history wisdom workflow
+- [ ] Make the "true wisdom" correction part of the implementation plan
+  - [ ] wire an active execution-derived wisdom path
+  - [ ] stop presenting synthesis output as wisdom
+- [ ] Remove decorative topology:
+  - [ ] either make looping real
+  - [ ] or simplify the workflow to a truthful single-pass DAG
+- [ ] Decide whether `_step_distill_from_history` becomes:
+  - [ ] part of the default workflow
+  - [ ] a separate workflow
+  - [ ] or a core analytics consumer later
+
+### Phase D: Test Migration Plan
+
+- [ ] Reclassify tests by ownership
+  - [ ] core capability tests move with `kogwistar`
+  - [ ] app policy tests stay in `kogwistar-llm-wiki`
+- [ ] Add invariant tests for the semantic split
+  - [ ] synthesis is not labeled as wisdom
+  - [ ] execution-history wisdom remains execution-derived
+  - [ ] cross-repo queue/runtime invariants still hold
+
+### Phase E: Documentation Plan
+
+- [ ] Update architecture docs after terminology is frozen
+- [ ] Update CLI/quickstart wording if artifact names change
+- [ ] Keep a migration note mapping old names to new names
+- [ ] Record cross-repo edit expectations anywhere contributor guidance discusses sibling repos
+
+### Decision Gates
+
+- [ ] Gate 1: agree on synthesis vs wisdom naming
+- [ ] Gate 2: agree on what is capability vs policy
+- [ ] Gate 3: agree on whether core ships a generic distillation template or only analytics + queue primitives
+- [ ] Gate 4: only after the above, begin code moves across repos
+
+### Non-Goals For This Pass
+
+- [x] No code move into `kogwistar` yet
+- [x] No storage-engine split between derived knowledge and wisdom yet
+- [x] No artifact rename in persisted data beyond the `derived_knowledge` semantic correction
+- [x] No projection behavior rewrite yet
+
 ## Completed
 
 - [x] Background job request/result envelopes defined in `models.py`
@@ -14,7 +111,7 @@
 - [x] Event-driven distillation pipeline (append-only invariants)
   - [x] `MaintenanceWorker.process_pending_jobs` uses `workflow_completed` event nodes (not CRUD status)
   - [x] `_step_distill` correctly accesses `NamespaceEngines` from `_deps`
-  - [x] Wisdom node creation is append-only: tombstone existing + write versioned new node
+  - [x] Derived-knowledge node creation is append-only: tombstone existing + write versioned new node
   - [x] Fallback `Span` provenance matches kogwistar `_make_trace_span` factory
 - [x] Projection worker hardened
   - [x] `_handle_projection_request` emits `projection_status_event` nodes (append-only; no CRUD mutation)
@@ -47,10 +144,14 @@
 
 ### Wisdom distillation
 
-- [x] `_step_distill` aggregates `promoted_knowledge` nodes → deduplicates mentions → writes versioned `wisdom` nodes into the `wisdom` engine
-- [x] Append-only: tombstone existing wisdom node for the label, then write fresh versioned node with `replaces_ids` backlink
-- [x] Tested via `test_wisdom_distillation.py` (5 tests pass)
-- [x] `_step_distill_from_history`: queries `workflow_step_exec` failure nodes, groups by `step_op`, emits `execution_wisdom` nodes (append-only, tombstone+version) for patterns with ≥ 2 failure signals
+- [x] `_step_distill` now aggregates `promoted_knowledge` nodes → deduplicates mentions → writes versioned `derived_knowledge` nodes into the existing maintenance-derived engine
+- [x] Append-only: tombstone existing derived-knowledge node for the label, then write a fresh versioned node with `replaces_ids` backlink
+- [x] Execution-history analysis is active: after each maintenance workflow run, failure traces are scanned and `execution_wisdom` nodes are emitted for repeated failure patterns
+- [x] Runtime workflow simplified back to a truthful synthesis/check DAG; history wisdom is emitted post-run rather than by self-reading the trace lane mid-step
+- [x] Tested via focused semantic-split coverage:
+  - [x] multi-document label merge now asserts `artifact_kind = derived_knowledge`
+  - [x] execution-history failures now produce `execution_wisdom`
+  - [x] maintenance runtime orchestration still records graph-native traces
 
 ### Remaining polish (non-blocking)
 

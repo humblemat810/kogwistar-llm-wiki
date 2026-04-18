@@ -55,7 +55,7 @@ llm-wiki daemon projection --workspace my-wiki --vault ~/Documents/ObsidianWiki
 
 ### `daemon maintenance`
 
-Drain the maintenance job queue and run the distillation + wisdom pipeline.
+Drain the maintenance job queue and run the synthesis + execution-wisdom pipeline.
 
 ```bash
 llm-wiki daemon maintenance \
@@ -71,6 +71,10 @@ llm-wiki daemon maintenance \
    - `distill_from_history` *(optional step)* — scan workflow failure patterns → execution_wisdom nodes
    - `check_done` → loop or finish
 4. Sleep `--interval` seconds before next poll
+
+Current semantics:
+- `distill` produces versioned `derived_knowledge` nodes from promoted KG knowledge
+- execution-history analysis runs immediately after the workflow finishes and emits `execution_wisdom` nodes for repeated failure patterns
 
 **Example:**
 

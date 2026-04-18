@@ -22,9 +22,9 @@ def build_distillation_design(workflow_id: str = "maintenance.distillation.v1") 
     nodes = [
         WorkflowNode(
             id=node_distill_id,
-            label="Distill Wisdom",
+            label="Derive Knowledge Synthesis",
             type="entity",
-            summary="Extract reusable lessons from ingestion artifacts.",
+            summary="Aggregate promoted knowledge into derived-knowledge artifacts.",
             mentions=[Grounding(spans=[Span(doc_id="dummy", start_char=0, end_char=1, excerpt="", document_page_url="", collection_page_url="", insertion_method="")])],
             metadata={
                 "entity_type": "workflow_node",

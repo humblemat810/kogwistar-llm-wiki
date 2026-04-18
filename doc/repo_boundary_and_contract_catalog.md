@@ -151,6 +151,36 @@ This especially applies to maintenance:
 
 ---
 
+## 6.1 Cross-Repo Refactor Mode
+
+For active architectural refactors, edits across sibling repositories under the
+same project root are explicitly allowed.
+
+The current coordinated workspace includes:
+
+- `kogwistar`
+- `kg-doc-parser`
+- `kogwistar-obsidian-sink`
+- `kogwistar-llm-wiki`
+
+Allowed during such refactors:
+
+- modify code in a sibling repo when the semantic owner of the concept lives there
+- move or rename contracts, workflow designs, docs, and tests across repos
+- update editable sibling repos in lockstep to preserve invariants
+
+Still required during such refactors:
+
+- preserve dependency direction
+- move reusable mechanism downward, not policy upward
+- update boundary docs and tests together with any cross-repo concept move
+- record migration notes when a concept is being split, renamed, or rehomed
+
+This is not a waiver of repository boundaries. It is an explicit allowance to
+edit sibling repos so the boundaries can be improved rather than worked around.
+
+---
+
 ## 7. Outcome
 
 These repo boundaries keep the core reusable while allowing the app to define how real use cases map to node and edge changes.
