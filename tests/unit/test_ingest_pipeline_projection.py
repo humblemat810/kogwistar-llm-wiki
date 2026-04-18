@@ -103,3 +103,85 @@ def test_projection_manifest_overrides_visibility_metadata(pipeline, ingest_requ
     snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
     titles = {entity.title for entity in snapshot.entities}
     assert titles == {"Manifest Knowledge"}
+
+
+def test_demo_projection_reifies_section_hyperedges(pipeline, ingest_request):
+    request = ingest_request.model_copy(
+        update={
+            "title": "My Document",
+            "source_uri": "file://demo.md",
+            "raw_text": "# My Document\n\nThis is a starter document for the LLM-Wiki quickstart.\n\n## Contacts\n- Alice\n- Bob\n",
+            "source_format": "markdown",
+        }
+    )
+    workspace_id = request.workspace_id
+    source_document_id = pipeline._source_document_id(request)
+
+    pipeline.register_source(
+        request=request,
+        source_document_id=source_document_id,
+        namespace=pipeline.namespaces_for(workspace_id).conv_fg,
+    )
+    parse_result = pipeline.parse_source(request=request, source_document_id=source_document_id)
+    graph_extraction = pipeline.translate_parse_result(
+        parse_result=parse_result,
+        source_document_id=source_document_id,
+    )
+    pipeline.persist_demo_graph_extraction(
+        request=request,
+        source_document_id=source_document_id,
+        graph_extraction=graph_extraction,
+        namespace=pipeline.namespaces_for(workspace_id).kg,
+    )
+
+    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    entities_by_title = {entity.title: entity for entity in snapshot.entities}
+
+    assert {"Contacts", "Alice", "Bob"} <= set(entities_by_title)
+
+    contacts = entities_by_title["Contacts"]
+    alice = entities_by_title["Alice"]
+    bob = entities_by_title["Bob"]
+
+    assert alice.kg_id in contacts.source_ids
+    assert bob.kg_id in contacts.source_ids
+    assert any(relationship.target_id == alice.kg_id for relationship in contacts.relationships)
+    assert any(relationship.target_id == bob.kg_id for relationship in contacts.relationships)
+
+
+def test_demo_projection_hides_sentence_like_leaf_nodes(pipeline, ingest_request):
+    request = ingest_request.model_copy(
+        update={
+            "title": "My Document",
+            "source_uri": "file://demo.md",
+            "raw_text": "# My Document\n\nThis is a starter document for the LLM-Wiki quickstart.\n\n## Contacts\n- Alice\n- Bob\n",
+            "source_format": "markdown",
+        }
+    )
+    workspace_id = request.workspace_id
+    source_document_id = pipeline._source_document_id(request)
+
+    pipeline.register_source(
+        request=request,
+        source_document_id=source_document_id,
+        namespace=pipeline.namespaces_for(workspace_id).conv_fg,
+    )
+    parse_result = pipeline.parse_source(request=request, source_document_id=source_document_id)
+    graph_extraction = pipeline.translate_parse_result(
+        parse_result=parse_result,
+        source_document_id=source_document_id,
+    )
+    pipeline.persist_demo_graph_extraction(
+        request=request,
+        source_document_id=source_document_id,
+        graph_extraction=graph_extraction,
+        namespace=pipeline.namespaces_for(workspace_id).kg,
+    )
+
+    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    titles = {entity.title for entity in snapshot.entities}
+
+    assert "Contacts" in titles
+    assert "Alice" in titles
+    assert "Bob" in titles
+    assert "This is a starter document for the LLM-Wiki quickstart." not in titles

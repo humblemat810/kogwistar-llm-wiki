@@ -56,21 +56,48 @@ pip install -e ".[dev]"
 
 ## Quick demo
 
+The default demo stays in one process on purpose. It uses the in-memory engine
+bundle for the graph/job state, then writes the Obsidian vault to disk before
+exiting.
+
+That is the safest local quickstart because embedded local Chroma is
+process-unsafe for a multi-process demo.
+
+The demo also mirrors the parsed semantic tree into KG so the graph view shows
+more than a single promoted node.
+
 ```bash
 # 1. Bootstrap (first time only)
 bash scripts/bootstrap-dev.sh
 
-# 2. Ingest a document
-python -c "
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-p = IngestPipeline(workspace_id='demo')
-p.run('my_document.md')
-"
+# 2. Create a small demo source
+mkdir -p logs/llm_wiki_demo/vault
+cat > logs/llm_wiki_demo/my_document.md <<'EOF'
+# My Document
 
-# 3. Run the background workers
-llm-wiki daemon maintenance --workspace demo
-llm-wiki daemon projection  --workspace demo --vault ~/obsidian/wiki
+This is a starter document for the LLM-Wiki quickstart.
+
+## Contacts
+- Alice
+- Bob
+EOF
+
+# 3. Run the one-process demo
+llm-wiki demo --workspace demo --source logs/llm_wiki_demo/my_document.md --vault logs/llm_wiki_demo/vault --title "My Document" --source-format markdown --promotion-mode sync
 ```
+
+Then open `logs/llm_wiki_demo/vault` in Obsidian.
+
+Optional slower equivalents:
+
+- In-memory, one-process demo: this is the default quick demo.
+- ChromaDB shared backend: use the persistent `ingest` + `daemon` flow against
+  an explicit shared Chroma deployment.
+- PostgreSQL/pgvector backend:
+  `llm-wiki --data-dir logs/llm_wiki_data --backend postgres --dsn postgresql://user:pass@localhost:5432/db ingest --workspace demo --source logs/llm_wiki_demo/my_document.md --title "My Document" --source-format markdown --promotion-mode sync`
+  and then run the same `daemon` commands with the same backend flags.
+- Embedded local Chroma: not the default demo path, because multiple local
+  processes sharing that path are not the safe story.
 
 See [QUICKSTART.md](QUICKSTART.md) for the full step-by-step tutorial.
 
@@ -79,8 +106,10 @@ See [QUICKSTART.md](QUICKSTART.md) for the full step-by-step tutorial.
 ## CLI reference
 
 ```
-llm-wiki daemon projection  --workspace <id> --vault <path> [--interval <s>]
-llm-wiki daemon maintenance --workspace <id>                [--interval <s>]
+llm-wiki demo --workspace <id> --source <path> --vault <path> [--title <text>] [--promotion-mode sync|pending]
+llm-wiki [--backend chroma|postgres --dsn <postgres-dsn>] ingest --workspace <id> --source <path> [--title <text>] [--promotion-mode sync|pending]
+llm-wiki [--backend chroma|postgres --dsn <postgres-dsn>] daemon projection  --workspace <id> --vault <path> [--interval <s>]
+llm-wiki [--backend chroma|postgres --dsn <postgres-dsn>] daemon maintenance --workspace <id>                [--interval <s>]
 ```
 
 Full reference: [doc/cli_reference.md](doc/cli_reference.md)

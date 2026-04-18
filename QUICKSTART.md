@@ -1,18 +1,80 @@
-# Quickstart — LLM-Wiki
+# Quickstart - LLM-Wiki
 
-This tutorial walks you through a full end-to-end run: ingest a document, promote knowledge, run the background workers, and inspect the Obsidian output.
+This tutorial starts with the safest default for this repo:
+an ephemeral, one-process demo that ingests a document, runs maintenance,
+projects the Obsidian vault, and exits.
+
+That default matters because local embedded Chroma is process-unsafe for a
+multi-process demo. So the quickstart does not pretend separate local processes
+sharing one embedded Chroma path are the normal case.
+
+The vault is still persisted on disk. The ephemeral part is only the graph/job
+engine that lives inside the one demo process.
+
+Optional shared-backend equivalents are included later:
+
+- default quickstart: in-memory, one-process end-to-end demo
+- optional shared ChromaDB backend: slower, explicit shared deployment
+- optional PostgreSQL/pgvector backend: slower still, heavier shared deployment
 
 ---
 
 ## Prerequisites
 
-- Python ≥ 3.11
-- Git, git-bash (Windows) or WSL for the bootstrap script
-- An [Obsidian](https://obsidian.md) vault (any empty directory works)
+- Python >= 3.11
+- Git, Git Bash on Windows, or WSL for the bootstrap script
+- An empty local directory for the Obsidian vault
 
 ---
 
-## Step 1 — Bootstrap the environment
+## 0. Copy-paste demo config
+
+If you just want to hit the ground running, start with this self-contained
+demo. It creates a starter source file, uses one workspace, and writes the
+vault into a known local directory.
+
+This is the fast path. It keeps ingest, maintenance, and projection in one
+process and writes the resulting vault to disk.
+
+```bash
+workspace="demo"
+demo_root="logs/llm_wiki_demo"
+source="$demo_root/my_document.md"
+vault_dir="$demo_root/vault"
+
+mkdir -p "$demo_root" "$vault_dir"
+cat > "$source" <<'EOF'
+# My Document
+
+This is a starter document for the LLM-Wiki quickstart.
+
+## Contacts
+- Alice
+- Bob
+EOF
+
+llm-wiki demo --workspace "$workspace" --source "$source" --vault "$vault_dir" --title "My Document" --source-format markdown --promotion-mode sync
+```
+
+After the run, open `logs/llm_wiki_demo/vault` in Obsidian.
+
+### Optional backend equivalents
+
+- In-memory demo: this is the default quickstart flow.
+- ChromaDB shared backend: use the persistent `ingest` + `daemon` commands
+  against an explicit shared Chroma deployment rather than local embedded
+  Chroma.
+- PostgreSQL/pgvector backend:
+  ```bash
+  llm-wiki --data-dir logs/llm_wiki_data --backend postgres --dsn postgresql://user:pass@localhost:5432/db ingest --workspace demo --source logs/llm_wiki_demo/my_document.md --title "My Document" --promotion-mode sync
+  ```
+  Then start the daemons with the same `--backend postgres --dsn ...` flags.
+
+Those are the slower, shared-backend equivalents of the same workflow.
+
+---
+
+## 1. Bootstrap the environment
 
 ```bash
 bash scripts/bootstrap-dev.sh
@@ -20,120 +82,103 @@ source .venv/bin/activate    # Linux/macOS
 # .venv\Scripts\activate     # Windows PowerShell
 ```
 
-The script runs in three steps:
+The script:
 
-1. **Clone** each sibling repo from GitHub if its local directory is missing; keep it if already present.
-2. **Install editable** from the local directory (always, even if it was just cloned).
-3. **Install this package** last — after all siblings are in the env.
+1. Clones sibling repos from GitHub if they are missing locally.
+2. Installs those sibling checkouts editable.
+3. Installs this package last.
 
-| Sibling repo | Local dir exists? | Action |
-|---|---|---|
-| `kogwistar` | ✅ already cloned | keep, reinstall editable |
-| `kogwistar` | ❌ missing | clone from GitHub, then install editable |
-| `kogwistar-obsidian-sink` | ✅ / ❌ | same |
-| `kg-doc-parser` | ✅ / ❌ | same |
-
-After the script, **local editable checkouts are always what the venv uses** — regardless of any prior `pip install git+...` that may have been done.
-
-> **Windows**: Run from Git Bash or WSL.
+After the script, local editable checkouts are what the venv uses.
 
 ---
 
-## Step 2 — Ingest a document
+## 2. Default demo: one process, one command
 
-```python
-# ingest_demo.py
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-
-pipeline = IngestPipeline(workspace_id="demo")
-result = pipeline.run("path/to/your_document.md")
-print(f"Ingested: {result}")
-```
+Use the `demo` command when you want the repo to be runnable immediately
+without standing up a shared backend.
 
 ```bash
-python ingest_demo.py
+llm-wiki demo --workspace demo --source logs/llm_wiki_demo/my_document.md --vault logs/llm_wiki_demo/vault --title "My Document" --source-format markdown --promotion-mode sync
 ```
 
-The pipeline will:
-- Parse the document via `kg-doc-parser`
-- Store parsed artifacts in the **conversation graph** (`conv:fg`)
-- Generate candidate links in the **background lane** (`conv:bg`)
-- Emit a `maintenance_job_request` event for the distillation worker
+What this does:
+
+- reads the source file
+- builds an in-memory engine bundle for this one run
+- ingests the document
+- mirrors the parsed semantic tree into KG so the graph view is richer
+- runs maintenance
+- runs projection
+- writes the Obsidian vault to disk
+- exits after printing a JSON summary
+
+Open `logs/llm_wiki_demo/vault` in Obsidian after it finishes.
 
 ---
 
-## Step 3 — Promote a candidate to the Knowledge Graph
+## 3. Optional persistent flow: ingest a source document into the workspace
 
-Promotion moves a candidate entity from conversation-space into the durable **knowledge graph**:
-
-```python
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-
-pipeline = IngestPipeline(workspace_id="demo")
-
-# List promotion candidates
-candidates = pipeline.list_promotion_candidates()
-for c in candidates:
-    print(c.label, c.confidence)
-
-# Promote one (or let auto-promotion kick in for confidence >= threshold)
-pipeline.promote(entity_id=candidates[0].id)
-```
-
----
-
-## Step 4 — Run the background workers
-
-Two daemons run independently. Open two terminals:
+Use the persistent `llm-wiki ingest` bridge command only when you intentionally
+want a shared backend flow.
 
 ```bash
-# Terminal 1 — maintenance daemon (distillation + wisdom)
-llm-wiki daemon maintenance --workspace demo --interval 10
-
-# Terminal 2 — projection daemon (Obsidian sync)
-llm-wiki daemon projection --workspace demo --vault ~/obsidian/wiki --interval 5
+llm-wiki --data-dir logs/llm_wiki_data ingest --workspace demo --source logs/llm_wiki_demo/my_document.md --title "My Document" --source-format markdown --promotion-mode sync
 ```
 
-Both daemons respond to `Ctrl-C` (SIGINT) with a clean shutdown.
+What this does:
 
-To embed in your own process instead:
-
-```python
-from kogwistar_llm_wiki.daemon import MaintenanceDaemon, ProjectionDaemon
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-import threading
-
-pipeline = IngestPipeline(workspace_id="demo")
-engines = pipeline.engines
-
-m_daemon = MaintenanceDaemon(engines, workspace_id="demo", poll_interval=10.0)
-p_daemon = ProjectionDaemon(engines, workspace_id="demo",
-                             vault_root="~/obsidian/wiki", poll_interval=5.0)
-
-# Run in background threads
-threading.Thread(target=m_daemon.run, daemon=True).start()
-threading.Thread(target=p_daemon.run, daemon=True).start()
-
-# ... your app logic ...
-
-m_daemon.stop()
-p_daemon.stop()
-```
+- reads the source file
+- writes parsed graph state into the workspace
+- enqueues maintenance jobs
+- enqueues projection jobs when promotion mode is `sync`
 
 ---
 
-## Step 5 — Inspect the Obsidian vault
+## 4. Optional persistent flow: run the background workers
 
-Open the vault directory in Obsidian. You should see:
-- One note per promoted entity
-- Wikilinks between related entities
-- Canvas files showing entity clusters
+Use the same `--data-dir` for both daemons so they operate on the same
+workspace and persistent backend:
 
-The vault is rebuilt incrementally on each projection cycle — only changed nodes trigger file writes.
+```bash
+# Terminal 1
+llm-wiki --data-dir logs/llm_wiki_data daemon maintenance --workspace demo --interval 10
+
+# Terminal 2
+llm-wiki --data-dir logs/llm_wiki_data daemon projection --workspace demo --vault logs/llm_wiki_data/vault --interval 5
+```
+
+Graceful wind-down:
+
+- press `Ctrl-C` in the maintenance terminal
+- press `Ctrl-C` in the projection terminal
+
+Both daemons handle `Ctrl-C` cleanly.
 
 ---
 
-## Step 6 — Run the test suite
+## 5. Inspect the Obsidian vault
+
+For the default demo, open `logs/llm_wiki_demo/vault` in Obsidian.
+
+For the persistent flow, open `logs/llm_wiki_data/vault` in Obsidian.
+
+You should see:
+
+- one note per promoted entity
+- wikilinks between related entities
+- canvas files for entity clusters when the data produces them
+
+---
+
+## 6. Optional parser demo harness
+
+`workflow-ingest demo --output-dir logs\workflow_ingest_demo` is a separate
+demo harness from the `kg-doc-parser` repo. It writes parser/demo artifacts
+only and does not populate the `llm-wiki` workspace.
+
+---
+
+## 7. Run the test suite
 
 ```bash
 pytest tests/unit/          # fast unit tests, no external services needed
@@ -141,7 +186,8 @@ pytest -m integration       # Obsidian vault + other on-disk integration checks
 pytest -m manual            # opt-in smoke cases that need local services like Ollama
 ```
 
-After a successful run, the next checks are:
+After a successful run, the useful checks are:
+
 - maintenance jobs in the durable meta-store should be `DONE`
 - projection jobs in the durable meta-store should be `DONE`
 - the projection manifest row should be `ready`
@@ -153,8 +199,9 @@ After a successful run, the next checks are:
 
 | Symptom | Fix |
 |---|---|
-| `ModuleNotFoundError: kogwistar` | Run `bash scripts/bootstrap-dev.sh` to install local checkout |
-| `ImportError: kogwistar-obsidian-sink` | Same — bootstrap installs it editable |
-| Local edits to `kogwistar/` not reflected | Confirm `pip show kogwistar` points to local path |
-| Projection daemon exits immediately | Vault directory may not exist — create it first |
-| `PydanticDeprecatedSince20: min_items` warnings | These come from the installed `kogwistar` package; safe to ignore |
+| `ModuleNotFoundError: kogwistar` | Run `bash scripts/bootstrap-dev.sh` |
+| `ImportError: kogwistar-obsidian-sink` | Bootstrap installs it editable |
+| Local edits to `kogwistar/` not reflected | Confirm `pip show kogwistar` points to the local path |
+| No vault after the default demo | Confirm you ran `llm-wiki demo ...`, not the persistent `ingest` command by itself |
+| Multi-process local Chroma behaves strangely | Do not use embedded local Chroma as the shared demo backend; use the one-process `demo` command, shared ChromaDB, or PostgreSQL |
+| `PydanticDeprecatedSince20: min_items` warnings | They come from the installed `kogwistar` package; safe to ignore |

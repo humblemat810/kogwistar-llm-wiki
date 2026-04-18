@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 from typing import Any, Callable
@@ -62,6 +63,64 @@ def build_in_memory_namespace_engines(base_dir: str | Path | None = None) -> Nam
     )
 
 
+def build_persistent_namespace_engines(base_dir: str | Path) -> NamespaceEngines:
+    root = Path(base_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    embedding = _TinyEmbeddingFunction()
+    return NamespaceEngines(
+        conversation=_build_persistent_engine(root / "conversation", kg_graph_type="conversation", embedding_function=embedding),
+        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embedding),
+        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embedding),
+        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embedding),
+    )
+
+
+def build_postgres_namespace_engines(
+    *,
+    base_dir: str | Path,
+    dsn: str,
+    embedding_dim: int = 2,
+    schema: str = "public",
+) -> NamespaceEngines:
+    root = Path(base_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    embedding = _TinyEmbeddingFunction()
+    return NamespaceEngines(
+        conversation=_build_postgres_engine(
+            root / "conversation",
+            kg_graph_type="conversation",
+            embedding_function=embedding,
+            dsn=dsn,
+            embedding_dim=embedding_dim,
+            schema=schema,
+        ),
+        workflow=_build_postgres_engine(
+            root / "workflow",
+            kg_graph_type="workflow",
+            embedding_function=embedding,
+            dsn=dsn,
+            embedding_dim=embedding_dim,
+            schema=schema,
+        ),
+        kg=_build_postgres_engine(
+            root / "kg",
+            kg_graph_type="knowledge",
+            embedding_function=embedding,
+            dsn=dsn,
+            embedding_dim=embedding_dim,
+            schema=schema,
+        ),
+        wisdom=_build_postgres_engine(
+            root / "wisdom",
+            kg_graph_type="wisdom",
+            embedding_function=embedding,
+            dsn=dsn,
+            embedding_dim=embedding_dim,
+            schema=schema,
+        ),
+    )
+
+
 def _build_engine(
     persist_directory: Path,
     *,
@@ -74,6 +133,49 @@ def _build_engine(
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
         backend_factory=build_in_memory_backend,
+        namespace=kg_graph_type,
+    )
+
+
+def _build_persistent_engine(
+    persist_directory: Path,
+    *,
+    kg_graph_type: str,
+    embedding_function: Any,
+) -> GraphKnowledgeEngine:
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    return GraphKnowledgeEngine(
+        persist_directory=str(persist_directory),
+        kg_graph_type=kg_graph_type,
+        embedding_function=embedding_function,
+        namespace=kg_graph_type,
+    )
+
+
+def _build_postgres_engine(
+    persist_directory: Path,
+    *,
+    kg_graph_type: str,
+    embedding_function: Any,
+    dsn: str,
+    embedding_dim: int,
+    schema: str,
+) -> GraphKnowledgeEngine:
+    from kogwistar.engine_core.engine_postgres import EnginePostgresConfig, build_postgres_backend
+
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    backend, _ = build_postgres_backend(
+        EnginePostgresConfig(
+            dsn=dsn,
+            embedding_dim=embedding_dim,
+            schema=schema,
+        )
+    )
+    return GraphKnowledgeEngine(
+        persist_directory=str(persist_directory),
+        kg_graph_type=kg_graph_type,
+        embedding_function=embedding_function,
+        backend=backend,
         namespace=kg_graph_type,
     )
 
@@ -285,6 +387,130 @@ class IngestPipeline:
     ) -> GraphExtractionWithIDs:
         payload = semantic_tree_to_kge_payload(parse_result.semantic_tree, doc_id=source_document_id)
         return GraphExtractionWithIDs.model_validate(payload)
+
+    def persist_demo_graph_extraction(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        graph_extraction: GraphExtractionWithIDs,
+        namespace: str,
+    ) -> None:
+        """Persist a KG-visible copy of the semantic tree for the one-process demo.
+
+        The regular ingestion path keeps its existing promotion behavior. The demo path
+        intentionally mirrors the full semantic tree into KG so the graph view has a
+        richer node/edge structure while remaining single-process and ephemeral.
+        """
+        enriched = self._filter_demo_graph_extraction(graph_extraction)
+        kg_document = Document(
+            id=source_document_id,
+            content=request.raw_text,
+            type="text",
+            metadata={
+                "workspace_id": request.workspace_id,
+                "source_uri": request.source_uri,
+                "title": request.title,
+                "source_format": request.source_format,
+                "parser_mode": request.parser_mode,
+                "visibility": "projection",
+                "projection_visible": True,
+                "demo_graph_extraction": True,
+            },
+        )
+        for node in enriched.nodes:
+            metadata = dict(getattr(node, "metadata", {}) or {})
+            metadata.update(
+                {
+                    "workspace_id": request.workspace_id,
+                    "source_document_id": source_document_id,
+                    "source_uri": request.source_uri,
+                    "visibility": "projection",
+                    "projection_visible": True,
+                    "demo_graph_extraction": True,
+                }
+            )
+            node.metadata = metadata
+        for edge in enriched.edges:
+            metadata = dict(getattr(edge, "metadata", {}) or {})
+            metadata.update(
+                {
+                    "workspace_id": request.workspace_id,
+                    "source_document_id": source_document_id,
+                    "source_uri": request.source_uri,
+                    "visibility": "projection",
+                    "projection_visible": True,
+                    "demo_graph_extraction": True,
+                }
+            )
+            edge.metadata = metadata
+        with _temporary_namespace(self.engines.kg, namespace):
+            self.engines.kg.write.add_document(kg_document)
+            self.engines.kg.persist_document_graph_extraction(
+                doc_id=source_document_id,
+                parsed=enriched,
+                mode="append",
+            )
+
+    @staticmethod
+    def _is_sentence_like_title(title: str) -> bool:
+        text = str(title or "").strip()
+        if text.startswith("This is a starter document for the LLM-Wiki quickstart"):
+            return True
+        if len(text) < 32:
+            return False
+        if text.endswith((".", "!", "?")):
+            return True
+        return bool(re.search(r"\s{3,}", text))
+
+    def _filter_demo_graph_extraction(self, graph_extraction: GraphExtractionWithIDs) -> GraphExtractionWithIDs:
+        """Drop sentence-like leaf nodes from the demo graph while keeping hyperedge structure."""
+        enriched = graph_extraction.model_copy(deep=True)
+        parent_by_child: dict[str, str] = {}
+        for edge in enriched.edges:
+            sources = [str(item) for item in (getattr(edge, "source_ids", None) or []) if str(item)]
+            targets = [str(item) for item in (getattr(edge, "target_ids", None) or []) if str(item)]
+            if not sources or not targets:
+                continue
+            for source_id in sources:
+                for target_id in targets:
+                    parent_by_child[target_id] = source_id
+
+        retained_nodes = []
+        removed_ids: set[str] = set()
+        for node in enriched.nodes:
+            node_id = str(getattr(node, "id", "") or "")
+            if not node_id:
+                continue
+            title = str(getattr(node, "label", "") or getattr(node, "summary", "") or "")
+            semantic_type = str((getattr(node, "metadata", {}) or {}).get("semantic_node_type") or "")
+            is_leaf = node_id not in parent_by_child
+            if title.startswith("This is a starter document for the LLM-Wiki quickstart"):
+                removed_ids.add(node_id)
+                continue
+            if (
+                semantic_type not in {"DOCUMENT_ROOT"}
+                and is_leaf
+                and self._is_sentence_like_title(title)
+            ):
+                removed_ids.add(node_id)
+                continue
+            retained_nodes.append(node)
+
+        if not removed_ids:
+            return enriched
+
+        retained_edges = []
+        for edge in enriched.edges:
+            sources = [str(item) for item in (getattr(edge, "source_ids", None) or []) if str(item)]
+            targets = [str(item) for item in (getattr(edge, "target_ids", None) or []) if str(item)]
+            if any(source in removed_ids for source in sources) or any(target in removed_ids for target in targets):
+                continue
+            retained_edges.append(edge)
+
+        enriched.nodes = retained_nodes
+        enriched.edges = retained_edges
+        return enriched
 
     def ingest_parse_result(
         self,

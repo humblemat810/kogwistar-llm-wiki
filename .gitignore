@@ -28,6 +28,8 @@ tests/_tmp/
 .mypy_cache/
 .coverage
 htmlcov/
+logs
+test*.txt
 
 # Editor settings
 .vscode/
