@@ -36,7 +36,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("kogwistar_llm_wiki")
 
 
-def _build_engines(workspace_id: str, data_dir: str | None, backend: str, dsn: str | None):
+def _build_engines(
+    workspace_id: str,
+    data_dir: str | None,
+    backend: str,
+    dsn: str | None,
+    *,
+    split_derived_knowledge: bool = False,
+):
     """Construct a NamespaceEngines bundle from the selected backend."""
     from kogwistar_llm_wiki.ingest_pipeline import (
         build_persistent_namespace_engines,
@@ -46,18 +53,25 @@ def _build_engines(workspace_id: str, data_dir: str | None, backend: str, dsn: s
     if data_dir is None:
         raise ValueError("--data-dir is required for the llm-wiki CLI")
     if backend == "chroma":
-        return build_persistent_namespace_engines(base_dir=data_dir)
+        return build_persistent_namespace_engines(
+            base_dir=data_dir,
+            split_derived_knowledge=split_derived_knowledge,
+        )
     if backend == "postgres":
         if not dsn:
             raise ValueError("--dsn is required when --backend postgres is selected")
-        return build_postgres_namespace_engines(base_dir=data_dir, dsn=dsn)
+        return build_postgres_namespace_engines(
+            base_dir=data_dir,
+            dsn=dsn,
+            split_derived_knowledge=split_derived_knowledge,
+        )
     raise ValueError(f"Unsupported backend: {backend!r}")
 
 
-def _build_demo_engines():
+def _build_demo_engines(*, split_derived_knowledge: bool = False):
     from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 
-    return build_in_memory_namespace_engines()
+    return build_in_memory_namespace_engines(split_derived_knowledge=split_derived_knowledge)
 
 
 def _read_request_from_source(args: argparse.Namespace):
@@ -91,7 +105,7 @@ def _cmd_demo(args: argparse.Namespace) -> None:
     vault_root = Path(args.vault).expanduser().resolve()
     vault_root.mkdir(parents=True, exist_ok=True)
 
-    engines = _build_demo_engines()
+    engines = _build_demo_engines(split_derived_knowledge=args.split_derived_knowledge)
     pipeline = IngestPipeline(engines)
     ns = pipeline.namespaces_for(args.workspace)
     source_document_id = pipeline._source_document_id(request)
@@ -171,7 +185,13 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
 
     source_path, request = _read_request_from_source(args)
-    engines = _build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
     pipeline = IngestPipeline(engines)
     artifacts = pipeline.run(request)
     print(
@@ -190,7 +210,13 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
 def _cmd_daemon_projection(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.daemon import ProjectionDaemon
 
-    engines = _build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
     Path(args.vault).expanduser().resolve().mkdir(parents=True, exist_ok=True)
     daemon = ProjectionDaemon(
         engines=engines,
@@ -211,7 +237,13 @@ def _cmd_daemon_projection(args: argparse.Namespace) -> None:
 def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.daemon import MaintenanceDaemon
 
-    engines = _build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
     daemon = MaintenanceDaemon(
         engines=engines,
         workspace_id=args.workspace,
@@ -243,6 +275,11 @@ def main(argv: list[str] | None = None) -> int:
         "--dsn",
         default=None,
         help="PostgreSQL DSN for --backend postgres",
+    )
+    parser.add_argument(
+        "--split-derived-knowledge",
+        action="store_true",
+        help="Host derived knowledge on a dedicated engine instead of reusing raw KG",
     )
 
     sub = parser.add_subparsers(dest="command", required=True)

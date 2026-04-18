@@ -13,12 +13,13 @@ bash scripts/bootstrap-dev.sh
 ## Top-level
 
 ```
-llm-wiki [--data-dir <path>] <command>
+llm-wiki [--data-dir <path>] [--split-derived-knowledge] <command>
 ```
 
 | Option | Default | Description |
 |---|---|---|
 | `--data-dir` | `.` | Path to persistent data directory (SQLite meta-store, Chroma data) |
+| `--split-derived-knowledge` | off | Host `derived_knowledge` on a separate engine instead of sharing the KG engine |
 
 ---
 

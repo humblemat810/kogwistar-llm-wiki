@@ -86,8 +86,9 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
 
     fake_engines = SimpleNamespace(name="demo-engines", workflow=SimpleNamespace(name="workflow-engine"))
 
-    def _fake_build_demo_engines():
+    def _fake_build_demo_engines(*, split_derived_knowledge: bool = False):
         captured["demo_builder_called"] = True
+        captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
     def _fake_pipeline_ctor(engines):
@@ -127,6 +128,7 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
     assert exit_code == 0
     assert vault.exists()
     assert captured["demo_builder_called"] is True
+    assert captured["split_derived_knowledge"] is False
     assert captured["maintenance_workspace"] == "demo"
     assert captured["maintenance_designs_seeded"] is True
 
@@ -152,6 +154,57 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
     ]
 
 
+def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "source.md"
+    source.write_text("# Demo\n\nHello\n", encoding="utf-8")
+    vault = tmp_path / "vault-root"
+    captured: dict[str, object] = {}
+
+    fake_engines = SimpleNamespace(name="demo-engines", workflow=SimpleNamespace(name="workflow-engine"))
+
+    def _fake_build_demo_engines(*, split_derived_knowledge: bool = False):
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    def _fake_pipeline_ctor(engines):
+        assert engines is fake_engines
+        return _FakePipeline(engines)
+
+    class _FakeMaintenanceWorker:
+        def __init__(self, engines):
+            assert engines is fake_engines
+
+        def process_pending_jobs(self, workspace_id):
+            captured["maintenance_workspace"] = workspace_id
+
+    monkeypatch.setattr(llm_wiki_cli, "_build_demo_engines", _fake_build_demo_engines)
+    monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
+    monkeypatch.setattr("kogwistar_llm_wiki.worker.MaintenanceWorker", _FakeMaintenanceWorker)
+    monkeypatch.setattr("kogwistar_llm_wiki.maintenance_designs.materialize_maintenance_designs", lambda workflow_engine: None)
+
+    exit_code = llm_wiki_cli.main(
+        [
+            "--split-derived-knowledge",
+            "demo",
+            "--workspace",
+            "demo",
+            "--source",
+            str(source),
+            "--vault",
+            str(vault),
+            "--title",
+            "Demo Doc",
+            "--promotion-mode",
+            "sync",
+        ]
+    )
+
+    assert exit_code == 0
+    assert vault.exists()
+    assert captured["split_derived_knowledge"] is True
+    assert captured["maintenance_workspace"] == "demo"
+
+
 def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, capsys):
     source = tmp_path / "source.md"
     source.write_text("Alpha\nBeta\n", encoding="utf-8")
@@ -160,11 +213,19 @@ def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, 
 
     fake_engines = SimpleNamespace(name="engines")
 
-    def _fake_build_engines(workspace_id: str, data_dir_arg: str | None, backend: str, dsn: str | None):
+    def _fake_build_engines(
+        workspace_id: str,
+        data_dir_arg: str | None,
+        backend: str,
+        dsn: str | None,
+        *,
+        split_derived_knowledge: bool = False,
+    ):
         captured["workspace_id"] = workspace_id
         captured["data_dir"] = data_dir_arg
         captured["backend"] = backend
         captured["dsn"] = dsn
+        captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
     def _fake_pipeline_ctor(engines):
@@ -195,6 +256,7 @@ def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, 
     assert Path(captured["data_dir"]) == data_dir
     assert captured["backend"] == "chroma"
     assert captured["dsn"] is None
+    assert captured["split_derived_knowledge"] is False
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["workspace_id"] == "demo"
@@ -210,11 +272,19 @@ def test_projection_daemon_command_creates_vault_root(tmp_path, monkeypatch):
 
     fake_engines = SimpleNamespace(name="engines")
 
-    def _fake_build_engines(workspace_id: str, data_dir_arg: str | None, backend: str, dsn: str | None):
+    def _fake_build_engines(
+        workspace_id: str,
+        data_dir_arg: str | None,
+        backend: str,
+        dsn: str | None,
+        *,
+        split_derived_knowledge: bool = False,
+    ):
         captured["workspace_id"] = workspace_id
         captured["data_dir"] = data_dir_arg
         captured["backend"] = backend
         captured["dsn"] = dsn
+        captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
     class _FakeProjectionDaemon:
@@ -264,11 +334,19 @@ def test_ingest_cli_accepts_postgres_backend_switch(tmp_path, monkeypatch, capsy
 
     fake_engines = SimpleNamespace(name="engines")
 
-    def _fake_build_engines(workspace_id: str, data_dir_arg: str | None, backend: str, dsn: str | None):
+    def _fake_build_engines(
+        workspace_id: str,
+        data_dir_arg: str | None,
+        backend: str,
+        dsn: str | None,
+        *,
+        split_derived_knowledge: bool = False,
+    ):
         captured["workspace_id"] = workspace_id
         captured["data_dir"] = data_dir_arg
         captured["backend"] = backend
         captured["dsn"] = dsn
+        captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
     def _fake_pipeline_ctor(engines):
@@ -301,5 +379,59 @@ def test_ingest_cli_accepts_postgres_backend_switch(tmp_path, monkeypatch, capsy
     assert exit_code == 0
     assert captured["backend"] == "postgres"
     assert captured["dsn"] == "postgresql://demo:demo@127.0.0.1:5432/demo"
+    assert captured["split_derived_knowledge"] is False
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["workspace_id"] == "demo"
+
+
+def test_ingest_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "source.md"
+    source.write_text("Alpha\nBeta\n", encoding="utf-8")
+    data_dir = tmp_path / "workspace-data"
+    captured: dict[str, object] = {}
+
+    fake_engines = SimpleNamespace(name="engines")
+
+    def _fake_build_engines(
+        workspace_id: str,
+        data_dir_arg: str | None,
+        backend: str,
+        dsn: str | None,
+        *,
+        split_derived_knowledge: bool = False,
+    ):
+        captured["workspace_id"] = workspace_id
+        captured["data_dir"] = data_dir_arg
+        captured["backend"] = backend
+        captured["dsn"] = dsn
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    def _fake_pipeline_ctor(engines):
+        assert engines is fake_engines
+        return _FakePipeline(engines)
+
+    monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
+    monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
+
+    exit_code = llm_wiki_cli.main(
+        [
+            "--data-dir",
+            str(data_dir),
+            "--split-derived-knowledge",
+            "ingest",
+            "--workspace",
+            "demo",
+            "--source",
+            str(source),
+            "--title",
+            "Demo Doc",
+            "--promotion-mode",
+            "sync",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["split_derived_knowledge"] is True
     payload = json.loads(capsys.readouterr().out)
     assert payload["workspace_id"] == "demo"

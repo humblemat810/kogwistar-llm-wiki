@@ -26,6 +26,8 @@ Refactor the current maintenance/distillation stack so that:
 - [x] Derived knowledge is isolated from raw KG by namespace
 - [x] Derived knowledge can be hosted on a separate engine from raw KG
 - [x] Engine-split mode for derived knowledge is covered by tests
+- [x] CLI now exposes `--split-derived-knowledge` so same-engine and split-engine hosting can be selected explicitly
+- [x] The hosting split is now a runtime/configuration choice, not an internal-only refactor detail
 - [ ] Generic maintenance capability is factored cleanly enough to move into core
 
 ### Phase A: Semantic Cleanup
@@ -55,6 +57,8 @@ Refactor the current maintenance/distillation stack so that:
 - [ ] Decide the hosting shape for `derived_knowledge`
   - [x] minimum isolation: separate namespace from raw KG
   - [x] optional split: dedicated engine separate from raw KG engine
+  - [x] CLI flag now selects same-engine vs split-engine hosting
+  - [x] the toggle is exposed in both the CLI and the builder path
   - [ ] document backend/search tradeoffs for same-engine vs separate-engine hosting
 
 ### Phase C: Workflow Refactor Plan
@@ -75,6 +79,7 @@ Refactor the current maintenance/distillation stack so that:
 - [ ] Decouple engine assumptions from maintenance steps
   - [x] `derived_knowledge` writer should not be hard-wired to `engines.kg`
   - [x] `NamespaceEngines` can represent same-engine and split-engine derived-knowledge layouts
+- [x] Expose split-engine hosting as a CLI-level toggle
 
 ### Phase D: Test Migration Plan
 
