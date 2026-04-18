@@ -48,7 +48,7 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 
 **Currently (app layer):**
 - `build_distillation_design()` in `maintenance_designs.py` constructs a `WorkflowDesignArtifact`
-- The step resolvers (`_step_distill`, `_step_distill_from_history`) are app-specific
+- The step resolvers (`_step_distill`, `derive_problem_solving_wisdom_from_history`) are app-specific
 
 **Proposed core addition:**
 - A `KnowledgeDistillationDesign` built-in workflow design similar to how the engine ships with index-job schema
@@ -88,7 +88,7 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 ### 4. Execution-wisdom pattern recognition
 
 **Currently (app layer):**
-- `_step_distill_from_history` is a step resolver that scans step exec nodes and emits wisdom
+- `derive_problem_solving_wisdom_from_history` is a step resolver that scans step exec nodes and emits execution wisdom
 - It uses a fixed threshold (`_MIN_FAILURE_SIGNALS = 2`) and groups only by `step_op`
 
 **Longer-term design:**

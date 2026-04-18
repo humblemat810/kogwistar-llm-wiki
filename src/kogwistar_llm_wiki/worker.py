@@ -58,7 +58,8 @@ class MaintenanceWorker(BaseWorker):
         self.eager_mode = eager_mode
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
-        self.resolver.register("distill_from_history")(self._step_distill_from_history)
+        self.resolver.register("distill_from_history")(self.derive_problem_solving_wisdom_from_history)
+        self.resolver.register("derive_problem_solving_wisdom_from_history")(self.derive_problem_solving_wisdom_from_history)
         self.resolver.register("check_done")(self._step_check_done)
         self.resolver.register("noop")(self._step_noop)
         def pred_continue(ctx):
@@ -364,7 +365,7 @@ class MaintenanceWorker(BaseWorker):
         ]
 
         if not step_exec_nodes:
-            logger.debug("_step_distill_from_history: no failure records found — skipping")
+            logger.debug("derive_problem_solving_wisdom_from_history: no failure records found — skipping")
             return []
 
         # 2. Group failures by step_op.
@@ -443,8 +444,8 @@ class MaintenanceWorker(BaseWorker):
 
         return emitted
 
-    def _step_distill_from_history(self, ctx: StepContext) -> StepRunResult:
-        """Resolver wrapper for future workflow-native execution-wisdom extraction."""
+    def derive_problem_solving_wisdom_from_history(self, ctx: StepContext) -> StepRunResult:
+        """Resolver wrapper for workflow-native execution-wisdom extraction."""
         workspace_id = ctx.state_view.get("workspace_id")
         _deps_raw = ctx.state_view.get("_deps")
         engines = _deps_raw.get("engines") if isinstance(_deps_raw, dict) else _deps_raw
@@ -455,6 +456,10 @@ class MaintenanceWorker(BaseWorker):
                 "execution_wisdom_emitted": emitted,
             })]
         )
+
+    def _step_distill_from_history(self, ctx: StepContext) -> StepRunResult:
+        """Compatibility alias for older workflow step names."""
+        return self.derive_problem_solving_wisdom_from_history(ctx)
 
     def _step_noop(self, ctx: StepContext) -> StepRunResult:
         """Resolver step for terminal/noop nodes."""

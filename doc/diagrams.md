@@ -82,7 +82,7 @@ flowchart LR
     KG --> MW
     PREQ --> PW
     MW -->|_step_distill| WISDOM
-    MW -->|_step_distill_from_history| WISDOM
+    MW -->|derive_problem_solving_wisdom_from_history| WISDOM
     PW -->|sync_obsidian_vault| VAULT
 ```
 
@@ -101,7 +101,7 @@ flowchart TD
     subgraph Workflow Steps
         direction TB
         D1["_step_distill\n① fetch promoted_knowledge nodes\n② group by entity label\n③ merge + deduplicate mentions\n④ tombstone existing wisdom node\n⑤ write versioned wisdom node"]
-        D2["_step_distill_from_history\n① fetch workflow_step_exec failures\n② group by step_op\n③ if ≥2 signals → tombstone old\n④ write execution_wisdom node"]
+        D2["derive_problem_solving_wisdom_from_history\n① fetch workflow_step_exec failures\n② group by step_op\n③ if ≥2 signals → tombstone old\n④ write execution_wisdom node"]
         CHECK{"continue_distillation?"}
         DONE([done])
     end
@@ -203,7 +203,7 @@ flowchart TB
     end
 
     subgraph wisdom["wisdom engine"]
-        W1["ws:demo:wisdom\nwisdom nodes (KG aggregation)\nexecution_wisdom nodes (failure patterns)"]
+        W1["ws:demo:wisdom\nexecution_wisdom nodes (failure patterns)"]
     end
 
     subgraph obsidian["📁 Obsidian vault (filesystem)"]

@@ -1,119 +1,159 @@
 # Status
 
-## Refactor Plan: Distillation, Wisdom, and Cross-Repo Ownership
+## Refactor Status: Distillation, Wisdom, and Core Boundaries
 
 **Status:** In progress  
-**Mode:** Runtime refactor active in `kogwistar-llm-wiki`; no cross-repo code move yet  
-**Scope:** `kogwistar`, `kogwistar-llm-wiki`, and supporting docs/tests across the sibling repos
+**Mode:** Runtime refactor active in `kogwistar-llm-wiki`; cross-repo code moves are still gated  
+**Scope:** `kogwistar`, `kogwistar-llm-wiki`, and sibling docs/tests
 
-### Goal
+### What is already true
 
-Refactor the current maintenance/distillation stack so that:
+- core maintenance plumbing exists and is working
+- core queue claim / retry / completion semantics already exist in `kogwistar`
+- namespace isolation and append-only lifecycle invariants are in place
+- the maintenance path now distinguishes:
+  - `derived_knowledge` for cross-document synthesis
+  - `execution_wisdom` for reusable problem-solving lessons
+- `derived_knowledge` can live:
+  - in the same engine as raw KG, or
+  - in a separate derived-knowledge engine
+- the CLI exposes `--split-derived-knowledge` so the host layout is configurable
+- the split-engine choice is covered by tests
 
-- core `kogwistar` owns generic maintenance capability
-- `kogwistar-llm-wiki` owns knowledge-maintenance policy
-- "wisdom" regains the core meaning of reusable problem-solving lessons
-- current label-merge aggregation is renamed or reclassified if it is really derived knowledge / synthesis
-- the implementation target explicitly corrects the current misuse of `wisdom`
+### What this refactor is correcting
 
-### Current Assessment
+- the old label-merge path is no longer being treated as core-style wisdom
+- current synthesis output should be thought of as derived knowledge, not wisdom
+- true wisdom remains execution-derived or outcome-derived lesson material
+- generic maintenance capability still needs to be cleanly separated from app policy before any code moves into core `kogwistar`
 
-- [x] Durable maintenance job flow exists and is working
-- [x] Namespace isolation and append-only lifecycle invariants are in place
-- [x] A live app-level distillation path exists
-- [x] The live label-merge path is no longer presented as core-style wisdom
-- [x] Execution-history wisdom is wired into the active maintenance path
-- [x] Derived knowledge is isolated from raw KG by namespace
-- [x] Derived knowledge can be hosted on a separate engine from raw KG
-- [x] Engine-split mode for derived knowledge is covered by tests
-- [x] CLI now exposes `--split-derived-knowledge` so same-engine and split-engine hosting can be selected explicitly
-- [x] The hosting split is now a runtime/configuration choice, not an internal-only refactor detail
-- [ ] Generic maintenance capability is factored cleanly enough to move into core
+### Current shape
 
-### Phase A: Semantic Cleanup
+- `kogwistar-llm-wiki` owns:
+  - document-specific grouping policy
+  - promotion and review thresholds
+  - maintenance job selection policy
+  - artifact semantics for derived knowledge vs wisdom
+- `kogwistar` should eventually own:
+  - maintenance queue / claim / retry protocol
+  - engine-native namespace scoping API
+  - workflow analytics over execution history
+  - append-only versioned artifact helpers for generic maintenance outputs
 
-- [ ] Freeze terminology:
-  - [ ] `knowledge` = promoted durable facts/entities
-  - [ ] `derived_knowledge` or `synthesis` = cross-document consolidation
-  - [ ] `wisdom` = reusable lesson for solving classes of problems
-- [ ] Record the wisdom correction explicitly:
-  - [ ] current live label-merge output is not treated as true wisdom
-  - [ ] true wisdom target is execution-derived / maintenance-outcome-derived
-- [ ] Audit docs that currently blur synthesis and wisdom
-- [ ] Decide whether the current `wisdom` artifact kind should be renamed before any code move
+### Core extraction candidates
 
-### Phase B: Boundary Decision
+The first pieces that look generic enough to expose more cleanly through `kogwistar` are:
 
-- [ ] Confirm the move-down set for `kogwistar`
-  - [ ] maintenance queue / claim / retry protocol
-  - [ ] engine-native namespace scoping API
-  - [ ] workflow analytics over execution history
-  - [ ] append-only versioned artifact helpers for derived maintenance outputs
-- [ ] Confirm the keep-in-app set for `kogwistar-llm-wiki`
-  - [ ] grouping policy
-  - [ ] promotion and review thresholds
-  - [ ] maintenance job selection policy
-  - [ ] artifact semantics for synthesis vs wisdom
-- [ ] Decide the hosting shape for `derived_knowledge`
-  - [x] minimum isolation: separate namespace from raw KG
-  - [x] optional split: dedicated engine separate from raw KG engine
-  - [x] CLI flag now selects same-engine vs split-engine hosting
-  - [x] the toggle is exposed in both the CLI and the builder path
-  - [ ] document backend/search tradeoffs for same-engine vs separate-engine hosting
+- queue claim / retry / completion protocol
+  - already implemented in core; the extraction work is to expose it more clearly to `llm-wiki`
+- engine-scoped namespace context handling
+  - not yet a core API; currently an app-side utility and a core design note
+- execution-history analytics over workflow step traces
+  - not yet a first-class core subsystem; currently a worker-side helper plus docs proposal
+- append-only helpers for versioned derived maintenance artifacts
+  - partially present as patterns in core and app code; not yet unified
+- generic workflow analytics shared by derived-knowledge and wisdom paths
+  - proposal only; not yet a core subsystem
 
-### Phase C: Workflow Refactor Plan
+### Semantic buckets
 
-- [ ] Split the current maintenance workflow into explicit concerns
+#### Already core
+
+- job queue storage and lease semantics
+- claim / retry / completion lifecycle
+- backend parity for in-memory, SQLite, and Postgres queue implementations
+
+#### Good core generalizations
+
+- engine-scoped namespace context
+- execution-history analytics over workflow traces
+- append-only versioned artifact helpers
+- generic workflow analytics for repeated failures, retries, and latency outliers
+
+#### App policy only
+
+- `derived_knowledge` vs `execution_wisdom` naming and semantics
+- label grouping policy
+- promotion/review thresholds
+- exact step-op thresholds for emitting lessons
+- whether an extracted lesson is written to `wisdom` or another app lane
+
+### Open decisions
+
+- which core abstraction should be surfaced first for `llm-wiki` reuse
+- whether `derived_knowledge` stays same-engine by default or moves to split-engine by default later
+- whether the current `wisdom` artifact kind should be renamed before any cross-repo code move
+- whether `derive_problem_solving_wisdom_from_history` becomes:
+  - part of the default workflow,
+  - a separate workflow, or
+  - a core analytics consumer later
+- whether core should ship only generic maintenance primitives or also a reusable distillation template
+
+### Current checklist
+
+#### Semantic cleanup
+
+- [x] freeze terminology enough for the current implementation:
+  - `knowledge` = promoted durable facts/entities
+  - `derived_knowledge` / `synthesis` = cross-document consolidation
+  - `wisdom` = reusable lesson for solving classes of problems
+- [x] record the wisdom correction in docs and status
+- [ ] audit remaining docs for old synthesis/wisdom wording
+- [ ] decide whether persisted `wisdom` should be renamed before a code move
+
+#### Hosting shape
+
+- [x] separate namespace from raw KG
+- [x] optional split engine for derived knowledge
+- [x] CLI flag now selects same-engine vs split-engine hosting
+- [x] builder path exposes the same toggle
+- [ ] document backend/search tradeoffs for same-engine vs split-engine hosting
+
+#### Workflow refactor
+
+- [ ] split maintenance into explicit concerns:
   - [ ] synthesis / derived-knowledge workflow
   - [ ] execution-history wisdom workflow
-- [ ] Make the "true wisdom" correction part of the implementation plan
-  - [ ] wire an active execution-derived wisdom path
-  - [ ] stop presenting synthesis output as wisdom
-- [ ] Remove decorative topology:
-  - [ ] either make looping real
-  - [ ] or simplify the workflow to a truthful single-pass DAG
-- [ ] Decide whether `_step_distill_from_history` becomes:
-  - [ ] part of the default workflow
-  - [ ] a separate workflow
-  - [ ] or a core analytics consumer later
-- [ ] Decouple engine assumptions from maintenance steps
-  - [x] `derived_knowledge` writer should not be hard-wired to `engines.kg`
-  - [x] `NamespaceEngines` can represent same-engine and split-engine derived-knowledge layouts
-- [x] Expose split-engine hosting as a CLI-level toggle
+- [x] decouple derived-knowledge writes from hard-wired `engines.kg`
+- [x] `NamespaceEngines` can represent same-engine and split-engine derived-knowledge layouts
+- [x] expose split-engine hosting as a CLI-level toggle
+- [ ] remove any remaining decorative topology in the maintenance workflow
 
-### Phase D: Test Migration Plan
+#### Test migration
 
-- [ ] Reclassify tests by ownership
+- [ ] reclassify tests by ownership
   - [ ] core capability tests move with `kogwistar`
   - [ ] app policy tests stay in `kogwistar-llm-wiki`
-- [ ] Add invariant tests for the semantic split
-  - [ ] synthesis is not labeled as wisdom
-  - [ ] execution-history wisdom remains execution-derived
-  - [ ] cross-repo queue/runtime invariants still hold
-- [ ] Add topology tests for derived-knowledge hosting
-  - [x] same-engine / separate-namespace mode
-  - [x] separate-engine mode
-  - [ ] backend-sensitive search behavior documented or pinned where practical
+- [ ] add invariant tests for the semantic split
+- [x] same-engine / separate-namespace hosting is covered
+- [x] separate-engine hosting is covered
+- [ ] backend-sensitive search behavior still needs documentation or pinning where practical
 
-### Phase E: Documentation Plan
+#### Documentation
 
-- [ ] Update architecture docs after terminology is frozen
-- [ ] Update CLI/quickstart wording if artifact names change
-- [ ] Keep a migration note mapping old names to new names
-- [ ] Record cross-repo edit expectations anywhere contributor guidance discusses sibling repos
+- [ ] update architecture docs after terminology is fully frozen
+- [ ] keep a migration note mapping old names to new ones
+- [ ] refresh CLI/quickstart wording if artifact names change again
+- [ ] keep cross-repo edit expectations visible in contributor guidance
 
-### Decision Gates
+### Non-goals for this pass
 
-- [ ] Gate 1: agree on synthesis vs wisdom naming
-- [ ] Gate 2: agree on what is capability vs policy
-- [ ] Gate 3: agree on whether core ships a generic distillation template or only analytics + queue primitives
-- [ ] Gate 4: only after the above, begin code moves across repos
+- [x] no code move into `kogwistar` yet
+- [x] no projection rewrite yet
+- [x] no persisted artifact rename beyond the derived-knowledge semantic correction
 
-### Non-Goals For This Pass
+### Recommended next slice
 
-- [x] No code move into `kogwistar` yet
-- [x] No artifact rename in persisted data beyond the `derived_knowledge` semantic correction
-- [x] No projection behavior rewrite yet
+Document the same-engine vs split-engine tradeoff for `derived_knowledge`, then use that to decide the first core-boundary extraction target.
+
+Why this next:
+- the hosting split is now implemented
+- the semantics are now clean enough to reason about
+- the remaining blocker is not code shape, but deciding which parts are truly generic enough to move into core
+
+If you want the shortest possible implementation slice after that, it should be:
+- add a small core-facing maintenance abstraction for queue/analytics
+- keep `derived_knowledge` and `execution_wisdom` policy in `llm-wiki` until the seam is stable
 
 ## Completed
 
