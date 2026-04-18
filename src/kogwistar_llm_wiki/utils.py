@@ -4,6 +4,8 @@ import threading
 from contextlib import contextmanager
 from typing import Any
 
+from kogwistar.engine_core.engine import scoped_namespace as _core_scoped_namespace
+
 
 # ---------------------------------------------------------------------------
 # CoW namespace proxy
@@ -117,3 +119,10 @@ def _temporary_namespace(engine: Any, namespace: str):
         finally:
             for obj, attr, old_val in rebindings:
                 setattr(obj, attr, old_val)
+
+
+@contextmanager
+def _temporary_namespace(engine: Any, namespace: str):
+    """Compatibility wrapper over the core namespace scoping primitive."""
+    with _core_scoped_namespace(engine, namespace):
+        yield

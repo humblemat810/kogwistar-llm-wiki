@@ -10,6 +10,7 @@
 
 - core maintenance plumbing exists and is working
 - core queue claim / retry / completion semantics already exist in `kogwistar`
+- core namespace-scoping primitive now exists and `llm-wiki` delegates to it
 - namespace isolation and append-only lifecycle invariants are in place
 - the maintenance path now distinguishes:
   - `derived_knowledge` for cross-document synthesis
@@ -34,9 +35,9 @@
   - promotion and review thresholds
   - maintenance job selection policy
   - artifact semantics for derived knowledge vs wisdom
-- `kogwistar` should eventually own:
+- `kogwistar` already owns or should own:
+  - engine-native namespace scoping primitive
   - maintenance queue / claim / retry protocol
-  - engine-native namespace scoping API
   - workflow analytics over execution history
   - append-only versioned artifact helpers for generic maintenance outputs
 
@@ -47,7 +48,7 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - queue claim / retry / completion protocol
   - already implemented in core; the extraction work is to expose it more clearly to `llm-wiki`
 - engine-scoped namespace context handling
-  - not yet a core API; currently an app-side utility and a core design note
+  - now implemented as a core-scoped namespace primitive and reused by `llm-wiki`
 - execution-history analytics over workflow step traces
   - not yet a first-class core subsystem; currently a worker-side helper plus docs proposal
 - append-only helpers for versioned derived maintenance artifacts
@@ -62,6 +63,7 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - job queue storage and lease semantics
 - claim / retry / completion lifecycle
 - backend parity for in-memory, SQLite, and Postgres queue implementations
+- engine-scoped namespace context handling
 
 #### Good core generalizations
 
@@ -144,16 +146,16 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 
 ### Recommended next slice
 
-Document the same-engine vs split-engine tradeoff for `derived_knowledge`, then use that to decide the first core-boundary extraction target.
+Extract a small core execution-history analytics primitive next, then wire `llm-wiki` to consume it for problem-solving wisdom.
 
 Why this next:
-- the hosting split is now implemented
-- the semantics are now clean enough to reason about
-- the remaining blocker is not code shape, but deciding which parts are truly generic enough to move into core
+- namespace scoping is now a core primitive
+- queue semantics already live in core
+- execution-history analysis is the next clear reusable substrate-level behavior
 
 If you want the shortest possible implementation slice after that, it should be:
-- add a small core-facing maintenance abstraction for queue/analytics
-- keep `derived_knowledge` and `execution_wisdom` policy in `llm-wiki` until the seam is stable
+- add a core helper that groups repeated workflow failures by `step_op`
+- keep the authoring policy for `execution_wisdom` in `llm-wiki` until the seam is stable
 
 ## Completed
 
