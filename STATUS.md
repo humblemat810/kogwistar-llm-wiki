@@ -52,7 +52,7 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
   - now implemented as a core-scoped namespace primitive and reused by `llm-wiki`
 - execution-history analytics over workflow step traces
   - now has a small core grouping helper; wisdom authorship still lives in the app
-- append-only helpers for versioned derived maintenance artifacts
+- append-only helpers for replacement derived maintenance artifacts
   - now implemented in core and reused by `llm-wiki`
 - generic workflow analytics shared by derived-knowledge and wisdom paths
   - proposal only; not yet a core subsystem
@@ -100,10 +100,10 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 
 - [x] freeze terminology enough for the current implementation:
   - `knowledge` = promoted durable facts/entities
-  - `derived_knowledge` / `synthesis` = cross-document consolidation
+- `derived_knowledge` / `synthesis` = cross-document consolidation via replacement nodes
   - `wisdom` = reusable lesson for solving classes of problems
 - [x] record the wisdom correction in docs and status
-- [ ] audit remaining docs for old synthesis/wisdom wording
+- [x] audit remaining docs for old synthesis/wisdom wording
 - [ ] decide whether persisted `wisdom` should be renamed before a code move
 
 #### Hosting shape
@@ -117,12 +117,12 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 #### Workflow refactor
 
 - [ ] split maintenance into explicit concerns:
-  - [ ] synthesis / derived-knowledge workflow
-  - [ ] execution-history wisdom workflow
+  - [x] synthesis / derived-knowledge workflow
+  - [x] execution-history wisdom job path
 - [x] decouple derived-knowledge writes from hard-wired `engines.kg`
 - [x] `NamespaceEngines` can represent same-engine and split-engine derived-knowledge layouts
 - [x] expose split-engine hosting as a CLI-level toggle
-- [ ] remove any remaining decorative topology in the maintenance workflow
+- [x] remove decorative loop/check topology from the derived-knowledge maintenance workflow
 
 #### Test migration
 
@@ -149,14 +149,14 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 
 ### Recommended next slice
 
-Document and pin the behavioral tradeoff for redirect-based replacement versus terminal tombstone, then keep `llm-wiki` as the authoring layer on top of it.
+Document and pin the backend/search tradeoff for same-engine versus split-engine `derived_knowledge` hosting, then decide which default should survive the core move.
 
 Why this next:
 - queue semantics already live in core
 - namespace scoping now lives in core
 - repeated failure grouping now lives in core
 - append-only replacement now lives in core
-- the next uncertainty is semantic clarity, not mechanism
+- the next uncertainty is backend/search behavior, not workflow wiring
 
 ## Completed
 
@@ -167,7 +167,9 @@ Why this next:
   - [x] Consume workflow maintenance requests and emit run records
   - [x] Route job categories by namespace and policy
   - [x] Align maintenance with `conv_bg` and `workflow` engine partitioning
-  - [x] Looping distillation design (`maintenance.distillation.v1`) implemented
+  - [x] Explicit maintenance concerns now exist:
+    - [x] `maintenance.derived_knowledge.v1` for synthesis
+    - [x] `execution_wisdom` jobs routed as their own maintenance kind
   - [x] Verified with behavioral pinning tests
 - [x] Event-driven distillation pipeline (append-only invariants)
   - [x] `MaintenanceWorker.process_pending_jobs` uses `workflow_completed` event nodes (not CRUD status)
@@ -205,11 +207,14 @@ Why this next:
 
 ### Wisdom distillation
 
-- [x] `_step_distill` now aggregates `promoted_knowledge` nodes → deduplicates mentions → writes versioned `derived_knowledge` nodes into the knowledge engine under a separate `ws:{id}:kg:derived` namespace
+- [x] `_step_distill` now aggregates `promoted_knowledge` nodes → deduplicates mentions → writes replacement `derived_knowledge` nodes into the knowledge engine under a separate `ws:{id}:kg:derived` namespace
 - [x] Append-only: prior derived-knowledge ids are redirected to the fresh replacement node, with `replaces_ids` backlink preserved
 - [x] Replacement artifacts now stamp `created_at_ms` instead of an ambiguous `version_ts`
 - [x] Execution-history analysis is active: after each maintenance workflow run, failure traces are scanned and `execution_wisdom` nodes are emitted for repeated failure patterns
-- [x] Runtime workflow simplified back to a truthful synthesis/check DAG; history wisdom is emitted post-run rather than by self-reading the trace lane mid-step
+- [x] Maintenance structure split:
+  - [x] derived-knowledge uses `maintenance.derived_knowledge.v1`
+  - [x] execution-wisdom uses its own maintenance kind instead of piggybacking on every synthesis run
+  - [x] history-wisdom extraction stays outside the runtime step lane for now to avoid the conversation trace self-read deadlock
 - [x] Tested via focused semantic-split coverage:
   - [x] multi-document label merge now asserts `artifact_kind = derived_knowledge`
   - [x] execution-history failures now produce `execution_wisdom`

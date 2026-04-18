@@ -96,22 +96,20 @@ flowchart TD
     FIND["scan conv:bg for\nmaintenance_job_request nodes"]
     TRACE{"workflow_completed\ntrace exists?"}
     SKIP["skip — already done"]
-    RUN["_handle_request\nrun maintenance.distillation.v1"]
+    RUN["_handle_request\nroute by maintenance_kind"]
 
     subgraph Workflow Steps
         direction TB
-        D1["_step_distill\n① fetch promoted_knowledge nodes\n② group by entity label\n③ merge + deduplicate mentions\n④ tombstone existing wisdom node\n⑤ write versioned wisdom node"]
-        D2["derive_problem_solving_wisdom_from_history\n① fetch workflow_step_exec failures\n② group by step_op\n③ if ≥2 signals → tombstone old\n④ write execution_wisdom node"]
-        CHECK{"continue_distillation?"}
+        D1["maintenance.derived_knowledge.v1 / _step_distill\n① fetch promoted_knowledge nodes\n② group by entity label\n③ merge + deduplicate mentions\n④ write replacement derived_knowledge node\n⑤ redirect old ids to new id"]
+        D2["execution_wisdom maintenance kind\n① fetch workflow_step_exec failures\n② group by step_op\n③ if ≥2 signals → write replacement execution_wisdom node\n④ redirect old ids to new id"]
         DONE([done])
     end
 
     START --> FIND --> TRACE
     TRACE -->|yes| SKIP
     TRACE -->|no| RUN
-    RUN --> D1 --> D2 --> CHECK
-    CHECK -->|yes| D1
-    CHECK -->|no| DONE
+    RUN --> D1 --> DONE
+    RUN --> D2 --> DONE
 ```
 
 ---

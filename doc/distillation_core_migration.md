@@ -10,7 +10,7 @@
 
 The current `kogwistar-llm-wiki` repository implements two background capabilities on top of the Kogwistar engine:
 
-1. **Knowledge distillation** — aggregates `promoted_knowledge` nodes from the KG into versioned `wisdom` nodes
+1. **Knowledge distillation** — aggregates `promoted_knowledge` nodes from the KG into replacement `derived_knowledge` nodes
 2. **Execution-history wisdom** — scans `workflow_step_exec` failure records, groups by step op, emits `execution_wisdom` patterns
 3. **Maintenance worker** — a polling loop that discovers `maintenance_job_request` events and runs the distillation workflow
 
@@ -49,6 +49,7 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 **Currently (app layer):**
 - `build_distillation_design()` in `maintenance_designs.py` constructs a `WorkflowDesignArtifact`
 - The step resolvers (`_step_distill`, `derive_problem_solving_wisdom_from_history`) are app-specific
+- Execution-history wisdom is intentionally not running as a workflow step today because reading conversation trace history from inside the runtime lane deadlocks against the runtime's own namespaced trace context
 
 **Proposed core addition:**
 - A `KnowledgeDistillationDesign` built-in workflow design similar to how the engine ships with index-job schema
@@ -59,7 +60,7 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 
 **Why:**
 - The merge/deduplication logic for mentions is generic — any app doing multi-document entity resolution would need it
-- The tombstone-before-replace pattern for node versioning is a core invariant; it should be enforced by core utilities, not duplicated in app code
+- The replacement-by-redirect pattern for node lifecycle is a core invariant; it should be enforced by core utilities, not duplicated in app code
 
 ---
 
@@ -88,7 +89,7 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 ### 4. Execution-wisdom pattern recognition
 
 **Currently (app layer):**
-- `derive_problem_solving_wisdom_from_history` is a step resolver that scans step exec nodes and emits execution wisdom
+- `derive_problem_solving_wisdom_from_history` is an app-owned history-analysis routine that scans step exec nodes and emits `execution_wisdom`
 - It uses a fixed threshold (`_MIN_FAILURE_SIGNALS = 2`) and groups only by `step_op`
 
 **Longer-term design:**
@@ -96,7 +97,7 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
   - `get_failure_patterns(workspace_id, since)` — returns aggregated failure stats
   - `get_latency_outliers(workspace_id, percentile)` — for perf-aware wisdom
   - `get_retry_chains(workspace_id)` — for resilience wisdom
-- Apps call these analytics APIs and decide what to write as wisdom artifacts
+- Apps call these analytics APIs and decide what to write as `execution_wisdom` artifacts
 - This separates the *pattern detection* (core) from the *wisdom authorship* (app)
 
 ---
@@ -116,16 +117,17 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 ## Migration path
 
 1. **Phase 1 (now):** App implements everything. Core provides primitives (engines, runtime, subsystems).
-2. **Phase 2:** Extract `MaintenanceQueue` protocol into Kogwistar core. Apps call `engine.maintenance.enqueue/claim`.
+2. **Phase 2:** Keep the existing core queue protocol surfaced cleanly. Apps call `engine.maintenance.enqueue/claim`.
 3. **Phase 3:** Add `engine.scoped_namespace()` to engine public API. Deprecate app-layer `_temporary_namespace`.
 4. **Phase 4:** Ship `KnowledgeDistillationDesign` as a built-in workflow design in Kogwistar. Apps configure, not reimplement.
-5. **Phase 5:** Add `WorkflowAnalyticsSubsystem` to engine. Apps consume analytics, write wisdom.
+5. **Phase 5:** Add `WorkflowAnalyticsSubsystem` to engine. Apps consume analytics, write `execution_wisdom`.
+6. **Phase 6:** Revisit whether execution-history wisdom can move back into a runtime-native workflow after the trace-lane self-read deadlock has a core solution.
 
 ---
 
 ## Key invariants that must survive migration
 
-- **Append-only**: any move to core must preserve tombstone-before-replace semantics for node updates
-- **Provenance**: every wisdom node written by core must carry a `Grounding` with a real `Span` (`doc_id`, `insertion_method`, `excerpt`)
+- **Append-only**: any move to core must preserve redirect-based replacement semantics for node updates
+- **Provenance**: every `execution_wisdom` or `derived_knowledge` node written by core must carry a `Grounding` with a real `Span` (`doc_id`, `insertion_method`, `excerpt`)
 - **`_deps` injection**: step resolvers must never instantiate engines internally — they receive `NamespaceEngines` via `_deps`
 - **Namespace isolation**: all cross-space writes must go through a scoped namespace context (`conv_bg`, `wisdom`, `workflow_maintenance`)

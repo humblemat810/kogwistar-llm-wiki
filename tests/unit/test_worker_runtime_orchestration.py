@@ -103,7 +103,7 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     assert "workflow_run" in kinds
     assert "workflow_step_exec" in kinds
     
-    # Verify the workflow runs the synthesis pass and the completion check.
+    # Verify the workflow runs the explicit derived-knowledge workflow.
     node_ops = [t.metadata.get("op") for t in traces if t.metadata.get("entity_type") == "workflow_step_exec"]
     assert "distill" in node_ops
-    assert "check_done" in node_ops
+    assert "check_done" not in node_ops

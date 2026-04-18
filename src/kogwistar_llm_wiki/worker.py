@@ -19,6 +19,9 @@ from .utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)
 
+DERIVED_KNOWLEDGE_WORKFLOW_ID = "maintenance.derived_knowledge.v1"
+EXECUTION_WISDOM_WORKFLOW_ID = "maintenance.execution_wisdom.v1"
+
 
 class BaseWorker(ABC):
     """Base class for background workers polling the Kogwistar artifact stream."""
@@ -62,19 +65,13 @@ class MaintenanceWorker(BaseWorker):
         self.resolver.register("distill")(self._step_distill)
         self.resolver.register("distill_from_history")(self.derive_problem_solving_wisdom_from_history)
         self.resolver.register("derive_problem_solving_wisdom_from_history")(self.derive_problem_solving_wisdom_from_history)
-        self.resolver.register("check_done")(self._step_check_done)
         self.resolver.register("noop")(self._step_noop)
-
-        def pred_continue(ctx):
-            return True
 
         self.runtime = WorkflowRuntime(
             workflow_engine=self.engines.workflow,
             conversation_engine=self.engines.conversation,
             step_resolver=self.resolver,
-            predicate_registry={
-                "continue": pred_continue,
-            },
+            predicate_registry={},
         )
 
     def process_pending_jobs(self, workspace_id: str):
@@ -110,6 +107,39 @@ class MaintenanceWorker(BaseWorker):
             )
         logger.info("Processing maintenance job %s", req_node_id)
         ns = WorkspaceNamespaces(workspace_id)
+        workflow_id = self._workflow_id_for_kind(maintenance_kind)
+
+        if workflow_id == EXECUTION_WISDOM_WORKFLOW_ID:
+            try:
+                emitted = self._emit_execution_wisdom_from_history(workspace_id, self.engines)
+                logger.info(
+                    "Maintenance job %s execution finished: finished (%s emitted=%s)",
+                    req_node_id,
+                    workflow_id,
+                    len(emitted),
+                )
+                if job_id:
+                    self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
+            except Exception as e:
+                logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
+                if job_id:
+                    retry_count = int(
+                        getattr(job, "retry_count", None)
+                        or (job.get("retry_count") if isinstance(job, dict) else 0)
+                    )
+                    max_retries = int(
+                        getattr(job, "max_retries", None)
+                        or (job.get("max_retries") if isinstance(job, dict) else 10)
+                    )
+                    if retry_count + 1 < max_retries:
+                        self.engines.conversation.meta_sqlite.bump_retry_and_requeue(
+                            job_id,
+                            str(e),
+                            next_run_at_seconds=min(300, 2 ** max(retry_count, 0)),
+                        )
+                    else:
+                        self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
+            return
 
         import warnings
         with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
@@ -123,7 +153,7 @@ class MaintenanceWorker(BaseWorker):
                 )
                 try:
                     result = self.runtime.run(
-                        workflow_id="maintenance.distillation.v1",
+                        workflow_id=workflow_id,
                         initial_state={
                             "workspace_id": workspace_id,
                             "request_id": req_node_id,
@@ -134,8 +164,12 @@ class MaintenanceWorker(BaseWorker):
                         turn_node_id=req_node_id,
                     )
                     status = result.status if hasattr(result, "status") else "finished"
-                    self._emit_execution_wisdom_from_history(workspace_id, self.engines)
-                    logger.info(f"Maintenance job {req_node_id} execution finished: {status}")
+                    logger.info(
+                        "Maintenance job %s execution finished: %s (%s)",
+                        req_node_id,
+                        status,
+                        workflow_id,
+                    )
                     if job_id:
                         self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
                 except Exception as e:
@@ -157,6 +191,17 @@ class MaintenanceWorker(BaseWorker):
                             )
                         else:
                             self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
+
+    def _workflow_id_for_kind(self, maintenance_kind: str) -> str:
+        normalized = str(maintenance_kind or "distill").strip().lower()
+        if normalized in {
+            "execution_wisdom",
+            "history_wisdom",
+            "distill_from_history",
+            "derive_problem_solving_wisdom_from_history",
+        }:
+            return EXECUTION_WISDOM_WORKFLOW_ID
+        return DERIVED_KNOWLEDGE_WORKFLOW_ID
 
     def _decode_payload(self, job: Any) -> dict[str, Any]:
         payload = getattr(job, "payload_json", None)
@@ -290,14 +335,6 @@ class MaintenanceWorker(BaseWorker):
                 "distilled_entities": list(entity_groups.keys()),
             })]
         )
-
-    def _step_check_done(self, ctx: StepContext) -> StepRunResult:
-        """Resolver step for checking if distillation is done."""
-        should_continue = ctx.state_view.get("continue_distillation", False)
-        if should_continue:
-            return RunSuccess(state_update=[], next_step_names=["continue"])
-        else:
-            return RunSuccess(state_update=[], next_step_names=["finished"])
 
     def _emit_execution_wisdom_from_history(self, workspace_id: str, engines: NamespaceEngines) -> list[str]:
         """Analyze completed execution history and emit execution-derived wisdom."""

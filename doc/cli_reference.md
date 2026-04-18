@@ -67,15 +67,15 @@ llm-wiki daemon maintenance \
 **What it does on each poll cycle:**
 1. Scan `conv:bg` for `maintenance_job_request` nodes
 2. Skip any request that already has a `workflow_completed` trace
-3. For each pending request, run `maintenance.distillation.v1` workflow:
-   - `distill` aggregates promoted knowledge into versioned `derived_knowledge` nodes
-   - `check_done` finishes or requests another synthesis pass
-4. After the workflow completes, scan execution history for repeated failure patterns and emit `execution_wisdom` nodes
+3. For each pending `distill` request, run `maintenance.derived_knowledge.v1`:
+   - `distill` aggregates promoted knowledge into replacement `derived_knowledge` nodes
+4. For each pending `execution_wisdom` request, run the dedicated history-analysis job path:
+   - `derive_problem_solving_wisdom_from_history` scans failure traces and emits replacement `execution_wisdom` nodes
 5. Sleep `--interval` seconds before next poll
 
 Current semantics:
-- `distill` produces versioned `derived_knowledge` nodes from promoted KG knowledge in `ws:{id}:kg:derived`
-- execution-history analysis runs immediately after the workflow finishes and emits `execution_wisdom` nodes for repeated failure patterns
+- `distill` produces replacement `derived_knowledge` nodes from promoted KG knowledge in `ws:{id}:kg:derived`
+- `execution_wisdom` jobs scan failure traces and emit `execution_wisdom` nodes without piggybacking on every distill run
 
 **Example:**
 

@@ -10,6 +10,7 @@ from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_desig
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
+import json
 
 
 def _sync_request(request, **updates):
@@ -163,7 +164,14 @@ def test_execution_wisdom_derivation_uses_history_failures(pipeline, ingest_requ
         raise RuntimeError("history failure")
 
     failing_worker.resolver.register("distill")(mock_distill)
-    failing_worker.process_pending_jobs(workspace_id)
+    failed_jobs = engines.conversation.meta_sqlite.claim_index_jobs(
+        limit=10,
+        lease_seconds=60,
+        namespace=ns.maintenance_jobs,
+    )
+    assert len(failed_jobs) >= 2
+    for job in failed_jobs[:2]:
+        failing_worker._handle_job(workspace_id, job)
 
     third = _run_sync_ingest(
         pipeline,
@@ -171,6 +179,25 @@ def test_execution_wisdom_derivation_uses_history_failures(pipeline, ingest_requ
     )
 
     successful_worker = MaintenanceWorker(engines)
+    successful_worker.process_pending_jobs(workspace_id)
+
+    wisdom_job_id = f"{third.maintenance_job_id}:execution_wisdom"
+    engines.conversation.meta_sqlite.enqueue_index_job(
+        job_id=wisdom_job_id,
+        namespace=ns.maintenance_jobs,
+        entity_kind="maintenance_job",
+        entity_id=third.source_document_id,
+        index_kind="maintenance_job",
+        op="UPSERT",
+        payload_json=json.dumps(
+            {
+                "workspace_id": workspace_id,
+                "request_node_id": third.maintenance_job_id,
+                "source_document_id": third.source_document_id,
+                "maintenance_kind": "execution_wisdom",
+            }
+        ),
+    )
     successful_worker.process_pending_jobs(workspace_id)
 
     with _temporary_namespace(engines.wisdom, ns.wisdom):
@@ -205,6 +232,7 @@ def test_execution_wisdom_derivation_uses_history_failures(pipeline, ingest_requ
         str(first.maintenance_job_id),
         str(second.maintenance_job_id),
         str(third.maintenance_job_id),
+        wisdom_job_id,
     } <= job_ids
 
 
