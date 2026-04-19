@@ -138,7 +138,10 @@ entry, a test pin, or a small implementation guard:
   - only widen this if a future ARD explicitly approves richer links
 - lane messaging keeps graph semantics and queue mechanics split
   - current state: implemented and pinned for one maintenance request/reply round-trip
-  - remaining work: broader worker adoption, rebuild/recovery tests, and run-registry observability
+  - request / reply and claim / ack / requeue behavior are now pinned against the stable engine contract
+  - in-memory and SQLite app integration are covered directly; Postgres parity is enabled when the DSN-backed test env is present
+  - persistent SQLite reload is pinned so projected inbox rows survive engine rebuild
+  - remaining work: broader worker adoption, rebuild/recovery tests once core publishes the repair surface, and run-registry observability
 
 ### Current checklist
 
@@ -187,6 +190,9 @@ entry, a test pin, or a small implementation guard:
 - [x] generic workflow-step execution stats helper is in core and tested
 - [x] core lane-messaging creation / projection / claim-ack-requeue behavior is tested
 - [x] `llm-wiki` maintenance round-trip is pinned with request/reply lane-message assertions
+- [x] `llm-wiki` stable lane-message contract integration is pinned across in-memory and SQLite backends
+- [x] persistent SQLite lane-message projection survives engine reload
+- [x] Postgres parity hook is in place and skips cleanly when the DSN test env is absent
 
 #### Lane messaging
 
@@ -194,10 +200,13 @@ entry, a test pin, or a small implementation guard:
 - [x] projected lane-message queue rows implemented in in-memory, SQLite, and Postgres meta stores
 - [x] one `llm-wiki` foreground/background maintenance flow now emits durable request/reply lane messages
 - [x] correlation and reply linkage are preserved
+- [x] `llm-wiki` now uses the stable engine-level send / claim / ack / requeue / list contract without depending on concrete store class names
+- [x] app-side regression coverage now pins request/reply and projected claim / ack / requeue behavior for memory and SQLite
 - [ ] run registry / SSE surfacing of worker lifecycle via lane messages
 - [ ] runtime-facing durable `StepContext.send_lane_message(...)` API
 - [ ] additional worker flows migrated beyond maintenance request/reply
 - [ ] rebuild / recovery / multi-sender concurrency coverage for lane-message projections
+  - note: app-side rebuild coverage is intentionally waiting on a stable engine-level repair / rebuild contract from core
 
 #### Documentation
 

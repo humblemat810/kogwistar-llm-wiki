@@ -307,8 +307,10 @@ class MaintenanceWorker(BaseWorker):
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
             nodes = self.engines.conversation.read.get_nodes(
                 where={
-                    "workspace_id": workspace_id,
-                    "id": req_node_id,
+                    "$and": [
+                        {"workspace_id": workspace_id},
+                        {"id": req_node_id},
+                    ]
                 }
             )
         if nodes:

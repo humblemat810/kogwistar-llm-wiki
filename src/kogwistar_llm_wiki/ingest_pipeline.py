@@ -33,9 +33,9 @@ class _TinyEmbeddingFunction:
     def name(self) -> str:
         return self._name
 
-    def __call__(self, values: list[str]) -> list[list[float]]:
+    def __call__(self, input: list[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
-        for value in values:
+        for value in input:
             text = str(value or "")
             checksum = float((sum(ord(ch) for ch in text) % 97) + 1)
             vectors.append([float(len(text) + 1), checksum])
