@@ -576,11 +576,25 @@ class IngestPipeline:
         )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
+            lane_message = self.engines.conversation.send_lane_message(
+                conversation_id=f"maintenance:{source_document_id}",
+                inbox_id="inbox:worker:maintenance",
+                sender_id="lane:foreground",
+                recipient_id="lane:worker:maintenance",
+                msg_type="request.maintenance",
+                payload={
+                    "workspace_id": request.workspace_id,
+                    "request_node_id": str(node.id),
+                    "source_document_id": source_document_id,
+                    "maintenance_kind": "distill",
+                },
+            )
         self._enqueue_maintenance_job(
             request=request,
             request_node_id=str(node.id),
             source_document_id=source_document_id,
             namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
+            lane_message_id=lane_message.message_id,
         )
         return str(node.id)
 
@@ -675,12 +689,14 @@ class IngestPipeline:
         request_node_id: str,
         source_document_id: str,
         namespace: str,
+        lane_message_id: str | None = None,
     ) -> str:
         payload = {
             "workspace_id": request.workspace_id,
             "request_node_id": request_node_id,
             "source_document_id": source_document_id,
             "maintenance_kind": "distill",
+            "lane_message_id": lane_message_id,
         }
         job_id = request_node_id
         self.engines.conversation.meta_sqlite.enqueue_index_job(

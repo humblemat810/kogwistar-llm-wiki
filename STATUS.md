@@ -29,6 +29,11 @@
   - in a separate derived-knowledge engine
 - the CLI exposes `--split-derived-knowledge` so the host layout is configurable
 - the split-engine choice is covered by tests
+- core lane messaging now exists in `kogwistar.messaging`
+  - graph-native lane messages are written as first-class nodes plus semantic edges
+  - queue claim / lease / retry state is projected in meta stores
+  - the metastore interface slot is `engine.meta_sqlite`; concrete stores may be SQLite, in-memory, or Postgres-backed
+  - `llm-wiki` now uses it for one foreground/background maintenance request/reply path
 
 ### What this refactor is correcting
 
@@ -49,6 +54,7 @@
   - maintenance queue / claim / retry protocol
   - workflow analytics over execution history
   - append-only replacement helpers for generic maintenance outputs
+  - lane-message graph write + projection primitives
 
 ### Core extraction candidates
 
@@ -82,6 +88,8 @@ The first pieces that look generic enough to expose more cleanly through `kogwis
 - redirect-based append-only replacement for derived runtime artifacts
 - reusable grouped maintenance template for replacement artifacts
 - reusable execution-wisdom template for repeated failure patterns
+- lane-message send / update / claim / ack / requeue primitives
+- lane-message projection support in in-memory, SQLite, and Postgres meta stores
 
 #### Good core generalizations
 
@@ -128,6 +136,9 @@ entry, a test pin, or a small implementation guard:
   - pinned by conversation projection tests that use deterministic pointer nodes
 - conversation-to-wisdom links remain pointer-first by default
   - only widen this if a future ARD explicitly approves richer links
+- lane messaging keeps graph semantics and queue mechanics split
+  - current state: implemented and pinned for one maintenance request/reply round-trip
+  - remaining work: broader worker adoption, rebuild/recovery tests, and run-registry observability
 
 ### Current checklist
 
@@ -174,6 +185,19 @@ entry, a test pin, or a small implementation guard:
 - [x] same-engine hosting now pins the shared-engine derived-knowledge read path
 - [x] backend-sensitive search behavior is documented and pinned for the current hosting layouts
 - [x] generic workflow-step execution stats helper is in core and tested
+- [x] core lane-messaging creation / projection / claim-ack-requeue behavior is tested
+- [x] `llm-wiki` maintenance round-trip is pinned with request/reply lane-message assertions
+
+#### Lane messaging
+
+- [x] core graph-native lane-message substrate implemented
+- [x] projected lane-message queue rows implemented in in-memory, SQLite, and Postgres meta stores
+- [x] one `llm-wiki` foreground/background maintenance flow now emits durable request/reply lane messages
+- [x] correlation and reply linkage are preserved
+- [ ] run registry / SSE surfacing of worker lifecycle via lane messages
+- [ ] runtime-facing durable `StepContext.send_lane_message(...)` API
+- [ ] additional worker flows migrated beyond maintenance request/reply
+- [ ] rebuild / recovery / multi-sender concurrency coverage for lane-message projections
 
 #### Documentation
 
@@ -232,6 +256,11 @@ These items are not required for correctness. They are follow-on improvements th
   - the safest current direction is:
     - keep lane names as namespace conventions in app code
     - extract a core lane abstraction only when more than one app needs multi-lane orchestration
+- lane messaging rollout beyond the first slice
+  - add run-registry / SSE lifecycle surfacing
+  - add a runtime-facing durable messaging API
+  - decide whether explicit `MESSAGE_*` semantic event taxonomy should become first-class
+  - add projection rebuild and multi-sender concurrency coverage
 
 These are intentionally lower priority than bug fixes or correctness issues.
 

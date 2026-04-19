@@ -102,6 +102,7 @@ class MaintenanceWorker(BaseWorker):
         job_id = str(getattr(job, "job_id", None) or (job.get("job_id") if isinstance(job, dict) else ""))
         payload = self._decode_payload(job)
         req_node_id = str(payload.get("request_node_id") or job_id)
+        lane_message_id = str(payload.get("lane_message_id") or "")
         maintenance_kind = str(payload.get("maintenance_kind") or "distill")
         request_node = self._load_request_node(workspace_id, req_node_id)
         if request_node is not None:
@@ -123,10 +124,32 @@ class MaintenanceWorker(BaseWorker):
                     workflow_id,
                     len(emitted),
                 )
+                self._emit_lane_reply(
+                    workspace_id=workspace_id,
+                    source_document_id=str(payload.get("source_document_id") or ""),
+                    request_node_id=req_node_id,
+                    reply_to_message_id=lane_message_id or None,
+                    status="completed",
+                    payload={
+                        "maintenance_kind": maintenance_kind,
+                        "execution_wisdom_emitted": emitted,
+                    },
+                )
                 if job_id:
                     self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
             except Exception as e:
                 logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
+                self._emit_lane_reply(
+                    workspace_id=workspace_id,
+                    source_document_id=str(payload.get("source_document_id") or ""),
+                    request_node_id=req_node_id,
+                    reply_to_message_id=lane_message_id or None,
+                    status="failed",
+                    payload={
+                        "maintenance_kind": maintenance_kind,
+                        "error": str(e),
+                    },
+                )
                 if job_id:
                     retry_count = int(
                         getattr(job, "retry_count", None)
@@ -185,10 +208,34 @@ class MaintenanceWorker(BaseWorker):
                         status,
                         workflow_id,
                     )
+                    self._emit_lane_reply(
+                        workspace_id=workspace_id,
+                        source_document_id=str(payload.get("source_document_id") or ""),
+                        request_node_id=req_node_id,
+                        reply_to_message_id=lane_message_id or None,
+                        status="completed",
+                        payload={
+                            "maintenance_kind": maintenance_kind,
+                            "workflow_id": workflow_id,
+                            "runtime_status": status,
+                        },
+                    )
                     if job_id:
                         self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
                 except Exception as e:
                     logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
+                    self._emit_lane_reply(
+                        workspace_id=workspace_id,
+                        source_document_id=str(payload.get("source_document_id") or ""),
+                        request_node_id=req_node_id,
+                        reply_to_message_id=lane_message_id or None,
+                        status="failed",
+                        payload={
+                            "maintenance_kind": maintenance_kind,
+                            "workflow_id": workflow_id,
+                            "error": str(e),
+                        },
+                    )
                     if job_id:
                         retry_count = int(
                             getattr(job, "retry_count", None)
@@ -206,6 +253,41 @@ class MaintenanceWorker(BaseWorker):
                             )
                         else:
                             self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
+
+    def _emit_lane_reply(
+        self,
+        *,
+        workspace_id: str,
+        source_document_id: str,
+        request_node_id: str,
+        reply_to_message_id: str | None,
+        status: str,
+        payload: dict[str, Any],
+    ) -> None:
+        if not reply_to_message_id:
+            return
+        ns = WorkspaceNamespaces(workspace_id)
+        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            self.engines.conversation.send_lane_message(
+                conversation_id=f"maintenance:{source_document_id or request_node_id}",
+                inbox_id="inbox:foreground",
+                sender_id="lane:worker:maintenance",
+                recipient_id="lane:foreground",
+                msg_type=f"reply.maintenance.{status}",
+                payload={
+                    "workspace_id": workspace_id,
+                    "request_node_id": request_node_id,
+                    **payload,
+                },
+                reply_to=reply_to_message_id,
+                correlation_id=reply_to_message_id,
+            )
+            self.engines.conversation.update_lane_message_status(
+                message_id=reply_to_message_id,
+                status="completed" if status == "completed" else "failed",
+                error=(payload if status != "completed" else None),
+                completed=True,
+            )
 
     def _decode_payload(self, job: Any) -> dict[str, Any]:
         payload = getattr(job, "payload_json", None)

@@ -56,6 +56,16 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     req_node = requests[0]
     assert req_node.metadata.get("status") == "pending"
 
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        lane_requests = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "request.maintenance",
+            }
+        )
+    assert len(lane_requests) == 1
+    request_message_id = str(lane_requests[0].id)
+
     # 3. Run Worker
     worker = MaintenanceWorker(pipeline.engines)
     worker.process_pending_jobs(workspace_id)
@@ -107,3 +117,19 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     node_ops = [t.metadata.get("op") for t in traces if t.metadata.get("entity_type") == "workflow_step_exec"]
     assert "distill" in node_ops
     assert "check_done" in node_ops
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "reply.maintenance.completed",
+            }
+        )
+        request_after = pipeline.engines.conversation.read.get_nodes(
+            where={"artifact_kind": "lane_message"},
+        )
+    assert len(replies) == 1
+    assert replies[0].metadata.get("reply_to_message_id") == request_message_id
+    matching_request = [node for node in request_after if str(node.id) == request_message_id]
+    assert len(matching_request) == 1
+    assert matching_request[0].metadata.get("status") == "completed"
