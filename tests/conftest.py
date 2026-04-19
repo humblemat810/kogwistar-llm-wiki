@@ -1,13 +1,42 @@
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 KOGWISTAR_ROOT = ROOT / "kogwistar"
 KG_DOC_PARSER_SRC = ROOT / "kg-doc-parser" / "src"
 OBSIDIAN_SINK_ROOT = ROOT / "kogwistar-obsidian-sink"
+TEST_TMP = ROOT / "tests" / "_tmp"
+
+TEST_TMP.mkdir(parents=True, exist_ok=True)
+for key in ("TMPDIR", "TEMP", "TMP"):
+    os.environ[key] = str(TEST_TMP)
+
+
+import pytest
+
+
+def pytest_configure(config):
+    del config
+    TEST_TMP.mkdir(parents=True, exist_ok=True)
+    for key in ("TMPDIR", "TEMP", "TMP"):
+        os.environ[key] = str(TEST_TMP)
+
+
+@pytest.fixture()
+def tmp_path():
+    TEST_TMP.mkdir(parents=True, exist_ok=True)
+    path = TEST_TMP / f"kogwistar-llm-wiki-{uuid4().hex}"
+    path.mkdir(parents=True, exist_ok=False)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 # Keep the local src tree first, but do not let vendored repos shadow the repo's own tests.
 if str(SRC) not in sys.path:
@@ -15,8 +44,6 @@ if str(SRC) not in sys.path:
 for path in [KG_DOC_PARSER_SRC, KOGWISTAR_ROOT, OBSIDIAN_SINK_ROOT]:
     if str(path) not in sys.path:
         sys.path.append(str(path))
-
-import pytest
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend

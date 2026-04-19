@@ -1,4 +1,5 @@
 def test_promote_creates_kg_visible_node_not_workflow_artifact(pipeline, ingest_request):
+    ingest_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
     artifacts = pipeline.run(ingest_request)
 
     kg_nodes = pipeline.engines.kg.read.get_nodes(

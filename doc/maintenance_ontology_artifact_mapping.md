@@ -26,10 +26,10 @@ This document maps major maintenance use cases to:
 
 Kogwistar currently gives first-class graph kind tokens such as:
 
-- `conversation`
+- `conversation` (One instance shared by fg/bg lanes)
 - `knowledge`
 - `workflow`
-- `wisdom`
+- `wisdom` (Is a graph)
 
 Maintenance is best treated as an **application semantic domain** layered on top of those graph kinds.
 
@@ -144,7 +144,7 @@ Cross-lane communication should normally be modeled as:
 - creating a graph artifact in the receiver-owned namespace
 - then relying on event emission / subscription
 
-This is preferable to an opaque side channel.
+This is facilitated by sharing the same conversation engine instance between fg and bg lanes.
 
 ---
 

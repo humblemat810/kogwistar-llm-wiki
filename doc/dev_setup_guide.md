@@ -56,6 +56,11 @@ bash scripts/bootstrap-dev.sh
 That script is opt-in. It clones and editable-installs the local repos only when you run it.
 Windows users can run it from Git Bash or WSL.
 
+During cross-repo refactors, those sibling repos are expected to be edited
+together from the same project root. Treat them as coordinated local sources,
+not as read-only vendor blobs, while still respecting the documented ownership
+boundaries for reusable capability vs. app policy.
+
 ## 5. Common Checks
 
 ```powershell

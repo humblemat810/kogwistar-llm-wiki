@@ -1,4 +1,4 @@
-from workflow_ingest.page_index import parse_page_index_document
+from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 
 
 def test_run_registers_source_and_invokes_parser(pipeline, ingest_request, monkeypatch):

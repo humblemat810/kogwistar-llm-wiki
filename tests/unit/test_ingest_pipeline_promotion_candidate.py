@@ -6,12 +6,13 @@ def test_promotion_candidate_stays_out_of_workflow_storage(pipeline, ingest_requ
     )
     assert not workflow_candidates
 
-    review_candidates = pipeline.engines.conversation.read.get_nodes(
+    background_candidates = pipeline.engines.conversation.read.get_nodes(
         where={
             "workspace_id": ingest_request.workspace_id,
             "artifact_kind": "promotion_candidate",
-            "namespace": "ws:demo:review",
+            "namespace": "ws:demo:conv:bg",
+            "queue_state": "pending",
         }
     )
-    assert review_candidates
-    assert {node.id for node in review_candidates} == {artifacts.promotion_candidate_id}
+    assert background_candidates
+    assert {node.id for node in background_candidates} == {artifacts.promotion_candidate_id}
