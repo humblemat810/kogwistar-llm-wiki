@@ -71,6 +71,13 @@ uv run pytest
 
 There may not be any tests yet, so `pytest` can be empty until code lands.
 
+### Pytest cache warning
+
+If pytest reaches `100% passed` and then hangs until timeout, check the cache
+directory before debugging application logic. This has happened repeatedly on
+Windows when `.pytest_cache` or `C:\tmp` was not writable by the test process.
+See [Testing Guide](testing_guide.md) for the current mitigation.
+
 ## 6. Suggested Working Loop
 
 1. Edit docs or code.

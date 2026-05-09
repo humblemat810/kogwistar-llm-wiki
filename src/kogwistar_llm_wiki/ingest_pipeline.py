@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import os
 import re
 from pathlib import Path
@@ -699,14 +698,14 @@ class IngestPipeline:
             "lane_message_id": lane_message_id,
         }
         job_id = request_node_id
-        self.engines.conversation.meta_sqlite.enqueue_index_job(
+        self.engines.conversation.jobs.enqueue(
             job_id=job_id,
             namespace=namespace,
             entity_kind="maintenance_job",
             entity_id=source_document_id,
-            index_kind="maintenance_job",
+            job_kind="maintenance_job",
             op="UPSERT",
-            payload_json=json.dumps(payload, ensure_ascii=False),
+            payload=payload,
         )
         return job_id
 
@@ -729,14 +728,14 @@ class IngestPipeline:
             "promoted_entity_id": promoted_id,
             "promotion_mode": request.promotion_mode,
         }
-        self.engines.conversation.meta_sqlite.enqueue_index_job(
+        self.engines.conversation.jobs.enqueue(
             job_id=job_id,
             namespace=namespace,
             entity_kind="projection_request",
             entity_id=promoted_id,
-            index_kind="projection_request",
+            job_kind="projection_request",
             op="UPSERT",
-            payload_json=json.dumps(payload, ensure_ascii=False),
+            payload=payload,
         )
         return job_id
 

@@ -136,6 +136,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/diagrams.md](doc/diagrams.md) | CLI spider map, pipeline, algorithm & data-flow diagrams |
 | [doc/architecture.md](doc/architecture.md) | System design |
 | [doc/core_workflows.md](doc/core_workflows.md) | Workflow graph designs |
+| [doc/testing_guide.md](doc/testing_guide.md) | Local test-running pitfalls and pytest cache guidance |
 | [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
 | [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |
 | [doc/glossary.md](doc/glossary.md) | Term definitions |

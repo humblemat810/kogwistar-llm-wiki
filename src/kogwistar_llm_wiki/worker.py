@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -86,9 +85,8 @@ class MaintenanceWorker(BaseWorker):
         as audit artifacts.
         """
         ns = WorkspaceNamespaces(workspace_id)
-        meta = self.engines.conversation.meta_sqlite
         while True:
-            jobs = meta.claim_index_jobs(
+            jobs = self.engines.conversation.jobs.claim(
                 limit=50,
                 lease_seconds=60,
                 namespace=ns.maintenance_jobs,
@@ -99,8 +97,9 @@ class MaintenanceWorker(BaseWorker):
                 self._handle_job(workspace_id, job)
 
     def _handle_job(self, workspace_id: str, job: Any):
-        job_id = str(getattr(job, "job_id", None) or (job.get("job_id") if isinstance(job, dict) else ""))
-        payload = self._decode_payload(job)
+        job = self.engines.conversation.jobs.coerce(job)
+        job_id = str(job.job_id)
+        payload = dict(job.payload)
         req_node_id = str(payload.get("request_node_id") or job_id)
         lane_message_id = str(payload.get("lane_message_id") or "")
         maintenance_kind = str(payload.get("maintenance_kind") or "distill")
@@ -136,7 +135,7 @@ class MaintenanceWorker(BaseWorker):
                     },
                 )
                 if job_id:
-                    self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
+                    self.engines.conversation.jobs.mark_done(job_id)
             except Exception as e:
                 logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
                 self._emit_lane_reply(
@@ -151,22 +150,7 @@ class MaintenanceWorker(BaseWorker):
                     },
                 )
                 if job_id:
-                    retry_count = int(
-                        getattr(job, "retry_count", None)
-                        or (job.get("retry_count") if isinstance(job, dict) else 0)
-                    )
-                    max_retries = int(
-                        getattr(job, "max_retries", None)
-                        or (job.get("max_retries") if isinstance(job, dict) else 10)
-                    )
-                    if retry_count + 1 < max_retries:
-                        self.engines.conversation.meta_sqlite.bump_retry_and_requeue(
-                            job_id,
-                            str(e),
-                            next_run_at_seconds=min(300, 2 ** max(retry_count, 0)),
-                        )
-                    else:
-                        self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
+                    self.engines.conversation.jobs.retry_or_fail(job, e)
             return
 
         import warnings
@@ -221,7 +205,7 @@ class MaintenanceWorker(BaseWorker):
                         },
                     )
                     if job_id:
-                        self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
+                        self.engines.conversation.jobs.mark_done(job_id)
                 except Exception as e:
                     logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
                     self._emit_lane_reply(
@@ -237,22 +221,7 @@ class MaintenanceWorker(BaseWorker):
                         },
                     )
                     if job_id:
-                        retry_count = int(
-                            getattr(job, "retry_count", None)
-                            or (job.get("retry_count") if isinstance(job, dict) else 0)
-                        )
-                        max_retries = int(
-                            getattr(job, "max_retries", None)
-                            or (job.get("max_retries") if isinstance(job, dict) else 10)
-                        )
-                        if retry_count + 1 < max_retries:
-                            self.engines.conversation.meta_sqlite.bump_retry_and_requeue(
-                                job_id,
-                                str(e),
-                                next_run_at_seconds=min(300, 2 ** max(retry_count, 0)),
-                            )
-                        else:
-                            self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
+                        self.engines.conversation.jobs.retry_or_fail(job, e)
 
     def _emit_lane_reply(
         self,
@@ -288,19 +257,6 @@ class MaintenanceWorker(BaseWorker):
                 error=(payload if status != "completed" else None),
                 completed=True,
             )
-
-    def _decode_payload(self, job: Any) -> dict[str, Any]:
-        payload = getattr(job, "payload_json", None)
-        if payload is None and isinstance(job, dict):
-            payload = job.get("payload_json")
-        if isinstance(payload, str) and payload:
-            try:
-                decoded = json.loads(payload)
-                if isinstance(decoded, dict):
-                    return decoded
-            except Exception:
-                pass
-        return {}
 
     def _load_request_node(self, workspace_id: str, req_node_id: str) -> Any | None:
         ns = WorkspaceNamespaces(workspace_id)

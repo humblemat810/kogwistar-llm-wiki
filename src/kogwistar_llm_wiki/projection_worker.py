@@ -24,9 +24,8 @@ class ProjectionWorker:
     def process_pending_projections(self, workspace_id: str, vault_root: str):
         """Drains the projection job queue in durable claim order."""
         ns = WorkspaceNamespaces(workspace_id)
-        meta = self.engines.conversation.meta_sqlite
         while True:
-            jobs = meta.claim_index_jobs(
+            jobs = self.engines.conversation.jobs.claim(
                 limit=50,
                 lease_seconds=60,
                 namespace=ns.projection_jobs,
@@ -38,9 +37,10 @@ class ProjectionWorker:
                 self._handle_projection_job(workspace_id, job, vault_root)
 
     def _handle_projection_job(self, workspace_id: str, job: Any, vault_root: str):
-        job_id = str(getattr(job, "job_id", None) or (job.get("job_id") if isinstance(job, dict) else ""))
-        entity_id = str(getattr(job, "entity_id", None) or (job.get("entity_id") if isinstance(job, dict) else ""))
-        payload = self._decode_payload(job)
+        job = self.engines.conversation.jobs.coerce(job)
+        job_id = str(job.job_id)
+        entity_id = str(job.entity_id)
+        payload = dict(job.payload)
         promoted_entity_id = str(payload.get("promoted_entity_id") or entity_id)
         ns = WorkspaceNamespaces(workspace_id)
 
@@ -76,7 +76,7 @@ class ProjectionWorker:
                 ns=ns,
             )
             if job_id:
-                self.engines.conversation.meta_sqlite.mark_index_job_done(job_id)
+                self.engines.conversation.jobs.mark_done(job_id)
             logger.info("Successfully projected entity %s", promoted_entity_id)
         except Exception as e:
             logger.error("Projection failed for job %s: %s", job_id, e)
@@ -94,30 +94,8 @@ class ProjectionWorker:
                 error=str(e),
             )
             if job_id:
-                retry_count = int(getattr(job, "retry_count", None) or (job.get("retry_count") if isinstance(job, dict) else 0))
-                max_retries = int(getattr(job, "max_retries", None) or (job.get("max_retries") if isinstance(job, dict) else 10))
-                if retry_count + 1 < max_retries:
-                    self.engines.conversation.meta_sqlite.bump_retry_and_requeue(
-                        job_id,
-                        str(e),
-                        next_run_at_seconds=min(300, 2 ** max(retry_count, 0)),
-                    )
-                else:
-                    self.engines.conversation.meta_sqlite.mark_index_job_failed(job_id, str(e), final=True)
+                self.engines.conversation.jobs.retry_or_fail(job, e)
             raise
-
-    def _decode_payload(self, job: Any) -> dict[str, Any]:
-        payload = getattr(job, "payload_json", None)
-        if payload is None and isinstance(job, dict):
-            payload = job.get("payload_json")
-        if isinstance(payload, str) and payload:
-            try:
-                decoded = json.loads(payload)
-                if isinstance(decoded, dict):
-                    return decoded
-            except Exception:
-                pass
-        return {}
 
     def _record_projection_manifest(
         self,
