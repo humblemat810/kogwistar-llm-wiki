@@ -29,6 +29,8 @@ tests/_tmp/
 .coverage
 htmlcov/
 logs
+.logs
+.tmp_*
 test*.txt
 
 # Editor settings

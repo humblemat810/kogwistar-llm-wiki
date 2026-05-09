@@ -1,6 +1,6 @@
 # Kogwistar AI OS Slice Checklist
 
-Status: In progress
+Status: Complete
 Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contract
 
 ## Current integration baseline
@@ -25,13 +25,19 @@ Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contra
 - [x] worker-side request-node lookup is backend-agnostic
   - normalized to a single-root filter shape that works on persistent Chroma-backed engines too
 
-## Known core dependency gaps
+## Core dependency gaps
 
-- [ ] engine-level lane-message repair / rebuild API
-  - `llm-wiki` should not invent this locally
-  - once core publishes a stable repair / rebuild surface, add an app-level regression immediately
-- [ ] run-registry / SSE lane lifecycle surfacing
-- [ ] runtime-facing durable `StepContext.send_lane_message(...)`
+- [x] engine-level lane-message repair / rebuild API
+  - `engine.repair_lane_message_projection(...)` restores projected lane-message rows from graph truth
+  - app-level regression proves a worker can recover after projected lane-message rows are missing
+- [x] run-registry / SSE lane lifecycle surfacing
+  - runtime-sent lane messages append `worker.requested` events to the core run registry
+  - existing run event polling and SSE endpoints surface the lane lifecycle event
+  - lane progress reports projected lane-message rows, including projection status, for app maintenance visibility
+- [x] runtime-facing durable `StepContext.send_lane_message(...)`
+  - `WorkflowRuntime` injects durable lane-message sender into real resolver contexts
+  - `AsyncWorkflowRuntime` mirrors the same sender/sink options through its sync runtime
+  - app-level regression proves a workflow resolver can create projected lane messages through the conversation engine
 
 ## App-side policy still owned by `llm-wiki`
 
