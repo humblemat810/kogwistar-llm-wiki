@@ -22,6 +22,7 @@ from .models import (
     NamespaceEngines,
     ProjectionSnapshot,
 )
+from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import WorkspaceNamespaces
 from .projection import ProjectionManager
 
@@ -202,19 +203,17 @@ def _build_postgres_engine(
 
 
 class IngestPipeline:
-    # Threshold above which a promotion_candidate is auto-accepted in 'sync' mode.
-    # TODO: make this configurable per-workspace or per-document-type.
-    _AUTO_ACCEPT_THRESHOLD = 0.95
-
     def __init__(
         self,
         engines: NamespaceEngines,
         *,
         parser: ParserFn = parse_page_index_document,
+        policies: LlmWikiPolicies | None = None,
     ) -> None:
         self.engines = engines
         self.parser = parser
-        self.projection = ProjectionManager(engines)
+        self.policies = policies or build_default_policies()
+        self.projection = ProjectionManager(engines, policies=self.policies)
 
     def namespaces_for(self, workspace_id: str) -> WorkspaceNamespaces:
         return WorkspaceNamespaces(workspace_id)
@@ -262,7 +261,16 @@ class IngestPipeline:
 
 
         promoted_entity_id: str | None = None
-        if request.promotion_mode == "sync" and self._AUTO_ACCEPT_THRESHOLD >= request.auto_accept_threshold:
+        promotion_decision = self.policies.promotion.decide(
+            promotion_mode=request.promotion_mode,
+            auto_accept_threshold=request.auto_accept_threshold,
+            metadata={
+                "workspace_id": request.workspace_id,
+                "source_document_id": source_document_id,
+                "promotion_candidate_id": promotion_candidate_id,
+            },
+        )
+        if promotion_decision.should_promote:
             promoted_entity_id = self.promote_to_knowledge(
                 request=request,
                 source_document_id=source_document_id,
@@ -757,6 +765,14 @@ class IngestPipeline:
         extra_metadata: dict[str, Any] | None = None,
     ) -> Node:
         span = self._leading_span(source_document_id, request.raw_text, insertion_method=artifact_kind)
+        extra_meta = dict(extra_metadata or {})
+        normalized_visibility = self.policies.visibility.visibility_for(
+            {
+                "artifact_kind": artifact_kind,
+                "visibility": visibility,
+                "projection_visible": extra_meta.get("projection_visible"),
+            }
+        )
         metadata = {
             "workspace_id": request.workspace_id,
             "source_document_id": source_document_id,
@@ -764,12 +780,15 @@ class IngestPipeline:
             "artifact_kind": artifact_kind,
             "namespace": namespace,
             "conversation_lane": lane,
-            "visibility": visibility,
+            "visibility": normalized_visibility,
             "title": request.title,
             "parser_mode": request.parser_mode,
+            "requires_provenance": self.policies.lifecycle.requires_provenance(artifact_kind),
         }
-        if extra_metadata:
-            metadata.update(extra_metadata)
+        if normalized_visibility == "projection":
+            metadata["projection_visible"] = True
+        if extra_meta:
+            metadata.update(extra_meta)
         return Node(
             id=node_id,
             label=label,

@@ -12,6 +12,7 @@ from kogwistar.maintenance.template import run_grouped_maintenance_template
 from kogwistar.wisdom.template import write_execution_wisdom_artifacts
 
 from .models import NamespaceEngines, MaintenanceJobResult
+from .policies import LlmWikiPolicies, build_default_policies
 from .maintenance_policy import (
     DERIVED_KNOWLEDGE_WORKFLOW_ID,
     EXECUTION_WISDOM_WORKFLOW_ID,
@@ -54,7 +55,13 @@ class MaintenanceWorker(BaseWorker):
     and the graph-native runtime for the actual distillation work.
     """
 
-    def __init__(self, engines: NamespaceEngines, eager_mode: bool = False):
+    def __init__(
+        self,
+        engines: NamespaceEngines,
+        eager_mode: bool = False,
+        *,
+        policies: LlmWikiPolicies | None = None,
+    ):
         """
         Initialize the MaintenanceWorker.
 
@@ -64,6 +71,7 @@ class MaintenanceWorker(BaseWorker):
         """
         super().__init__(engines)
         self.eager_mode = eager_mode
+        self.policies = policies or build_default_policies()
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
         self.resolver.register("check_done")(self._step_check_done)
@@ -306,19 +314,21 @@ class MaintenanceWorker(BaseWorker):
             target_engine=derived_engine,
             source_namespace=ns.kg,
             target_namespace=ns.derived_knowledge,
-            source_where={"artifact_kind": "promoted_knowledge", "workspace_id": workspace_id},
-            group_key_for_node=lambda node: str(node.metadata.get("label") or getattr(node, "label", "Unknown Entity")),
-            match_where_for_group=lambda label: {
-                "artifact_kind": "derived_knowledge",
-                "workspace_id": workspace_id,
-                "label": label,
-            },
+            source_where=self.policies.derived_knowledge.source_query(
+                workspace_id=workspace_id,
+            ).where,
+            group_key_for_node=self.policies.derived_knowledge.group_key,
+            match_where_for_group=lambda label: self.policies.derived_knowledge.match_where(
+                workspace_id=workspace_id,
+                label=label,
+            ),
             build_node_for_group=lambda label, nodes, existing, created_at_ms: self._build_derived_node_for_group(
                 workspace_id=workspace_id,
                 label=label,
                 nodes=nodes,
                 existing=existing,
                 created_at_ms=created_at_ms,
+                policies=self.policies,
                 fallback_span_factory=lambda: Grounding(spans=[Span(
                     collection_page_url=f"conversation/{ns.conv_bg}",
                     document_page_url=f"conversation/{ns.conv_bg}",
@@ -373,6 +383,7 @@ class MaintenanceWorker(BaseWorker):
         nodes: list[Any],
         existing: list[Any],
         created_at_ms: int,
+        policies: LlmWikiPolicies,
         fallback_span_factory,
     ):
         from kogwistar.engine_core.models import Grounding, Node
@@ -404,14 +415,13 @@ class MaintenanceWorker(BaseWorker):
             type="entity",
             summary=f"Derived knowledge synthesis for {label} aggregated from {len(nodes)} source documents.",
             mentions=merged_mentions,
-            metadata={
-                "workspace_id": workspace_id,
-                "artifact_kind": "derived_knowledge",
-                "source_node_ids": [str(node.id) for node in nodes],
-                "label": label,
-                "created_at_ms": created_at_ms,
-                "replaces_ids": [str(node.id) for node in existing],
-            },
+            metadata=policies.derived_knowledge.build_metadata(
+                workspace_id=workspace_id,
+                label=label,
+                source_node_ids=[str(node.id) for node in nodes],
+                replaces_ids=policies.lifecycle.replacement_ids(existing),
+                created_at_ms=created_at_ms,
+            ),
         )
 
     def _emit_execution_wisdom_from_history(self, workspace_id: str, engines: NamespaceEngines) -> list[str]:
@@ -428,13 +438,12 @@ class MaintenanceWorker(BaseWorker):
             target_engine=engines.wisdom,
             source_namespace=ns.conv_bg,
             target_namespace=ns.wisdom,
-            source_where={"entity_type": "workflow_step_exec"},
-            min_failure_signals=2,
-            match_where_for_pattern=lambda pattern: {
-                "artifact_kind": "execution_wisdom",
-                "workspace_id": workspace_id,
-                "step_op": pattern.step_op,
-            },
+            source_where=self.policies.wisdom.source_query(workspace_id=workspace_id).where,
+            min_failure_signals=self.policies.wisdom.min_failure_signals,
+            match_where_for_pattern=lambda pattern: self.policies.wisdom.match_where(
+                workspace_id=workspace_id,
+                step_op=pattern.step_op,
+            ),
             build_node_for_pattern=lambda pattern, existing, created_at_ms: Node(
                 id=str(stable_id("execution_wisdom", workspace_id, pattern.step_op, str(created_at_ms))),
                 label=f"execution_failure_pattern:{pattern.step_op}",
@@ -458,14 +467,15 @@ class MaintenanceWorker(BaseWorker):
                     chunk_id=None,
                     source_cluster_id=None,
                 )])],
-                metadata={
-                    "workspace_id": workspace_id,
-                    "artifact_kind": "execution_wisdom",
-                    "step_op": pattern.step_op,
-                    "failure_count": len(pattern.failure_nodes),
-                    "evidence_run_ids": list(pattern.run_ids),
-                    "created_at_ms": created_at_ms,
-                    "replaces_ids": [str(node.id) for node in existing],
+                metadata=self.policies.wisdom.build_metadata(
+                    workspace_id=workspace_id,
+                    step_op=pattern.step_op,
+                    failure_count=len(pattern.failure_nodes),
+                    evidence_run_ids=list(pattern.run_ids),
+                    replaces_ids=self.policies.lifecycle.replacement_ids(existing),
+                    created_at_ms=created_at_ms,
+                )
+                | {
                     "label": f"execution_failure_pattern:{pattern.step_op}",
                 },
             ),

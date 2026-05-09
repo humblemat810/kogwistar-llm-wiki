@@ -11,6 +11,7 @@ from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuck
 from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 
 from .models import NamespaceEngines, ProjectionSnapshot, ObsidianBuildResult
+from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import WorkspaceNamespaces
 
 
@@ -23,8 +24,9 @@ class ProjectionManager:
     Acts as the composition layer between Kogwistar and the Obsidian Sink.
     """
 
-    def __init__(self, engines: NamespaceEngines):
+    def __init__(self, engines: NamespaceEngines, *, policies: LlmWikiPolicies | None = None):
         self.engines = engines
+        self.policies = policies or build_default_policies()
 
     def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
         """Returns the current 'KG-visible' state for a workspace."""
@@ -34,7 +36,11 @@ class ProjectionManager:
         manifest_ids = self._load_projection_manifest_ids(workspace_id)
 
         if manifest_ids is None:
-            visible_nodes = [node for node in all_nodes if ns.is_kg_visible(node.metadata or {})]
+            visible_nodes = [
+                node
+                for node in all_nodes
+                if self.policies.projection.is_projection_eligible(node.metadata or {})
+            ]
             visible_ids = {str(node.id) for node in visible_nodes}
         else:
             visible_nodes = [node for node in all_nodes if str(node.id) in manifest_ids]

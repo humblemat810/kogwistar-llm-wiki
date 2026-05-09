@@ -10,6 +10,7 @@ from .models import (
     ProjectionEntity,
     ProjectionSnapshot,
 )
+from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import WorkspaceNamespaces
 
 __all__ = [
@@ -18,8 +19,10 @@ __all__ = [
     "IngestPipelineRequest",
     "NamespaceEngines",
     "ObsidianBuildResult",
+    "LlmWikiPolicies",
     "ProjectionEntity",
     "ProjectionSnapshot",
     "WorkspaceNamespaces",
+    "build_default_policies",
     "build_in_memory_namespace_engines",
 ]
