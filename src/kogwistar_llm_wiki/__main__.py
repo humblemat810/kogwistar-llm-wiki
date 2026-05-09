@@ -226,7 +226,7 @@ def _cmd_daemon_projection(args: argparse.Namespace) -> None:
     )
 
     def _stop(sig, frame):  # noqa: ANN001
-        logger.info("Received signal %s — stopping ProjectionDaemon…", sig)
+        logger.info("Received signal %s — graceful stop requested for ProjectionDaemon", sig)
         daemon.stop()
 
     signal.signal(signal.SIGINT, _stop)
@@ -251,7 +251,7 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
     )
 
     def _stop(sig, frame):  # noqa: ANN001
-        logger.info("Received signal %s — stopping MaintenanceDaemon…", sig)
+        logger.info("Received signal %s — graceful stop requested for MaintenanceDaemon", sig)
         daemon.stop()
 
     signal.signal(signal.SIGINT, _stop)

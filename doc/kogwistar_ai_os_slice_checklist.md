@@ -38,6 +38,11 @@ Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contra
   - `WorkflowRuntime` injects durable lane-message sender into real resolver contexts
   - `AsyncWorkflowRuntime` mirrors the same sender/sink options through its sync runtime
   - app-level regression proves a workflow resolver can create projected lane messages through the conversation engine
+- [x] core restart recovery coordinator and operator visibility
+  - `engine.recovery.recover_startup(...)` owns bounded restart coordination
+  - recovery reports include queues, lane rows, checkpoints, run history, dead letters, daemon health, and app output surfaces
+  - default resume policy is inspect-only; auto-resume requires explicit restartable markers and a caller-provided resume hook
+  - `llm-wiki` daemons now call the core recovery coordinator and only supply manifest/vault/daemon surface probes
 
 ## App-side policy still owned by `llm-wiki`
 

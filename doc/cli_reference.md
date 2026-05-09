@@ -1,36 +1,40 @@
-# CLI Reference — `llm-wiki`
+# CLI Reference - `llm-wiki`
 
 All commands are available after installing the package:
 
 ```bash
 pip install -e ".[dev]"
-# or after bootstrap:
-bash scripts/bootstrap-dev.sh
 ```
 
----
+## Top-Level
 
-## Top-level
-
-```
+```text
 llm-wiki [--data-dir <path>] [--split-derived-knowledge] <command>
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `--data-dir` | `.` | Path to persistent data directory (SQLite meta-store, Chroma data) |
-| `--split-derived-knowledge` | off | Host `derived_knowledge` on a separate engine instead of sharing the KG engine |
+| `--data-dir` | `.` | Path to persistent data directory |
+| `--split-derived-knowledge` | off | Host `derived_knowledge` on a separate engine |
 
 Hosting tradeoff for `derived_knowledge`:
-- Default same-engine mode keeps raw KG and `derived_knowledge` on the same backend, but in different namespaces (`ws:{id}:kg` vs `ws:{id}:kg:derived`). This is simpler operationally and keeps one query/search substrate.
-- Split-engine mode isolates `derived_knowledge` onto its own backend instance. That improves workload isolation and makes it easier to tune/index separately, but cross-surface search now has to query two engines explicitly instead of one engine with two namespaces.
-- The semantic contract is the same in both layouts: `derived_knowledge` never lives in the raw KG namespace.
 
----
+- Default same-engine mode keeps raw KG and `derived_knowledge` on the same backend, but in different namespaces (`ws:{id}:kg` versus `ws:{id}:kg:derived`).
+- Split-engine mode isolates storage and indexing cost, but cross-surface search must query two engines deliberately.
+- The semantic contract is the same in both layouts: `derived_knowledge` never lives in the raw KG namespace.
 
 ## `llm-wiki daemon`
 
-Run a long-lived background worker. Both daemons poll on a configurable interval and shut down cleanly on `Ctrl-C` / `SIGTERM`.
+Both daemons poll on a configurable interval, treat `Ctrl-C` / `SIGTERM` as
+graceful stop requests, and call the core `engine.recovery.recover_startup(...)`
+coordinator before polling after restart.
+
+Core startup recovery:
+
+1. Safely repairs missing lane-message projection rows from graph/entity-event truth.
+2. Reports durable queues, lane rows, checkpoints, run history, dead letters, and daemon health.
+3. Leaves durable job claims and lane claims to existing lease expiry semantics.
+4. Keeps workflow checkpoint auto-resume disabled unless an explicit restartable policy and resume hook are supplied.
 
 ### `daemon projection`
 
@@ -40,55 +44,68 @@ Drain the Obsidian projection queue for a workspace and keep the vault in sync.
 llm-wiki daemon projection \
   --workspace <workspace-id> \
   --vault     <path-to-obsidian-vault> \
-  [--interval <seconds>]              # default: 5.0
+  [--interval <seconds>]
 ```
 
-**What it does on each poll cycle:**
-1. Read the last projected sequence number from the meta-store
-2. Query the graph for the next `projection_request` node (`seq = last + 1`)
-3. Call `ProjectionManager.sync_obsidian_vault()` → `kogwistar-obsidian-sink`
-4. Emit an append-only `projection_status_event` node (processing → completed/failed)
-5. Advance the sequence counter in the meta-store
-6. Stop when the queue is empty; sleep `--interval` seconds before next poll
+Startup recovery passes these app-specific surfaces into core:
 
-**Example:**
+- projection manifest state
+- vault materialization state
+- projection daemon health
 
-```bash
-llm-wiki daemon projection --workspace my-wiki --vault ~/Documents/ObsidianWiki
-```
+Each poll cycle:
 
----
+1. Claim durable projection jobs from the queue facade.
+2. Call `ProjectionManager.sync_obsidian_vault()` through the Obsidian sink.
+3. Emit append-only projection status events.
+4. Mark jobs done or retry/fail through `engine.jobs`.
+5. Sleep `--interval` seconds before the next poll.
 
 ### `daemon maintenance`
 
-Drain the maintenance job queue and run the synthesis + execution-wisdom pipeline.
+Drain the maintenance job queue and run the synthesis plus execution-wisdom path.
 
 ```bash
 llm-wiki daemon maintenance \
   --workspace <workspace-id> \
-  [--interval <seconds>]              # default: 10.0
+  [--interval <seconds>]
 ```
 
-**What it does on each poll cycle:**
-1. Scan `conv:bg` for `maintenance_job_request` nodes
-2. Skip any request that already has a `workflow_completed` trace
-3. For each pending `distill` request, run `maintenance.derived_knowledge.v1`:
-   - `distill` aggregates promoted knowledge into replacement `derived_knowledge` nodes
-4. For each pending `execution_wisdom` request, run the dedicated history-analysis job path:
-   - `derive_problem_solving_wisdom_from_history` scans failure traces and emits replacement `execution_wisdom` nodes
-5. Sleep `--interval` seconds before next poll
+Startup recovery passes maintenance daemon health into core and uses the core
+report for queue/lane/checkpoint/run/dead-letter visibility.
+
+Each poll cycle:
+
+1. Claim durable maintenance jobs from the queue facade.
+2. Process `distill` and `execution_wisdom` requests.
+3. Emit a reply lane message.
+4. Mark the durable job `DONE` or retry/fail it through `engine.jobs`.
+5. Sleep `--interval` seconds before the next poll.
 
 Current semantics:
-- `distill` produces replacement `derived_knowledge` nodes from promoted KG knowledge in `ws:{id}:kg:derived`
-- `execution_wisdom` jobs scan failure traces and emit `execution_wisdom` nodes without piggybacking on every distill run
 
-**Example:**
+- `distill` writes replacement `derived_knowledge` nodes in `ws:{id}:kg:derived`.
+- `execution_wisdom` scans failure traces and emits `execution_wisdom` nodes.
+- Interrupted work is recovered by core projection repair plus lease redelivery.
+- Delivery remains at-least-once; duplicate execution should converge through deterministic IDs, completion checks, and versioned replacement.
 
-```bash
-llm-wiki daemon maintenance --workspace my-wiki --interval 30
+## Programmatic API Cheatsheet
+
+```python
+from kogwistar_llm_wiki.daemon import MaintenanceDaemon, ProjectionDaemon
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+
+pipeline = IngestPipeline(workspace_id="demo")
+engines = pipeline.engines
+
+pipeline.run("doc.md")
+
+m = MaintenanceDaemon(engines, "demo", poll_interval=10.0)
+p = ProjectionDaemon(engines, "demo", vault_root="/tmp/vault", poll_interval=5.0)
+
+report = m.recover_startup_state()
+print(report.repaired_count, len(report.dead_letters))
 ```
-
----
 
 ## Running `python -m kogwistar_llm_wiki`
 
@@ -99,70 +116,17 @@ python -m kogwistar_llm_wiki daemon projection --workspace demo --vault /tmp/vau
 python -m kogwistar_llm_wiki --help
 ```
 
----
-
-## Programmatic API cheatsheet
-
-```python
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-from kogwistar_llm_wiki.daemon import MaintenanceDaemon, ProjectionDaemon
-
-# Build engines for a workspace
-pipeline = IngestPipeline(workspace_id="demo")
-engines  = pipeline.engines
-
-# Ingest
-pipeline.run("doc.md")
-
-# List and promote candidates
-candidates = pipeline.list_promotion_candidates()
-pipeline.promote(entity_id=candidates[0].id)
-
-# Projection snapshot (no vault write)
-from kogwistar_llm_wiki.projection import ProjectionManager
-snap = ProjectionManager(engines).build_projection_snapshot("demo")
-print(len(snap.entities), "KG-visible entities")
-
-# Run workers in-process
-m = MaintenanceDaemon(engines, "demo", poll_interval=10.0)
-p = ProjectionDaemon(engines, "demo", vault_root="/tmp/vault", poll_interval=5.0)
-import threading
-threading.Thread(target=m.run, daemon=True).start()
-threading.Thread(target=p.run, daemon=True).start()
-# ... later:
-m.stop(); p.stop()
-```
-
----
-
-## Environment variables
+## Environment Variables
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `KOGWISTAR_DATA_DIR` | future | Override default data directory (not yet enforced) |
+| `KOGWISTAR_DATA_DIR` | CLI | Default persistent data directory when supplied by the caller |
 | `PYTHONPATH` | dev | Ensure `src/` is importable without install |
 
----
+## Test Commands
 
-## Test commands cheatsheet
-
-```bash
-# All fast unit tests
-pytest tests/unit/ -q
-
-# Verbose with short tracebacks
-pytest tests/unit/ -v --tb=short
-
-# Only namespace proxy tests
-pytest tests/unit/test_temporary_namespace.py -v
-
-# Only projection tests
-pytest tests/unit/test_projection_consistency.py -v
-
-# Opt-in integration tests (require real vault / Chroma)
-pytest -m integration
-
-# Opt-in manual tests
-pytest -m manual
+```powershell
+.venv\Scripts\python.exe -m pytest tests/unit/ -q
+.venv\Scripts\python.exe -m pytest tests/unit/test_temporary_namespace.py -q
+.venv\Scripts\python.exe -m pytest tests/unit/test_projection_consistency.py -q
 ```
-

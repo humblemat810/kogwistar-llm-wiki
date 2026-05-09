@@ -70,6 +70,24 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 
 ---
 
+### 3a. Core recovery coordinator
+
+**Status:** Done.
+
+`kogwistar` now exposes `engine.recovery` as the generic restart recovery and
+operator visibility subsystem. It owns bounded startup repair/inspection for
+durable queues, projected lane rows, workflow checkpoints, run history, dead
+letters, daemon health surfaces, and app-supplied output surfaces.
+
+`kogwistar-llm-wiki` no longer owns restart recovery semantics. Its daemons pass
+workspace namespaces plus app-specific probes such as projection manifest and
+vault materialization state into `engine.recovery.recover_startup(...)`.
+
+The default resume policy is intentionally inspect-only. Automatic workflow
+resume requires explicit restartable markers and a caller-provided resume hook.
+
+---
+
 ### 4. Execution-wisdom pattern recognition
 
 **Currently (app layer):**
@@ -119,9 +137,10 @@ These are implemented as application-layer code (`worker.py`, `projection_worker
 1. **Phase 1:** App implements everything. Core provides primitives (engines, runtime, subsystems).
 2. **Phase 2:** Surface the existing durable queue protocol cleanly as `engine.jobs.enqueue/claim`. **Implemented as the durable job facade.**
 3. **Phase 3:** Add core namespace scoping and deprecate direct app-layer namespace rebinding. **Implemented; app wrapper remains for compatibility.**
-4. **Phase 4:** Ship `KnowledgeDistillationDesign` as a built-in workflow design in Kogwistar. Apps configure, not reimplement.
-5. **Phase 5:** Add `WorkflowAnalyticsSubsystem` to engine. Apps consume analytics, write `execution_wisdom`.
-6. **Phase 6:** Revisit whether execution-history wisdom can move back into a runtime-native workflow after the trace-lane self-read deadlock has a core solution.
+4. **Phase 4:** Add core restart recovery coordination and operator visibility. **Implemented as `engine.recovery`.**
+5. **Phase 5:** Ship `KnowledgeDistillationDesign` as a built-in workflow design in Kogwistar. Apps configure, not reimplement.
+6. **Phase 6:** Add `WorkflowAnalyticsSubsystem` to engine. Apps consume analytics, write `execution_wisdom`.
+7. **Phase 7:** Revisit whether execution-history wisdom can move back into a runtime-native workflow after the trace-lane self-read deadlock has a core solution.
 
 ---
 
