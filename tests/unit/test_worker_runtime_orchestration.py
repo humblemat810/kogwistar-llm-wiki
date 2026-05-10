@@ -4,7 +4,9 @@ import json
 
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
+import kogwistar_llm_wiki.worker as worker_module
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
@@ -133,3 +135,58 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     matching_request = [node for node in request_after if str(node.id) == request_message_id]
     assert len(matching_request) == 1
     assert matching_request[0].metadata.get("status") == "completed"
+
+
+def test_maintenance_worker_rematerializes_only_for_missing_embeddings(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    calls: list[str] = []
+
+    def fake_materialize(_workflow_engine):
+        calls.append("materialize")
+
+    original_get_nodes = pipeline.engines.workflow.read.get_nodes
+    state = {"raised": False}
+
+    def flaky_get_nodes(*args, **kwargs):
+        where = kwargs.get("where") or {}
+        if isinstance(where, dict) and where.get("$and") and not state["raised"]:
+            state["raised"] = True
+            raise Exception("Missing Embeddings")
+        return original_get_nodes(*args, **kwargs)
+
+    monkeypatch.setattr(worker_module, "materialize_maintenance_designs", fake_materialize)
+    monkeypatch.setattr(pipeline.engines.workflow.read, "get_nodes", flaky_get_nodes)
+    monkeypatch.setattr(worker.runtime, "run", lambda **kwargs: SimpleNamespace(status="finished"))
+
+    worker.process_pending_jobs(sync_request.workspace_id)
+
+    assert calls == ["materialize"]
+
+
+def test_maintenance_worker_propagates_unrelated_workflow_lookup_error(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("workflow read exploded")
+
+    monkeypatch.setattr(pipeline.engines.workflow.read, "get_nodes", boom)
+    monkeypatch.setattr(
+        worker_module,
+        "materialize_maintenance_designs",
+        lambda _workflow_engine: (_ for _ in ()).throw(AssertionError("should not rematerialize")),
+    )
+
+    with pytest.raises(RuntimeError, match="workflow read exploded"):
+        worker.process_pending_jobs(sync_request.workspace_id)

@@ -12,5 +12,7 @@
   can create directories there.
 - For a quick signal when cache behavior is suspect, run pytest with
   `-p no:cacheprovider`.
+- A pytest run that reaches `100% passed` and then hangs is usually a cache
+  shutdown problem, not a product regression. Confirm the cache path before
+  chasing app logic.
 - See `doc/testing_guide.md` before inventing a new pytest cache workaround.
-

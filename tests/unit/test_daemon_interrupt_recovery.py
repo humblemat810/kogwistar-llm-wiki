@@ -51,6 +51,18 @@ def test_maintenance_daemon_startup_repairs_missing_lane_projection_rows(tmp_pat
     daemon = MaintenanceDaemon(engines, "demo", poll_interval=0.01)
     recovery = daemon.recover_startup_state()
 
+    service_rows = engines.conversation.service_health.list_services(workspace_id="demo")
+    maintenance_health = next(
+        row for row in service_rows if row["service_kind"] == "maintenance_daemon"
+    )
+    assert maintenance_health["owner_app"] == "kogwistar-llm-wiki"
+    assert maintenance_health["llm_assisted"] is True
+    assert maintenance_health["deterministic"] is False
+    assert [surface.surface_kind for surface in recovery.app_surfaces] == []
+    assert [
+        item.daemon_id for item in recovery.daemon_health
+    ] == ["kogwistar-llm-wiki:demo:maintenance_daemon"]
+
     repaired = {item.namespace: item for item in recovery.repaired_lane_projections}
     assert repaired[durable_namespace].repaired_count == 1
     assert repaired[ns.conv_bg].repaired_count == 0
@@ -107,6 +119,21 @@ def test_projection_daemon_startup_recovery_is_bounded(tmp_path):
         poll_interval=0.01,
     )
     recovery = daemon.recover_startup_state()
+
+    service_rows = engines.conversation.service_health.list_services(workspace_id="demo")
+    projection_health = next(
+        row for row in service_rows if row["service_kind"] == "projection_daemon"
+    )
+    assert projection_health["owner_app"] == "kogwistar-llm-wiki"
+    assert projection_health["llm_assisted"] is False
+    assert projection_health["deterministic"] is True
+    assert [surface.surface_kind for surface in recovery.app_surfaces] == [
+        "projection_manifest",
+        "vault_materialization",
+    ]
+    assert [
+        item.daemon_id for item in recovery.daemon_health
+    ] == ["kogwistar-llm-wiki:demo:projection_daemon"]
 
     repaired = {item.namespace: item for item in recovery.repaired_lane_projections}
     assert repaired[durable_namespace].repaired_count == 1
@@ -184,3 +211,66 @@ def test_maintenance_daemon_stop_exits_after_current_poll_cycle(monkeypatch):
     daemon.run()
 
     assert calls == ["demo"]
+
+
+def test_daemon_poll_updates_durable_service_health_without_graph_heartbeat_spam(tmp_path):
+    base_dir = tmp_path / "maintenance-daemon-health"
+    engines = build_persistent_namespace_engines(base_dir)
+    pipeline = IngestPipeline(engines)
+    materialize_maintenance_designs(engines.workflow)
+    pipeline.run(_request())
+
+    daemon = MaintenanceDaemon(engines, "demo", poll_interval=0.01)
+    daemon.recover_startup_state()
+    before_events = engines.conversation.read.get_nodes(
+        where={"entity_type": "service_health_event"},
+        limit=10_000,
+    )
+
+    daemon._worker.process_pending_jobs("demo")
+    from kogwistar_llm_wiki.daemon import _heartbeat_service_health
+
+    _heartbeat_service_health(
+        engines,
+        workspace_id="demo",
+        service_kind="maintenance_daemon",
+        instance_id=daemon._instance_id,
+    )
+
+    rows = engines.conversation.service_health.list_services(workspace_id="demo")
+    health = next(row for row in rows if row["service_kind"] == "maintenance_daemon")
+    assert health["instance_id"] == daemon._instance_id
+    assert health["last_seen_ms"] is not None
+    assert health["status"] == "healthy"
+
+    after_events = engines.conversation.read.get_nodes(
+        where={"entity_type": "service_health_event"},
+        limit=10_000,
+    )
+    assert len(after_events) == len(before_events)
+
+
+def test_startup_recovery_restores_missing_service_health_projection(tmp_path):
+    base_dir = tmp_path / "maintenance-daemon-health-repair"
+    engines = build_persistent_namespace_engines(base_dir)
+    daemon = MaintenanceDaemon(engines, "demo", poll_interval=0.01)
+    recovery = daemon.recover_startup_state()
+    assert recovery.daemon_health
+
+    engines.conversation.meta_sqlite.clear_named_projection(
+        "service_health",
+        "demo|conversation|kogwistar-llm-wiki:demo:maintenance_daemon",
+    )
+    assert (
+        engines.conversation.service_health.get_service(
+            "kogwistar-llm-wiki:demo:maintenance_daemon",
+            workspace_id="demo",
+            namespace="conversation",
+        )
+        is None
+    )
+
+    repaired = daemon.recover_startup_state()
+    assert [
+        item.daemon_id for item in repaired.daemon_health
+    ] == ["kogwistar-llm-wiki:demo:maintenance_daemon"]

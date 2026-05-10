@@ -9,6 +9,10 @@ If a pytest command reaches `100% passed` and then hangs until the command
 timeout, check the pytest cache directory before investigating application
 logic.
 
+Treat that pattern as a cache-shutdown problem first, not as a product
+regression. On this Windows workspace, the test process has repeatedly reached
+`100% passed` and only hung while pytest was shutting down its cache provider.
+
 Observed local failure mode:
 
 - `kogwistar/.pytest_cache` existed but was not writable by the test process.
@@ -52,4 +56,3 @@ pass. It stores convenience state such as node IDs and last-failed data.
 However, a bad cache path can still create noisy warnings or shutdown hangs in
 local tooling. Treat cache-path problems as environment/tooling problems and
 fix the cache location before debugging product code.
-

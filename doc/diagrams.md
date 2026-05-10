@@ -215,3 +215,124 @@ flowchart TB
     BG -->|projection_request queue| obsidian
     KG -->|snapshot| obsidian
 ```
+
+---
+
+## Durable Job Queue Facade
+
+```mermaid
+flowchart LR
+    APP["llm-wiki workers / ingest"]
+    JOBS["engine.jobs\n typed facade"]
+    META["meta store\n index_jobs"]
+    WORKER["MaintenanceWorker /\nProjectionWorker"]
+
+    APP -->|enqueue job_id + namespace + payload| JOBS
+    JOBS -->|preserve coalescing\nnamespace/entity/job kind| META
+    WORKER -->|claim(namespace)| JOBS
+    JOBS -->|lease rows| META
+    WORKER -->|mark_done / retry_or_fail| JOBS
+    JOBS -->|DONE / retry / FAILED| META
+```
+
+---
+
+## Lane Message Projection Repair
+
+```mermaid
+flowchart TB
+    GRAPH["graph truth\nlane_message nodes"]
+    EVENTS["entity_events\nADD / REPLACE order"]
+    PROJ["projected lane-message rows\nworker/foreground inbox serving table"]
+    REPAIR["engine.repair_lane_message_projection(namespace)"]
+    WORKER["llm-wiki worker\nclaims inbox row"]
+
+    GRAPH --> EVENTS
+    EVENTS --> REPAIR
+    GRAPH --> REPAIR
+    REPAIR -->|safe repair inserts missing rows| PROJ
+    PROJ --> WORKER
+```
+
+---
+
+## Runtime Lane Lifecycle To SSE
+
+```mermaid
+sequenceDiagram
+    participant R as WorkflowRuntime
+    participant CTX as StepContext
+    participant CONV as conversation engine
+    participant REG as run registry
+    participant SSE as existing run events SSE
+
+    R->>CTX: construct with lane sender + event sink
+    CTX->>CONV: send_lane_message(...)
+    CONV-->>CTX: durable lane message id
+    CTX->>REG: append worker.requested
+    REG-->>SSE: /api/runs/{run_id}/events
+```
+
+---
+
+## Startup Recovery Coordinator
+
+```mermaid
+flowchart LR
+    DAEMON["llm-wiki daemon startup"]
+    REC["engine.recovery.recover_startup"]
+    QUEUES["durable queues\nindex_jobs"]
+    LANES["lane rows\nprojected inboxes"]
+    CHECKPOINTS["workflow checkpoints"]
+    RUNS["run history"]
+    DEAD["dead letters"]
+    SERVICE["service health\nlatest projection"]
+    APP["app surfaces\nmanifest / vault"]
+    REPORT["RecoveryReport\noperator visibility"]
+
+    DAEMON --> REC
+    REC --> QUEUES
+    REC --> LANES
+    REC --> CHECKPOINTS
+    REC --> RUNS
+    REC --> DEAD
+    REC --> SERVICE
+    REC --> APP
+    REC --> REPORT
+```
+
+---
+
+## Knowledge Policy Boundary
+
+```mermaid
+flowchart TB
+    CORE["kogwistar.policy\nprotocols + conservative defaults"]
+    APPPOL["llm-wiki policies\nconfigured policy instances"]
+    TAX["LlmWikiArtifactTaxonomy\napp artifact names"]
+    CALLS["ingest / maintenance / projection call sites"]
+
+    CORE -->|generic decisions| APPPOL
+    TAX -->|app vocabulary| APPPOL
+    APPPOL --> CALLS
+    CORE -.does not classify app vocabulary.-> TAX
+```
+
+---
+
+## Service Health Registry
+
+```mermaid
+flowchart TB
+    SVC["long-running service\nmaintenance/projection daemon"]
+    REG["engine.service_health\nServiceHealthRegistry"]
+    GRAPH["graph/oplog sparse lifecycle facts\nregistered, started, stopped,\nstale, recovered, config changed"]
+    PROJ["durable latest health projection\nservice_id, instance_id,\nlast_seen_ms, status, last_error"]
+    REC["engine.recovery.inspect"]
+
+    SVC -->|declare / start / stop| REG
+    REG -->|meaningful transitions only| GRAPH
+    SVC -->|heartbeat per poll cycle| REG
+    REG -->|update latest row, no graph spam| PROJ
+    PROJ --> REC
+```

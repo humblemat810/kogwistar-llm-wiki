@@ -52,6 +52,10 @@ Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contra
   - recovery reports include queues, lane rows, checkpoints, run history, dead letters, daemon health, and app output surfaces
   - default resume policy is inspect-only; auto-resume requires explicit restartable markers and a caller-provided resume hook
   - `llm-wiki` daemons now call the core recovery coordinator and only supply manifest/vault/daemon surface probes
+- [x] service/daemon health visibility
+  - long-running operational services expose durable latest health state without creating a universal agent/participant ontology
+  - latest heartbeat state belongs in named projections / ops metastore rows, not high-frequency graph events
+  - semantic diagrams: [doc/diagrams.md](diagrams.md)
 
 ## App-side policy still owned by `llm-wiki`
 
@@ -79,6 +83,10 @@ Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contra
   - core owns generic protocols/defaults in `kogwistar.policy`
   - `llm-wiki` owns concrete taxonomy and app policy instances in `LlmWikiPolicies`
   - app call sites for ingest, maintenance derivation/wisdom, and projection eligibility route through those policy objects
+- [x] narrow service health registry
+  - core exposes `engine.service_health` for long-running operational service health
+  - latest heartbeat state is durable projection state, not high-frequency graph truth
+  - `llm-wiki` maintenance/projection daemons declare stable service health and update per-instance heartbeat state
 
 ## Not done yet
 
@@ -92,8 +100,6 @@ Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contra
   - runtime budget scaffolding exists in places, but no end-to-end enforced budget policy for llm-wiki jobs
 - [ ] graph-native message bus over CDC oplog
   - lane messages and durable jobs exist, but there is no general topic/subscription bus
-- [ ] persistent agent identity and capability registry
-  - daemons do not yet register stable agent identities or advertised capabilities in the graph
 - [ ] perception/sensor layer
   - no filesystem watcher, webhook receiver, RSS/email/calendar adapter, or timer-triggered ingestion loop
 - [ ] workflow self-modification loop
@@ -110,3 +116,6 @@ Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contra
 - [x] `tests/unit/test_projection_consistency.py`
 - [x] `tests/unit/test_knowledge_derivation.py`
 - [x] `tests/unit/test_lane_message_contract_integration.py`
+- [x] `kogwistar/tests/core/test_service_health_registry.py`
+- [x] `kogwistar/tests/server/test_service_daemon_model.py`
+- [x] `tests/unit/test_daemon_interrupt_recovery.py`
