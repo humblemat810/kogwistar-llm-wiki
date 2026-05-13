@@ -565,24 +565,44 @@ class IngestPipeline:
                 source_document_id,
             )
         )
-        node = self._artifact_node(
-            request=request,
-            source_document_id=source_document_id,
+        existing_node = self._get_existing_node(self.engines.conversation, namespace=namespace, node_id=node_id)
+        if existing_node is None:
+            node = self._artifact_node(
+                request=request,
+                source_document_id=source_document_id,
+                namespace=namespace,
+                node_id=node_id,
+                artifact_kind="maintenance_job_request",
+                lane="background",
+                visibility="internal",
+                label="Maintenance Job Request",
+                summary=f"Maintenance requested for {request.title}",
+                extra_metadata={
+                    "job_type": "distillation",
+                    "trigger_type": "ingest",
+                    "status": "pending",
+                },
+            )
+            with _temporary_namespace(self.engines.conversation, namespace):
+                self.engines.conversation.write.add_node(node)
+            request_node_id = str(node.id)
+        else:
+            request_node_id = str(existing_node.id)
+        lane_idempotency_key = str(
+            stable_id(
+                "kogwistar_llm_wiki.maintenance_request_lane",
+                request.workspace_id,
+                source_document_id,
+                "distill",
+            )
+        )
+        existing_messages = self.engines.conversation.find_lane_messages(
             namespace=namespace,
-            node_id=node_id,
-            artifact_kind="maintenance_job_request",
-            lane="background",
-            visibility="internal",
-            label="Maintenance Job Request",
-            summary=f"Maintenance requested for {request.title}",
-            extra_metadata={
-                "job_type": "distillation",
-                "trigger_type": "ingest",
-                "status": "pending",
-            },
+            idempotency_key=lane_idempotency_key,
+            limit=1,
+            newest_first=True,
         )
         with _temporary_namespace(self.engines.conversation, namespace):
-            self.engines.conversation.write.add_node(node)
             lane_message = self.engines.conversation.send_lane_message(
                 conversation_id=f"maintenance:{source_document_id}",
                 inbox_id="inbox:worker:maintenance",
@@ -591,19 +611,26 @@ class IngestPipeline:
                 msg_type="request.maintenance",
                 payload={
                     "workspace_id": request.workspace_id,
-                    "request_node_id": str(node.id),
+                    "request_node_id": request_node_id,
                     "source_document_id": source_document_id,
                     "maintenance_kind": "distill",
                 },
+                idempotency_key=lane_idempotency_key,
             )
-        self._enqueue_maintenance_job(
-            request=request,
-            request_node_id=str(node.id),
-            source_document_id=source_document_id,
+        if not existing_messages and not self._job_exists(
             namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
-            lane_message_id=lane_message.message_id,
-        )
-        return str(node.id)
+            entity_kind="maintenance_job",
+            entity_id=source_document_id,
+            job_kind="maintenance_job",
+        ):
+            self._enqueue_maintenance_job(
+                request=request,
+                request_node_id=request_node_id,
+                source_document_id=source_document_id,
+                namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
+                lane_message_id=lane_message.message_id,
+            )
+        return request_node_id
 
     def create_candidate_link(
         self,
@@ -613,10 +640,21 @@ class IngestPipeline:
         parse_result: PageIndexParseResult,
         namespace: str,
     ) -> str:
+        node_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.candidate_link",
+                request.workspace_id,
+                source_document_id,
+            )
+        )
+        existing_node = self._get_existing_node(self.engines.conversation, namespace=namespace, node_id=node_id)
+        if existing_node is not None:
+            return str(existing_node.id)
         node = self._artifact_node(
             request=request,
             source_document_id=source_document_id,
             namespace=namespace,
+            node_id=node_id,
             artifact_kind="candidate_link",
             lane="background",
             visibility="review",
@@ -635,10 +673,21 @@ class IngestPipeline:
         candidate_link_id: str,
         namespace: str,
     ) -> str:
+        node_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.promotion_candidate",
+                request.workspace_id,
+                source_document_id,
+            )
+        )
+        existing_node = self._get_existing_node(self.engines.conversation, namespace=namespace, node_id=node_id)
+        if existing_node is not None:
+            return str(existing_node.id)
         node = self._artifact_node(
             request=request,
             source_document_id=source_document_id,
             namespace=namespace,
+            node_id=node_id,
             artifact_kind="promotion_candidate",
             lane="background",
             visibility="review",
@@ -666,10 +715,33 @@ class IngestPipeline:
         promotion_candidate_id: str,
         namespace: str,
     ) -> str:
+        node_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.promoted_knowledge",
+                request.workspace_id,
+                source_document_id,
+            )
+        )
+        existing_node = self._get_existing_node(self.engines.kg, namespace=namespace, node_id=node_id)
+        if existing_node is not None:
+            promoted_id = str(existing_node.id)
+            if not self._job_exists(
+                namespace=self.namespaces_for(request.workspace_id).projection_jobs,
+                entity_kind="projection_request",
+                entity_id=promoted_id,
+                job_kind="projection_request",
+            ):
+                self._enqueue_projection_job(
+                    request=request,
+                    promoted_id=promoted_id,
+                    namespace=self.namespaces_for(request.workspace_id).projection_jobs,
+                )
+            return promoted_id
         node = self._artifact_node(
             request=request,
             source_document_id=source_document_id,
             namespace=namespace,
+            node_id=node_id,
             artifact_kind="promoted_knowledge",
             lane="knowledge",
             visibility="projection",
@@ -800,6 +872,31 @@ class IngestPipeline:
             }],
             metadata=metadata,
         )
+
+    def _get_existing_node(self, engine: Any, *, namespace: str, node_id: str) -> Node | None:
+        with _temporary_namespace(engine, namespace):
+            nodes = engine.read.get_nodes(ids=[str(node_id)])
+        if not nodes:
+            return None
+        return nodes[0]
+
+    def _job_exists(
+        self,
+        *,
+        namespace: str,
+        entity_kind: str,
+        entity_id: str,
+        job_kind: str,
+    ) -> bool:
+        jobs = self.engines.conversation.jobs.list(namespace=namespace, limit=10_000)
+        for job in jobs:
+            if (
+                str(job.entity_kind) == str(entity_kind)
+                and str(job.entity_id) == str(entity_id)
+                and str(job.job_kind) == str(job_kind)
+            ):
+                return True
+        return False
 
     def _leading_span(self, source_document_id: str, raw_text: str, *, insertion_method: str) -> Span:
         excerpt = (raw_text or " ")[:1]

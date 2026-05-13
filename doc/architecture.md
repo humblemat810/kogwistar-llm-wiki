@@ -91,6 +91,17 @@ Responsibilities:
 - Generate candidate links
 - Populate conversation-oriented artifacts
 - Trigger follow-up maintenance
+- Reuse stable ids and idempotency keys so repeated ingest converges instead of
+  producing duplicate review, maintenance, or projection work
+
+Convergent promotion path:
+
+- `source_document_id` is stable by `workspace_id + source_uri`
+- `candidate_link`, `promotion_candidate`, and `promoted_knowledge` are stable
+  artifacts derived from that source identity
+- maintenance request lane messages and maintenance replies use idempotency keys
+  so graph truth stays authoritative and projected serving rows can be rebuilt if
+  lost
 
 ---
 

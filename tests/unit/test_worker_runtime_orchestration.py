@@ -190,3 +190,49 @@ def test_maintenance_worker_propagates_unrelated_workflow_lookup_error(
 
     with pytest.raises(RuntimeError, match="workflow read exploded"):
         worker.process_pending_jobs(sync_request.workspace_id)
+
+
+def test_maintenance_worker_reply_emission_is_idempotent(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        requests = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "request.maintenance",
+            }
+        )
+    assert len(requests) == 1
+    request_message_id = str(requests[0].id)
+
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="completed",
+        payload={"maintenance_kind": "distill"},
+    )
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="completed",
+        payload={"maintenance_kind": "distill"},
+    )
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "reply.maintenance.completed",
+            }
+        )
+    assert len(replies) == 1

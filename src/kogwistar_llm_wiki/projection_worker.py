@@ -83,7 +83,7 @@ class ProjectionWorker:
             self._record_projection_manifest(
                 workspace_id=workspace_id,
                 promoted_entity_id=promoted_entity_id,
-                status="rebuilding",
+                status="failed",
             )
             self._emit_projection_status(
                 workspace_id=workspace_id,
@@ -116,17 +116,34 @@ class ProjectionWorker:
         if not isinstance(payload, dict):
             payload = {}
 
-        projected_ids = [str(item) for item in payload.get("projected_ids", []) if str(item)]
-        if promoted_entity_id not in projected_ids:
-            projected_ids.append(promoted_entity_id)
+        desired_ids = [str(item) for item in payload.get("desired_projected_ids", []) if str(item)]
+        ready_ids = [str(item) for item in payload.get("ready_projected_ids", payload.get("projected_ids", [])) if str(item)]
+        failed_ids = [str(item) for item in payload.get("failed_projected_ids", []) if str(item)]
+        if promoted_entity_id not in desired_ids:
+            desired_ids.append(promoted_entity_id)
+        if status == "ready":
+            if promoted_entity_id not in ready_ids:
+                ready_ids.append(promoted_entity_id)
+            failed_ids = [item for item in failed_ids if item != promoted_entity_id]
+        elif status == "failed":
+            ready_ids = [item for item in ready_ids if item != promoted_entity_id]
+            if promoted_entity_id not in failed_ids:
+                failed_ids.append(promoted_entity_id)
+        else:
+            ready_ids = [item for item in ready_ids if item != promoted_entity_id]
+            failed_ids = [item for item in failed_ids if item != promoted_entity_id]
 
         version = int(payload.get("projection_schema_version", 1) or 1)
+        projected_ids = list(ready_ids)
         count = len(projected_ids)
         meta.replace_named_projection(
             namespace=ns.projection_manifest,
             key=workspace_id,
             payload={
                 "workspace_id": workspace_id,
+                "desired_projected_ids": desired_ids,
+                "ready_projected_ids": ready_ids,
+                "failed_projected_ids": failed_ids,
                 "projected_ids": projected_ids,
                 "status": status,
             },

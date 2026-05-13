@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 
@@ -49,6 +51,23 @@ def test_projection_jobs_are_enqueued_per_sync_promotion(pipeline, ingest_reques
     assert {str(_job_field(job, "entity_kind")) for job in jobs} == {"projection_request"}
     assert {str(_job_field(job, "namespace")) for job in jobs} == {ns.projection_jobs}
     assert {str(_job_field(job, "entity_id")) for job in jobs} == promoted_ids
+
+
+def test_repeated_sync_ingest_reuses_projection_job_for_same_source(pipeline, ingest_request):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+    request = _sync_request(ingest_request)
+
+    first = pipeline.run(request)
+    second = pipeline.run(request)
+
+    assert second.promoted_entity_id == first.promoted_entity_id
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.projection_jobs,
+        limit=20,
+    )
+    assert len(jobs) == 1
+    assert _job_payload(jobs[0])["promoted_entity_id"] == first.promoted_entity_id
 
 
 def test_projection_worker_processes_durable_jobs_and_records_manifest(
@@ -124,6 +143,32 @@ def test_projection_manager_reads_manifest_written_by_worker(
     assert ingest_request.title in titles
     assert manifest["namespace"] == ns.projection_manifest
     assert manifest["key"] == workspace_id
+
+
+def test_failed_projection_does_not_mark_manifest_id_ready(pipeline, ingest_request, tmp_path, monkeypatch):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+    vault_root = tmp_path / "manifest_failure_vault"
+    vault_root.mkdir()
+
+    artifacts = pipeline.run(_sync_request(ingest_request))
+    worker = ProjectionWorker(pipeline.engines)
+    monkeypatch.setattr(worker.manager, "sync_obsidian_vault", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("sink boom")))
+
+    with pytest.raises(RuntimeError, match="sink boom"):
+        worker.process_pending_projections(workspace_id, str(vault_root))
+
+    manifest = pipeline.engines.conversation.meta_sqlite.get_named_projection(
+        ns.projection_manifest,
+        workspace_id,
+    )
+    assert manifest is not None
+    payload = manifest["payload"]
+    assert payload["status"] == "failed"
+    assert artifacts.promoted_entity_id in payload["desired_projected_ids"]
+    assert artifacts.promoted_entity_id in payload["failed_projected_ids"]
+    assert artifacts.promoted_entity_id not in payload["ready_projected_ids"]
+    assert artifacts.promoted_entity_id not in payload["projected_ids"]
 
 
 def test_projection_worker_is_noop_for_empty_queue(pipeline, tmp_path):

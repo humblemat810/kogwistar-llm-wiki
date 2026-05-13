@@ -256,6 +256,65 @@ flowchart TB
 
 ---
 
+## Promotion Convergence Happy Path
+
+```mermaid
+flowchart LR
+    SRC["source_uri + workspace_id"] --> DOC["stable source_document_id"]
+    DOC --> CL["candidate_link\nstable id"]
+    CL --> PC["promotion_candidate\nstable id"]
+    PC --> DEC{"promotion policy"}
+    DEC -->|promote| PK["promoted_knowledge\nstable id"]
+    DOC --> MR["maintenance request\nstable node id"]
+    MR --> LM["maintenance lane request\nidempotency key"]
+    PK --> PJ["projection job\ncoalesced durable job"]
+```
+
+---
+
+## Core Lane Idempotency
+
+```mermaid
+flowchart TD
+    SEND["send_lane_message(..., idempotency_key=K)"] --> SEARCH["search lane_message graph truth\nnamespace + key + common filters"]
+    SEARCH --> MATCH{"existing match?"}
+    MATCH -->|yes| VALIDATE["validate stable send-shape"]
+    VALIDATE --> REPROJECT{"projected row missing?"}
+    REPROJECT -->|yes| REPAIR["re-project serving row"]
+    REPROJECT -->|no| RETURN["return existing message_id"]
+    REPAIR --> RETURN
+    MATCH -->|no| CREATE["create message node + semantic edges"]
+    CREATE --> PROJECT["project serving row"]
+    PROJECT --> RETURNNEW["return new message_id"]
+```
+
+---
+
+## Normal Convergent Happy Path
+
+```mermaid
+sequenceDiagram
+    participant Ingest as IngestPipeline
+    participant Core as Kogwistar core
+    participant Worker as MaintenanceWorker
+    participant Proj as ProjectionWorker
+    participant Vault as Obsidian vault
+
+    Ingest->>Core: register source + stable promotion-chain ids
+    Ingest->>Core: send maintenance request (idempotency key)
+    Ingest->>Core: enqueue maintenance job once
+    Ingest->>Core: promote knowledge once
+    Ingest->>Core: enqueue projection job once
+    Worker->>Core: claim maintenance request
+    Worker->>Core: send foreground reply (idempotency key)
+    Worker->>Core: complete request message + durable job
+    Proj->>Core: process projection job
+    Proj->>Core: manifest desired -> ready
+    Proj->>Vault: sync materialized notes
+```
+
+---
+
 ## Runtime Lane Lifecycle To SSE
 
 ```mermaid

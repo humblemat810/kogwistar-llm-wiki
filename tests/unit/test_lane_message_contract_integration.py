@@ -121,6 +121,26 @@ def test_lane_message_request_reply_round_trip_is_backend_agnostic(tmp_path: Pat
     assert artifacts.maintenance_job_id
 
 
+def test_repeated_sync_ingest_reuses_maintenance_request_message(tmp_path: Path):
+    engines = build_in_memory_namespace_engines(tmp_path / "lane-idempotent-ingest")
+    pipeline = IngestPipeline(engines)
+    materialize_maintenance_designs(engines.workflow)
+
+    first = pipeline.run(_request())
+    second = pipeline.run(_request())
+
+    assert second.maintenance_job_id == first.maintenance_job_id
+    maintenance_rows = engines.conversation.list_projected_lane_messages(
+        inbox_id="inbox:worker:maintenance"
+    )
+    assert len(maintenance_rows) == 1
+    jobs = engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=WorkspaceNamespaces("demo").maintenance_jobs,
+        limit=10,
+    )
+    assert len(jobs) == 1
+
+
 def test_maintenance_lane_progress_reports_projected_request_and_reply(tmp_path: Path):
     engines = build_in_memory_namespace_engines(tmp_path / "lane-progress")
     pipeline = IngestPipeline(engines)
@@ -245,7 +265,7 @@ def test_sqlite_lane_message_projection_persists_across_engine_reload(tmp_path: 
     assert after == before
 
 
-def test_worker_recovers_after_lane_message_projection_repair(tmp_path: Path):
+def test_worker_recovers_after_lane_message_projection_repair(tmp_path: Path, monkeypatch):
     engines = build_persistent_namespace_engines(tmp_path / "sqlite-repair")
     pipeline = IngestPipeline(engines)
     materialize_maintenance_designs(engines.workflow)
@@ -269,6 +289,11 @@ def test_worker_recovers_after_lane_message_projection_repair(tmp_path: Path):
     assert repaired_rows[0].status == "pending"
 
     worker = MaintenanceWorker(engines)
+    monkeypatch.setattr(
+        worker.runtime,
+        "run",
+        lambda **kwargs: type("RunResult", (), {"status": "finished"})(),
+    )
     worker.process_pending_jobs("demo")
 
     maintenance_after = engines.conversation.list_projected_lane_messages(
