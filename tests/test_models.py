@@ -1,6 +1,13 @@
 from kogwistar_llm_wiki import IngestPipelineArtifacts, IngestPipelineRequest
 
 
+def test_package_root_import_smoke():
+    import kogwistar_llm_wiki
+
+    assert hasattr(kogwistar_llm_wiki, "IngestPipeline")
+    assert hasattr(kogwistar_llm_wiki, "NamespaceEngines")
+
+
 def test_request_defaults():
     # Pydantic validates keyword arguments
     request = IngestPipelineRequest(

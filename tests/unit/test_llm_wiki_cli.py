@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.models import ObsidianBuildResult
@@ -203,6 +205,16 @@ def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch,
     assert vault.exists()
     assert captured["split_derived_knowledge"] is True
     assert captured["maintenance_workspace"] == "demo"
+
+
+def test_cli_help_exits_cleanly(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        llm_wiki_cli.main(["--help"])
+
+    assert excinfo.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "python -m kogwistar_llm_wiki" in help_text
+    assert "daemon" in help_text
 
 
 def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, capsys):

@@ -2,21 +2,22 @@
 
 ## 1. What This Repo Is
 
-This repository is currently a docs-first workspace for the Kogwistar LLM-Wiki effort.
+This repository contains the `kogwistar-llm-wiki` application package plus the
+supporting docs and tests that describe its runtime contract.
 
 At the moment it contains:
 
-- architecture notes
-- workflow maps
+- the llm-wiki application package under `src/`
+- architecture notes and workflow maps
 - responsibility boundaries
 - contract catalogs
 
-There is not yet an application package in this repo, so the setup below is a baseline for Python
-tooling and future code.
+The application package imports sibling runtime repos, so setup needs to keep
+those sibling checkouts and package metadata aligned.
 
 ## 2. Prerequisites
 
-- Python 3.13 through 3.14
+- Python 3.13+
 - Git
 - SSH access to `github.com` if you plan to install the vendored repos directly from GitHub
 - A terminal with access to the repo root
@@ -35,31 +36,41 @@ or use your preferred local environment workflow.
 
 ## 4. Install Dev Tools
 
-```powershell
-uv pip install -e ".[dev,test]"
-```
-
-That installs the GitHub-first baseline declared in `pyproject.toml`.
-
-The default runtime dependency is:
-
-- `kogwistar`
-- `graph-knowledge-doc-parser`
-- `kogwistar-obsidian-sink`
-
-If you want local editable checkouts of the sibling repos, run the bootstrap script manually:
+First, make the sibling runtime repos available locally:
 
 ```bash
 bash scripts/bootstrap-dev.sh
 ```
 
-That script is opt-in. It clones and editable-installs the local repos only when you run it.
-Windows users can run it from Git Bash or WSL.
+That script clones local checkouts when needed, editable-installs the sibling
+runtime repos, and then installs `kogwistar-llm-wiki` itself.
+
+If you prefer to drive installation manually, keep the same order:
+
+```powershell
+pip install -e ./kogwistar
+pip install -e ./kogwistar-obsidian-sink
+pip install -e ./kg-doc-parser
+uv pip install -e ".[dev,test]"
+```
+
+The runtime dependency bundle is:
+
+- `kogwistar`
+- `kg-doc-parser`
+- `kogwistar-obsidian-sink`
+
+This is a real application package, so those sibling repos are part of the
+runtime contract rather than optional tooling.
+
+`[tool.uv.sources]` in `pyproject.toml` tells `uv` to prefer the local sibling
+checkouts when they are present. It does not replace the real dependency
+declarations, and `pip` ignores it.
 
 During cross-repo refactors, those sibling repos are expected to be edited
 together from the same project root. Treat them as coordinated local sources,
 not as read-only vendor blobs, while still respecting the documented ownership
-boundaries for reusable capability vs. app policy.
+boundaries for reusable core versus app policy.
 
 ## 5. Common Checks
 

@@ -150,11 +150,11 @@ Required search themes for this branch:
   - `kogwistar/kogwistar/server/run_registry.py`
   - `kogwistar/tests/core/test_recovery_subsystem.py`
 - Checklist items:
-  - [ ] Filter recovery run-history rows by workspace and namespace, or add the needed metadata at run creation. Maps: `F3`. Files: `kogwistar/kogwistar/engine_core/recovery.py`, `kogwistar/kogwistar/server/run_registry.py`.
-  - [ ] Confirm the filtering key source is semantically stable across conversation runs, workflow runs, and server runs. Maps: `F3`. Files: `kogwistar/kogwistar/engine_core/recovery.py`, `kogwistar/kogwistar/server/run_registry.py`.
-  - [ ] Add multi-workspace regression coverage for recovery inspect and recover-startup reports. Maps: `F3`, `F8`, `F9`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
-  - [ ] Search completed for other recovery inspection surfaces that drop or ignore workspace/namespace inputs. Maps: `F3`, `F10`, `F11`. Files: review-only search across `kogwistar/kogwistar/engine_core/`.
-  - [ ] Verification completed. Maps: `F3`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
+  - [x] Filter recovery run-history rows by workspace and namespace, or add the needed metadata at run creation. Maps: `F3`. Files: `kogwistar/kogwistar/engine_core/recovery.py`, `kogwistar/kogwistar/server/run_registry.py`.
+  - [x] Confirm the filtering key source is semantically stable across conversation runs, workflow runs, and server runs. Maps: `F3`. Files: `kogwistar/kogwistar/engine_core/recovery.py`, `kogwistar/kogwistar/server/run_registry.py`.
+  - [x] Add multi-workspace regression coverage for recovery inspect and recover-startup reports. Maps: `F3`, `F8`, `F9`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
+  - [x] Search completed for other recovery inspection surfaces that drop or ignore workspace/namespace inputs. Maps: `F3`, `F10`, `F11`. Files: review-only search across `kogwistar/kogwistar/engine_core/`.
+  - [x] Verification completed. Maps: `F3`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
 - Similar-class search:
   - Search for unused or deleted `workspace_id` and `namespace` parameters in recovery and reporting code.
   - Search patterns: `"del namespace"`, `"del workspace_id"`, `"workspace_id=None"`, `"namespace=None"`, `"list_server_runs"`.
@@ -176,28 +176,28 @@ Required search themes for this branch:
   install metadata, bootstrap assumptions, and import-time dependencies are not
   aligned, so a clean environment can install successfully and still fail at
   runtime.
-- Primary implementation targets:
-  - `pyproject.toml`
-  - `scripts/bootstrap-dev.sh`
+  - Primary implementation targets:
+    - `pyproject.toml`
+    - `scripts/bootstrap-dev.sh`
   - `src/kogwistar_llm_wiki/__init__.py`
   - `src/kogwistar_llm_wiki/ingest_pipeline.py`
   - `src/kogwistar_llm_wiki/projection.py`
   - `src/kogwistar_llm_wiki/models.py`
   - `doc/dev_setup_guide.md`
   - `doc/cli_reference.md`
-- Checklist items:
-  - [ ] Make runtime dependency declarations honest for imported sibling packages, or make those imports truly lazy/optional. Maps: `F4`. Files: `pyproject.toml`, `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/projection.py`, `src/kogwistar_llm_wiki/models.py`.
-  - [ ] Align top-level Python version metadata with the strictest direct runtime dependency, or lower the dependency requirements upstream if appropriate. Maps: `F4`. Files: `pyproject.toml`.
-  - [ ] Remove misleading comments that describe direct runtime imports as non-import dependencies. Maps: `F4`. Files: `pyproject.toml`.
-  - [ ] Fix bootstrap so dependency installation and editable sibling setup match the declared packaging contract. Maps: `F4`. Files: `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`.
-  - [ ] Add clean import and CLI smoke expectations to docs or tests. Maps: `F4`, `F13`, `F14`. Files: `doc/dev_setup_guide.md`, `doc/cli_reference.md`.
-  - [ ] Search completed for other import-time sibling dependencies, version drift, and empty dependency declarations that are not actually optional. Maps: `F4`. Files: review-only search across root metadata and `src/`.
-  - [ ] Verification completed. Maps: `F4`. Files: targeted smoke script or future import-smoke test module.
+  - Checklist items:
+    - [x] Make runtime dependency declarations honest for imported sibling packages, or make those imports truly lazy/optional. Maps: `F4`. Files: `pyproject.toml`, `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/projection.py`, `src/kogwistar_llm_wiki/models.py`.
+    - [x] Align top-level Python version metadata with the strictest direct runtime dependency, or lower the dependency requirements upstream if appropriate. Maps: `F4`. Files: `pyproject.toml`.
+    - [x] Remove misleading comments that describe direct runtime imports as non-import dependencies. Maps: `F4`. Files: `pyproject.toml`.
+    - [x] Fix bootstrap so dependency installation and editable sibling setup match the declared packaging contract. Maps: `F4`. Files: `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`.
+    - [x] Add clean import and CLI smoke expectations to docs or tests. Maps: `F4`, `F13`, `F14`. Files: `doc/dev_setup_guide.md`, `doc/cli_reference.md`, `tests/unit/test_llm_wiki_cli.py`, `tests/test_models.py`.
+    - [x] Search completed for other import-time sibling dependencies, version drift, and empty dependency declarations that are not actually optional. Maps: `F4`. Files: review-only search across root metadata and `src/`.
+    - [x] Verification completed. Maps: `F4`. Files: targeted smoke script or future import-smoke test module.
 - Similar-class search:
   - Search for other import-time sibling dependencies that are described as optional or non-runtime.
   - Search patterns: `"from kg_doc_parser"`, `"from kogwistar_obsidian_sink"`, `"dependencies = []"`, `"not a Python import dep"`, `"--no-deps"`.
-- Discovered during implementation:
-  - [ ] None yet.
+  - Discovered during implementation:
+    - [x] None yet.
 - Regression tests to add/update:
   - import smoke coverage for `import kogwistar_llm_wiki`
   - CLI smoke coverage for `llm-wiki --help`
@@ -316,11 +316,11 @@ Required search themes for this branch:
   - `kogwistar/kogwistar/engine_core/service_health.py`
   - `kogwistar/tests/core/test_recovery_subsystem.py`
 - Checklist items:
-  - [ ] Surface service-health repair actions and counts in `RecoveryReport`. Maps: `F8`. Files: `kogwistar/kogwistar/engine_core/recovery.py`.
-  - [ ] Reuse the existing repair result shape or add a generic per-surface repair action model. Maps: `F8`. Files: `kogwistar/kogwistar/engine_core/recovery.py`, `kogwistar/kogwistar/engine_core/service_health.py`.
-  - [ ] Add regression tests for repaired service-health projection rows appearing in startup recovery output. Maps: `F8`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
-  - [ ] Search completed for other mutating recovery operations that are not reported back to operators. Maps: `F8`. Files: review-only search across `kogwistar/kogwistar/engine_core/recovery.py`.
-  - [ ] Verification completed. Maps: `F8`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
+  - [x] Surface service-health repair actions and counts in `RecoveryReport`. Maps: `F8`. Files: `kogwistar/kogwistar/engine_core/recovery.py`.
+  - [x] Reuse the existing repair result shape or add a generic per-surface repair action model. Maps: `F8`. Files: `kogwistar/kogwistar/engine_core/recovery.py`, `kogwistar/kogwistar/engine_core/service_health.py`.
+  - [x] Add regression tests for repaired service-health projection rows appearing in startup recovery output. Maps: `F8`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
+  - [x] Search completed for other mutating recovery operations that are not reported back to operators. Maps: `F8`. Files: review-only search across `kogwistar/kogwistar/engine_core/recovery.py`.
+  - [x] Verification completed. Maps: `F8`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`.
 - Similar-class search:
   - Search for side-effecting recovery calls whose results are dropped or not counted.
   - Search patterns: `"repair_"`, `"recover_startup"`, `"actions="`, `"repaired_count"`, `"scanned_count"`.
@@ -346,11 +346,11 @@ Required search themes for this branch:
   - `kogwistar/tests/core/test_recovery_subsystem.py`
   - `kogwistar/tests/runtime/test_checkpoint_resume_contract.py`
 - Checklist items:
-  - [ ] Replace the broad checkpoint fallback with a typed or predicate-based recoverable-path check. Maps: `F9`. Files: `kogwistar/kogwistar/engine_core/recovery.py`.
-  - [ ] Add a recovery finding or explicit error surface for unrelated checkpoint inspection failures. Maps: `F9`. Files: `kogwistar/kogwistar/engine_core/recovery.py`.
-  - [ ] Add regression coverage for known recoverable lookup failures versus unrelated exceptions. Maps: `F9`, `F7`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`, `kogwistar/tests/runtime/test_checkpoint_resume_contract.py`.
-  - [ ] Search completed for other broad core fallbacks that silently convert real backend failures into empty data. Maps: `F9`. Files: review-only search across `kogwistar/kogwistar/engine_core/`.
-  - [ ] Verification completed. Maps: `F9`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`, `kogwistar/tests/runtime/test_checkpoint_resume_contract.py`.
+  - [x] Replace the broad checkpoint fallback with a typed or predicate-based recoverable-path check. Maps: `F9`. Files: `kogwistar/kogwistar/engine_core/recovery.py`.
+  - [x] Add a recovery finding or explicit error surface for unrelated checkpoint inspection failures. Maps: `F9`. Files: `kogwistar/kogwistar/engine_core/recovery.py`.
+  - [x] Add regression coverage for known recoverable lookup failures versus unrelated exceptions. Maps: `F9`, `F7`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`, `kogwistar/tests/runtime/test_checkpoint_resume_contract.py`.
+  - [x] Search completed for other broad core fallbacks that silently convert real backend failures into empty data. Maps: `F9`. Files: review-only search across `kogwistar/kogwistar/engine_core/`.
+  - [x] Verification completed. Maps: `F9`. Files: `kogwistar/tests/core/test_recovery_subsystem.py`, `kogwistar/tests/runtime/test_checkpoint_resume_contract.py`.
 - Similar-class search:
   - Search for `except Exception` in read-path fallback logic throughout recovery and inspection code.
   - Search patterns: `"except Exception"`, `"return []"`, `"fallback"`, `"checkpoint"`, `"read.get_nodes"`.

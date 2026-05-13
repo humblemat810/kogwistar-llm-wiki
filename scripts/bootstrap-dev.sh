@@ -5,8 +5,8 @@
 # everything editable in the correct order.
 #
 # For each sibling repo:
-#   - If the local directory already exists  → keep it (no re-clone)
-#   - If it does not exist                   → clone from GitHub
+#   - If the local directory already exists -> keep it (no re-clone)
+#   - If it does not exist                  -> clone from GitHub
 #   Then install as editable from local path.
 #
 # This package (kogwistar-llm-wiki) is installed last, after all siblings.
@@ -49,9 +49,9 @@ ensure_local() {
   local local_dir="$ROOT_DIR/$name"
 
   if [ -d "$local_dir" ]; then
-    printf '[keep]  %s — already present at %s\n' "$name" "$local_dir"
+    printf '[keep]  %s - already present at %s\n' "$name" "$local_dir"
   else
-    printf '[clone] %s — cloning from %s\n' "$name" "$git_url"
+    printf '[clone] %s - cloning from %s\n' "$name" "$git_url"
     git clone "$git_url" "$local_dir"
   fi
 }
@@ -61,10 +61,10 @@ install_editable() {
   local local_dir="$ROOT_DIR/$name"
 
   if has_python_package "$local_dir"; then
-    printf '[install] %s — editable from %s\n' "$name" "$local_dir"
-    pip install --no-deps -e "$local_dir"
+    printf '[install] %s - editable from %s\n' "$name" "$local_dir"
+    pip install -e "$local_dir"
   else
-    printf '[skip]  %s — no Python package metadata found at %s\n' "$name" "$local_dir" >&2
+    printf '[skip]  %s - no Python package metadata found at %s\n' "$name" "$local_dir" >&2
   fi
 }
 

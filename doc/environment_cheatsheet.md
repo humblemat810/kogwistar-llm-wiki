@@ -2,12 +2,11 @@
 
 ## 1. Repo Status
 
-- Docs-first repository
-- Python tooling scaffold added
-- GitHub-first default install for `kogwistar`, `graph-knowledge-doc-parser`, and `kogwistar-obsidian-sink`
-- Python target range: 3.13 through 3.14
-- Local editable bootstrap is opt-in
-- `uv` is used for the install commands below
+- `kogwistar-llm-wiki` application package plus docs and tests
+- Python target range: 3.13+
+- Runtime bundle includes `kogwistar`, `kg-doc-parser`, and `kogwistar-obsidian-sink`
+- Local editable bootstrap is the recommended repo-local setup path
+- `uv` can prefer local sibling checkouts via `[tool.uv.sources]`
 
 ## 2. Setup Commands
 
@@ -15,14 +14,11 @@
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-uv pip install -e ".[dev,test]"
-```
-
-Optional local bootstrap:
-
-```powershell
 bash scripts/bootstrap-dev.sh
 ```
+
+If you want to install manually instead, editable-install the sibling repos
+first and then install `kogwistar-llm-wiki`.
 
 ## 3. Everyday Commands
 
@@ -43,6 +39,6 @@ uv run pytest
 
 ## 5. Current Gaps
 
-- No app entrypoint yet
-- No source package yet
-- No automated tests yet
+- Keep the sibling runtime repos checked out locally when working on the app
+- Keep docs and package metadata aligned with the real import graph
+- Run the smoke tests after packaging or CLI changes

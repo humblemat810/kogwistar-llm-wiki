@@ -1,9 +1,10 @@
 # CLI Reference - `llm-wiki`
 
-All commands are available after installing the package:
+All commands are available after installing the package and its sibling runtime
+dependencies:
 
 ```bash
-pip install -e ".[dev]"
+bash scripts/bootstrap-dev.sh
 ```
 
 ## Top-Level
@@ -93,10 +94,10 @@ Current semantics:
 
 ```python
 from kogwistar_llm_wiki.daemon import MaintenanceDaemon, ProjectionDaemon
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, build_in_memory_namespace_engines
 
-pipeline = IngestPipeline(workspace_id="demo")
-engines = pipeline.engines
+engines = build_in_memory_namespace_engines()
+pipeline = IngestPipeline(engines)
 
 pipeline.run("doc.md")
 
