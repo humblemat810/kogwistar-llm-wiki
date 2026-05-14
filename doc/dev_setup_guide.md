@@ -21,7 +21,7 @@ those sibling checkouts and package metadata aligned.
 - Git
 - SSH access to `github.com` if you plan to install the vendored repos directly from GitHub
 - A terminal with access to the repo root
-- `uv` for the install and bootstrap commands below
+- `uv` for the optional manual install and common check commands below
 
 ## 3. Create a Virtual Environment
 
@@ -43,7 +43,8 @@ bash scripts/bootstrap-dev.sh
 ```
 
 That script clones local checkouts when needed, editable-installs the sibling
-runtime repos, and then installs `kogwistar-llm-wiki` itself.
+runtime repos with `pip install -e`, and then installs `kogwistar-llm-wiki`
+itself the same way.
 
 If you prefer to drive installation manually, keep the same order:
 
@@ -51,7 +52,7 @@ If you prefer to drive installation manually, keep the same order:
 pip install -e ./kogwistar
 pip install -e ./kogwistar-obsidian-sink
 pip install -e ./kg-doc-parser
-uv pip install -e ".[dev,test]"
+uv pip install -e ".[dev]"
 ```
 
 The runtime dependency bundle is:

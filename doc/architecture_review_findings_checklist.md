@@ -734,7 +734,8 @@ Required search themes for this branch:
 - [ ] Search for workspace/namespace isolation leaks across recovery, projection, and policy query code. Candidate roots: `kogwistar/kogwistar/engine_core/recovery.py`, `src/kogwistar_llm_wiki/policies.py`, `src/kogwistar_llm_wiki/projection.py`.
 - [x] Search for stale docs that still imply agent/capability registry semantics. Candidate roots: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`, `doc/architecture.md`, `doc/diagrams.md`.
   - Note: `F12` and `F20` already handled most of the branch boundary; this slice closed the remaining roadmap/gap-analysis residue.
-- [ ] Search for bootstrap/install/import contract drift across app docs, scripts, and metadata. Candidate roots: `pyproject.toml`, `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`, `doc/cli_reference.md`.
+- [x] Search for bootstrap/install/import contract drift across app docs, scripts, and metadata. Candidate roots: `pyproject.toml`, `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`, `doc/cli_reference.md`.
+  - Note: `F4`, `F13`, and `F14` already reconciled the runtime package contract; this slice closed the remaining setup-guide wording drift around bootstrap versus `uv` usage and the root editable install example.
 
 ## Verification Anchors
 
