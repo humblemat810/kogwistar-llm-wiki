@@ -701,20 +701,21 @@ Recommended correction:
 
 Evidence:
 
-- `LaneMessagingService` creates anchor nodes with `artifact_kind="lane_actor"`.
+- `LaneMessagingService` now creates anchor nodes with `artifact_kind="lane_anchor"` and
+  preserves legacy `lane_actor` ids when they already exist.
 
 Code reference:
 
-- `kogwistar/kogwistar/messaging/service.py:702`
+- `kogwistar/kogwistar/messaging/service.py`
 
 Why it matters:
 
 - This is lane-local sender/recipient anchoring, not a universal actor registry.
-- But the word `actor` may confuse future contributors after the service-health semantic correction.
+- The live contract now uses anchor wording, but legacy ids still exist in historical graphs.
 
 Recommended correction:
 
-- Leave code if changing would be migration-heavy.
+- Keep the compatibility bridge for old graphs.
 - In docs, describe them as "lane sender/recipient anchors", not actors/participants.
 
 ## Test Coverage Assessment

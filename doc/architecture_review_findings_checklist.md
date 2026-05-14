@@ -673,23 +673,21 @@ Required search themes for this branch:
   now that broader actor/participant registry semantics were intentionally rejected.
 - Primary implementation targets:
   - `kogwistar/kogwistar/messaging/service.py`
-  - `doc/architecture.md`
-  - `doc/diagrams.md`
   - `kogwistar/docs/tutorials/23_lane_messaging_contract.md`
 - Checklist items:
-  - [ ] Decide whether code renaming is worth the migration cost or whether docs-only clarification is sufficient. Maps: `F20`. Files: `kogwistar/kogwistar/messaging/service.py`, `doc/architecture.md`, `doc/diagrams.md`.
-  - [ ] Update docs and diagrams to describe these nodes as lane sender/recipient anchors rather than universal actors. Maps: `F20`, `F12`. Files: `doc/architecture.md`, `doc/diagrams.md`, `kogwistar/docs/tutorials/23_lane_messaging_contract.md`.
-  - [ ] Search completed for other doc wording that overgeneralizes lane-local actor terms into broader ontology language. Maps: `F20`. Files: review-only search across docs and lane tutorials.
-  - [ ] Verification completed. Maps: `F20`. Files: docs review.
+  - [x] Rename the durable anchor prefix to `lane_message_anchor` and the live node kind to `lane_anchor`, while preserving legacy reuse for existing `lane_actor` nodes. Maps: `F20`. Files: `kogwistar/kogwistar/messaging/service.py`.
+  - [x] Update current-contract docs and lane tutorial wording to describe the nodes as lane sender/recipient anchors rather than universal actors. Maps: `F20`, `F12`. Files: `kogwistar/docs/lane_messaging_contract.md`, `kogwistar/docs/tutorials/23_lane_messaging_contract.md`, `kogwistar/docs/kogwistar_lane_messaging_impl_checklist.md`, `kogwistar/docs/kogwistar_lane_messaging_ard.md`.
+  - [x] Search completed for other doc wording that overgeneralizes lane-local anchor terms into broader ontology language. Maps: `F20`. Files: review-only search across docs and lane tutorials.
+  - [x] Verification completed. Maps: `F20`. Files: code, docs, and lane-messaging tests.
 - Similar-class search:
-  - Search for `actor` wording in lane docs, diagrams, and service-health discussions.
-  - Search patterns: `"lane_actor"`, `"actor"`, `"participant"`, `"sender/recipient"`.
+  - Search for `actor` wording in lane docs and lane-messaging implementation notes.
+  - Search patterns: `"lane_actor"`, `"lane_message_actor"`, `"actor"`, `"participant"`, `"sender/recipient"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Live lane messaging now writes `lane_anchor` nodes and reuses legacy `lane_actor` ids when they already exist, so mixed graphs stay readable without a bulk migration.
 - Regression tests to add/update:
-  - docs-only unless a code rename is chosen
+  - `kogwistar/tests/core/test_lane_messaging.py`
 - Done means:
-  lane anchor wording no longer suggests a new universal actor model.
+  lane anchor wording now uses `lane_anchor` in the live contract, and the legacy `lane_actor` ids remain only as a compatibility bridge for older graphs.
 
 #### F21. Core read API conflates probe semantics with full hydrated node semantics
 
