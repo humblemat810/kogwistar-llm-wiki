@@ -5,6 +5,8 @@
 This checklist operationalizes the deep architecture review in
 [current_branch_deep_architecture_review.md](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md).
 It is the execution tracker for follow-up work on the current branch.
+Current branch findings have been reconciled as of 2026-05-15; this document is
+retained as a traceability record and ongoing search ledger.
 
 This document is intentionally stricter than a normal backlog:
 
@@ -161,7 +163,7 @@ Required search themes for this branch:
   - Search for unused or deleted `workspace_id` and `namespace` parameters in recovery and reporting code.
   - Search patterns: `"del namespace"`, `"del workspace_id"`, `"workspace_id=None"`, `"namespace=None"`, `"list_server_runs"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - None.
 - Regression tests to add/update:
   - `kogwistar/tests/core/test_recovery_subsystem.py`
 - Done means:
@@ -178,28 +180,28 @@ Required search themes for this branch:
   install metadata, bootstrap assumptions, and import-time dependencies are not
   aligned, so a clean environment can install successfully and still fail at
   runtime.
-  - Primary implementation targets:
-    - `pyproject.toml`
-    - `scripts/bootstrap-dev.sh`
+- Primary implementation targets:
+  - `pyproject.toml`
+  - `scripts/bootstrap-dev.sh`
   - `src/kogwistar_llm_wiki/__init__.py`
   - `src/kogwistar_llm_wiki/ingest_pipeline.py`
   - `src/kogwistar_llm_wiki/projection.py`
   - `src/kogwistar_llm_wiki/models.py`
   - `doc/dev_setup_guide.md`
   - `doc/cli_reference.md`
-  - Checklist items:
-    - [x] Make runtime dependency declarations honest for imported sibling packages, or make those imports truly lazy/optional. Maps: `F4`. Files: `pyproject.toml`, `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/projection.py`, `src/kogwistar_llm_wiki/models.py`.
-    - [x] Align top-level Python version metadata with the strictest direct runtime dependency, or lower the dependency requirements upstream if appropriate. Maps: `F4`. Files: `pyproject.toml`.
-    - [x] Remove misleading comments that describe direct runtime imports as non-import dependencies. Maps: `F4`. Files: `pyproject.toml`.
-    - [x] Fix bootstrap so dependency installation and editable sibling setup match the declared packaging contract. Maps: `F4`. Files: `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`.
-    - [x] Add clean import and CLI smoke expectations to docs or tests. Maps: `F4`, `F13`, `F14`. Files: `doc/dev_setup_guide.md`, `doc/cli_reference.md`, `tests/unit/test_llm_wiki_cli.py`, `tests/test_models.py`.
-    - [x] Search completed for other import-time sibling dependencies, version drift, and empty dependency declarations that are not actually optional. Maps: `F4`. Files: review-only search across root metadata and `src/`.
-    - [x] Verification completed. Maps: `F4`. Files: targeted smoke script or future import-smoke test module.
+- Checklist items:
+  - [x] Make runtime dependency declarations honest for imported sibling packages, or make those imports truly lazy/optional. Maps: `F4`. Files: `pyproject.toml`, `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/projection.py`, `src/kogwistar_llm_wiki/models.py`.
+  - [x] Align top-level Python version metadata with the strictest direct runtime dependency, or lower the dependency requirements upstream if appropriate. Maps: `F4`. Files: `pyproject.toml`.
+  - [x] Remove misleading comments that describe direct runtime imports as non-import dependencies. Maps: `F4`. Files: `pyproject.toml`.
+  - [x] Fix bootstrap so dependency installation and editable sibling setup match the declared packaging contract. Maps: `F4`. Files: `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`.
+  - [x] Add clean import and CLI smoke expectations to docs or tests. Maps: `F4`, `F13`, `F14`. Files: `doc/dev_setup_guide.md`, `doc/cli_reference.md`, `tests/unit/test_llm_wiki_cli.py`, `tests/test_models.py`.
+  - [x] Search completed for other import-time sibling dependencies, version drift, and empty dependency declarations that are not actually optional. Maps: `F4`. Files: review-only search across root metadata and `src/`.
+  - [x] Verification completed. Maps: `F4`. Files: targeted smoke script or future import-smoke test module.
 - Similar-class search:
   - Search for other import-time sibling dependencies that are described as optional or non-runtime.
   - Search patterns: `"from kg_doc_parser"`, `"from kogwistar_obsidian_sink"`, `"dependencies = []"`, `"not a Python import dep"`, `"--no-deps"`.
-  - Discovered during implementation:
-    - [x] None yet.
+- Discovered during implementation:
+  - [x] None yet.
 - Regression tests to add/update:
   - import smoke coverage for `import kogwistar_llm_wiki`
   - CLI smoke coverage for `llm-wiki --help`
@@ -216,24 +218,24 @@ Required search themes for this branch:
 - Problem summary:
   service-health visibility and workflow-backed service supervision are both in
   core, but their boundaries are not yet clear enough to prevent semantic drift.
-  - Primary implementation targets:
-    - `kogwistar/kogwistar/server/service_daemon.py`
-    - `kogwistar/kogwistar/engine_core/service_health.py`
-    - `kogwistar/tests/server/test_service_daemon_model.py`
-    - `kogwistar/tests/core/test_service_health_registry.py`
-    - `kogwistar/docs/service_daemon_model.md`
-    - `kogwistar/docs/recovery_repair_utilities.md`
-  - Checklist items:
-    - [x] Clarify naming or type aliases so workflow service supervision and service-health visibility cannot be confused. Maps: `F5`. Files: `kogwistar/kogwistar/server/service_daemon.py`, `kogwistar/kogwistar/engine_core/service_health.py`.
-    - [x] Add docs that explicitly separate orchestration semantics from health-visibility semantics. Maps: `F5`, `F12`. Files: `kogwistar/docs/service_daemon_model.md`, `kogwistar/docs/recovery_repair_utilities.md`.
-    - [x] Add non-interference tests proving recovery reads service health but does not tick, start, or restart supervised services. Maps: `F5`, `F8`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
-    - [x] Search completed for other service-facing APIs or docs that blur health visibility with scheduling or supervision. Maps: `F5`, `F12`. Files: review-only search across `kogwistar/kogwistar/server/`, `kogwistar/docs/`, `doc/`.
-    - [x] Verification completed. Maps: `F5`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
-  - Similar-class search:
-    - Search for places where `service`, `registry`, `daemon`, `health`, and `supervisor` are used interchangeably.
-    - Search patterns: `"ServiceDefinition"`, `"ServiceSupervisor"`, `"ServiceHealthRegistry"`, `"service_registry"`, `"service_health"`.
-  - Discovered during implementation:
-    - [x] None yet.
+- Primary implementation targets:
+  - `kogwistar/kogwistar/server/service_daemon.py`
+  - `kogwistar/kogwistar/engine_core/service_health.py`
+  - `kogwistar/tests/server/test_service_daemon_model.py`
+  - `kogwistar/tests/core/test_service_health_registry.py`
+  - `kogwistar/docs/service_daemon_model.md`
+  - `kogwistar/docs/recovery_repair_utilities.md`
+- Checklist items:
+  - [x] Clarify naming or type aliases so workflow service supervision and service-health visibility cannot be confused. Maps: `F5`. Files: `kogwistar/kogwistar/server/service_daemon.py`, `kogwistar/kogwistar/engine_core/service_health.py`.
+  - [x] Add docs that explicitly separate orchestration semantics from health-visibility semantics. Maps: `F5`, `F12`. Files: `kogwistar/docs/service_daemon_model.md`, `kogwistar/docs/recovery_repair_utilities.md`.
+  - [x] Add non-interference tests proving recovery reads service health but does not tick, start, or restart supervised services. Maps: `F5`, `F8`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
+  - [x] Search completed for other service-facing APIs or docs that blur health visibility with scheduling or supervision. Maps: `F5`, `F12`. Files: review-only search across `kogwistar/kogwistar/server/`, `kogwistar/docs/`, `doc/`.
+  - [x] Verification completed. Maps: `F5`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
+- Similar-class search:
+  - Search for places where `service`, `registry`, `daemon`, `health`, and `supervisor` are used interchangeably.
+  - Search patterns: `"ServiceDefinition"`, `"ServiceSupervisor"`, `"ServiceHealthRegistry"`, `"service_registry"`, `"service_health"`.
+- Discovered during implementation:
+  - [x] None yet.
 - Regression tests to add/update:
   - `kogwistar/tests/server/test_service_daemon_model.py`
   - `kogwistar/tests/core/test_service_health_registry.py`
@@ -327,7 +329,7 @@ Required search themes for this branch:
   - Search for side-effecting recovery calls whose results are dropped or not counted.
   - Search patterns: `"repair_"`, `"recover_startup"`, `"actions="`, `"repaired_count"`, `"scanned_count"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - None.
 - Regression tests to add/update:
   - `kogwistar/tests/core/test_recovery_subsystem.py`
 - Done means:
@@ -357,7 +359,7 @@ Required search themes for this branch:
   - Search for `except Exception` in read-path fallback logic throughout recovery and inspection code.
   - Search patterns: `"except Exception"`, `"return []"`, `"fallback"`, `"checkpoint"`, `"read.get_nodes"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - None.
 - Regression tests to add/update:
   - `kogwistar/tests/core/test_recovery_subsystem.py`
   - `kogwistar/tests/runtime/test_checkpoint_resume_contract.py`
@@ -388,7 +390,7 @@ Required search themes for this branch:
   - Search for policies and queries that `del workspace_id` or omit workspace metadata despite multi-workspace semantics.
   - Search patterns: `"del workspace_id"`, `"workspace_id"`, `"source_query("`, `"where={"`, `"workflow_step_exec"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - None.
 - Regression tests to add/update:
   - `tests/unit/test_llm_wiki_policies.py`
   - `tests/unit/test_knowledge_derivation.py`
