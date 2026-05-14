@@ -60,19 +60,31 @@ This already exceeds most agent frameworks. But an *operating system* requires s
 
 ---
 
-## Gap 3 — No Multi-Agent Coordination Protocol
+## Gap 3 — No Cross-Process Coordination Surface
 
 **What an OS has:** IPC, shared memory, semaphores, named pipes — mechanisms for processes to coordinate without tight coupling.
 
-**What exists today:** All "agents" are workflow steps inside a single `WorkflowRuntime`. There is no mechanism for two independent agent processes to negotiate, divide work, or share state safely.
+**What exists today:** Most current coordination is narrower than a general
+multi-agent OS. Workflow steps run inside `WorkflowRuntime`, background work
+flows through durable queues and lane messages, and long-running operational
+processes are tracked through service health. There is not yet a generic
+cross-process coordination surface for independently running tools or daemons.
 
 **What is missing:**
-- An **agent registry** — a well-known namespace where agents can advertise their capabilities and current state
-- **Agent-to-agent messaging** — a graph-native message bus where one agent's output becomes another's input without a human orchestrating it
-- **Capability negotiation** — agent A asks agent B "can you do X?" before delegating
-- **Conflict resolution** — two agents proposing incompatible graph mutations need a merge/adjudication protocol
+- A **graph-native message bus** that existing runtimes, workers, and daemons
+  can publish to and subscribe from without going through HTTP
+- **Cross-process routing contracts** keyed by workspace, namespace, job kind,
+  workflow id, or topic rather than ad hoc polling loops
+- **Conflict resolution** for incompatible graph mutations proposed by separate
+  producers
+- **Operator-visible coordination state** that explains which background process
+  requested or completed a piece of work without inventing a new universal
+  agent registry
 
-**Why this matters:** The governance layer in `cloistar` intercepts tool calls from one agent (OpenClaw). But it is still one agent system + one governance system. A real AI OS would support N cooperating agents with explicit coordination contracts.
+**Why this matters:** The next useful step is not a universal agent ontology.
+It is better coordination between the identities already present in the system:
+`workflow_id`, `run_id`, `job_id`, `message_id`, `workspace_id`, `namespace`,
+and durable service-health identities for long-running operational processes.
 
 ---
 
@@ -147,26 +159,36 @@ There is no unified path that traverses all of these.
 
 ---
 
-## Gap 8 — No Persistent Agent Identity
+## Gap 8 — No Durable Operational Identity Story Across Surfaces
 
-**What an OS has:** User accounts — persistent identities that carry across sessions, with associated permissions and state.
+**What an OS has:** Persistent identities that carry across sessions, with
+associated permissions, histories, and operational state.
 
 **What exists today:**
 - OIDC/PKCE in kogwistar provides authentication
 - Namespace-based isolation (`ws:{workspace_id}`) provides multi-tenancy
-- But "the agent" has no persistent identity across runs
+- Workflow, run, lane message, durable job, and service-health identities
+  already exist, but they are not yet presented as one coherent operator-facing
+  identity story
 
 **What is missing:**
-- **Agent identity nodes** in the graph — a first-class `AgentNode` with a stable ID, capabilities, trust level, and execution history
-- **Per-agent history** — which runs did this agent initiate? What did it learn? What did it fail at?
-- **Trust evolution** — an agent that consistently makes good decisions can be granted more autonomy; one that fails gets more governance scrutiny
-- **Cross-session continuity** — the agent's "personality" (rule preferences, learned patterns) persists between restarts
+- A clearer **identity map** that starts from existing ids such as
+  `workflow_id`, `run_id`, `job_id`, `message_id`, `workspace_id`,
+  `namespace`, `user_id`, and `token_id`
+- A narrow durable identity for **long-running operational services** that
+  pairs service supervision with service-health visibility without turning into
+  an actor registry
+- Better **cross-surface navigation** from runs to jobs to lane messages to
+  service health when operators inspect failures or recover startup state
+- Governance-facing identity bridges only where actually needed, instead of
+  inventing a first-class universal agent node too early
 
 ---
 
-## Gap 9 — No Package / Capability Registry
+## Gap 9 — No Unified Capability Governance Surface
 
-**What an OS has:** A package manager (apt, pip, npm) + a capability registry (what tools are available on this system?).
+**What an OS has:** A package manager (apt, pip, npm) plus a coherent way to
+inspect what execution capabilities are installed, granted, or revoked.
 
 **What exists today:**
 - Python packages installed via bootstrap scripts
@@ -176,14 +198,18 @@ There is no unified path that traverses all of these.
 These are three separate registries with no unified view.
 
 **What is missing:**
-- A **graph-native capability registry** — a namespace in the knowledge graph where available tools, workflows, and agent skills are advertised as nodes
-- **Capability discovery** — agent asks "what can I do?" and gets a query result from the graph
-- **Capability versioning** — capabilities have versions; agents can pin to a version or request the latest
-- **Capability revocation** — the governance layer can remove a capability from the registry, making it unavailable to all agents instantly
+- A more unified **capability governance surface** for inspection and approval
+  across installed tools, workflows, and external integrations
+- **Capability discovery** for operator and runtime decisions without assuming a
+  graph-native capability registry must be the next storage primitive
+- **Capability versioning and revocation** that are inspectable across the
+  existing governance and runtime surfaces
+- Clear boundaries between **governance/capability kernel** work and unrelated
+  runtime/service-health semantics
 
 ---
 
-## Gap 10 — No Inter-Agent Messaging / Event Bus
+## Gap 10 — No Durable Event Bus For Cross-Process Work
 
 **What an OS has:** Pipes, sockets, message queues — structured channels for processes to send data to each other asynchronously.
 
@@ -193,10 +219,12 @@ These are three separate registries with no unified view.
 - The CDC oplog is not consumed by other services in real-time
 
 **What is missing:**
-- A **graph-native message queue** — nodes in `conv:bg` (or a dedicated `events` namespace) that any agent can publish to and subscribe from
-- A **routing layer** — messages addressed by topic or agent identity, not by HTTP endpoint
-- **At-least-once delivery guarantees** — the CDC oplog is append-only and replayable; this makes it a strong candidate for a message bus backbone, but it is not currently exposed that way
-- **Dead-letter handling** — unprocessed events after N retries go to an inspection namespace
+- A **graph-native message bus** that runtimes, workers, daemons, and external
+  adapters can publish to and subscribe from
+- A **routing layer** addressed by topic, workspace, namespace, or durable work
+  identity rather than HTTP endpoint shape
+- **At-least-once delivery guarantees** exposed as a first-class bus contract
+- **Dead-letter handling** for messages that repeatedly fail delivery
 
 ---
 

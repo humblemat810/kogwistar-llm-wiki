@@ -75,7 +75,16 @@ Future:
 
 ---
 
-### 2.3 Background Agent System
+### 2.3 Background Maintenance And Worker System
+
+Wording note:
+
+- Workflow is what runs.
+- Runtime is how it runs.
+- Service health is which long-running operational process is alive.
+- In this document, "agent" should only be used when genuinely agentic behavior
+  is meant, not as a blanket label for maintenance daemons, workers, or runtime
+  infrastructure.
 
 #### Hot Path (Ingestion Loop)
 
@@ -471,14 +480,14 @@ kg_id → deterministic file path
 - Knowledge (KG)
 - Maintenance (system maintenance semantics)
 - Obsidian (projection)
-- Agent (jobs + control)
+- Maintenance workers and daemon control
 
 ---
 
 ### 12.2 UX Requirements
 
 - Clear distinction:
-  - source vs user vs agent
+  - source vs user vs maintenance/system output
 - Provenance visibility
 - Promotion control
 - Inspectability ("why link exists")
@@ -514,7 +523,7 @@ Cross-lane communication should preferably be modeled as:
 - **Maintenance ≠ Wisdom**
 - Maintenance is a semantic domain, not currently a core graph kind
 - **Wisdom is a graph** derived from execution
-- No silent promotion of agent output
+- No silent promotion of maintenance or worker output
 - Provenance always preserved
 - Update preserves lineage
 - Delete preserves history

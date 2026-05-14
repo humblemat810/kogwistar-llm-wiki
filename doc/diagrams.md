@@ -336,6 +336,13 @@ sequenceDiagram
 
 ## Startup Recovery Coordinator
 
+Wording note:
+
+- Workflow is what runs. Runtime is how it runs. Service health is which
+  long-running operational process is alive.
+- The recovery surface inspects service health as an operator-visible latest
+  state. It is not a universal actor or capability registry.
+
 ```mermaid
 flowchart LR
     DAEMON["llm-wiki daemon startup"]

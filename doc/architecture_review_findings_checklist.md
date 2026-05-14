@@ -439,16 +439,16 @@ Required search themes for this branch:
   - `doc/architecture.md`
   - `doc/diagrams.md`
 - Checklist items:
-  - [ ] Rewrite roadmap and gap-analysis sections so they start from existing identities before proposing new ontologies. Maps: `F12`. Files: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`.
-  - [ ] Reframe architecture doc wording that still says "agent" when the semantics are maintenance daemons, workers, runtimes, or service health. Maps: `F12`, `F20`. Files: `doc/architecture.md`, `doc/diagrams.md`.
-  - [ ] Add the branch-approved wording distinguishing workflow, runtime, and service health. Maps: `F12`. Files: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`, `doc/architecture.md`.
-  - [ ] Search completed for stale agent/capability/participant registry language across docs and tutorials. Maps: `F12`, `F20`. Files: review-only search across `doc/`, `kogwistar/docs/`.
-  - [ ] Verification completed. Maps: `F12`. Files: docs-only review and link integrity where applicable.
+  - [x] Rewrite roadmap and gap-analysis sections so they start from existing identities before proposing new ontologies. Maps: `F12`. Files: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`.
+  - [x] Reframe architecture doc wording that still says "agent" when the semantics are maintenance daemons, workers, runtimes, or service health. Maps: `F12`, `F20`. Files: `doc/architecture.md`, `doc/diagrams.md`.
+  - [x] Add the branch-approved wording distinguishing workflow, runtime, and service health. Maps: `F12`. Files: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`, `doc/architecture.md`.
+  - [x] Search completed for stale agent/capability/participant registry language across docs and tutorials. Maps: `F12`, `F20`. Files: review-only search across `doc/`, `kogwistar/docs/`.
+  - [x] Verification completed. Maps: `F12`. Files: docs-only review and link integrity where applicable.
 - Similar-class search:
   - Search for docs that recommend capability discovery, agent registries, participant ontologies, or service semantics broader than the implemented code.
   - Search patterns: `"agent registry"`, `"capability registry"`, `"participant"`, `"actor registry"`, `"capabilities"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Search also found older lane-messaging and historical planning docs that still use local `actor` or `agent` wording; they are adjacent but remain better tracked under `F20` or later historical-doc cleanup rather than widening this planning-doc slice.
 - Regression tests to add/update:
   - docs-only; no code-path regression required unless terminology affects rendered tutorial integrity tests
 - Done means:

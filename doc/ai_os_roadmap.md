@@ -179,52 +179,68 @@
 
 ---
 
-### B3 — Agent Identity Nodes
+Branch-aligned note:
 
-**Dependencies:** B2 (agents announce themselves via the bus)
+- Workflow is what runs. Runtime is how it runs. Service health is which
+  long-running operational process is alive.
+- This branch does not recommend introducing a universal agent or capability
+  registry before the narrower service, workflow, job, lane, and governance
+  surfaces are proven insufficient.
 
-**What:** Every running agent has a persistent identity node in the graph. Its history, capabilities, and trust level are queryable.
+---
+
+### B3 — Operational Identity Mapping And Service Visibility
+
+**Dependencies:** B2 (coordination events flow through the bus)
+
+**What:** Make the existing operational identities easier to inspect and relate
+without introducing a universal agent node. The goal is an operator-facing map
+across service supervision, service health, runs, jobs, and lane messages.
 
 **Deliverables:**
-- `kogwistar/agents/identity.py`
-  - `AgentNode` — a first-class graph node type (`artifact_kind: "agent"`)
-  - Fields: `agent_id`, `display_name`, `capabilities: list[str]`, `trust_level: float`, `first_seen_ts`, `last_seen_ts`
-  - `AgentIdentityManager` — creates/updates agent nodes, uses `stable_id("agent", agent_id)` for stable addressing
-- `kogwistar/agents/session.py`
-  - `AgentSession` — a context manager that creates an identity node on enter, updates `last_seen_ts` on exit
-  - Publishes `agent.started` and `agent.stopped` bus messages
-- Integration: `MaintenanceDaemon` and `ProjectionDaemon` both create `AgentSession` on startup
-- Trust evolution (initial): trust level increases 0.01 per successful run, decreases 0.05 per failed run
+- operator and recovery docs that clearly map:
+  - `workflow_id`, `run_id`, `job_id`, `message_id`, `workspace_id`,
+    `namespace`, `user_id`, and `token_id`
+  - supervised service definitions and service-health identities for
+    long-running operational daemons
+- startup and recovery reporting that cross-links those identities instead of
+  inventing a new actor ontology
+- optional service startup/stop events that reference existing service and run
+  identities directly
 
 **Acceptance criteria:**
-- After `llm-wiki daemon maintenance` runs, an `agent` node for `MaintenanceDaemon` exists in the graph
-- Agent node is queryable by `agent_id`
-- Trust level changes are reflected in the node after runs
+- after `llm-wiki daemon maintenance` runs, operators can connect service
+  supervision, service health, runs, and durable jobs without relying on a new
+  universal identity node
+- recovery and service docs explain the same identity boundaries as the code
 
 **Effort:** ~3 days
 
 ---
 
-### B4 — Capability Registry
+### B4 — Capability Governance Kernel
 
-**Dependencies:** B3 (capabilities are attached to agent identity)
+**Dependencies:** B3 (operational identity map), B1 (budget)
 
-**What:** A graph-native registry where available tools, workflow designs, and agent capabilities are advertised as nodes and discoverable via query.
+**What:** Build a narrower capability-governance surface for approval,
+inspection, and revocation without assuming the next step must be a graph-native
+capability registry.
 
 **Deliverables:**
-- `kogwistar/agents/capability_registry.py`
-  - `CapabilityNode` — graph node: `artifact_kind: "capability"`, fields: `capability_id`, `version`, `description`, `input_schema`, `output_schema`, `provider_agent_id`
-  - `CapabilityRegistry` — wraps engine read/write
-  - `register(capability: CapabilityNode)` — adds/updates capability in the graph
-  - `query(filter: dict)` → `list[CapabilityNode]` — returns matching capabilities
-  - `revoke(capability_id)` — tombstones the capability node
-- Integration: on startup, each daemon registers its capabilities (e.g., `MaintenanceDaemon.register_capabilities()` registers `"distillation"`, `"history_wisdom"`)
-- Integration: governance (`cloistar`) checks the registry before granting a tool call — if the capability is revoked, the decision is `block`
+- a unified inspection surface for workflow/tool/device capability grants and
+  revocations
+- governance integration that can answer:
+  - what is currently allowed
+  - what was denied
+  - what changed and why
+- optional backing storage choices may include graph truth, named projections,
+  or service/kernel rows, but the roadmap does not force a capability-node
+  ontology first
 
 **Acceptance criteria:**
-- `CapabilityRegistry.query({"provider_agent_id": "maintenance-daemon"})` returns the registered capabilities
-- Revoking a capability makes it invisible to subsequent queries
-- A governance test: revoked capability → `block` decision
+- operator views show granted and revoked capabilities with provenance
+- governance can block work based on revoked capability state without relying on
+  a daemon self-registration step
 
 **Effort:** ~3 days
 
@@ -258,7 +274,7 @@
 
 ### B6 — Workflow Revision Proposer + Approval Gate
 
-**Dependencies:** B3 (proposer needs agent identity), B4 (revision is a capability), B1 (proposals consume budget)
+**Dependencies:** B3 (proposer needs operational identity context), B4 (revision is a governed capability), B1 (proposals consume budget)
 
 **What:** The system reads `execution_wisdom` nodes and proposes concrete mutations to workflow designs, gated by human approval.
 
@@ -287,9 +303,10 @@
 
 ### B7 — Kernel Scheduler
 
-**Dependencies:** B1 (budget), B2 (bus), B3 (agent identity), B4 (capability registry)
+**Dependencies:** B1 (budget), B2 (bus), B3 (operational identity mapping), B4 (capability governance kernel)
 
-**What:** A coordinator that knows what work is pending, what agents are available, and schedules runs by priority and resource budget.
+**What:** A coordinator that knows what work is pending, what executors or
+services are available, and schedules runs by priority and resource budget.
 
 **Deliverables:**
 - `kogwistar/kernel/scheduler.py`
@@ -297,9 +314,9 @@
   - Priority queue: `"critical"` > `"high"` > `"normal"` > `"background"`
   - Budget-aware: refuses to schedule a run if the workspace's remaining token budget is < minimum for that job type
   - Concurrency control: max N simultaneous runs per workspace (configurable)
-  - Dispatches runs to registered `AgentExecutor` instances via the bus
+- Dispatches runs to registered executor instances via the bus
 - `kogwistar/kernel/executor.py`
-  - `AgentExecutor` — receives dispatch messages, runs `WorkflowRuntime.run()`, publishes `run.completed` / `run.failed` bus messages
+  - `WorkflowExecutor` — receives dispatch messages, runs `WorkflowRuntime.run()`, publishes `run.completed` / `run.failed` bus messages
 - Integration: `MaintenanceDaemon` and `ProjectionDaemon` become passive executors, scheduled by `KernelScheduler` instead of self-polling
 - `llm-wiki kernel start` CLI command — starts the scheduler as the system's main process
 
@@ -369,8 +386,8 @@
 Week 1-2    A1 PyPI publish + A5 metadata key fix + A2 cloistar tests
 Week 3      A3 unified bootstrap + A4 init/supervisor
 Week 4-5    A6 kg-doc-parser decision + B1 token budget
-Week 6-7    B2 message bus + B3 agent identity
-Week 8      B4 capability registry + B5 filesystem watcher
+Week 6-7    B2 message bus + B3 operational identity mapping
+Week 8      B4 capability governance kernel + B5 filesystem watcher
 Week 9-10   B6 workflow revision proposer
 Week 11-12  B7 kernel scheduler
 Week 13     B8 real-time learning
