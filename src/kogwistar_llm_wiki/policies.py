@@ -46,6 +46,7 @@ class LlmWikiPromotionPolicy:
 
 @dataclass(frozen=True, slots=True)
 class LlmWikiVisibilityPolicy:
+    """Owns app-level visibility semantics, including projection eligibility."""
     taxonomy: LlmWikiArtifactTaxonomy = field(default_factory=LlmWikiArtifactTaxonomy)
     _core: DefaultArtifactVisibilityPolicy = field(default_factory=DefaultArtifactVisibilityPolicy)
 
@@ -193,6 +194,7 @@ class LlmWikiLifecyclePolicy:
 
 @dataclass(frozen=True, slots=True)
 class LlmWikiProjectionPolicy:
+    """Projection eligibility stays policy-owned instead of namespace-owned."""
     visibility: LlmWikiVisibilityPolicy = field(default_factory=LlmWikiVisibilityPolicy)
 
     def is_projection_eligible(self, metadata: Mapping[str, Any]) -> bool:

@@ -9,7 +9,13 @@ def test_llm_wiki_taxonomy_maps_visibility_and_projection():
 
     assert policies.visibility.visibility_for({"artifact_kind": taxonomy.candidate_link}) == "review"
     assert policies.visibility.visibility_for({"artifact_kind": taxonomy.promotion_candidate}) == "review"
+    assert policies.visibility.visibility_for({"artifact_kind": taxonomy.maintenance_job_request}) == "internal"
     assert policies.visibility.visibility_for({"artifact_kind": taxonomy.promoted_knowledge}) == "knowledge"
+    assert not policies.projection.is_projection_eligible(
+        {
+            "artifact_kind": taxonomy.promoted_knowledge,
+        }
+    )
     assert policies.visibility.visibility_for(
         {
             "artifact_kind": taxonomy.promoted_knowledge,
@@ -22,6 +28,21 @@ def test_llm_wiki_taxonomy_maps_visibility_and_projection():
             "projection_visible": True,
         }
     )
+
+
+def test_projection_visibility_is_policy_owned_not_namespace_owned():
+    policies = LlmWikiPolicies()
+    taxonomy = policies.taxonomy
+
+    visible_metadata = {
+        "artifact_kind": taxonomy.promoted_knowledge,
+        "projection_visible": True,
+    }
+
+    assert policies.visibility.visibility_for(visible_metadata) == "projection"
+    assert policies.projection.is_projection_eligible(visible_metadata)
+    assert policies.visibility.visibility_for({"artifact_kind": taxonomy.candidate_link}) == "review"
+    assert policies.visibility.visibility_for({"artifact_kind": taxonomy.promotion_candidate}) == "review"
 
 
 def test_llm_wiki_taxonomy_drives_source_and_match_queries():

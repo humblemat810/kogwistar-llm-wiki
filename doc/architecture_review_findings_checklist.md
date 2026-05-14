@@ -645,15 +645,15 @@ Required search themes for this branch:
   - `src/kogwistar_llm_wiki/policies.py`
   - `tests/unit/test_llm_wiki_policies.py`
 - Checklist items:
-  - [ ] Remove, deprecate, or clearly fence the legacy helper so projection visibility decisions stay policy-owned. Maps: `F19`. Files: `src/kogwistar_llm_wiki/namespaces.py`, `src/kogwistar_llm_wiki/policies.py`.
-  - [ ] Add or update tests if helper removal changes public expectations. Maps: `F19`. Files: `tests/unit/test_llm_wiki_policies.py`.
-  - [ ] Search completed for call sites still using legacy namespace visibility shortcuts instead of policy objects. Maps: `F19`. Files: review-only search across `src/kogwistar_llm_wiki/`.
-  - [ ] Verification completed. Maps: `F19`. Files: `tests/unit/test_llm_wiki_policies.py`.
+  - [x] Remove, deprecate, or clearly fence the legacy helper so projection visibility decisions stay policy-owned. Maps: `F19`. Files: `src/kogwistar_llm_wiki/namespaces.py`, `src/kogwistar_llm_wiki/policies.py`.
+  - [x] Add or update tests if helper removal changes public expectations. Maps: `F19`. Files: `tests/unit/test_llm_wiki_policies.py`.
+  - [x] Search completed for call sites still using legacy namespace visibility shortcuts instead of policy objects. Maps: `F19`. Files: review-only search across `src/kogwistar_llm_wiki/`.
+  - [x] Verification completed. Maps: `F19`. Files: `tests/unit/test_llm_wiki_policies.py`.
 - Similar-class search:
   - Search for legacy helper methods that predate the policy-protocol refactor and can bypass policy objects.
   - Search patterns: `"is_kg_visible"`, `"visibility"`, `"projection policy"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] `WorkspaceNamespaces` no longer carries policy-shaped visibility helpers; projection eligibility is only owned by `LlmWikiPolicies`.
 - Regression tests to add/update:
   - `tests/unit/test_llm_wiki_policies.py`
 - Done means:
