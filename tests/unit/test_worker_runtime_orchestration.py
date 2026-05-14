@@ -7,10 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
 import kogwistar_llm_wiki.worker as worker_module
+from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar.engine_core.jobs import DurableQueueUnavailableError
 
 
 def _job_field(job, name: str):
@@ -265,3 +267,89 @@ def test_maintenance_worker_reply_emission_is_idempotent(
             }
         )
     assert len(replies) == 1
+
+
+def test_maintenance_enqueue_requires_durable_queue_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "enqueue_index_job",
+        None,
+        raising=False,
+    )
+
+    with pytest.raises(DurableQueueUnavailableError, match="enqueue_index_job"):
+        pipeline._enqueue_maintenance_job(
+            request=request,
+            request_node_id="req-queue-missing",
+            source_document_id="doc-queue-missing",
+            namespace=WorkspaceNamespaces(request.workspace_id).maintenance_jobs,
+            lane_message_id="lane:queue-missing",
+        )
+
+
+def test_projection_enqueue_requires_durable_queue_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "enqueue_index_job",
+        None,
+        raising=False,
+    )
+
+    with pytest.raises(DurableQueueUnavailableError, match="enqueue_index_job"):
+        pipeline._enqueue_projection_job(
+            request=request,
+            promoted_id="promoted:queue-missing",
+            namespace=WorkspaceNamespaces(request.workspace_id).projection_jobs,
+        )
+
+
+def test_maintenance_worker_requires_durable_queue_claim_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(request)
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "claim_index_jobs",
+        None,
+        raising=False,
+    )
+
+    with pytest.raises(DurableQueueUnavailableError, match="claim_index_jobs"):
+        MaintenanceWorker(pipeline.engines).process_pending_jobs(request.workspace_id)
+
+
+def test_projection_worker_requires_durable_queue_claim_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+    tmp_path: Path,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(request)
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "claim_index_jobs",
+        None,
+        raising=False,
+    )
+    vault_root = tmp_path / "projection-queue-missing"
+    vault_root.mkdir()
+
+    with pytest.raises(DurableQueueUnavailableError, match="claim_index_jobs"):
+        ProjectionWorker(pipeline.engines).process_pending_projections(
+            request.workspace_id,
+            str(vault_root),
+        )

@@ -24,6 +24,7 @@ class ProjectionWorker:
     def process_pending_projections(self, workspace_id: str, vault_root: str):
         """Drains the projection job queue in durable claim order."""
         ns = WorkspaceNamespaces(workspace_id)
+        self.engines.conversation.jobs.require_available(claim=True)
         while True:
             jobs = self.engines.conversation.jobs.claim(
                 limit=50,

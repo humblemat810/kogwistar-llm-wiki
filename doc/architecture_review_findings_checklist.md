@@ -585,16 +585,16 @@ Required search themes for this branch:
   - `src/kogwistar_llm_wiki/worker.py`
   - `tests/unit/test_worker_runtime_orchestration.py`
 - Checklist items:
-  - [ ] Decide whether core needs a strict mode or typed exception for unavailable durable queue support. Maps: `F17`. Files: `kogwistar/kogwistar/engine_core/jobs.py`.
-  - [ ] Make llm-wiki startup or worker-critical paths fail fast when durable queue support is required but absent. Maps: `F17`. Files: `src/kogwistar_llm_wiki/worker.py`.
-  - [ ] Add tests for unavailable queue support in app-critical paths. Maps: `F17`. Files: `tests/unit/test_worker_runtime_orchestration.py`.
-  - [ ] Search completed for other core subsystem adapters that silently degrade in app-critical flows. Maps: `F17`. Files: review-only search across `kogwistar/kogwistar/engine_core/`.
-  - [ ] Verification completed. Maps: `F17`. Files: `tests/unit/test_worker_runtime_orchestration.py`.
+  - [x] Decide whether core needs a strict mode or typed exception for unavailable durable queue support. Maps: `F17`. Files: `kogwistar/kogwistar/engine_core/jobs.py`.
+  - [x] Make llm-wiki startup or worker-critical paths fail fast when durable queue support is required but absent. Maps: `F17`. Files: `src/kogwistar_llm_wiki/worker.py`.
+  - [x] Add tests for unavailable queue support in app-critical paths. Maps: `F17`. Files: `tests/unit/test_worker_runtime_orchestration.py`.
+  - [x] Search completed for other core subsystem adapters that silently degrade in app-critical flows. Maps: `F17`. Files: review-only search across `kogwistar/kogwistar/engine_core/`.
+  - [x] Verification completed. Maps: `F17`. Files: `tests/unit/test_worker_runtime_orchestration.py`.
 - Similar-class search:
   - Search for optional subsystem adapters that return empty or falsey values instead of raising in critical paths.
   - Search patterns: `"return \"\""`, `"hasattr("`, `"if not"`, `"Unavailable"`, `"optional subsystem"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Reviewed adjacent optional-return adapters in indexing/meta plumbing; they remain outside this queue-specific slice and can be revisited separately if they become app-critical.
 - Regression tests to add/update:
   - `tests/unit/test_worker_runtime_orchestration.py`
 - Done means:

@@ -774,6 +774,7 @@ class IngestPipeline:
             "lane_message_id": lane_message_id,
         }
         job_id = request_node_id
+        self.engines.conversation.jobs.require_available(enqueue=True)
         self.engines.conversation.jobs.enqueue(
             job_id=job_id,
             namespace=namespace,
@@ -804,6 +805,7 @@ class IngestPipeline:
             "promoted_entity_id": promoted_id,
             "promotion_mode": request.promotion_mode,
         }
+        self.engines.conversation.jobs.require_available(enqueue=True)
         self.engines.conversation.jobs.enqueue(
             job_id=job_id,
             namespace=namespace,

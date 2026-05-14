@@ -94,6 +94,7 @@ class MaintenanceWorker(BaseWorker):
         as audit artifacts.
         """
         ns = WorkspaceNamespaces(workspace_id)
+        self.engines.conversation.jobs.require_available(claim=True)
         while True:
             jobs = self.engines.conversation.jobs.claim(
                 limit=50,
