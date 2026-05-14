@@ -68,6 +68,9 @@ Responsibilities:
 - Parse documents (PDF, OCR, markdown, etc.)
 - Extract structure (sections, entities, tables)
 - Emit grounded artifacts into conversation-oriented state
+- Regular sync ingest does not imply the same immediate KG shape as the demo
+  shortcut; it reaches richer KG state through maintenance, promotion, and
+  projection.
 
 Future:
 
@@ -102,6 +105,9 @@ Responsibilities:
 - Trigger follow-up maintenance
 - Reuse stable ids and idempotency keys so repeated ingest converges instead of
   producing duplicate review, maintenance, or projection work
+- Regular ingest keeps the production contract focused on source and working
+  artifacts first; it does not directly mirror the demo's richer semantic-tree
+  KG shape.
 
 Convergent promotion path:
 
@@ -111,6 +117,15 @@ Convergent promotion path:
 - maintenance request lane messages and maintenance replies use idempotency keys
   so graph truth stays authoritative and projected serving rows can be rebuilt if
   lost
+
+Demo shortcut:
+
+- The `demo` command uses the same source parsing pipeline but additionally
+  mirrors filtered semantic-tree structure into KG so the one-process demo can
+  approximate a post-maintenance/post-promotion view without extra LLM cost or
+  time.
+- That enrichment is intentionally demo-only and is meant for fast inspection
+  and projection legibility, not as the canonical production ingest contract.
 
 ---
 

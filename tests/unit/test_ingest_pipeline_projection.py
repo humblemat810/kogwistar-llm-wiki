@@ -135,6 +135,14 @@ def test_demo_projection_reifies_section_hyperedges(pipeline, ingest_request):
         namespace=pipeline.namespaces_for(workspace_id).kg,
     )
 
+    kg_nodes = pipeline.engines.kg.read.get_nodes(where={"workspace_id": workspace_id})
+    assert any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
+    assert any(
+        node.metadata.get("projection_visible") is True
+        and node.metadata.get("demo_graph_extraction") is True
+        for node in kg_nodes
+    )
+
     snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
     entities_by_title = {entity.title: entity for entity in snapshot.entities}
 
@@ -178,6 +186,9 @@ def test_demo_projection_hides_sentence_like_leaf_nodes(pipeline, ingest_request
         graph_extraction=graph_extraction,
         namespace=pipeline.namespaces_for(workspace_id).kg,
     )
+
+    kg_nodes = pipeline.engines.kg.read.get_nodes(where={"workspace_id": workspace_id})
+    assert any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
 
     snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
     titles = {entity.title for entity in snapshot.entities}

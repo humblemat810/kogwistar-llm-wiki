@@ -4,7 +4,9 @@ Sub-commands
 ------------
 demo --workspace <id> --source <path> --vault <path> [--title <text>]
     Run the ephemeral end-to-end demo in one process. Uses the in-memory
-    engine bundle, then writes the Obsidian vault to disk before exiting.
+    engine bundle, mirrors a filtered semantic tree into KG as a shortcut that
+    approximates a post-maintenance/post-promotion view, then writes the
+    Obsidian vault to disk before exiting.
 
 ingest --workspace <id> --source <path> [--title <text>] [--promotion-mode <mode>]
     Read a source document and populate the workspace state.

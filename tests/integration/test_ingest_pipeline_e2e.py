@@ -47,9 +47,6 @@ def test_ingest_pipeline_e2e(pipeline, ingest_request, parser_mode, llm_provider
     conversation_nodes = pipeline.engines.conversation.read.get_nodes(
         where={"workspace_id": ingest_request.workspace_id}
     )
-    workflow_nodes = pipeline.engines.workflow.read.get_nodes(
-        where={"workspace_id": ingest_request.workspace_id}
-    )
     kg_nodes = pipeline.engines.kg.read.get_nodes(
         where={"workspace_id": ingest_request.workspace_id}
     )
@@ -73,9 +70,10 @@ def test_ingest_pipeline_e2e(pipeline, ingest_request, parser_mode, llm_provider
     )
     assert any(
         node.metadata.get("artifact_kind") == "maintenance_job_request"
-        and node.metadata.get("namespace") == "ws:demo:wf:maintenance"
-        for node in workflow_nodes
+        and node.metadata.get("namespace") == "ws:demo:conv:bg"
+        for node in conversation_nodes
     )
+    assert not any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
     assert not any(node.metadata.get("artifact_kind") == "promoted_knowledge" for node in kg_nodes)
     assert artifacts.promoted_entity_id is None
 

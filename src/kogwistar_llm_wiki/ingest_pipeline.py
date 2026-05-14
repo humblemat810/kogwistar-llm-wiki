@@ -427,9 +427,11 @@ class IngestPipeline:
     ) -> None:
         """Persist a KG-visible copy of the semantic tree for the one-process demo.
 
-        The regular ingestion path keeps its existing promotion behavior. The demo path
-        intentionally mirrors the full semantic tree into KG so the graph view has a
-        richer node/edge structure while remaining single-process and ephemeral.
+        The regular ingestion path keeps its existing promotion behavior. The demo
+        path intentionally mirrors a filtered semantic tree into KG so the graph view
+        approximates a post-maintenance/post-promotion view while remaining
+        single-process and ephemeral. That shortcut saves cost and time for the
+        one-process demo.
         """
         enriched = self._filter_demo_graph_extraction(graph_extraction)
         kg_document = Document(

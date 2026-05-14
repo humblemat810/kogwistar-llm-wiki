@@ -4,6 +4,11 @@
 
 upload → parse → ingest → maintenance → promotion → projection
 
+Regular ingest does not imply the same immediate KG shape as the demo shortcut.
+The demo path can mirror a filtered semantic tree into KG so the one-process
+walkthrough approximates a later post-maintenance/post-promotion view and saves
+cost and time.
+
 ```mermaid
 flowchart LR
     A[Upload source] --> B[kg-doc-parser parse]

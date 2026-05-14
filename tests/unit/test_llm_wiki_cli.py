@@ -170,7 +170,9 @@ def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch,
 
     def _fake_pipeline_ctor(engines):
         assert engines is fake_engines
-        return _FakePipeline(engines)
+        pipeline = _FakePipeline(engines)
+        captured["pipeline"] = pipeline
+        return pipeline
 
     class _FakeMaintenanceWorker:
         def __init__(self, engines):
@@ -242,7 +244,9 @@ def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, 
 
     def _fake_pipeline_ctor(engines):
         assert engines is fake_engines
-        return _FakePipeline(engines)
+        pipeline = _FakePipeline(engines)
+        captured["pipeline"] = pipeline
+        return pipeline
 
     monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
     monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
@@ -269,6 +273,7 @@ def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, 
     assert captured["backend"] == "chroma"
     assert captured["dsn"] is None
     assert captured["split_derived_knowledge"] is False
+    assert "persist_demo_graph_extraction" not in captured["pipeline"].calls
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["workspace_id"] == "demo"
@@ -298,7 +303,9 @@ def test_ingest_cli_uses_kogwistar_data_dir_when_explicit_dir_is_omitted(tmp_pat
 
     def _fake_pipeline_ctor(engines):
         assert engines is fake_engines
-        return _FakePipeline(engines)
+        pipeline = _FakePipeline(engines)
+        captured["pipeline"] = pipeline
+        return pipeline
 
     monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(data_dir))
     monkeypatch.setattr(
@@ -477,7 +484,9 @@ def test_ingest_cli_accepts_postgres_backend_switch(tmp_path, monkeypatch, capsy
 
     def _fake_pipeline_ctor(engines):
         assert engines is fake_engines
-        return _FakePipeline(engines)
+        pipeline = _FakePipeline(engines)
+        captured["pipeline"] = pipeline
+        return pipeline
 
     monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
     monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
@@ -506,6 +515,7 @@ def test_ingest_cli_accepts_postgres_backend_switch(tmp_path, monkeypatch, capsy
     assert captured["backend"] == "postgres"
     assert captured["dsn"] == "postgresql://demo:demo@127.0.0.1:5432/demo"
     assert captured["split_derived_knowledge"] is False
+    assert "persist_demo_graph_extraction" not in captured["pipeline"].calls
     payload = json.loads(capsys.readouterr().out)
     assert payload["workspace_id"] == "demo"
 
@@ -532,7 +542,9 @@ def test_persistent_cli_explicit_data_dir_wins_over_env(tmp_path, monkeypatch, c
 
     def _fake_pipeline_ctor(engines):
         assert engines is fake_engines
-        return _FakePipeline(engines)
+        pipeline = _FakePipeline(engines)
+        captured["pipeline"] = pipeline
+        return pipeline
 
     monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(env_data_dir))
     monkeypatch.setattr(
@@ -615,7 +627,9 @@ def test_ingest_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatc
 
     def _fake_pipeline_ctor(engines):
         assert engines is fake_engines
-        return _FakePipeline(engines)
+        pipeline = _FakePipeline(engines)
+        captured["pipeline"] = pipeline
+        return pipeline
 
     monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
     monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)

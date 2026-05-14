@@ -518,8 +518,9 @@ Required search themes for this branch:
   [F15 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
 - Related findings: `F1`, `F6`
 - Problem summary:
-  demo ingest currently materializes a richer graph than regular sync ingest,
-  and that distinction is not yet fully normalized or documented.
+  demo ingest intentionally materializes a richer KG-visible shortcut than
+  regular sync ingest, but that shortcut was not clearly spelled out as an
+  intentional product choice.
 - Primary implementation targets:
   - `src/kogwistar_llm_wiki/__main__.py`
   - `src/kogwistar_llm_wiki/ingest_pipeline.py`
@@ -527,21 +528,22 @@ Required search themes for this branch:
   - `doc/happy_paths.md`
   - `tests/unit/test_projection_consistency.py`
 - Checklist items:
-  - [ ] Decide whether the current ingest-shape difference is intentional product policy or technical drift. Maps: `F15`. Files: `src/kogwistar_llm_wiki/__main__.py`, `src/kogwistar_llm_wiki/ingest_pipeline.py`, `doc/architecture.md`.
-  - [ ] If intentional, document the difference clearly in architecture and quickstart-style docs. Maps: `F15`. Files: `doc/architecture.md`, `doc/happy_paths.md`.
-  - [ ] If not intentional, plan the normalization path and expected tests before code changes. Maps: `F15`, `F1`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `tests/unit/test_projection_consistency.py`.
-  - [ ] Search completed for other demo-only code paths that create misleading richer semantics than production flows. Maps: `F15`. Files: review-only search across demos and CLI commands.
-  - [ ] Verification completed. Maps: `F15`. Files: `tests/unit/test_projection_consistency.py` or docs review depending on chosen resolution.
+  - [x] Decide whether the current ingest-shape difference is intentional product policy or technical drift. Maps: `F15`. Files: `src/kogwistar_llm_wiki/__main__.py`, `src/kogwistar_llm_wiki/ingest_pipeline.py`, `doc/architecture.md`.
+  - [x] If intentional, document the difference clearly in architecture and quickstart-style docs. Maps: `F15`. Files: `doc/architecture.md`, `doc/happy_paths.md`.
+  - [x] If not intentional, plan the normalization path and expected tests before code changes. Maps: `F15`, `F1`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `tests/unit/test_projection_consistency.py`.
+  - [x] Search completed for other demo-only code paths that create misleading richer semantics than production flows. Maps: `F15`. Files: review-only search across demos and CLI commands.
+  - [x] Verification completed. Maps: `F15`. Files: `tests/integration/test_ingest_pipeline_e2e.py`, `tests/unit/test_ingest_pipeline_projection.py`, `tests/unit/test_llm_wiki_cli.py`.
 - Similar-class search:
   - Search for `demo` code paths that write graph state differently than mainline app workflows.
   - Search patterns: `"persist_demo_graph_extraction"`, `"demo"`, `"sync ingest"`, `"promoted_knowledge"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Demo enrichment is intentionally demo-only and mirrors a filtered semantic tree into KG to approximate a post-maintenance/post-promotion view for the one-process shortcut; regular ingest keeps the production contract focused on source and working artifacts first.
 - Regression tests to add/update:
   - `tests/unit/test_projection_consistency.py`
 - Done means:
-  demo-versus-regular ingest semantics are either aligned or explicitly documented
-  as a deliberate product distinction.
+  demo-versus-regular ingest semantics are explicitly documented as an
+  intentional shortcut, with any future normalization handled as a separate
+  runtime slice.
 
 ### Cleanup And Alignment
 
