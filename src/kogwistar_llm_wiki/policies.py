@@ -40,6 +40,7 @@ class LlmWikiPromotionPolicy:
                 auto_accept_threshold=auto_accept_threshold,
                 default_accept_threshold=self.default_accept_threshold,
                 metadata=dict(metadata or {}),
+                promotion_approved=str(promotion_mode or "").strip().lower() == "sync",
             )
         )
 

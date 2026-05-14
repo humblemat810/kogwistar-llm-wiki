@@ -559,15 +559,15 @@ Required search themes for this branch:
   - `kogwistar/tests/core/test_knowledge_policy_defaults.py`
   - `src/kogwistar_llm_wiki/policies.py`
 - Checklist items:
-  - [ ] Replace the core mode-string check with a more generic explicit positive-signal contract, if that can be done without semantic regression. Maps: `F16`. Files: `kogwistar/kogwistar/policy/__init__.py`, `src/kogwistar_llm_wiki/policies.py`.
-  - [ ] Update core policy tests and llm-wiki adapters accordingly. Maps: `F16`. Files: `kogwistar/tests/core/test_knowledge_policy_defaults.py`, `src/kogwistar_llm_wiki/policies.py`.
-  - [ ] Search completed for other app-shaped vocabulary still living in core policy defaults. Maps: `F16`. Files: review-only search across `kogwistar/kogwistar/policy/`.
-  - [ ] Verification completed. Maps: `F16`. Files: `kogwistar/tests/core/test_knowledge_policy_defaults.py`.
+  - [x] Replace the core mode-string check with a more generic explicit positive-signal contract, if that can be done without semantic regression. Maps: `F16`. Files: `kogwistar/kogwistar/policy/__init__.py`, `src/kogwistar_llm_wiki/policies.py`.
+  - [x] Update core policy tests and llm-wiki adapters accordingly. Maps: `F16`. Files: `kogwistar/tests/core/test_knowledge_policy_defaults.py`, `src/kogwistar_llm_wiki/policies.py`.
+  - [x] Search completed for other app-shaped vocabulary still living in core policy defaults. Maps: `F16`. Files: review-only search across `kogwistar/kogwistar/policy/`.
+  - [x] Verification completed. Maps: `F16`. Files: `kogwistar/tests/core/test_knowledge_policy_defaults.py`.
 - Similar-class search:
   - Search for string literals in core policy defaults that express app intent instead of generic decision signals.
   - Search patterns: `"sync"`, `"promotion_mode"`, `"artifact_kind"`, `"knowledge_stage"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] llm-wiki still intentionally uses `promotion_mode="sync"` at the app layer, but core now receives a generic `promotion_approved` signal instead of owning the product vocabulary.
 - Regression tests to add/update:
   - `kogwistar/tests/core/test_knowledge_policy_defaults.py`
 - Done means:

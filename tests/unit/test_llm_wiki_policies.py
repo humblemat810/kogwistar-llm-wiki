@@ -3,6 +3,32 @@ from __future__ import annotations
 from kogwistar_llm_wiki.policies import LlmWikiPolicies
 
 
+def test_llm_wiki_promotion_policy_maps_sync_to_core_approval():
+    policies = LlmWikiPolicies()
+
+    promoted = policies.promotion.decide(
+        promotion_mode="sync",
+        auto_accept_threshold=0.9,
+    )
+    assert promoted.should_promote
+    assert promoted.reason == "explicit promotion approval accepted by default policy"
+    assert promoted.metadata["promotion_approved"] is True
+
+    pending = policies.promotion.decide(
+        promotion_mode="pending",
+        auto_accept_threshold=0.9,
+    )
+    assert not pending.should_promote
+    assert pending.reason == "promotion was not explicitly approved"
+
+    blocked = policies.promotion.decide(
+        promotion_mode="sync",
+        auto_accept_threshold=0.99,
+    )
+    assert not blocked.should_promote
+    assert blocked.reason == "auto_accept_threshold is above the default accept threshold"
+
+
 def test_llm_wiki_taxonomy_maps_visibility_and_projection():
     policies = LlmWikiPolicies()
     taxonomy = policies.taxonomy
