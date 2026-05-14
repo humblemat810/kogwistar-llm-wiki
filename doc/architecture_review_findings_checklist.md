@@ -618,15 +618,16 @@ Required search themes for this branch:
   - `kogwistar/docs/recovery_repair_utilities.md`
   - `kogwistar/docs/tutorials/26_recovery_and_durable_operational_state.md`
 - Checklist items:
-  - [ ] Document the repaired-service-health freshness limitation clearly in core recovery docs and tutorial material. Maps: `F18`. Files: `kogwistar/docs/recovery_repair_utilities.md`, `kogwistar/docs/tutorials/26_recovery_and_durable_operational_state.md`.
-  - [ ] Evaluate whether sparse lifecycle event timestamps should be used as the best available repaired observation time. Maps: `F18`. Files: `kogwistar/kogwistar/engine_core/service_health.py`.
-  - [ ] Search completed for other repaired projections whose reconstructed state is intentionally coarser than the original latest-state row. Maps: `F18`, `F8`. Files: review-only search across projection repair code.
-  - [ ] Verification completed. Maps: `F18`. Files: docs review and any matching service-health regression updates.
+  - [x] Document the repaired-service-health freshness limitation clearly in core recovery docs and tutorial material. Maps: `F18`. Files: `kogwistar/docs/recovery_repair_utilities.md`, `kogwistar/docs/tutorials/26_recovery_and_durable_operational_state.md`.
+  - [x] Evaluate whether sparse lifecycle event timestamps should be used as the best available repaired observation time. Maps: `F18`. Files: `kogwistar/kogwistar/engine_core/service_health.py`.
+  - [x] Search completed for other repaired projections whose reconstructed state is intentionally coarser than the original latest-state row. Maps: `F18`, `F8`. Files: review-only search across projection repair code.
+  - [x] Verification completed. Maps: `F18`. Files: docs review and any matching service-health regression updates.
 - Similar-class search:
   - Search for repair paths that intentionally rebuild from sparse truth and therefore cannot restore transient latest-state detail.
   - Search patterns: `"repair_projection"`, `"last_seen_ms"`, `"heartbeat"`, `"lifecycle event"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Service-health repair now uses the best available persisted lifecycle timestamp for `last_seen_ms`, but exact heartbeat freshness remains unrecoverable once the latest-state row is lost because heartbeats are not persisted as sparse truth.
+  - [x] Search also confirmed lane-message projection repair similarly rebuilds serving rows from authoritative truth without restoring every transient latest-state detail; that remains an acceptable same-class coarse-repair behavior rather than a separate bug in this slice.
 - Regression tests to add/update:
   - `kogwistar/tests/core/test_service_health_registry.py` if behavior changes
   - docs updates otherwise
