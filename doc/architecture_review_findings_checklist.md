@@ -732,7 +732,8 @@ Required search themes for this branch:
 - [ ] Search for duplicate-idempotency gaps outside ingest and maintenance reply flows. Candidate roots: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/worker.py`, `src/kogwistar_llm_wiki/projection_worker.py`.
 - [ ] Search for broad fallback exception handling in core and app recovery/read paths. Candidate roots: `kogwistar/kogwistar/engine_core/recovery.py`, `src/kogwistar_llm_wiki/worker.py`.
 - [ ] Search for workspace/namespace isolation leaks across recovery, projection, and policy query code. Candidate roots: `kogwistar/kogwistar/engine_core/recovery.py`, `src/kogwistar_llm_wiki/policies.py`, `src/kogwistar_llm_wiki/projection.py`.
-- [ ] Search for stale docs that still imply agent/capability registry semantics. Candidate roots: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`, `doc/architecture.md`, `doc/diagrams.md`.
+- [x] Search for stale docs that still imply agent/capability registry semantics. Candidate roots: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`, `doc/architecture.md`, `doc/diagrams.md`.
+  - Note: `F12` and `F20` already handled most of the branch boundary; this slice closed the remaining roadmap/gap-analysis residue.
 - [ ] Search for bootstrap/install/import contract drift across app docs, scripts, and metadata. Candidate roots: `pyproject.toml`, `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`, `doc/cli_reference.md`.
 
 ## Verification Anchors
