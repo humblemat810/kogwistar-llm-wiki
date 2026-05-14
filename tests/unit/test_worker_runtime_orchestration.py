@@ -269,6 +269,121 @@ def test_maintenance_worker_reply_emission_is_idempotent(
     assert len(replies) == 1
 
 
+def test_maintenance_worker_reply_lookup_converges_after_pre_ack_redelivery(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        request_message = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "request.maintenance"},
+                ],
+            },
+            limit=1,
+        )[0]
+    request_message_id = str(request_message.id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        pipeline.engines.conversation.send_lane_message(
+            conversation_id=f"maintenance:{sync_request.source_uri}",
+            inbox_id="inbox:foreground",
+            sender_id="lane:worker:maintenance",
+            recipient_id="lane:foreground",
+            msg_type="reply.maintenance.completed",
+            payload={
+                "workspace_id": sync_request.workspace_id,
+                "request_node_id": "req-1",
+                "maintenance_kind": "distill",
+            },
+            reply_to=request_message_id,
+            correlation_id=request_message_id,
+            idempotency_key="legacy-or-pre-ack-reply",
+        )
+
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="completed",
+        payload={"maintenance_kind": "distill"},
+    )
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "reply.maintenance.completed"},
+                    {"reply_to_message_id": request_message_id},
+                    {"correlation_id": request_message_id},
+                ],
+            },
+            limit=10,
+        )
+    assert len(replies) == 1
+
+
+def test_maintenance_worker_failed_reply_emission_is_idempotent(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        request_message = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "request.maintenance"},
+                ],
+            },
+            limit=1,
+        )[0]
+    request_message_id = str(request_message.id)
+
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="failed",
+        payload={"maintenance_kind": "distill", "error": "boom"},
+    )
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="failed",
+        payload={"maintenance_kind": "distill", "error": "boom"},
+    )
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "reply.maintenance.failed"},
+                    {"reply_to_message_id": request_message_id},
+                    {"correlation_id": request_message_id},
+                ],
+            },
+            limit=10,
+        )
+    assert len(replies) == 1
+
+
 def test_maintenance_enqueue_requires_durable_queue_support(
     pipeline: IngestPipeline,
     ingest_request: IngestPipelineRequest,

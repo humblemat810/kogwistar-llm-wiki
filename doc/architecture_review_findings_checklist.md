@@ -82,18 +82,19 @@ Required search themes for this branch:
   - `tests/unit/test_projection_consistency.py`
   - `tests/unit/test_knowledge_derivation.py`
 - Checklist items:
-  - [ ] Define a stable identity strategy for promoted knowledge writes. Maps: `F1`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/policies.py`.
-  - [ ] Decide whether candidate-link and promotion-candidate artifacts also need stable ids or explicit version semantics. Maps: `F1`, `F15`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/policies.py`.
-  - [ ] Add or confirm a durable promotion completion marker keyed by source identity and policy version. Maps: `F1`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`.
-  - [ ] Ensure duplicate ingest does not enqueue duplicate projection jobs for the same promoted result. Maps: `F1`, `F6`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/projection_worker.py`.
-  - [ ] Add regression coverage for duplicate sync ingest convergence. Maps: `F1`. Files: `tests/unit/test_projection_consistency.py`, `tests/unit/test_knowledge_derivation.py`.
-  - [ ] Search completed for other duplicate-write paths driven by at-least-once redelivery. Maps: `F1`. Files: review-only search across `src/kogwistar_llm_wiki/`.
-  - [ ] Verification completed. Maps: `F1`. Files: `tests/unit/test_projection_consistency.py`, `tests/unit/test_knowledge_derivation.py`.
+  - [x] Define a stable identity strategy for promoted knowledge writes. Maps: `F1`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/policies.py`.
+  - [x] Decide whether candidate-link and promotion-candidate artifacts also need stable ids or explicit version semantics. Maps: `F1`, `F15`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/policies.py`.
+  - [x] Add or confirm a durable promotion completion marker keyed by source identity and policy version. Maps: `F1`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`.
+  - [x] Ensure duplicate ingest does not enqueue duplicate projection jobs for the same promoted result. Maps: `F1`, `F6`. Files: `src/kogwistar_llm_wiki/ingest_pipeline.py`, `src/kogwistar_llm_wiki/projection_worker.py`.
+  - [x] Add regression coverage for duplicate sync ingest convergence. Maps: `F1`. Files: `tests/unit/test_projection_consistency.py`, `tests/unit/test_knowledge_derivation.py`.
+  - [x] Search completed for other duplicate-write paths driven by at-least-once redelivery. Maps: `F1`. Files: review-only search across `src/kogwistar_llm_wiki/`.
+  - [x] Verification completed. Maps: `F1`. Files: `tests/unit/test_projection_consistency.py`, `tests/unit/test_knowledge_derivation.py`.
 - Similar-class search:
   - Search for other artifact writes that depend on generated ids instead of stable ids.
   - Search patterns: `"_artifact_node("`, `"node_id=None"`, `"stable_id("`, `"promoted_knowledge"`, `"projection job"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Sync ingest now converges by stable IDs for source document, maintenance request, candidate link, promotion candidate, promoted knowledge, maintenance lane request, maintenance job, and projection job. Candidate-link and promotion-candidate artifacts intentionally remain canonical per `workspace_id + source_document_id` rather than versioned in this slice.
+  - [x] Duplicate sync ingest also repairs the crash window where the maintenance lane request exists but the durable maintenance job was not enqueued yet; the repaired job reuses the existing lane request message id.
 - Regression tests to add/update:
   - `tests/unit/test_projection_consistency.py`
   - `tests/unit/test_knowledge_derivation.py`
@@ -117,17 +118,18 @@ Required search themes for this branch:
   - `tests/unit/test_lane_message_contract_integration.py`
   - `tests/unit/test_worker_runtime_orchestration.py`
 - Checklist items:
-  - [ ] Add an app-level reply dedupe lookup by `reply_to_message_id + msg_type + correlation_id`. Maps: `F2`. Files: `src/kogwistar_llm_wiki/worker.py`.
-  - [ ] Evaluate whether core should expose optional lane-message idempotency-key support rather than repeated app-local lookup logic. Maps: `F2`. Files: `kogwistar/kogwistar/messaging/service.py`, `src/kogwistar_llm_wiki/worker.py`.
-  - [ ] Ensure duplicate successful and failed replies converge after lease redelivery. Maps: `F2`, `F7`. Files: `src/kogwistar_llm_wiki/worker.py`.
-  - [ ] Add regression coverage for crash-after-reply-before-ack. Maps: `F2`. Files: `tests/unit/test_lane_message_contract_integration.py`, `tests/unit/test_worker_runtime_orchestration.py`.
-  - [ ] Search completed for other user-visible lane-message writes lacking idempotent convergence. Maps: `F2`. Files: review-only search across `src/kogwistar_llm_wiki/`, `kogwistar/kogwistar/runtime/`.
-  - [ ] Verification completed. Maps: `F2`. Files: `tests/unit/test_lane_message_contract_integration.py`, `tests/unit/test_worker_runtime_orchestration.py`.
+  - [x] Add an app-level reply dedupe lookup by `reply_to_message_id + msg_type + correlation_id`. Maps: `F2`. Files: `src/kogwistar_llm_wiki/worker.py`.
+  - [x] Evaluate whether core should expose optional lane-message idempotency-key support rather than repeated app-local lookup logic. Maps: `F2`. Files: `kogwistar/kogwistar/messaging/service.py`, `src/kogwistar_llm_wiki/worker.py`.
+  - [x] Ensure duplicate successful and failed replies converge after lease redelivery. Maps: `F2`, `F7`. Files: `src/kogwistar_llm_wiki/worker.py`.
+  - [x] Add regression coverage for crash-after-reply-before-ack. Maps: `F2`. Files: `tests/unit/test_lane_message_contract_integration.py`, `tests/unit/test_worker_runtime_orchestration.py`.
+  - [x] Search completed for other user-visible lane-message writes lacking idempotent convergence. Maps: `F2`. Files: review-only search across `src/kogwistar_llm_wiki/`, `kogwistar/kogwistar/runtime/`.
+  - [x] Verification completed. Maps: `F2`. Files: `tests/unit/test_lane_message_contract_integration.py`, `tests/unit/test_worker_runtime_orchestration.py`.
 - Similar-class search:
   - Search for every `send_lane_message` call site that can run inside retries, leases, or daemon restarts.
   - Search patterns: `"send_lane_message("`, `"correlation_id="`, `"reply_to_message_id"`, `"mark_done("`, `"lease"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Core `send_lane_message(...)` already supports idempotency-key lookup; llm-wiki now adds an app-level pre-send lookup for visible maintenance replies by both stable idempotency key and `reply_to_message_id + msg_type + correlation_id`.
+  - [x] Search found user-visible llm-wiki lane writes only in ingest maintenance requests and maintenance worker replies; runtime `StepContext.send_lane_message(...)` remains a generic workflow helper rather than a concrete retrying app write in this slice.
 - Regression tests to add/update:
   - `tests/unit/test_lane_message_contract_integration.py`
   - `tests/unit/test_worker_runtime_orchestration.py`

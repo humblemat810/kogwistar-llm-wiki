@@ -595,12 +595,17 @@ class IngestPipeline:
                 "distill",
             )
         )
-        existing_messages = self.engines.conversation.find_lane_messages(
-            namespace=namespace,
-            idempotency_key=lane_idempotency_key,
-            limit=1,
-            newest_first=True,
-        )
+        with _temporary_namespace(self.engines.conversation, namespace):
+            existing_messages = self.engines.conversation.read.get_nodes(
+                where={
+                    "$and": [
+                        {"artifact_kind": "lane_message"},
+                        {"idempotency_key": lane_idempotency_key},
+                    ],
+                },
+                limit=1,
+            )
+        existing_lane_message_id = str(existing_messages[0].id) if existing_messages else None
         with _temporary_namespace(self.engines.conversation, namespace):
             lane_message = self.engines.conversation.send_lane_message(
                 conversation_id=f"maintenance:{source_document_id}",
@@ -616,7 +621,8 @@ class IngestPipeline:
                 },
                 idempotency_key=lane_idempotency_key,
             )
-        if not existing_messages and not self._job_exists(
+        lane_message_id = existing_lane_message_id or lane_message.message_id
+        if not self._job_exists(
             namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
             entity_kind="maintenance_job",
             entity_id=source_document_id,
@@ -627,7 +633,7 @@ class IngestPipeline:
                 request_node_id=request_node_id,
                 source_document_id=source_document_id,
                 namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
-                lane_message_id=lane_message.message_id,
+                lane_message_id=lane_message_id,
             )
         return request_node_id
 

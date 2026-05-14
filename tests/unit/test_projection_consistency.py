@@ -7,6 +7,7 @@ import pytest
 from kogwistar.engine_core.models import Edge, Grounding, Span
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
 def _job_field(job, name: str):
@@ -84,12 +85,81 @@ def test_repeated_sync_ingest_reuses_projection_job_for_same_source(pipeline, in
     second = pipeline.run(request)
 
     assert second.promoted_entity_id == first.promoted_entity_id
-    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+    assert second.maintenance_job_id == first.maintenance_job_id
+
+    maintenance_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        limit=20,
+    )
+    assert len(maintenance_jobs) == 1
+    assert _job_payload(maintenance_jobs[0])["request_node_id"] == first.maintenance_job_id
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        maintenance_requests = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "request.maintenance",
+            },
+        )
+    assert len(maintenance_requests) == 1
+
+    projection_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
         namespace=ns.projection_jobs,
         limit=20,
     )
-    assert len(jobs) == 1
-    assert _job_payload(jobs[0])["promoted_entity_id"] == first.promoted_entity_id
+    assert len(projection_jobs) == 1
+    assert _job_payload(projection_jobs[0])["promoted_entity_id"] == first.promoted_entity_id
+
+
+def test_duplicate_sync_ingest_repairs_missing_maintenance_job_after_lane_request(
+    pipeline,
+    ingest_request,
+    monkeypatch,
+):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+    request = _sync_request(ingest_request)
+    original_enqueue = pipeline._enqueue_maintenance_job
+    skipped = {"count": 0}
+
+    def flaky_enqueue(**kwargs):
+        if skipped["count"] == 0:
+            skipped["count"] += 1
+            return str(kwargs["request_node_id"])
+        return original_enqueue(**kwargs)
+
+    monkeypatch.setattr(pipeline, "_enqueue_maintenance_job", flaky_enqueue)
+
+    first = pipeline.run(request)
+    assert skipped["count"] == 1
+    assert first.maintenance_job_id is not None
+
+    jobs_after_crash = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        limit=20,
+    )
+    assert jobs_after_crash == []
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        lane_requests = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "request.maintenance",
+            },
+        )
+    assert len(lane_requests) == 1
+    lane_message_id = str(lane_requests[0].id)
+
+    second = pipeline.run(request)
+
+    assert second.maintenance_job_id == first.maintenance_job_id
+    jobs_after_repair = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        limit=20,
+    )
+    assert len(jobs_after_repair) == 1
+    repaired_payload = _job_payload(jobs_after_repair[0])
+    assert repaired_payload["request_node_id"] == first.maintenance_job_id
+    assert repaired_payload["lane_message_id"] == lane_message_id
 
 
 def test_projection_worker_processes_durable_jobs_and_records_manifest(

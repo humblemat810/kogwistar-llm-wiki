@@ -260,30 +260,55 @@ class MaintenanceWorker(BaseWorker):
         if not reply_to_message_id:
             return
         ns = WorkspaceNamespaces(workspace_id)
+        msg_type = f"reply.maintenance.{status}"
+        correlation_id = reply_to_message_id
         reply_idempotency_key = str(
             stable_id(
                 "kogwistar_llm_wiki.maintenance_reply",
                 workspace_id,
                 reply_to_message_id,
-                status,
+                msg_type,
+                correlation_id,
             )
         )
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
-            self.engines.conversation.send_lane_message(
-                conversation_id=f"maintenance:{source_document_id or request_node_id}",
-                inbox_id="inbox:foreground",
-                sender_id="lane:worker:maintenance",
-                recipient_id="lane:foreground",
-                msg_type=f"reply.maintenance.{status}",
-                payload={
-                    "workspace_id": workspace_id,
-                    "request_node_id": request_node_id,
-                    **payload,
+            existing_reply = self.engines.conversation.read.get_nodes(
+                where={
+                    "$and": [
+                        {"artifact_kind": "lane_message"},
+                        {"idempotency_key": reply_idempotency_key},
+                    ],
                 },
-                reply_to=reply_to_message_id,
-                correlation_id=reply_to_message_id,
-                idempotency_key=reply_idempotency_key,
+                limit=1,
             )
+            if not existing_reply:
+                existing_reply = self.engines.conversation.read.get_nodes(
+                    where={
+                        "$and": [
+                            {"artifact_kind": "lane_message"},
+                            {"reply_to_message_id": reply_to_message_id},
+                            {"msg_type": msg_type},
+                            {"correlation_id": correlation_id},
+                        ],
+                    },
+                    limit=1,
+                )
+            if not existing_reply:
+                self.engines.conversation.send_lane_message(
+                    conversation_id=f"maintenance:{source_document_id or request_node_id}",
+                    inbox_id="inbox:foreground",
+                    sender_id="lane:worker:maintenance",
+                    recipient_id="lane:foreground",
+                    msg_type=msg_type,
+                    payload={
+                        "workspace_id": workspace_id,
+                        "request_node_id": request_node_id,
+                        **payload,
+                    },
+                    reply_to=reply_to_message_id,
+                    correlation_id=correlation_id,
+                    idempotency_key=reply_idempotency_key,
+                )
             self.engines.conversation.update_lane_message_status(
                 message_id=reply_to_message_id,
                 status="completed" if status == "completed" else "failed",
