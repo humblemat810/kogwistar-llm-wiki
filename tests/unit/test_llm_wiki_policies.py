@@ -42,6 +42,7 @@ def test_llm_wiki_taxonomy_drives_source_and_match_queries():
     }
     assert policies.wisdom.source_query(workspace_id="w1").where == {
         "entity_type": taxonomy.workflow_step_exec_entity_type,
+        "workspace_id": "w1",
     }
     assert policies.wisdom.match_where(workspace_id="w1", step_op="distill") == {
         "artifact_kind": taxonomy.execution_wisdom,

@@ -10,6 +10,8 @@ from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_desig
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar.engine_core.models import Grounding, Span
+from kogwistar.runtime.models import WorkflowStepExecNode
 import json
 
 
@@ -80,6 +82,7 @@ def test_knowledge_derivation_multi_document_grounding(pipeline, ingest_request)
             }
         )
         assert step_execs
+        assert all(step.metadata.get("workspace_id") == workspace_id for step in step_execs)
 
     done_jobs = engines.conversation.meta_sqlite.list_index_jobs(
         namespace=ns.maintenance_jobs,
@@ -272,6 +275,83 @@ def test_execution_wisdom_derivation_uses_history_failures(pipeline, ingest_requ
         str(third.maintenance_job_id),
         wisdom_job_id,
     } <= job_ids
+
+
+def test_execution_wisdom_derivation_filters_workspace_metadata(pipeline):
+    workspace_id = "wisdom_workspace"
+    other_workspace_id = "foreign_wisdom_workspace"
+    ns = WorkspaceNamespaces(workspace_id)
+    engines = pipeline.engines
+    materialize_maintenance_designs(engines.workflow)
+    worker = MaintenanceWorker(engines)
+
+    def _step_exec(*, run_id: str, workspace_id: str, step_seq: int, op: str) -> WorkflowStepExecNode:
+        return WorkflowStepExecNode(
+            id=f"wf_step|{run_id}|{step_seq}",
+            label=f"Step {step_seq}",
+            type="entity",
+            doc_id=f"wf_step|{run_id}|{step_seq}",
+            summary=f"workflow_step_exec {run_id} {step_seq}",
+            mentions=[Grounding(spans=[Span.from_dummy_for_conversation()])],
+            properties={},
+            metadata={
+                "entity_type": "workflow_step_exec",
+                "run_id": run_id,
+                "workflow_id": "execution_wisdom_wf",
+                "workflow_node_id": f"wf:execution_wisdom_wf:{op}",
+                "step_seq": step_seq,
+                "op": op,
+                "status": "failure",
+                "duration_ms": 1,
+                "result_json": json.dumps(
+                    {
+                        "conversation_node_id": None,
+                        "state_update": [],
+                        "next_step_names": [],
+                        "status": "failure",
+                    }
+                ),
+                "workspace_id": workspace_id,
+            },
+            level_from_root=0,
+            domain_id=None,
+            canonical_entity_id=None,
+            embedding=None,
+        )
+
+    with _temporary_namespace(engines.conversation, ns.conv_bg):
+        engines.conversation.write.add_node(
+            _step_exec(run_id="run-local-1", workspace_id=workspace_id, step_seq=1, op="distill")
+        )
+        engines.conversation.write.add_node(
+            _step_exec(run_id="run-local-2", workspace_id=workspace_id, step_seq=2, op="distill")
+        )
+        engines.conversation.write.add_node(
+            _step_exec(run_id="run-foreign-1", workspace_id=other_workspace_id, step_seq=3, op="distill")
+        )
+
+        source_where = worker.policies.wisdom.source_query(workspace_id=workspace_id).where
+        source_nodes = engines.conversation.read.get_nodes(where=source_where)
+
+    assert len(source_nodes) == 2
+    assert all(node.metadata.get("workspace_id") == workspace_id for node in source_nodes)
+
+    emitted = worker._emit_execution_wisdom_from_history(workspace_id, engines)
+    assert emitted == ["distill"]
+
+    with _temporary_namespace(engines.wisdom, ns.wisdom):
+        execution_wisdom = engines.wisdom.read.get_nodes(
+            where={
+                "artifact_kind": "execution_wisdom",
+                "workspace_id": workspace_id,
+                "step_op": "distill",
+            }
+        )
+
+    assert len(execution_wisdom) == 1
+    wisdom = execution_wisdom[0]
+    assert wisdom.metadata.get("failure_count") == 2
+    assert wisdom.metadata.get("workspace_id") == workspace_id
 
 
 def test_knowledge_derivation_pydantic_validation(pipeline):

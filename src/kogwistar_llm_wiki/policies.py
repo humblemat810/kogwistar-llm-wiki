@@ -132,10 +132,10 @@ class LlmWikiWisdomPolicy:
         object.__setattr__(self, "_core", DefaultWisdomPolicy(min_failure_signals=self.min_failure_signals))
 
     def source_query(self, *, workspace_id: str) -> SourceQueryDecision:
-        del workspace_id
         return SourceQueryDecision(
             where={
                 "entity_type": self.taxonomy.workflow_step_exec_entity_type,
+                "workspace_id": workspace_id,
             }
         )
 

@@ -377,11 +377,11 @@ Required search themes for this branch:
   - `tests/unit/test_llm_wiki_policies.py`
   - `tests/unit/test_knowledge_derivation.py`
 - Checklist items:
-  - [ ] Add or confirm stable workspace metadata on workflow step execution artifacts used by wisdom derivation. Maps: `F10`. Files: `src/kogwistar_llm_wiki/policies.py` and any upstream write sites found during search.
-  - [ ] Update wisdom source query policy to include workspace filtering, or document and test an equivalent isolation guarantee. Maps: `F10`. Files: `src/kogwistar_llm_wiki/policies.py`.
-  - [ ] Add regression tests for multi-workspace wisdom isolation. Maps: `F10`. Files: `tests/unit/test_llm_wiki_policies.py`, `tests/unit/test_knowledge_derivation.py`.
-  - [ ] Search completed for other app policies that drop workspace identity from queries while relying only on namespace. Maps: `F10`, `F11`. Files: review-only search across `src/kogwistar_llm_wiki/policies.py`, `src/kogwistar_llm_wiki/`.
-  - [ ] Verification completed. Maps: `F10`. Files: `tests/unit/test_llm_wiki_policies.py`, `tests/unit/test_knowledge_derivation.py`.
+  - [x] Add or confirm stable workspace metadata on workflow step execution artifacts used by wisdom derivation. Maps: `F10`. Files: `kogwistar/kogwistar/runtime/runtime.py`, `src/kogwistar_llm_wiki/policies.py`, and upstream write sites found during search.
+  - [x] Update wisdom source query policy to include workspace filtering, or document and test an equivalent isolation guarantee. Maps: `F10`. Files: `src/kogwistar_llm_wiki/policies.py`.
+  - [x] Add regression tests for multi-workspace wisdom isolation. Maps: `F10`. Files: `tests/unit/test_llm_wiki_policies.py`, `tests/unit/test_knowledge_derivation.py`.
+  - [x] Search completed for other app policies that drop workspace identity from queries while relying only on namespace. Maps: `F10`, `F11`. Files: review-only search across `src/kogwistar_llm_wiki/policies.py`, `src/kogwistar_llm_wiki/`.
+  - [x] Verification completed. Maps: `F10`. Files: `tests/unit/test_llm_wiki_policies.py`, `tests/unit/test_knowledge_derivation.py`.
 - Similar-class search:
   - Search for policies and queries that `del workspace_id` or omit workspace metadata despite multi-workspace semantics.
   - Search patterns: `"del workspace_id"`, `"workspace_id"`, `"source_query("`, `"where={"`, `"workflow_step_exec"`.
