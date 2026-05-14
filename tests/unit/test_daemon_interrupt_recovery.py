@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from kogwistar_llm_wiki.daemon import MaintenanceDaemon, ProjectionDaemon
 from kogwistar_llm_wiki.ingest_pipeline import (
     IngestPipeline,
@@ -142,10 +144,12 @@ def test_projection_daemon_startup_recovery_is_bounded(tmp_path):
     assert not vault_root.exists()
 
 
-def test_restart_after_interrupt_reclaims_expired_job_lease(tmp_path):
+def test_restart_after_interrupt_reclaims_expired_job_lease(tmp_path, monkeypatch):
+    """Lease recovery should replay durable work without depending on unrelated workflow lookup state."""
     base_dir = tmp_path / "maintenance-daemon-restart"
     engines = build_persistent_namespace_engines(base_dir)
     pipeline = IngestPipeline(engines)
+    monkeypatch.setattr(pipeline, "_get_existing_node", lambda *args, **kwargs: None)
     materialize_maintenance_designs(engines.workflow)
     pipeline.run(_request())
 
@@ -163,6 +167,11 @@ def test_restart_after_interrupt_reclaims_expired_job_lease(tmp_path):
     recovery = daemon.recover_startup_state()
 
     assert recovery.repaired_count >= 0
+    monkeypatch.setattr(
+        daemon._worker.runtime,
+        "run",
+        lambda **kwargs: SimpleNamespace(status="succeeded"),
+    )
     daemon._worker.process_pending_jobs("demo")
 
     done_jobs = restarted.conversation.meta_sqlite.list_index_jobs(
@@ -274,3 +283,20 @@ def test_startup_recovery_restores_missing_service_health_projection(tmp_path):
     assert [
         item.daemon_id for item in repaired.daemon_health
     ] == ["kogwistar-llm-wiki:demo:maintenance_daemon"]
+
+
+def test_startup_recovery_does_not_touch_service_supervisor_controls(tmp_path, monkeypatch):
+    """Startup recovery may inspect service health, but it must not orchestrate supervised services."""
+    base_dir = tmp_path / "recovery-no-supervisor-touch"
+    engines = build_persistent_namespace_engines(base_dir)
+    daemon = MaintenanceDaemon(engines, "demo", poll_interval=0.01)
+
+    supervisor = SimpleNamespace(
+        tick=lambda *args, **kwargs: pytest.fail("recovery should not tick ServiceSupervisor"),
+        bootstrap=lambda *args, **kwargs: pytest.fail("recovery should not bootstrap ServiceSupervisor"),
+        trigger_service=lambda *args, **kwargs: pytest.fail("recovery should not trigger ServiceSupervisor"),
+    )
+    engines.conversation.service_supervisor = supervisor
+
+    recovery = daemon.recover_startup_state()
+    assert recovery.daemon_health

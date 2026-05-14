@@ -214,24 +214,24 @@ Required search themes for this branch:
 - Problem summary:
   service-health visibility and workflow-backed service supervision are both in
   core, but their boundaries are not yet clear enough to prevent semantic drift.
-- Primary implementation targets:
-  - `kogwistar/kogwistar/server/service_daemon.py`
-  - `kogwistar/kogwistar/engine_core/service_health.py`
-  - `kogwistar/tests/server/test_service_daemon_model.py`
-  - `kogwistar/tests/core/test_service_health_registry.py`
-  - `kogwistar/docs/service_daemon_model.md`
-  - `kogwistar/docs/recovery_repair_utilities.md`
-- Checklist items:
-  - [ ] Clarify naming or type aliases so workflow service supervision and service-health visibility cannot be confused. Maps: `F5`. Files: `kogwistar/kogwistar/server/service_daemon.py`, `kogwistar/kogwistar/engine_core/service_health.py`.
-  - [ ] Add docs that explicitly separate orchestration semantics from health-visibility semantics. Maps: `F5`, `F12`. Files: `kogwistar/docs/service_daemon_model.md`, `kogwistar/docs/recovery_repair_utilities.md`.
-  - [ ] Add non-interference tests proving recovery reads service health but does not tick, start, or restart supervised services. Maps: `F5`, `F8`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
-  - [ ] Search completed for other service-facing APIs or docs that blur health visibility with scheduling or supervision. Maps: `F5`, `F12`. Files: review-only search across `kogwistar/kogwistar/server/`, `kogwistar/docs/`, `doc/`.
-  - [ ] Verification completed. Maps: `F5`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
-- Similar-class search:
-  - Search for places where `service`, `registry`, `daemon`, `health`, and `supervisor` are used interchangeably.
-  - Search patterns: `"ServiceDefinition"`, `"ServiceSupervisor"`, `"ServiceHealthRegistry"`, `"service_registry"`, `"service_health"`.
-- Discovered during implementation:
-  - [ ] None yet.
+  - Primary implementation targets:
+    - `kogwistar/kogwistar/server/service_daemon.py`
+    - `kogwistar/kogwistar/engine_core/service_health.py`
+    - `kogwistar/tests/server/test_service_daemon_model.py`
+    - `kogwistar/tests/core/test_service_health_registry.py`
+    - `kogwistar/docs/service_daemon_model.md`
+    - `kogwistar/docs/recovery_repair_utilities.md`
+  - Checklist items:
+    - [x] Clarify naming or type aliases so workflow service supervision and service-health visibility cannot be confused. Maps: `F5`. Files: `kogwistar/kogwistar/server/service_daemon.py`, `kogwistar/kogwistar/engine_core/service_health.py`.
+    - [x] Add docs that explicitly separate orchestration semantics from health-visibility semantics. Maps: `F5`, `F12`. Files: `kogwistar/docs/service_daemon_model.md`, `kogwistar/docs/recovery_repair_utilities.md`.
+    - [x] Add non-interference tests proving recovery reads service health but does not tick, start, or restart supervised services. Maps: `F5`, `F8`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
+    - [x] Search completed for other service-facing APIs or docs that blur health visibility with scheduling or supervision. Maps: `F5`, `F12`. Files: review-only search across `kogwistar/kogwistar/server/`, `kogwistar/docs/`, `doc/`.
+    - [x] Verification completed. Maps: `F5`. Files: `kogwistar/tests/server/test_service_daemon_model.py`, `kogwistar/tests/core/test_service_health_registry.py`.
+  - Similar-class search:
+    - Search for places where `service`, `registry`, `daemon`, `health`, and `supervisor` are used interchangeably.
+    - Search patterns: `"ServiceDefinition"`, `"ServiceSupervisor"`, `"ServiceHealthRegistry"`, `"service_registry"`, `"service_health"`.
+  - Discovered during implementation:
+    - [x] None yet.
 - Regression tests to add/update:
   - `kogwistar/tests/server/test_service_daemon_model.py`
   - `kogwistar/tests/core/test_service_health_registry.py`
