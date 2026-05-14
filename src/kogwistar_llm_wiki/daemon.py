@@ -203,7 +203,11 @@ def _projection_manifest_surface(
         or payload.get("status")
         or ("missing" if row is None else "unknown")
     )
-    projected_ids = payload.get("projected_ids")
+    ready_ids = payload.get("ready_projected_ids")
+    if not isinstance(ready_ids, list):
+        ready_ids = payload.get("projected_ids")
+    desired_ids = payload.get("desired_projected_ids")
+    failed_ids = payload.get("failed_projected_ids")
     return OutputReconciliationState(
         surface_id=f"{workspace_id}:projection_manifest",
         surface_kind="projection_manifest",
@@ -214,7 +218,10 @@ def _projection_manifest_surface(
         namespace=ns.projection_manifest,
         details={
             "workspace_id": workspace_id,
-            "projected_count": len(projected_ids) if isinstance(projected_ids, list) else 0,
+            "ready_count": len(ready_ids) if isinstance(ready_ids, list) else 0,
+            "projected_count": len(ready_ids) if isinstance(ready_ids, list) else 0,
+            "desired_count": len(desired_ids) if isinstance(desired_ids, list) else 0,
+            "failed_count": len(failed_ids) if isinstance(failed_ids, list) else 0,
         },
     )
 

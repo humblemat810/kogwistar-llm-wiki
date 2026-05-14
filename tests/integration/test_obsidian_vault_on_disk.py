@@ -67,7 +67,8 @@ class TestSyncObsidianVaultOnDisk:
         )
         assert manifest is not None
         assert manifest["materialization_status"] == "ready"
-        assert artifacts.promoted_entity_id in manifest["payload"]["projected_ids"]
+        assert artifacts.promoted_entity_id in manifest["payload"]["ready_projected_ids"]
+        assert manifest["payload"]["ready_projected_ids"] == manifest["payload"]["projected_ids"]
 
     def test_projection_worker_is_idempotent_when_queue_is_empty(
         self, pipeline, ingest_request, tmp_path

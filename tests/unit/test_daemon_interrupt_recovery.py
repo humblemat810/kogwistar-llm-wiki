@@ -98,6 +98,9 @@ def test_projection_daemon_startup_recovery_is_bounded(tmp_path, monkeypatch):
         key="demo",
         payload={
             "workspace_id": "demo",
+            "desired_projected_ids": [str(artifacts.promoted_entity_id or "")],
+            "ready_projected_ids": [str(artifacts.promoted_entity_id or "")],
+            "failed_projected_ids": [],
             "projected_ids": [str(artifacts.promoted_entity_id or "")],
             "status": "ready",
         },
@@ -136,6 +139,13 @@ def test_projection_daemon_startup_recovery_is_bounded(tmp_path, monkeypatch):
     assert [
         item.daemon_id for item in recovery.daemon_health
     ] == ["kogwistar-llm-wiki:demo:projection_daemon"]
+    manifest_surface = next(
+        item for item in recovery.app_surfaces if getattr(item, "surface_kind", None) == "projection_manifest"
+    )
+    assert manifest_surface.details["ready_count"] == 1
+    assert manifest_surface.details["projected_count"] == 1
+    assert manifest_surface.details["desired_count"] == 1
+    assert manifest_surface.details["failed_count"] == 0
 
     repaired = {item.namespace: item for item in recovery.repaired_lane_projections}
     assert repaired[durable_namespace].repaired_count == 1

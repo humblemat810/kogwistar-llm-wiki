@@ -257,16 +257,16 @@ Required search themes for this branch:
   - `src/kogwistar_llm_wiki/projection.py`
   - `tests/unit/test_projection_consistency.py`
 - Checklist items:
-  - [ ] Separate desired, rebuilding, ready, and failed projection state, or otherwise make manifest reads readiness-aware. Maps: `F6`. Files: `src/kogwistar_llm_wiki/projection_worker.py`, `src/kogwistar_llm_wiki/projection.py`.
-  - [ ] Ensure failed sink runs do not leave snapshot selection in a falsely ready state. Maps: `F6`. Files: `src/kogwistar_llm_wiki/projection_worker.py`, `src/kogwistar_llm_wiki/projection.py`.
-  - [ ] Add failure-path regression tests for manifest/vault divergence. Maps: `F6`. Files: `tests/unit/test_projection_consistency.py`.
-  - [ ] Search completed for other app projections or manifests that mark readiness before durable materialization. Maps: `F6`. Files: review-only search across `src/kogwistar_llm_wiki/`.
-  - [ ] Verification completed. Maps: `F6`. Files: `tests/unit/test_projection_consistency.py`.
+  - [x] Separate desired, rebuilding, ready, and failed projection state, or otherwise make manifest reads readiness-aware. Maps: `F6`. Files: `src/kogwistar_llm_wiki/projection_worker.py`, `src/kogwistar_llm_wiki/projection.py`.
+  - [x] Ensure failed sink runs do not leave snapshot selection in a falsely ready state. Maps: `F6`. Files: `src/kogwistar_llm_wiki/projection_worker.py`, `src/kogwistar_llm_wiki/projection.py`.
+  - [x] Add failure-path regression tests for manifest/vault divergence. Maps: `F6`. Files: `tests/unit/test_projection_consistency.py`.
+  - [x] Search completed for other app projections or manifests that mark readiness before durable materialization. Maps: `F6`. Files: review-only search across `src/kogwistar_llm_wiki/`.
+  - [x] Verification completed. Maps: `F6`. Files: `tests/unit/test_projection_consistency.py`.
 - Similar-class search:
   - Search for writes that update selection/manifest state before a sink or output operation actually completes.
   - Search patterns: `"status=\"rebuilding\""`, `"projected_ids"`, `"materialized_state"`, `"manifest"`, `"sink"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] `ProjectionWorker` already wrote readiness-aware manifest state; this slice finalized the reader contract, daemon reporting, and compatibility handling for legacy `projected_ids` rows.
 - Regression tests to add/update:
   - `tests/unit/test_projection_consistency.py`
 - Done means:

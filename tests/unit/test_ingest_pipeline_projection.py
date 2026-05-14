@@ -91,6 +91,7 @@ def test_projection_manifest_overrides_visibility_metadata(pipeline, ingest_requ
         key=workspace_id,
         payload={
             "workspace_id": workspace_id,
+            "ready_projected_ids": [str(hidden_node.id)],
             "projected_ids": [str(hidden_node.id)],
             "status": "ready",
         },

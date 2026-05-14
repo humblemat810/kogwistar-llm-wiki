@@ -208,7 +208,8 @@ def test_projection_worker_processes_durable_jobs_and_records_manifest(
     assert manifest["key"] == workspace_id
     assert manifest["materialization_status"] == "ready"
     assert manifest["payload"]["status"] == "ready"
-    assert artifacts.promoted_entity_id in manifest["payload"]["projected_ids"]
+    assert manifest["payload"]["ready_projected_ids"] == manifest["payload"]["projected_ids"]
+    assert artifacts.promoted_entity_id in manifest["payload"]["ready_projected_ids"]
     assert list(vault_root.rglob("*.md")), "Projection worker should write markdown files"
 
 
@@ -318,6 +319,91 @@ def test_failed_projection_does_not_mark_manifest_id_ready(pipeline, ingest_requ
     assert artifacts.promoted_entity_id in payload["failed_projected_ids"]
     assert artifacts.promoted_entity_id not in payload["ready_projected_ids"]
     assert artifacts.promoted_entity_id not in payload["projected_ids"]
+    assert payload["ready_projected_ids"] == payload["projected_ids"]
+
+
+def test_projection_snapshot_reads_legacy_projection_manifest_projected_ids_only(
+    pipeline,
+    ingest_request,
+):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+
+    artifacts = pipeline.run(_sync_request(ingest_request))
+    assert artifacts.promoted_entity_id is not None
+
+    pipeline.engines.conversation.meta_sqlite.replace_named_projection(
+        namespace=ns.projection_manifest,
+        key=workspace_id,
+        payload={
+            "workspace_id": workspace_id,
+            "projected_ids": [str(artifacts.promoted_entity_id)],
+            "status": "ready",
+        },
+        last_authoritative_seq=1,
+        last_materialized_seq=1,
+        projection_schema_version=1,
+        materialization_status="ready",
+    )
+
+    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    assert {entity.kg_id for entity in snapshot.entities} == {str(artifacts.promoted_entity_id)}
+
+
+def test_projection_snapshot_prefers_ready_projected_ids_over_failed_ids(
+    pipeline,
+    ingest_request,
+):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+
+    ready_artifacts = pipeline.run(
+        _sync_request(
+            ingest_request.model_copy(
+                update={
+                    "source_uri": "file:///contracts/ready.txt",
+                    "title": "Ready Contract",
+                }
+            )
+        )
+    )
+    failed_artifacts = pipeline.run(
+        _sync_request(
+            ingest_request.model_copy(
+                update={
+                    "source_uri": "file:///contracts/failed.txt",
+                    "title": "Failed Contract",
+                }
+            )
+        )
+    )
+
+    assert ready_artifacts.promoted_entity_id is not None
+    assert failed_artifacts.promoted_entity_id is not None
+
+    pipeline.engines.conversation.meta_sqlite.replace_named_projection(
+        namespace=ns.projection_manifest,
+        key=workspace_id,
+        payload={
+            "workspace_id": workspace_id,
+            "desired_projected_ids": [
+                str(ready_artifacts.promoted_entity_id),
+                str(failed_artifacts.promoted_entity_id),
+            ],
+            "ready_projected_ids": [str(ready_artifacts.promoted_entity_id)],
+            "failed_projected_ids": [str(failed_artifacts.promoted_entity_id)],
+            "projected_ids": [str(ready_artifacts.promoted_entity_id)],
+            "status": "failed",
+        },
+        last_authoritative_seq=1,
+        last_materialized_seq=1,
+        projection_schema_version=1,
+        materialization_status="failed",
+    )
+
+    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    snapshot_ids = {entity.kg_id for entity in snapshot.entities}
+    assert snapshot_ids == {str(ready_artifacts.promoted_entity_id)}
 
 
 def test_projection_worker_is_noop_for_empty_queue(pipeline, tmp_path):

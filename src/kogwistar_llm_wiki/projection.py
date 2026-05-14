@@ -130,8 +130,10 @@ class ProjectionManager:
                 return None
         if not isinstance(payload, dict):
             return None
-        ids = payload.get("ready_projected_ids")
-        if not isinstance(ids, list):
+        ready_ids = payload.get("ready_projected_ids", None)
+        if isinstance(ready_ids, list):
+            ids = ready_ids
+        else:
             ids = payload.get("projected_ids")
         if not isinstance(ids, list):
             return None
