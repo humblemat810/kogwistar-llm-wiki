@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from kogwistar.engine_core.models import Edge, Grounding, Span
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 
@@ -23,6 +24,27 @@ def _job_payload(job) -> dict:
 
 def _sync_request(request):
     return request.model_copy(update={"promotion_mode": "sync"})
+
+
+def _cross_workspace_edge(*, source_id: str, target_id: str, relation: str) -> Edge:
+    return Edge(
+        id=f"edge|{source_id}|{target_id}|{relation}",
+        label=relation,
+        type="relationship",
+        doc_id=f"edge|{source_id}|{target_id}|{relation}",
+        summary=f"{source_id} -> {target_id} ({relation})",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation()])],
+        properties={},
+        source_ids=[source_id],
+        target_ids=[target_id],
+        relation=relation,
+        source_edge_ids=[],
+        target_edge_ids=[],
+        embedding=None,
+        metadata={},
+        domain_id=None,
+        canonical_entity_id=None,
+    )
 
 
 def test_projection_jobs_are_enqueued_per_sync_promotion(pipeline, ingest_request):
@@ -143,6 +165,55 @@ def test_projection_manager_reads_manifest_written_by_worker(
     assert ingest_request.title in titles
     assert manifest["namespace"] == ns.projection_manifest
     assert manifest["key"] == workspace_id
+
+
+def test_projection_snapshot_excludes_cross_workspace_edges(pipeline, ingest_request):
+    workspace_id = "projection_workspace_a"
+    foreign_workspace_id = "projection_workspace_b"
+
+    local_artifacts = pipeline.run(
+        _sync_request(
+            ingest_request.model_copy(
+                update={
+                    "workspace_id": workspace_id,
+                    "title": "Projection Local",
+                    "source_uri": "file:///projection/local.txt",
+                }
+            )
+        )
+    )
+    foreign_artifacts = pipeline.run(
+        _sync_request(
+            ingest_request.model_copy(
+                update={
+                    "workspace_id": foreign_workspace_id,
+                    "title": "Projection Foreign",
+                    "source_uri": "file:///projection/foreign.txt",
+                }
+            )
+        )
+    )
+
+    assert local_artifacts.promoted_entity_id is not None
+    assert foreign_artifacts.promoted_entity_id is not None
+
+    pipeline.engines.kg.write.add_edge(
+        _cross_workspace_edge(
+            source_id=str(local_artifacts.promoted_entity_id),
+            target_id=str(foreign_artifacts.promoted_entity_id),
+            relation="cross_workspace",
+        )
+    )
+
+    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    local_entity = next(
+        entity for entity in snapshot.entities if entity.kg_id == str(local_artifacts.promoted_entity_id)
+    )
+
+    assert "Projection Local" in {entity.title for entity in snapshot.entities}
+    assert "Projection Foreign" not in {entity.title for entity in snapshot.entities}
+    assert str(foreign_artifacts.promoted_entity_id) not in local_entity.target_ids
+    assert all(rel.relation_type != "cross_workspace" for rel in local_entity.relationships)
 
 
 def test_failed_projection_does_not_mark_manifest_id_ready(pipeline, ingest_request, tmp_path, monkeypatch):

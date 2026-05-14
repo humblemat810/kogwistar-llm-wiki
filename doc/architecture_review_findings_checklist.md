@@ -407,15 +407,15 @@ Required search themes for this branch:
   - `src/kogwistar_llm_wiki/projection.py`
   - `tests/unit/test_projection_consistency.py`
 - Checklist items:
-  - [ ] Filter projection edges by workspace when supported, or document why endpoint filtering is the intended isolation boundary. Maps: `F11`. Files: `src/kogwistar_llm_wiki/projection.py`.
-  - [ ] Add explicit regression coverage for cross-workspace edge isolation. Maps: `F11`. Files: `tests/unit/test_projection_consistency.py`.
-  - [ ] Search completed for other projection or snapshot reads that scan globally and rely only on later filtering. Maps: `F11`. Files: review-only search across projection-building code.
-  - [ ] Verification completed. Maps: `F11`. Files: `tests/unit/test_projection_consistency.py`.
+  - [x] Filter projection edges by workspace when supported, or document why endpoint filtering is the intended isolation boundary. Maps: `F11`. Files: `src/kogwistar_llm_wiki/projection.py`.
+  - [x] Add explicit regression coverage for cross-workspace edge isolation. Maps: `F11`. Files: `tests/unit/test_projection_consistency.py`.
+  - [x] Search completed for other projection or snapshot reads that scan globally and rely only on later filtering. Maps: `F11`. Files: review-only search across projection-building code.
+  - [x] Verification completed. Maps: `F11`. Files: `tests/unit/test_projection_consistency.py`.
 - Similar-class search:
   - Search for `where={}` or equivalent broad reads in projection and export surfaces.
   - Search patterns: `"where={}"`, `"get_edges"`, `"projection snapshot"`, `"visible_ids"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] Edge rows do not currently carry a reliable workspace filter, so projection keeps the broad scan and enforces isolation by endpoint scope. Files: `src/kogwistar_llm_wiki/projection.py`.
 - Regression tests to add/update:
   - `tests/unit/test_projection_consistency.py`
 - Done means:
