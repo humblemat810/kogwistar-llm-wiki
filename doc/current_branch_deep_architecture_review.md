@@ -483,9 +483,8 @@ Recommended correction:
 
 Evidence:
 
-- `ProjectionManager.build_projection_snapshot(...)` filters nodes by `workspace_id`.
-- It reads edges with `where={}`.
-- It then includes relationships only when endpoints are visible ids.
+- `ProjectionManager.build_projection_snapshot(...)` now filters both nodes and edges by `workspace_id`.
+- It still includes relationships only when endpoints are visible ids.
 
 Code reference:
 
@@ -493,15 +492,13 @@ Code reference:
 
 Why it matters:
 
-- Endpoint filtering reduces the correctness risk.
-- But the read can become expensive, and edge ids could collide or carry cross-workspace metadata if future graph IDs become less workspace-stable.
+- Endpoint filtering remains a second line of defense.
+- The workspace-scoped edge read closes the remaining multi-tenant isolation gap that the broad edge scan used to leave open.
 
 Recommended correction:
 
-- Filter edges by `workspace_id` where possible.
-- If Kogwistar edge APIs cannot query that efficiently, add a projection manager comment/test explaining endpoint-filter isolation.
-- Add tests:
-  - workspace B edge does not appear in workspace A projection even if labels overlap
+- Completed by workspace-scoped edge reads in `src/kogwistar_llm_wiki/projection.py`.
+- Tests now prove workspace B edges do not appear in workspace A projection even when relation labels overlap.
 
 ### F12. Medium: AI OS docs still recommend broad agent/capability registries
 

@@ -417,7 +417,7 @@ Required search themes for this branch:
   - Search for `where={}` or equivalent broad reads in projection and export surfaces.
   - Search patterns: `"where={}"`, `"get_edges"`, `"projection snapshot"`, `"visible_ids"`.
 - Discovered during implementation:
-  - [x] Edge rows do not currently carry a reliable workspace filter, so projection keeps the broad scan and enforces isolation by endpoint scope. Files: `src/kogwistar_llm_wiki/projection.py`.
+  - [x] Edge rows now carry `workspace_id` metadata in the stored edge metadata, so projection can filter edge reads by workspace up front while still keeping endpoint filtering as a second line of defense. Files: `src/kogwistar_llm_wiki/projection.py`, `kogwistar/kogwistar/engine_core/subsystems/write.py`.
 - Regression tests to add/update:
   - `tests/unit/test_projection_consistency.py`
 - Done means:
@@ -733,7 +733,8 @@ Required search themes for this branch:
   - Note: the remaining gaps were maintenance artifact replay churn from timestamp-based version ids and projection status trace duplication from timestamp-based status event ids.
 - [x] Search for broad fallback exception handling in core and app recovery/read paths. Candidate roots: `kogwistar/kogwistar/engine_core/recovery.py`, `src/kogwistar_llm_wiki/worker.py`.
   - Note: `F7` and `F9` already removed the main broad fallbacks; this slice closed the remaining silent service-health metadata read swallow in startup recovery by surfacing it as an explicit finding instead of hiding it behind empty details.
-- [ ] Search for workspace/namespace isolation leaks across recovery, projection, and policy query code. Candidate roots: `kogwistar/kogwistar/engine_core/recovery.py`, `src/kogwistar_llm_wiki/policies.py`, `src/kogwistar_llm_wiki/projection.py`.
+- [x] Search for workspace/namespace isolation leaks across recovery, projection, and policy query code. Candidate roots: `kogwistar/kogwistar/engine_core/recovery.py`, `src/kogwistar_llm_wiki/policies.py`, `src/kogwistar_llm_wiki/projection.py`.
+  - Note: recovery was already covered by `F3`, `F9`, and `F18`; policy queries were already covered by `F10` and `F19`; the remaining live issue was the global edge scan in `ProjectionManager.build_projection_snapshot(...)`, which this slice closed by filtering edge reads by `workspace_id` up front.
 - [x] Search for stale docs that still imply agent/capability registry semantics. Candidate roots: `doc/ai_os_gap_analysis.md`, `doc/ai_os_roadmap.md`, `doc/architecture.md`, `doc/diagrams.md`.
   - Note: `F12` and `F20` already handled most of the branch boundary; this slice closed the remaining roadmap/gap-analysis residue.
 - [x] Search for bootstrap/install/import contract drift across app docs, scripts, and metadata. Candidate roots: `pyproject.toml`, `scripts/bootstrap-dev.sh`, `doc/dev_setup_guide.md`, `doc/cli_reference.md`.

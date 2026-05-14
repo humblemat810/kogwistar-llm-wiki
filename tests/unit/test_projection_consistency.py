@@ -27,7 +27,13 @@ def _sync_request(request):
     return request.model_copy(update={"promotion_mode": "sync"})
 
 
-def _cross_workspace_edge(*, source_id: str, target_id: str, relation: str) -> Edge:
+def _cross_workspace_edge(
+    *,
+    source_id: str,
+    target_id: str,
+    relation: str,
+    workspace_id: str,
+) -> Edge:
     return Edge(
         id=f"edge|{source_id}|{target_id}|{relation}",
         label=relation,
@@ -42,7 +48,7 @@ def _cross_workspace_edge(*, source_id: str, target_id: str, relation: str) -> E
         source_edge_ids=[],
         target_edge_ids=[],
         embedding=None,
-        metadata={},
+        metadata={"workspace_id": workspace_id},
         domain_id=None,
         canonical_entity_id=None,
     )
@@ -306,11 +312,20 @@ def test_projection_snapshot_excludes_cross_workspace_edges(pipeline, ingest_req
     assert local_artifacts.promoted_entity_id is not None
     assert foreign_artifacts.promoted_entity_id is not None
 
+    snapshot_before = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    local_entity_before = next(
+        entity for entity in snapshot_before.entities if entity.kg_id == str(local_artifacts.promoted_entity_id)
+    )
+    shared_relation_label = (
+        local_entity_before.relationships[0].relation_type if local_entity_before.relationships else "cross_workspace"
+    )
+
     pipeline.engines.kg.write.add_edge(
         _cross_workspace_edge(
             source_id=str(local_artifacts.promoted_entity_id),
             target_id=str(foreign_artifacts.promoted_entity_id),
-            relation="cross_workspace",
+            relation=shared_relation_label,
+            workspace_id=foreign_workspace_id,
         )
     )
 
@@ -322,7 +337,11 @@ def test_projection_snapshot_excludes_cross_workspace_edges(pipeline, ingest_req
     assert "Projection Local" in {entity.title for entity in snapshot.entities}
     assert "Projection Foreign" not in {entity.title for entity in snapshot.entities}
     assert str(foreign_artifacts.promoted_entity_id) not in local_entity.target_ids
-    assert all(rel.relation_type != "cross_workspace" for rel in local_entity.relationships)
+    if local_entity_before.relationships:
+        assert shared_relation_label in {rel.relation_type for rel in local_entity_before.relationships}
+        assert str(foreign_artifacts.promoted_entity_id) not in {
+            rel.target_id for rel in local_entity.relationships if rel.relation_type == shared_relation_label
+        }
 
 
 def test_failed_projection_does_not_mark_manifest_id_ready(pipeline, ingest_request, tmp_path, monkeypatch):

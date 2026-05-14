@@ -32,9 +32,9 @@ class ProjectionManager:
         """Returns the current 'KG-visible' state for a workspace."""
         ns = WorkspaceNamespaces(workspace_id)
         all_nodes = list(self.engines.kg.read.get_nodes(where={"workspace_id": workspace_id}))
-        # Edge rows do not yet have a reliable backend workspace filter, so we
-        # keep the broad scan and enforce workspace isolation with endpoint scope.
-        all_edges = list(self.engines.kg.read.get_edges(where={}))
+        # Edge reads are workspace-scoped first, with endpoint filtering kept as a
+        # second line of defense for relationship visibility.
+        all_edges = list(self.engines.kg.read.get_edges(where={"workspace_id": workspace_id}))
         manifest_ids = self._load_projection_manifest_ids(workspace_id)
 
         if manifest_ids is None:
