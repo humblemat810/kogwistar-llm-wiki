@@ -18,15 +18,17 @@ daemon maintenance --workspace <id> [--interval <s>]
 ``demo`` is intentionally single-process and ephemeral so it does not depend on
 any process-shared local backend.
 
-The persistent commands expect KOGWISTAR_DATA_DIR (or --data-dir) to point at a
-directory containing the local backend state. Use ``--backend postgres`` and
-``--dsn`` to switch to a PostgreSQL/pgvector-backed store.
+The persistent commands expect ``--data-dir`` or ``KOGWISTAR_DATA_DIR`` to
+point at a directory containing the local backend state. ``--data-dir`` wins
+when both are provided. Use ``--backend postgres`` and ``--dsn`` to switch to a
+PostgreSQL/pgvector-backed store.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import os
 import signal
 import sys
 from dataclasses import asdict
@@ -50,18 +52,21 @@ def _build_engines(
         build_postgres_namespace_engines,
     )
 
-    if data_dir is None:
-        raise ValueError("--data-dir is required for the llm-wiki CLI")
+    effective_data_dir = data_dir or os.environ.get("KOGWISTAR_DATA_DIR")
+    if not effective_data_dir:
+        raise ValueError(
+            "persistent commands require --data-dir or KOGWISTAR_DATA_DIR"
+        )
     if backend == "chroma":
         return build_persistent_namespace_engines(
-            base_dir=data_dir,
+            base_dir=effective_data_dir,
             split_derived_knowledge=split_derived_knowledge,
         )
     if backend == "postgres":
         if not dsn:
             raise ValueError("--dsn is required when --backend postgres is selected")
         return build_postgres_namespace_engines(
-            base_dir=data_dir,
+            base_dir=effective_data_dir,
             dsn=dsn,
             split_derived_knowledge=split_derived_knowledge,
         )

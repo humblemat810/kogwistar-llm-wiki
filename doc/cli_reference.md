@@ -15,7 +15,7 @@ llm-wiki [--data-dir <path>] [--split-derived-knowledge] <command>
 
 | Option | Default | Description |
 |---|---|---|
-| `--data-dir` | `.` | Path to persistent data directory |
+| `--data-dir` | none | Path to persistent data directory; falls back to `KOGWISTAR_DATA_DIR` when omitted |
 | `--split-derived-knowledge` | off | Host `derived_knowledge` on a separate engine |
 
 Hosting tradeoff for `derived_knowledge`:
@@ -121,7 +121,7 @@ python -m kogwistar_llm_wiki --help
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `KOGWISTAR_DATA_DIR` | CLI | Default persistent data directory when supplied by the caller |
+| `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
 | `PYTHONPATH` | dev | Ensure `src/` is importable without install |
 
 ## Test Commands

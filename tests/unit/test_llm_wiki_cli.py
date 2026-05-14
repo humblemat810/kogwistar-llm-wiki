@@ -277,6 +277,61 @@ def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, 
     assert payload["artifacts"]["promoted_entity_id"] == "kg-1"
 
 
+def test_ingest_cli_uses_kogwistar_data_dir_when_explicit_dir_is_omitted(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "source.md"
+    source.write_text("Alpha\nBeta\n", encoding="utf-8")
+    data_dir = tmp_path / "env-data"
+    captured: dict[str, object] = {}
+
+    fake_engines = SimpleNamespace(name="engines")
+
+    def _fake_build_persistent_namespace_engines(*, base_dir, split_derived_knowledge=False):
+        captured["base_dir"] = base_dir
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    def _fake_build_postgres_namespace_engines(*, base_dir, dsn, split_derived_knowledge=False):
+        captured["base_dir"] = base_dir
+        captured["dsn"] = dsn
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    def _fake_pipeline_ctor(engines):
+        assert engines is fake_engines
+        return _FakePipeline(engines)
+
+    monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.build_persistent_namespace_engines",
+        _fake_build_persistent_namespace_engines,
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.build_postgres_namespace_engines",
+        _fake_build_postgres_namespace_engines,
+    )
+    monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
+
+    exit_code = llm_wiki_cli.main(
+        [
+            "ingest",
+            "--workspace",
+            "demo",
+            "--source",
+            str(source),
+            "--title",
+            "Demo Doc",
+            "--promotion-mode",
+            "sync",
+        ]
+    )
+
+    assert exit_code == 0
+    assert Path(captured["base_dir"]) == data_dir
+    assert captured["split_derived_knowledge"] is False
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["workspace_id"] == "demo"
+
+
 def test_projection_daemon_command_creates_vault_root(tmp_path, monkeypatch):
     data_dir = tmp_path / "workspace-data"
     vault = tmp_path / "vault-root"
@@ -338,6 +393,65 @@ def test_projection_daemon_command_creates_vault_root(tmp_path, monkeypatch):
     assert captured["dsn"] is None
 
 
+def test_projection_daemon_uses_kogwistar_data_dir_when_explicit_dir_is_omitted(tmp_path, monkeypatch):
+    data_dir = tmp_path / "env-data"
+    vault = tmp_path / "vault-root"
+    captured: dict[str, object] = {}
+
+    fake_engines = SimpleNamespace(name="engines")
+
+    def _fake_build_persistent_namespace_engines(*, base_dir, split_derived_knowledge=False):
+        captured["base_dir"] = base_dir
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    def _fake_build_postgres_namespace_engines(*, base_dir, dsn, split_derived_knowledge=False):
+        captured["base_dir"] = base_dir
+        captured["dsn"] = dsn
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    class _FakeProjectionDaemon:
+        def __init__(self, *, engines, workspace_id, vault_root, poll_interval):
+            captured["daemon_args"] = {
+                "engines": engines,
+                "workspace_id": workspace_id,
+                "vault_root": vault_root,
+                "poll_interval": poll_interval,
+            }
+
+        def run(self):
+            return None
+
+    monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.build_persistent_namespace_engines",
+        _fake_build_persistent_namespace_engines,
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.build_postgres_namespace_engines",
+        _fake_build_postgres_namespace_engines,
+    )
+    monkeypatch.setattr("kogwistar_llm_wiki.daemon.ProjectionDaemon", _FakeProjectionDaemon)
+
+    exit_code = llm_wiki_cli.main(
+        [
+            "daemon",
+            "projection",
+            "--workspace",
+            "demo",
+            "--vault",
+            str(vault),
+            "--interval",
+            "5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert Path(captured["base_dir"]) == data_dir
+    assert captured["daemon_args"]["vault_root"] == str(vault)
+
+
 def test_ingest_cli_accepts_postgres_backend_switch(tmp_path, monkeypatch, capsys):
     source = tmp_path / "source.md"
     source.write_text("Alpha\nBeta\n", encoding="utf-8")
@@ -394,6 +508,86 @@ def test_ingest_cli_accepts_postgres_backend_switch(tmp_path, monkeypatch, capsy
     assert captured["split_derived_knowledge"] is False
     payload = json.loads(capsys.readouterr().out)
     assert payload["workspace_id"] == "demo"
+
+
+def test_persistent_cli_explicit_data_dir_wins_over_env(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "source.md"
+    source.write_text("Alpha\nBeta\n", encoding="utf-8")
+    env_data_dir = tmp_path / "env-data"
+    cli_data_dir = tmp_path / "cli-data"
+    captured: dict[str, object] = {}
+
+    fake_engines = SimpleNamespace(name="engines")
+
+    def _fake_build_persistent_namespace_engines(*, base_dir, split_derived_knowledge=False):
+        captured["base_dir"] = base_dir
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    def _fake_build_postgres_namespace_engines(*, base_dir, dsn, split_derived_knowledge=False):
+        captured["base_dir"] = base_dir
+        captured["dsn"] = dsn
+        captured["split_derived_knowledge"] = split_derived_knowledge
+        return fake_engines
+
+    def _fake_pipeline_ctor(engines):
+        assert engines is fake_engines
+        return _FakePipeline(engines)
+
+    monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(env_data_dir))
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.build_persistent_namespace_engines",
+        _fake_build_persistent_namespace_engines,
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.build_postgres_namespace_engines",
+        _fake_build_postgres_namespace_engines,
+    )
+    monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
+
+    exit_code = llm_wiki_cli.main(
+        [
+            "--data-dir",
+            str(cli_data_dir),
+            "ingest",
+            "--workspace",
+            "demo",
+            "--source",
+            str(source),
+            "--title",
+            "Demo Doc",
+            "--promotion-mode",
+            "sync",
+        ]
+    )
+
+    assert exit_code == 0
+    assert Path(captured["base_dir"]) == cli_data_dir
+    assert captured["split_derived_knowledge"] is False
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["workspace_id"] == "demo"
+
+
+def test_persistent_cli_requires_data_dir_or_env(tmp_path, monkeypatch):
+    source = tmp_path / "source.md"
+    source.write_text("Alpha\nBeta\n", encoding="utf-8")
+
+    monkeypatch.delenv("KOGWISTAR_DATA_DIR", raising=False)
+
+    with pytest.raises(ValueError, match="--data-dir or KOGWISTAR_DATA_DIR"):
+        llm_wiki_cli.main(
+            [
+                "ingest",
+                "--workspace",
+                "demo",
+                "--source",
+                str(source),
+                "--title",
+                "Demo Doc",
+                "--promotion-mode",
+                "sync",
+            ]
+        )
 
 
 def test_ingest_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch, capsys):

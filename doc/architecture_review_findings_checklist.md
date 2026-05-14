@@ -467,16 +467,16 @@ Required search themes for this branch:
   - `doc/cli_reference.md`
   - `tests/unit/test_llm_wiki_cli.py`
 - Checklist items:
-  - [ ] Decide whether `KOGWISTAR_DATA_DIR` is a real supported CLI input or a docs mistake. Maps: `F13`. Files: `src/kogwistar_llm_wiki/__main__.py`, `doc/cli_reference.md`.
-  - [ ] Implement the chosen contract or remove the false claim. Maps: `F13`. Files: `src/kogwistar_llm_wiki/__main__.py`, `doc/cli_reference.md`.
-  - [ ] Add CLI regression tests for env-var and no-env behavior. Maps: `F13`. Files: `tests/unit/test_llm_wiki_cli.py`.
-  - [ ] Search completed for other env vars or defaults described in docs but not implemented. Maps: `F13`, `F14`. Files: review-only search across CLI docs and entrypoints.
-  - [ ] Verification completed. Maps: `F13`. Files: `tests/unit/test_llm_wiki_cli.py`.
+  - [x] Decide whether `KOGWISTAR_DATA_DIR` is a real supported CLI input or a docs mistake. Maps: `F13`. Files: `src/kogwistar_llm_wiki/__main__.py`, `doc/cli_reference.md`.
+  - [x] Implement the chosen contract or remove the false claim. Maps: `F13`. Files: `src/kogwistar_llm_wiki/__main__.py`, `doc/cli_reference.md`.
+  - [x] Add CLI regression tests for env-var and no-env behavior. Maps: `F13`. Files: `tests/unit/test_llm_wiki_cli.py`.
+  - [x] Search completed for other env vars or defaults described in docs but not implemented. Maps: `F13`, `F14`. Files: review-only search across CLI docs and entrypoints.
+  - [x] Verification completed. Maps: `F13`. Files: `tests/unit/test_llm_wiki_cli.py`.
 - Similar-class search:
   - Search for CLI or docs claims using "expects", "supports", or "defaults to" that are not backed by parser code.
   - Search patterns: `"KOGWISTAR_DATA_DIR"`, `"os.environ"`, `"ArgumentParser"`, `"default=None"`, `"--data-dir"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - `src/kogwistar_llm_wiki/__main__.py` now treats `--data-dir` as the explicit override and `KOGWISTAR_DATA_DIR` as the persistent fallback.
 - Regression tests to add/update:
   - `tests/unit/test_llm_wiki_cli.py`
 - Done means:
