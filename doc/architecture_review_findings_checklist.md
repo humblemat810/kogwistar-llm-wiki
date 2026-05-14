@@ -497,15 +497,15 @@ Required search themes for this branch:
   - `doc/cli_reference.md`
   - `doc/dev_setup_guide.md`
 - Checklist items:
-  - [ ] Replace stale API snippets with a working `NamespaceEngines`-based example. Maps: `F14`. Files: `doc/cli_reference.md`.
-  - [ ] Check adjacent setup docs for other outdated programmatic examples introduced before the current constructor shape. Maps: `F14`, `F4`. Files: `doc/dev_setup_guide.md`, `doc/cli_reference.md`.
-  - [ ] Search completed for stale code samples that still assume direct constructor shortcuts no longer supported. Maps: `F14`. Files: review-only search across `doc/` and `kogwistar/docs/`.
-  - [ ] Verification completed. Maps: `F14`. Files: docs review or future snippet smoke checks.
+  - [x] Replace stale API snippets with a working `NamespaceEngines`-based example. Maps: `F14`. Files: `doc/cli_reference.md`.
+  - [x] Check adjacent setup docs for other outdated programmatic examples introduced before the current constructor shape. Maps: `F14`, `F4`. Files: `doc/dev_setup_guide.md`, `doc/cli_reference.md`.
+  - [x] Search completed for stale code samples that still assume direct constructor shortcuts no longer supported. Maps: `F14`. Files: review-only search across `doc/` and `kogwistar/docs/`.
+  - [x] Verification completed. Maps: `F14`. Files: docs review or future snippet smoke checks.
 - Similar-class search:
   - Search for code snippets that instantiate runtime or app classes with old signatures.
   - Search patterns: `"IngestPipeline("`, `"workspace_id="`, `"build_persistent_namespace_engines"`, `"NamespaceEngines"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - [x] The programmatic API example now shows the real `NamespaceEngines` construction path instead of the stale shortcut form.
 - Regression tests to add/update:
   - docs-only unless snippet-smoke automation is later added
 - Done means:

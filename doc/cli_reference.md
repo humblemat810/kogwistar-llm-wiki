@@ -93,13 +93,13 @@ Current semantics:
 ## Programmatic API Cheatsheet
 
 ```python
+from pathlib import Path
+
 from kogwistar_llm_wiki.daemon import MaintenanceDaemon, ProjectionDaemon
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, build_in_memory_namespace_engines
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, build_persistent_namespace_engines
 
-engines = build_in_memory_namespace_engines()
+engines = build_persistent_namespace_engines(Path("logs/llm_wiki_data"))
 pipeline = IngestPipeline(engines)
-
-pipeline.run("doc.md")
 
 m = MaintenanceDaemon(engines, "demo", poll_interval=10.0)
 p = ProjectionDaemon(engines, "demo", vault_root="/tmp/vault", poll_interval=5.0)
