@@ -158,6 +158,14 @@ def test_failed_projection_does_not_mark_manifest_id_ready(pipeline, ingest_requ
     with pytest.raises(RuntimeError, match="sink boom"):
         worker.process_pending_projections(workspace_id, str(vault_root))
 
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.projection_jobs,
+        limit=10,
+    )
+    assert jobs
+    assert _job_field(jobs[0], "status") != "DOING"
+    assert int(_job_field(jobs[0], "retry_count") or 0) == 1
+
     manifest = pipeline.engines.conversation.meta_sqlite.get_named_projection(
         ns.projection_manifest,
         workspace_id,

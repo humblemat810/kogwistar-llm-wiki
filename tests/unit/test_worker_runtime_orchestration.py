@@ -191,6 +191,40 @@ def test_maintenance_worker_propagates_unrelated_workflow_lookup_error(
     with pytest.raises(RuntimeError, match="workflow read exploded"):
         worker.process_pending_jobs(sync_request.workspace_id)
 
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=WorkspaceNamespaces(sync_request.workspace_id).maintenance_jobs,
+        limit=10,
+    )
+    assert jobs
+    assert _job_field(jobs[0], "status") != "DOING"
+    assert int(_job_field(jobs[0], "retry_count") or 0) == 1
+
+
+def test_maintenance_worker_accounts_early_job_processing_failure(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("request node exploded")
+
+    monkeypatch.setattr(worker, "_load_request_node", boom)
+
+    with pytest.raises(RuntimeError, match="request node exploded"):
+        worker.process_pending_jobs(sync_request.workspace_id)
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=WorkspaceNamespaces(sync_request.workspace_id).maintenance_jobs,
+        limit=10,
+    )
+    assert jobs
+    assert _job_field(jobs[0], "status") != "DOING"
+    assert int(_job_field(jobs[0], "retry_count") or 0) == 1
+
 
 def test_maintenance_worker_reply_emission_is_idempotent(
     pipeline: IngestPipeline,

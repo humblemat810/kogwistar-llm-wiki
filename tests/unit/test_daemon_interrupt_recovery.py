@@ -84,10 +84,11 @@ def test_maintenance_daemon_startup_repairs_missing_lane_projection_rows(tmp_pat
     assert foreground_rows[0].msg_type == "reply.maintenance.completed"
 
 
-def test_projection_daemon_startup_recovery_is_bounded(tmp_path):
+def test_projection_daemon_startup_recovery_is_bounded(tmp_path, monkeypatch):
     base_dir = tmp_path / "projection-daemon-recovery"
     engines = build_persistent_namespace_engines(base_dir)
     pipeline = IngestPipeline(engines)
+    monkeypatch.setattr(pipeline, "_get_existing_node", lambda *args, **kwargs: None)
     materialize_maintenance_designs(engines.workflow)
     artifacts = pipeline.run(_request())
 
@@ -257,6 +258,32 @@ def test_daemon_poll_updates_durable_service_health_without_graph_heartbeat_spam
         limit=10_000,
     )
     assert len(after_events) == len(before_events)
+
+
+def test_daemon_poll_marks_service_health_failed_when_worker_raises(tmp_path, monkeypatch):
+    base_dir = tmp_path / "maintenance-daemon-failure"
+    engines = build_persistent_namespace_engines(base_dir)
+    daemon = MaintenanceDaemon(engines, "demo", poll_interval=0.01)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("poll boom")
+
+    monkeypatch.setattr(daemon._worker, "process_pending_jobs", boom)
+
+    def stop_after_first_wait(timeout: float | None = None):
+        del timeout
+        daemon._stop_event.set()
+        return True
+
+    monkeypatch.setattr(daemon._stop_event, "wait", stop_after_first_wait)
+    monkeypatch.setattr("kogwistar_llm_wiki.daemon._stop_service_health", lambda *args, **kwargs: None)
+
+    daemon.run()
+
+    rows = engines.conversation.service_health.list_services(workspace_id="demo")
+    health = next(row for row in rows if row["service_kind"] == "maintenance_daemon")
+    assert health["status"] == "failed"
+    assert "poll boom" in str(health.get("last_error") or "")
 
 
 def test_startup_recovery_restores_missing_service_health_projection(tmp_path):

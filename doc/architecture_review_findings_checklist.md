@@ -285,16 +285,16 @@ Required search themes for this branch:
   - `tests/unit/test_worker_runtime_orchestration.py`
   - `tests/unit/test_daemon_interrupt_recovery.py`
 - Checklist items:
-  - [ ] Add a job-level error accounting path that records retry or fail state for unexpected workflow lookup errors without restoring the old broad fallback. Maps: `F7`. Files: `src/kogwistar_llm_wiki/worker.py`.
-  - [ ] Preserve the narrow recoverable-Chroma rematerialization path while re-raising real corruption or ACL errors. Maps: `F7`, `F9`. Files: `src/kogwistar_llm_wiki/worker.py`.
-  - [ ] Add regression tests for unrelated lookup failures, queue accounting, and daemon failure visibility. Maps: `F7`. Files: `tests/unit/test_worker_runtime_orchestration.py`, `tests/unit/test_daemon_interrupt_recovery.py`.
-  - [ ] Search completed for other claimed-job paths that can raise before retry/fail accounting happens. Maps: `F7`. Files: review-only search across queue-processing code.
-  - [ ] Verification completed. Maps: `F7`. Files: `tests/unit/test_worker_runtime_orchestration.py`, `tests/unit/test_daemon_interrupt_recovery.py`.
+  - [x] Add a job-level error accounting path that records retry or fail state for unexpected workflow lookup errors without restoring the old broad fallback. Maps: `F7`. Files: `src/kogwistar_llm_wiki/worker.py`.
+  - [x] Preserve the narrow recoverable-Chroma rematerialization path while re-raising real corruption or ACL errors. Maps: `F7`, `F9`. Files: `src/kogwistar_llm_wiki/worker.py`.
+  - [x] Add regression tests for unrelated lookup failures, queue accounting, and daemon failure visibility. Maps: `F7`. Files: `tests/unit/test_worker_runtime_orchestration.py`, `tests/unit/test_daemon_interrupt_recovery.py`.
+  - [x] Search completed for other claimed-job paths that can raise before retry/fail accounting happens. Maps: `F7`. Files: review-only search across queue-processing code.
+  - [x] Verification completed. Maps: `F7`. Files: `tests/unit/test_worker_runtime_orchestration.py`, `tests/unit/test_daemon_interrupt_recovery.py`.
 - Similar-class search:
   - Search for claim-then-raise paths in workers and daemons.
   - Search patterns: `"claim_"`, `"retry_or_fail("`, `"mark_done("`, `"except Exception"`, `"raise"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - Reviewed `src/kogwistar_llm_wiki/projection_worker.py`; its failure path already records retry/fail accounting, so no additional runtime change was needed for this slice.
 - Regression tests to add/update:
   - `tests/unit/test_worker_runtime_orchestration.py`
   - `tests/unit/test_daemon_interrupt_recovery.py`
@@ -685,6 +685,41 @@ Required search themes for this branch:
   - docs-only unless a code rename is chosen
 - Done means:
   lane anchor wording no longer suggests a new universal actor model.
+
+#### F21. Core read API conflates probe semantics with full hydrated node semantics
+
+- Severity: Medium
+- Source review reference:
+  Discovered during `F7` implementation while tracing the workflow-design lookup
+  path and the narrow `"Missing Embeddings"` fallback in
+  [worker.py](/c:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py).
+- Related findings: `F7`, `F9`
+- Problem summary:
+  some callers use `get_nodes(...)` as an existence or control-flow probe, but
+  the current read hydration path still expects full node payload shape
+  including embeddings. That couples probe semantics to vector-materialization
+  state and leaks backend hydration failures into app-level orchestration logic.
+- Primary implementation targets:
+  - `kogwistar/kogwistar/engine_core/subsystems/read.py`
+  - `src/kogwistar_llm_wiki/worker.py`
+  - `kogwistar/kogwistar/runtime/design.py`
+- Checklist items:
+  - [ ] Decide whether core should expose an explicit probe/metadata-only read path, or whether `get_nodes(...)` should support a lightweight non-hydrating mode. Maps: `F21`. Files: `kogwistar/kogwistar/engine_core/subsystems/read.py`.
+  - [ ] Update workflow-design existence checks and similar control-flow probes to stop depending on full hydrated node reads when only presence or metadata is needed. Maps: `F21`, `F7`. Files: `src/kogwistar_llm_wiki/worker.py`, `kogwistar/kogwistar/runtime/design.py`.
+  - [ ] Add regression coverage proving probe-style reads do not require embeddings and do not mutate from partial node views. Maps: `F21`. Files: `kogwistar/tests/core/`, `tests/unit/test_worker_runtime_orchestration.py`.
+  - [ ] Search completed for other callers using `get_nodes(...)` as a probe rather than a full transferable node read. Maps: `F21`. Files: review-only search across `kogwistar/kogwistar/`, `src/kogwistar_llm_wiki/`.
+  - [ ] Verification completed. Maps: `F21`. Files: matching core and app regression modules chosen during implementation.
+- Similar-class search:
+  - Search for read paths that only need existence, ids, or metadata but still hydrate full node payloads.
+  - Search patterns: `"get_nodes("`, `"ids=["`, `"limit=1"`, `"workflow_node"`, `"Missing Embeddings"`.
+- Discovered during implementation:
+  - [ ] None yet.
+- Regression tests to add/update:
+  - `tests/unit/test_worker_runtime_orchestration.py`
+  - one new or existing focused core read-contract module under `kogwistar/tests/core/`
+- Done means:
+  probe reads and full transferable node reads are semantically separated enough
+  that control-flow checks no longer depend on embedding hydration.
 
 ## Shared Search Backlog
 

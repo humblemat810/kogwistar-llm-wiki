@@ -107,7 +107,18 @@ class MaintenanceWorker(BaseWorker):
             if not jobs:
                 break
             for job in jobs:
-                self._handle_job(workspace_id, job)
+                try:
+                    self._handle_job(workspace_id, job)
+                except Exception as exc:
+                    logger.error(
+                        "Maintenance worker failed to process claimed job for workspace %s: %s",
+                        workspace_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    coerced_job = self.engines.conversation.jobs.coerce(job)
+                    self.engines.conversation.jobs.retry_or_fail(coerced_job, exc)
+                    raise
 
     def _handle_job(self, workspace_id: str, job: Any):
         job = self.engines.conversation.jobs.coerce(job)
