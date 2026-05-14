@@ -459,8 +459,10 @@ class MaintenanceWorker(BaseWorker):
         if not merged_mentions:
             merged_mentions = [fallback_span_factory()]
 
+        source_node_ids = sorted(str(node.id) for node in nodes)
+
         return Node(
-            id=str(stable_id("derived_knowledge", workspace_id, label, str(created_at_ms))),
+            id=str(stable_id("derived_knowledge", workspace_id, label, *source_node_ids)),
             label=label,
             type="entity",
             summary=f"Derived knowledge synthesis for {label} aggregated from {len(nodes)} source documents.",
@@ -468,7 +470,7 @@ class MaintenanceWorker(BaseWorker):
             metadata=policies.derived_knowledge.build_metadata(
                 workspace_id=workspace_id,
                 label=label,
-                source_node_ids=[str(node.id) for node in nodes],
+                source_node_ids=source_node_ids,
                 replaces_ids=policies.lifecycle.replacement_ids(existing),
                 created_at_ms=created_at_ms,
             ),
@@ -495,7 +497,14 @@ class MaintenanceWorker(BaseWorker):
                 step_op=pattern.step_op,
             ),
             build_node_for_pattern=lambda pattern, existing, created_at_ms: Node(
-                id=str(stable_id("execution_wisdom", workspace_id, pattern.step_op, str(created_at_ms))),
+                id=str(
+                    stable_id(
+                        "execution_wisdom",
+                        workspace_id,
+                        pattern.step_op,
+                        *sorted(str(node.id) for node in pattern.failure_nodes),
+                    )
+                ),
                 label=f"execution_failure_pattern:{pattern.step_op}",
                 type="entity",
                 summary=(

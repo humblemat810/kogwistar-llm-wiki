@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from pydantic import ValidationError
 
@@ -91,6 +93,36 @@ def test_knowledge_derivation_multi_document_grounding(pipeline, ingest_request)
     )
     assert len(done_jobs) >= 1
     assert {str(job.job_id) for job in done_jobs} >= {str(art1.maintenance_job_id), str(art2.maintenance_job_id)}
+
+
+def test_knowledge_derivation_replay_reuses_existing_artifact(pipeline, ingest_request):
+    workspace_id = "replay_workspace"
+    ns = WorkspaceNamespaces(workspace_id)
+    engines = pipeline.engines
+    materialize_maintenance_designs(engines.workflow)
+
+    _run_sync_ingest(
+        pipeline,
+        _sync_request(
+            ingest_request,
+            workspace_id=workspace_id,
+            title="Replay Entity",
+            source_uri="file://replay.txt",
+        ),
+    )
+
+    worker = MaintenanceWorker(engines)
+    ctx = SimpleNamespace(state_view={"workspace_id": workspace_id, "_deps": {"engines": engines}})
+    worker._step_distill(ctx)
+    worker._step_distill(ctx)
+
+    with _temporary_namespace(engines.kg, ns.derived_knowledge):
+        derived_nodes = engines.kg.read.get_nodes(
+            where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id}
+        )
+
+    assert len(derived_nodes) == 1
+    assert derived_nodes[0].label == "Replay Entity"
 
 
 def test_same_engine_derived_knowledge_uses_namespace_isolation(pipeline, ingest_request):
@@ -275,6 +307,20 @@ def test_execution_wisdom_derivation_uses_history_failures(pipeline, ingest_requ
         str(third.maintenance_job_id),
         wisdom_job_id,
     } <= job_ids
+
+    repeat = successful_worker._emit_execution_wisdom_from_history(workspace_id, engines)
+    assert repeat == ["distill"]
+
+    with _temporary_namespace(engines.wisdom, ns.wisdom):
+        repeated_wisdom = engines.wisdom.read.get_nodes(
+            where={
+                "artifact_kind": "execution_wisdom",
+                "workspace_id": workspace_id,
+                "step_op": "distill",
+            }
+        )
+
+    assert len(repeated_wisdom) == 1
 
 
 def test_execution_wisdom_derivation_filters_workspace_metadata(pipeline):

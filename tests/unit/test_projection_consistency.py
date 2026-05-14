@@ -213,6 +213,44 @@ def test_projection_worker_processes_durable_jobs_and_records_manifest(
     assert list(vault_root.rglob("*.md")), "Projection worker should write markdown files"
 
 
+def test_projection_status_emission_is_phase_stable(pipeline, ingest_request):
+    workspace_id = ingest_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+
+    artifacts = pipeline.run(_sync_request(ingest_request))
+    assert artifacts.promoted_entity_id is not None
+
+    worker = ProjectionWorker(pipeline.engines)
+    worker._emit_projection_status(
+        workspace_id=workspace_id,
+        req_node_id="req-phase-stable",
+        promoted_entity_id=str(artifacts.promoted_entity_id),
+        status="processing",
+        ns=ns,
+    )
+    worker._emit_projection_status(
+        workspace_id=workspace_id,
+        req_node_id="req-phase-stable",
+        promoted_entity_id=str(artifacts.promoted_entity_id),
+        status="processing",
+        ns=ns,
+    )
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        status_nodes = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "projection_status_event"},
+                    {"projection_request_id": "req-phase-stable"},
+                    {"promoted_entity_id": str(artifacts.promoted_entity_id)},
+                    {"status": "processing"},
+                ]
+            }
+        )
+
+    assert len(status_nodes) == 1
+
+
 def test_projection_manager_reads_manifest_written_by_worker(
     pipeline, ingest_request, tmp_path
 ):

@@ -167,10 +167,8 @@ class ProjectionWorker:
         """Append-only status event — never updates the original request node."""
         from kogwistar.engine_core.models import Node, Grounding, Span
         from kogwistar.id_provider import stable_id
-        import time
 
-        ts = int(time.time() * 1000)
-        event_id = str(stable_id("projection_status", req_node_id, status, str(ts)))
+        event_id = str(stable_id("projection_status", req_node_id, promoted_entity_id, status))
 
         span = Span(
             collection_page_url=f"conversation/{ns.conv_bg}",
@@ -196,13 +194,26 @@ class ProjectionWorker:
         if error is not None:
             metadata["error"] = error
 
-        event_node = Node(
-            id=event_id,
-            label=f"Projection Status: {promoted_entity_id} {status}",
-            type="entity",
-            summary=f"Projection request {req_node_id} transitioned to {status}",
-            mentions=[Grounding(spans=[span])],
-            metadata=metadata,
-        )
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            existing = self.engines.conversation.read.get_nodes(
+                where={
+                    "$and": [
+                        {"artifact_kind": "projection_status_event"},
+                        {"projection_request_id": req_node_id},
+                        {"promoted_entity_id": promoted_entity_id},
+                        {"status": status},
+                    ],
+                },
+                limit=1,
+            )
+            if existing:
+                return
+            event_node = Node(
+                id=event_id,
+                label=f"Projection Status: {promoted_entity_id} {status}",
+                type="entity",
+                summary=f"Projection request {req_node_id} transitioned to {status}",
+                mentions=[Grounding(spans=[span])],
+                metadata=metadata,
+            )
             self.engines.conversation.write.add_node(event_node)
