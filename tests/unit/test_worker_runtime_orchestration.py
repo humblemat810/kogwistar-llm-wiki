@@ -137,7 +137,7 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
     assert matching_request[0].metadata.get("status") == "completed"
 
 
-def test_maintenance_worker_rematerializes_only_for_missing_embeddings(
+def test_maintenance_worker_uses_probe_reads_for_workflow_design_presence(
     pipeline: IngestPipeline,
     ingest_request: IngestPipelineRequest,
     monkeypatch,
@@ -150,18 +150,13 @@ def test_maintenance_worker_rematerializes_only_for_missing_embeddings(
     def fake_materialize(_workflow_engine):
         calls.append("materialize")
 
-    original_get_nodes = pipeline.engines.workflow.read.get_nodes
-    state = {"raised": False}
-
-    def flaky_get_nodes(*args, **kwargs):
-        where = kwargs.get("where") or {}
-        if isinstance(where, dict) and where.get("$and") and not state["raised"]:
-            state["raised"] = True
-            raise Exception("Missing Embeddings")
-        return original_get_nodes(*args, **kwargs)
-
     monkeypatch.setattr(worker_module, "materialize_maintenance_designs", fake_materialize)
-    monkeypatch.setattr(pipeline.engines.workflow.read, "get_nodes", flaky_get_nodes)
+    monkeypatch.setattr(
+        pipeline.engines.workflow.read,
+        "get_nodes",
+        lambda *args, **kwargs: pytest.fail("workflow probe should not hydrate nodes"),
+    )
+    monkeypatch.setattr(pipeline.engines.workflow.read, "node_exists", lambda *args, **kwargs: False)
     monkeypatch.setattr(worker.runtime, "run", lambda **kwargs: SimpleNamespace(status="finished"))
 
     worker.process_pending_jobs(sync_request.workspace_id)
@@ -181,7 +176,7 @@ def test_maintenance_worker_propagates_unrelated_workflow_lookup_error(
     def boom(*args, **kwargs):
         raise RuntimeError("workflow read exploded")
 
-    monkeypatch.setattr(pipeline.engines.workflow.read, "get_nodes", boom)
+    monkeypatch.setattr(pipeline.engines.workflow.read, "node_exists", boom)
     monkeypatch.setattr(
         worker_module,
         "materialize_maintenance_designs",

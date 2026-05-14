@@ -28,10 +28,6 @@ from .utils import _temporary_namespace
 logger = logging.getLogger(__name__)
 
 
-def _is_recoverable_workflow_design_lookup_error(exc: Exception) -> bool:
-    return "Missing Embeddings" in str(exc)
-
-
 class BaseWorker(ABC):
     """Base class for background workers polling the Kogwistar artifact stream."""
 
@@ -182,25 +178,17 @@ class MaintenanceWorker(BaseWorker):
             self.engines.workflow, ns.workflow_maintenance
         ):
             try:
-                workflow_nodes = self.engines.workflow.read.get_nodes(
+                workflow_exists = self.engines.workflow.read.node_exists(
                     where={
                         "$and": [
                             {"entity_type": "workflow_node"},
                             {"workflow_id": workflow_id},
                         ]
                     },
-                    limit=1,
                 )
             except Exception as exc:
-                if not _is_recoverable_workflow_design_lookup_error(exc):
-                    raise
-                logger.warning(
-                    "Workflow design lookup failed for %s; rematerializing designs: %s",
-                    workflow_id,
-                    exc,
-                )
-                workflow_nodes = []
-            if not workflow_nodes:
+                raise
+            if not workflow_exists:
                 materialize_maintenance_designs(self.engines.workflow)
             with warnings.catch_warnings():
                 warnings.filterwarnings(

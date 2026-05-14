@@ -565,8 +565,7 @@ class IngestPipeline:
                 source_document_id,
             )
         )
-        existing_node = self._get_existing_node(self.engines.conversation, namespace=namespace, node_id=node_id)
-        if existing_node is None:
+        if not self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
             node = self._artifact_node(
                 request=request,
                 source_document_id=source_document_id,
@@ -587,7 +586,7 @@ class IngestPipeline:
                 self.engines.conversation.write.add_node(node)
             request_node_id = str(node.id)
         else:
-            request_node_id = str(existing_node.id)
+            request_node_id = node_id
         lane_idempotency_key = str(
             stable_id(
                 "kogwistar_llm_wiki.maintenance_request_lane",
@@ -647,9 +646,8 @@ class IngestPipeline:
                 source_document_id,
             )
         )
-        existing_node = self._get_existing_node(self.engines.conversation, namespace=namespace, node_id=node_id)
-        if existing_node is not None:
-            return str(existing_node.id)
+        if self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
+            return node_id
         node = self._artifact_node(
             request=request,
             source_document_id=source_document_id,
@@ -680,9 +678,8 @@ class IngestPipeline:
                 source_document_id,
             )
         )
-        existing_node = self._get_existing_node(self.engines.conversation, namespace=namespace, node_id=node_id)
-        if existing_node is not None:
-            return str(existing_node.id)
+        if self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
+            return node_id
         node = self._artifact_node(
             request=request,
             source_document_id=source_document_id,
@@ -722,9 +719,8 @@ class IngestPipeline:
                 source_document_id,
             )
         )
-        existing_node = self._get_existing_node(self.engines.kg, namespace=namespace, node_id=node_id)
-        if existing_node is not None:
-            promoted_id = str(existing_node.id)
+        if self._node_exists(self.engines.kg, namespace=namespace, node_id=node_id):
+            promoted_id = node_id
             if not self._job_exists(
                 namespace=self.namespaces_for(request.workspace_id).projection_jobs,
                 entity_kind="projection_request",
@@ -873,12 +869,9 @@ class IngestPipeline:
             metadata=metadata,
         )
 
-    def _get_existing_node(self, engine: Any, *, namespace: str, node_id: str) -> Node | None:
+    def _node_exists(self, engine: Any, *, namespace: str, node_id: str) -> bool:
         with _temporary_namespace(engine, namespace):
-            nodes = engine.read.get_nodes(ids=[str(node_id)])
-        if not nodes:
-            return None
-        return nodes[0]
+            return bool(engine.read.node_exists(ids=[str(node_id)]))
 
     def _job_exists(
         self,

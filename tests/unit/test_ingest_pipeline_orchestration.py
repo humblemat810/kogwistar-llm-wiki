@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from unittest.mock import Mock
 
+import pytest
+
+from kogwistar.id_provider import stable_id
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 
 
@@ -72,3 +75,37 @@ def test_pipeline_enqueues_projection_job_only_for_sync_promotion(pipeline, inge
     assert payload["workspace_id"] == workspace_id
     assert payload["promoted_entity_id"] == artifacts.promoted_entity_id
     assert payload["promotion_mode"] == "sync"
+
+
+def test_pipeline_reuses_existing_promotion_candidate_without_hydrated_probe(
+    pipeline,
+    ingest_request,
+    monkeypatch,
+):
+    workspace_id = ingest_request.workspace_id
+    source_document_id = pipeline._source_document_id(ingest_request)
+    candidate_id = stable_id(
+        "kogwistar_llm_wiki.promotion_candidate",
+        workspace_id,
+        source_document_id,
+    )
+
+    monkeypatch.setattr(
+        pipeline.engines.conversation.read,
+        "get_nodes",
+        lambda *args, **kwargs: pytest.fail("promotion candidate probe should not hydrate nodes"),
+    )
+    monkeypatch.setattr(
+        pipeline.engines.conversation.read,
+        "node_exists",
+        lambda *args, **kwargs: True,
+    )
+
+    returned_id = pipeline.create_promotion_candidate(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        candidate_link_id="candidate-link-1",
+        namespace=WorkspaceNamespaces(workspace_id).conv_bg,
+    )
+
+    assert returned_id == str(candidate_id)

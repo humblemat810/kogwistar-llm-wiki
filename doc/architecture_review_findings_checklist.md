@@ -702,18 +702,21 @@ Required search themes for this branch:
 - Primary implementation targets:
   - `kogwistar/kogwistar/engine_core/subsystems/read.py`
   - `src/kogwistar_llm_wiki/worker.py`
+  - `src/kogwistar_llm_wiki/ingest_pipeline.py`
   - `kogwistar/kogwistar/runtime/design.py`
+  - `kogwistar/kogwistar/runtime/runtime.py`
 - Checklist items:
-  - [ ] Decide whether core should expose an explicit probe/metadata-only read path, or whether `get_nodes(...)` should support a lightweight non-hydrating mode. Maps: `F21`. Files: `kogwistar/kogwistar/engine_core/subsystems/read.py`.
-  - [ ] Update workflow-design existence checks and similar control-flow probes to stop depending on full hydrated node reads when only presence or metadata is needed. Maps: `F21`, `F7`. Files: `src/kogwistar_llm_wiki/worker.py`, `kogwistar/kogwistar/runtime/design.py`.
-  - [ ] Add regression coverage proving probe-style reads do not require embeddings and do not mutate from partial node views. Maps: `F21`. Files: `kogwistar/tests/core/`, `tests/unit/test_worker_runtime_orchestration.py`.
-  - [ ] Search completed for other callers using `get_nodes(...)` as a probe rather than a full transferable node read. Maps: `F21`. Files: review-only search across `kogwistar/kogwistar/`, `src/kogwistar_llm_wiki/`.
-  - [ ] Verification completed. Maps: `F21`. Files: matching core and app regression modules chosen during implementation.
+  - [x] Decide whether core should expose an explicit probe/metadata-only read path, or whether `get_nodes(...)` should support a lightweight non-hydrating mode. Maps: `F21`. Files: `kogwistar/kogwistar/engine_core/subsystems/read.py`.
+  - [x] Update workflow-design existence checks and similar control-flow probes to stop depending on full hydrated node reads when only presence or metadata is needed. Maps: `F21`, `F7`. Files: `src/kogwistar_llm_wiki/worker.py`, `kogwistar/kogwistar/runtime/design.py`.
+  - [x] Add regression coverage proving probe-style reads do not require embeddings and do not mutate from partial node views. Maps: `F21`. Files: `kogwistar/tests/core/`, `tests/unit/test_worker_runtime_orchestration.py`.
+  - [x] Search completed for other callers using `get_nodes(...)` as a probe rather than a full transferable node read. Maps: `F21`. Files: review-only search across `kogwistar/kogwistar/`, `src/kogwistar_llm_wiki/`.
+  - [x] Verification completed. Maps: `F21`. Files: matching core and app regression modules chosen during implementation.
 - Similar-class search:
   - Search for read paths that only need existence, ids, or metadata but still hydrate full node payloads.
   - Search patterns: `"get_nodes("`, `"ids=["`, `"limit=1"`, `"workflow_node"`, `"Missing Embeddings"`.
 - Discovered during implementation:
-  - [ ] None yet.
+  - `kogwistar/kogwistar/runtime/runtime.py` now uses `read.node_exists(...)` / `read.edge_exists(...)` for conversation existence checks instead of hydrating `get_nodes(...)` / `get_edges(...)`.
+  - `kogwistar/kogwistar/runtime/replay.py` and `kogwistar/kogwistar/server/chat_service.py` now use metadata-only probe reads where only checkpoint/message metadata was needed.
 - Regression tests to add/update:
   - `tests/unit/test_worker_runtime_orchestration.py`
   - one new or existing focused core read-contract module under `kogwistar/tests/core/`

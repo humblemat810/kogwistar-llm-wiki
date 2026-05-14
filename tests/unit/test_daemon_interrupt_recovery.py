@@ -88,7 +88,6 @@ def test_projection_daemon_startup_recovery_is_bounded(tmp_path, monkeypatch):
     base_dir = tmp_path / "projection-daemon-recovery"
     engines = build_persistent_namespace_engines(base_dir)
     pipeline = IngestPipeline(engines)
-    monkeypatch.setattr(pipeline, "_get_existing_node", lambda *args, **kwargs: None)
     materialize_maintenance_designs(engines.workflow)
     artifacts = pipeline.run(_request())
 
@@ -150,7 +149,6 @@ def test_restart_after_interrupt_reclaims_expired_job_lease(tmp_path, monkeypatc
     base_dir = tmp_path / "maintenance-daemon-restart"
     engines = build_persistent_namespace_engines(base_dir)
     pipeline = IngestPipeline(engines)
-    monkeypatch.setattr(pipeline, "_get_existing_node", lambda *args, **kwargs: None)
     materialize_maintenance_designs(engines.workflow)
     pipeline.run(_request())
 
