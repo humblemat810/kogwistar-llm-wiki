@@ -402,3 +402,66 @@ flowchart TB
     REG -->|update latest row, no graph spam| PROJ
     PROJ --> REC
 ```
+
+---
+
+## Long-Run Workflow Test
+
+The long-run workflow test is an opt-in diagnostic harness, not a production
+command. It uses runtime workflow execution for each document and a bounded
+daemon-like loop to observe background maintenance and projection state.
+
+```mermaid
+flowchart TD
+    A["input/"] --> B["discover_pending"]
+    B --> C["claim_document"]
+    C --> D["processing/"]
+    D --> E["token_check"]
+    E --> F["parse_document"]
+    F --> G["persist_document"]
+    G --> H["enqueue_background_maintenance"]
+    H --> I["observe_background_maintenance"]
+    I --> J["verify_document_artifacts"]
+    J --> K["move_completed"]
+    K --> L["completed/"]
+
+    E --> M["classify_failure"]
+    F --> M
+    G --> M
+    I --> M
+    J --> M
+    M --> N["write_failure_record"]
+    N --> O{"failure class"}
+    O --> P["failed/"]
+    O --> Q["quarantine/"]
+    O --> R["continue_or_abort"]
+    R --> B
+    R --> S["abort snapshot"]
+    S --> Q
+
+    L --> T["post-doc maintenance drain\nmax 100 steps"]
+    T --> U["projection/read checks"]
+    U --> V["dump/final_report.md\nlongrun-dump.zip"]
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> CLAIMED
+    CLAIMED --> TOKEN_CHECKED
+    TOKEN_CHECKED --> PARSED
+    PARSED --> PERSISTED
+    PERSISTED --> MAINTENANCE_ENQUEUED
+    MAINTENANCE_ENQUEUED --> MAINTENANCE_OBSERVED
+    MAINTENANCE_OBSERVED --> COMPLETED
+
+    TOKEN_CHECKED --> FAILED: token_count_out_of_range
+    CLAIMED --> FAILED: document-specific failure
+    PARSED --> FAILED: persist failed after retries
+    MAINTENANCE_ENQUEUED --> FAILED: maintenance artifact missing
+
+    CLAIMED --> QUARANTINED: systemic abort
+    TOKEN_CHECKED --> QUARANTINED: suspicious repeated failure
+    PARSED --> QUARANTINED: graph invariant corruption
+    PERSISTED --> QUARANTINED: runtime worker stuck
+```

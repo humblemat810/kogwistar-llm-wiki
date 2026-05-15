@@ -65,4 +65,6 @@ norecursedirs = ["kogwistar-llm-wiki-tests-*"]
 markers = [
     "manual: tests that are opt-in and may require local services",
     "integration: tests that require real external backends (Chroma, Obsidian vault)",
+    "longrun: opt-in long-running workflow/daemon-style soak tests",
+    "requires_ollama: tests that require a local Ollama service",
 ]

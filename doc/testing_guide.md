@@ -56,3 +56,20 @@ pass. It stores convenience state such as node IDs and last-failed data.
 However, a bad cache path can still create noisy warnings or shutdown hangs in
 local tooling. Treat cache-path problems as environment/tooling problems and
 fix the cache location before debugging product code.
+
+## Long-Run Workflow Test
+
+The long-run ingestion workflow test is skipped unless explicitly enabled. It
+requires a local Ollama service and defaults to `gemma4:e2b`:
+
+```powershell
+$env:KOGWISTAR_LLM_WIKI_LONGRUN='1'
+$env:KOGWISTAR_OLLAMA_MODEL='gemma4:e2b'
+$env:KOGWISTAR_OLLAMA_BASE_URL='http://localhost:11434'
+.\.venv\Scripts\python.exe -m pytest -m "longrun" tests/integration/test_longrun_workflow_ingestion.py -q -p no:cacheprovider
+```
+
+Use `-p no:cacheprovider` for a quick local signal on Windows. The test writes a
+diagnostic dump after the run starts, including raw documents, status
+transitions, graph/projection summaries, maintenance evidence, failure records,
+and a final report.
