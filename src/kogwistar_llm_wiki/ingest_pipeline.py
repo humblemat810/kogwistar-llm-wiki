@@ -12,6 +12,8 @@ from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.engine_core.models import Document, GraphExtractionWithIDs, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.policy import PromotionDecision
+from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 from kg_doc_parser.workflow_ingest.page_index import PageIndexParseResult, parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
@@ -252,10 +254,21 @@ class IngestPipeline:
             parse_result=parse_result,
             namespace=ns.conv_bg,
         )
+        promotion_evidence_pack_id, promotion_evidence_pack_digest = self.create_promotion_evidence_pack(
+            request=request,
+            source_document_id=source_document_id,
+            candidate_link_id=candidate_link_id,
+            graph_extraction=graph_extraction,
+            namespace=ns.conv_bg,
+        )
         promotion_candidate_id = self.create_promotion_candidate(
             request=request,
             source_document_id=source_document_id,
             candidate_link_id=candidate_link_id,
+            promotion_evidence_pack_id=promotion_evidence_pack_id,
+            promotion_evidence_pack_digest=promotion_evidence_pack_digest,
+            lineage_node_ids=[source_document_id, candidate_link_id],
+            lineage_edge_ids=[],
             namespace=ns.conv_bg,
         )
 
@@ -268,6 +281,7 @@ class IngestPipeline:
                 "workspace_id": request.workspace_id,
                 "source_document_id": source_document_id,
                 "promotion_candidate_id": promotion_candidate_id,
+                "promotion_evidence_pack_id": promotion_evidence_pack_id,
             },
         )
         if promotion_decision.should_promote:
@@ -275,6 +289,9 @@ class IngestPipeline:
                 request=request,
                 source_document_id=source_document_id,
                 promotion_candidate_id=promotion_candidate_id,
+                promotion_evidence_pack_id=promotion_evidence_pack_id,
+                promotion_evidence_pack_digest=promotion_evidence_pack_digest,
+                promotion_decision=promotion_decision,
                 namespace=ns.kg,
             )
 
@@ -677,6 +694,10 @@ class IngestPipeline:
         request: IngestPipelineRequest,
         source_document_id: str,
         candidate_link_id: str,
+        promotion_evidence_pack_id: str | None = None,
+        promotion_evidence_pack_digest: dict[str, Any] | None = None,
+        lineage_node_ids: list[str] | None = None,
+        lineage_edge_ids: list[str] | None = None,
         namespace: str,
     ) -> str:
         node_id = str(
@@ -700,11 +721,15 @@ class IngestPipeline:
             summary=f"Promotion candidate linked from {candidate_link_id}",
             extra_metadata={
                 "candidate_link_id": candidate_link_id,
+                "promotion_evidence_pack_id": promotion_evidence_pack_id,
+                "promotion_evidence_pack_digest": promotion_evidence_pack_digest,
                 "promotion_mode": request.promotion_mode,
                 "queue_state": "pending",
                 "queue_previous_id": None,
                 "queue_next_id": None,
                 "lineage_source_ids": [source_document_id, candidate_link_id],
+                "lineage_node_ids": list(lineage_node_ids or [source_document_id, candidate_link_id]),
+                "lineage_edge_ids": list(lineage_edge_ids or []),
                 "review_namespace": self.namespaces_for(request.workspace_id).review,
             },
         )
@@ -712,12 +737,73 @@ class IngestPipeline:
             self.engines.conversation.write.add_node(node)
         return str(node.id)
 
+    def create_promotion_evidence_pack(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        candidate_link_id: str,
+        graph_extraction: GraphExtractionWithIDs,
+        namespace: str,
+    ) -> tuple[str, dict[str, Any]]:
+        node_ids = sorted(
+            str(node.id) for node in (graph_extraction.nodes or []) if str(getattr(node, "id", "") or "")
+        )
+        edge_ids = sorted(
+            str(edge.id) for edge in (graph_extraction.edges or []) if str(getattr(edge, "id", "") or "")
+        )
+        digest = EvidencePackDigest(
+            node_ids=list(node_ids),
+            edge_ids=list(edge_ids),
+            depth="parsed_graph_extraction",
+            max_chars_per_item=0,
+            max_total_chars=0,
+        )
+        digest.evidence_pack_hash = evidence_pack_digest_hash(digest)
+        node_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.promotion_evidence_pack",
+                request.workspace_id,
+                source_document_id,
+                *node_ids,
+                *edge_ids,
+            )
+        )
+        if self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
+            return node_id, digest.model_dump(mode="python")
+        node = self._artifact_node(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            node_id=node_id,
+            artifact_kind="promotion_evidence_pack",
+            lane="background",
+            visibility="internal",
+            label=f"Promotion evidence pack: {request.title}",
+            summary=f"Promotion evidence pack derived from parsed graph for {request.title}",
+            extra_metadata={
+                "candidate_link_id": candidate_link_id,
+                "evidence_role": "promotion",
+                "created_from": "parsed_graph_extraction",
+                "node_ids": list(node_ids),
+                "edge_ids": list(edge_ids),
+                "evidence_pack_hash": digest.evidence_pack_hash,
+                "promotion_evidence_pack_digest": digest.model_dump(mode="python"),
+            },
+        )
+        with _temporary_namespace(self.engines.conversation, namespace):
+            self.engines.conversation.write.add_node(node)
+        return str(node.id), digest.model_dump(mode="python")
+
     def promote_to_knowledge(
         self,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
         promotion_candidate_id: str,
+        promotion_evidence_pack_id: str | None = None,
+        promotion_evidence_pack_digest: dict[str, Any] | None = None,
+        promotion_decision: PromotionDecision | None = None,
         namespace: str,
     ) -> str:
         node_id = str(
@@ -754,6 +840,10 @@ class IngestPipeline:
             extra_metadata={
                 "projection_visible": True,
                 "promotion_candidate_id": promotion_candidate_id,
+                "promotion_evidence_pack_id": promotion_evidence_pack_id,
+                "promotion_evidence_pack_digest": promotion_evidence_pack_digest,
+                "promotion_decision_reason": promotion_decision.reason if promotion_decision else None,
+                "promotion_decision_metadata": dict(promotion_decision.metadata or {}) if promotion_decision else {},
             },
         )
         with _temporary_namespace(self.engines.kg, namespace):
