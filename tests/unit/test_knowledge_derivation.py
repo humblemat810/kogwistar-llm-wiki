@@ -28,6 +28,98 @@ def _run_sync_ingest(pipeline, request):
     return artifacts
 
 
+def _run_sync_ingest_with_trace(pipeline, request):
+    workspace_id = request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+    source_document_id = pipeline._source_document_id(request)
+
+    pipeline.register_source(
+        request=request,
+        source_document_id=source_document_id,
+        namespace=ns.conv_fg,
+    )
+    parse_result = pipeline.parse_source(
+        request=request,
+        source_document_id=source_document_id,
+    )
+    graph_extraction = pipeline.translate_parse_result(
+        parse_result=parse_result,
+        source_document_id=source_document_id,
+    )
+    pipeline.ingest_parse_result(
+        request=request,
+        source_document_id=source_document_id,
+        graph_extraction=graph_extraction,
+        namespace=ns.conv_fg,
+    )
+    maintenance_job_id = pipeline.create_maintenance_request(
+        request=request,
+        source_document_id=source_document_id,
+        namespace=ns.conv_bg,
+    )
+    candidate_link_id = pipeline.create_candidate_link(
+        request=request,
+        source_document_id=source_document_id,
+        parse_result=parse_result,
+        namespace=ns.conv_bg,
+    )
+    promotion_evidence_pack_id, promotion_evidence_pack_digest = (
+        pipeline.create_promotion_evidence_pack(
+            request=request,
+            source_document_id=source_document_id,
+            candidate_link_id=candidate_link_id,
+            graph_extraction=graph_extraction,
+            namespace=ns.conv_bg,
+        )
+    )
+    promotion_candidate_id = pipeline.create_promotion_candidate(
+        request=request,
+        source_document_id=source_document_id,
+        candidate_link_id=candidate_link_id,
+        promotion_evidence_pack_id=promotion_evidence_pack_id,
+        promotion_evidence_pack_digest=promotion_evidence_pack_digest,
+        lineage_node_ids=[source_document_id, candidate_link_id],
+        lineage_edge_ids=[],
+        namespace=ns.conv_bg,
+    )
+    promotion_decision = pipeline.policies.promotion.decide(
+        promotion_mode=request.promotion_mode,
+        auto_accept_threshold=request.auto_accept_threshold,
+        metadata={
+            "workspace_id": request.workspace_id,
+            "source_document_id": source_document_id,
+            "promotion_candidate_id": promotion_candidate_id,
+            "promotion_evidence_pack_id": promotion_evidence_pack_id,
+        },
+    )
+    promoted_entity_id = None
+    if promotion_decision.should_promote:
+        promoted_entity_id = pipeline.promote_to_knowledge(
+            request=request,
+            source_document_id=source_document_id,
+            promotion_candidate_id=promotion_candidate_id,
+            promotion_evidence_pack_id=promotion_evidence_pack_id,
+            promotion_evidence_pack_digest=promotion_evidence_pack_digest,
+            promotion_decision=promotion_decision,
+            namespace=ns.kg,
+        )
+
+    return SimpleNamespace(
+        workspace_id=workspace_id,
+        namespaces=ns,
+        source_document_id=source_document_id,
+        parse_result=parse_result,
+        graph_extraction=graph_extraction,
+        maintenance_job_id=maintenance_job_id,
+        candidate_link_id=candidate_link_id,
+        promotion_evidence_pack_id=promotion_evidence_pack_id,
+        promotion_evidence_pack_digest=promotion_evidence_pack_digest,
+        promotion_candidate_id=promotion_candidate_id,
+        promotion_decision=promotion_decision,
+        promoted_entity_id=promoted_entity_id,
+    )
+
+
 def test_knowledge_derivation_multi_document_grounding(pipeline, ingest_request):
     workspace_id = ingest_request.workspace_id
     ns = WorkspaceNamespaces(workspace_id)
@@ -93,6 +185,79 @@ def test_knowledge_derivation_multi_document_grounding(pipeline, ingest_request)
     )
     assert len(done_jobs) >= 1
     assert {str(job.job_id) for job in done_jobs} >= {str(art1.maintenance_job_id), str(art2.maintenance_job_id)}
+
+
+def test_knowledge_derivation_preserves_promotion_provenance_walk(pipeline, ingest_request):
+    workspace_id = "provenance_walk_workspace"
+    ns = WorkspaceNamespaces(workspace_id)
+    engines = pipeline.engines
+    materialize_maintenance_designs(engines.workflow)
+
+    traced = _run_sync_ingest_with_trace(
+        pipeline,
+        _sync_request(
+            ingest_request,
+            workspace_id=workspace_id,
+            title="Traceable Entity",
+            source_uri="file://traceable_entity.txt",
+        ),
+    )
+
+    worker = MaintenanceWorker(engines)
+    worker.process_pending_jobs(workspace_id)
+
+    with _temporary_namespace(engines.kg, ns.derived_knowledge):
+        derived_nodes = engines.kg.read.get_nodes(
+            where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id}
+        )
+
+    assert len(derived_nodes) == 1
+    derived = derived_nodes[0]
+    assert derived.metadata.get("artifact_kind") == "derived_knowledge"
+    assert derived.metadata.get("source_node_ids")
+    assert derived.metadata.get("replaces_ids") is not None
+    assert derived.metadata["source_node_ids"] == [traced.promoted_entity_id]
+
+    with _temporary_namespace(engines.kg, ns.kg):
+        promoted_nodes = engines.kg.read.get_nodes(ids=[traced.promoted_entity_id])
+
+    assert len(promoted_nodes) == 1
+    promoted = promoted_nodes[0]
+    assert promoted.metadata.get("artifact_kind") == "promoted_knowledge"
+    assert promoted.metadata.get("workspace_id") == workspace_id
+    assert promoted.metadata.get("promotion_candidate_id") == traced.promotion_candidate_id
+    assert promoted.metadata.get("promotion_evidence_pack_id") == traced.promotion_evidence_pack_id
+    assert promoted.metadata.get("promotion_evidence_pack_digest")
+    assert promoted.metadata.get("promotion_decision_reason") == (
+        "explicit promotion approval accepted by default policy"
+    )
+    assert promoted.metadata.get("promotion_decision_metadata", {}).get("promotion_approved") is True
+
+    with _temporary_namespace(engines.conversation, ns.conv_bg):
+        evidence_packs = engines.conversation.read.get_nodes(ids=[traced.promotion_evidence_pack_id])
+
+    assert len(evidence_packs) == 1
+    evidence_pack = evidence_packs[0]
+    assert evidence_pack.metadata.get("artifact_kind") == "promotion_evidence_pack"
+    assert evidence_pack.metadata.get("workspace_id") == workspace_id
+    assert evidence_pack.metadata.get("evidence_role") == "promotion"
+    assert evidence_pack.metadata.get("created_from") == "parsed_graph_extraction"
+    assert evidence_pack.metadata.get("candidate_link_id") == traced.candidate_link_id
+    assert evidence_pack.metadata.get("evidence_pack_hash")
+
+    parsed_node_ids = sorted(str(node.id) for node in traced.graph_extraction.nodes)
+    parsed_edge_ids = sorted(str(edge.id) for edge in traced.graph_extraction.edges)
+    assert sorted(evidence_pack.metadata.get("node_ids", [])) == parsed_node_ids
+    assert sorted(evidence_pack.metadata.get("edge_ids", [])) == parsed_edge_ids
+    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("node_ids") == parsed_node_ids
+    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("edge_ids") == parsed_edge_ids
+    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("evidence_pack_hash") == (
+        evidence_pack.metadata.get("evidence_pack_hash")
+    )
+
+    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("evidence_pack_hash")
+    assert promoted.metadata.get("promotion_evidence_pack_id") == str(evidence_pack.id)
+    assert promoted.metadata.get("promotion_candidate_id") == traced.promotion_candidate_id
 
 
 def test_knowledge_derivation_replay_reuses_existing_artifact(pipeline, ingest_request):
