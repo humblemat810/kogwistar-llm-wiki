@@ -38,4 +38,4 @@ def test_promotion_candidate_stays_out_of_workflow_storage(pipeline, ingest_requ
         pipeline._source_document_id(ingest_request),
         artifacts.candidate_link_id,
     ]
-    assert candidate.metadata.get("lineage_edge_ids") == []
+    assert candidate.metadata.get("lineage_edge_ids") is None

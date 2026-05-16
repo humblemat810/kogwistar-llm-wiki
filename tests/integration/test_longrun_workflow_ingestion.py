@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import time
+import sys
 import zipfile
 from collections import Counter, defaultdict
 from contextlib import nullcontext
@@ -24,7 +25,7 @@ from kg_doc_parser.workflow_ingest.providers import (
 
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime import MappingStepResolver
-from kogwistar.runtime.models import RunSuccess, WorkflowEdge, WorkflowNode
+from kogwistar.runtime.models import RunSuccess, RunSuspended, WorkflowEdge, WorkflowNode
 from kogwistar.runtime.runtime import WorkflowRuntime
 from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.engine_core import RecoverySurface
@@ -33,8 +34,10 @@ from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.ingest_pipeline import (
     build_in_memory_namespace_engines,
     build_persistent_namespace_engines,
+    build_postgres_namespace_engines,
 )
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
+from kogwistar_llm_wiki.maintenance_policy import DERIVED_KNOWLEDGE_WORKFLOW_ID
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
@@ -47,6 +50,7 @@ STATUSES = {
     "TOKEN_CHECKED",
     "PARSED",
     "PERSISTED",
+    "SUSPENDED",
     "MAINTENANCE_ENQUEUED",
     "MAINTENANCE_OBSERVED",
     "COMPLETED",
@@ -61,6 +65,7 @@ WORKFLOW_STEPS = [
     "token_check",
     "parse_document",
     "persist_document",
+    "await_resume",
     "enqueue_background_maintenance",
     "observe_background_maintenance",
     "verify_document_artifacts",
@@ -117,6 +122,9 @@ class LongRunConfig:
     ollama_base_url: str
     max_repeated_systemic_errors: int
     max_post_doc_maintenance_steps: int
+    backend: str = "chroma"
+    dsn: str | None = None
+    resume_probe_enabled: bool = False
     max_idle_loops: int = 25
     max_runtime_seconds: int = 3600
     token_min: int = 500
@@ -132,10 +140,25 @@ class LongRunConfig:
                 "KOGWISTAR_LONGRUN_DOC_COUNT must be at least 20 unless "
                 "KOGWISTAR_LONGRUN_ALLOW_SMALL=1 is set"
             )
+        backend = os.getenv("KOGWISTAR_LONGRUN_BACKEND", "chroma").strip().lower() or "chroma"
+        if backend not in {"chroma", "postgres"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_BACKEND must be one of {'chroma', 'postgres'}; "
+                f"got {backend!r}"
+            )
+        dsn = _resolve_longrun_dsn()
+        if backend == "postgres" and not dsn:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_BACKEND=postgres requires a DSN; set "
+                "KOGWISTAR_LONGRUN_DSN or KOGWISTAR_LLM_WIKI_TEST_PG_DSN "
+                "(or PG_DSN/DATABASE_URL)"
+            )
         return cls(
             enabled=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
+            backend=backend,
+            dsn=dsn,
             ollama_model=os.getenv("KOGWISTAR_OLLAMA_MODEL", "gemma4:e2b"),
             ollama_base_url=os.getenv("KOGWISTAR_OLLAMA_BASE_URL", "http://localhost:11434"),
             max_repeated_systemic_errors=int(
@@ -145,6 +168,7 @@ class LongRunConfig:
                 os.getenv("KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS", "100")
             ),
             checkpoint_run_dir=os.getenv("KOGWISTAR_LONGRUN_RUN_DIR"),
+            resume_probe_enabled=os.getenv("KOGWISTAR_LONGRUN_RESUME_PROBE") == "1",
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -152,6 +176,9 @@ class LongRunConfig:
             "enabled": self.enabled,
             "mode": self.mode,
             "doc_count": self.doc_count,
+            "backend": self.backend,
+            "dsn_present": self.dsn is not None,
+            "resume_probe_enabled": self.resume_probe_enabled,
             "ollama_model": self.ollama_model,
             "ollama_base_url": self.ollama_base_url,
             "max_repeated_systemic_errors": self.max_repeated_systemic_errors,
@@ -184,6 +211,13 @@ class DocumentRecord:
     promotion_evidence_pack_id: str | None = None
     promotion_candidate_id: str | None = None
     promoted_entity_id: str | None = None
+    parsed_node_ids: list[str] = field(default_factory=list)
+    parsed_edge_ids: list[str] = field(default_factory=list)
+    resume_checkpoint_step_seq: int | None = None
+    resume_checkpoint_namespace: str | None = None
+    resume_suspended_node_id: str | None = None
+    resume_suspended_token_id: str | None = None
+    resumed_from_checkpoint: bool = False
     last_step_name: str | None = None
     last_step_at_ms: int | None = None
     parse_result: Any | None = field(default=None, repr=False)
@@ -201,6 +235,20 @@ class FailureRecord:
     message: str
     fingerprint: str
     timestamp_ms: int
+
+
+def _resolve_longrun_dsn() -> str | None:
+    for env_name in (
+        "KOGWISTAR_LONGRUN_DSN",
+        "KOGWISTAR_LLM_WIKI_TEST_PG_DSN",
+        "GKE_PG_DSN",
+        "PG_DSN",
+        "DATABASE_URL",
+    ):
+        value = os.getenv(env_name)
+        if value:
+            return value
+    return None
 
 
 class ErrorCircuitBreaker:
@@ -369,26 +417,77 @@ class LongRunHarness:
         self.projection_poll_count = 0
         self.aborted = False
         self.abort_reason: str | None = None
-        self._rebuild_runtime_objects()
+        self._engines: Any | None = None
+        self._pipeline: IngestPipeline | None = None
+        self._maintenance_worker: MaintenanceWorker | None = None
+        self._projection_worker: ProjectionWorker | None = None
         self.active_document_id: str | None = None
         self.active_step_name: str | None = None
         self.last_completed_step_name: str | None = None
         self.last_progress_at_ms: int | None = None
         self.checkpoint_loaded = False
         self.checkpoint_manifest_path: Path | None = None
+        self.resume_gate_consumed = False
+        self.dumper = DiagnosticDumper(self.run_dir, self)
+
+    @property
+    def engines(self) -> Any:
+        if self._engines is None:
+            self._rebuild_runtime_objects()
+        return self._engines
+
+    @property
+    def pipeline(self) -> IngestPipeline:
+        if self._pipeline is None:
+            self._rebuild_runtime_objects()
+        assert self._pipeline is not None
+        return self._pipeline
+
+    @property
+    def maintenance_worker(self) -> MaintenanceWorker:
+        if self._maintenance_worker is None:
+            self._rebuild_runtime_objects()
+        assert self._maintenance_worker is not None
+        return self._maintenance_worker
+
+    @property
+    def projection_worker(self) -> ProjectionWorker:
+        if self._projection_worker is None:
+            self._rebuild_runtime_objects()
+        assert self._projection_worker is not None
+        return self._projection_worker
+
+    def _build_namespace_engines(self):
+        backend = self.config.backend.strip().lower()
+        base_dir = self.run_dir / "engines"
+        if backend == "chroma":
+            return build_persistent_namespace_engines(base_dir)
+        if backend == "postgres":
+            if not self.config.dsn:
+                raise ValueError(
+                    "postgres long-run backend requires a DSN; set "
+                    "KOGWISTAR_LONGRUN_DSN or KOGWISTAR_LLM_WIKI_TEST_PG_DSN"
+                )
+            return build_postgres_namespace_engines(
+                base_dir=base_dir,
+                dsn=self.config.dsn,
+            )
+        raise ValueError(
+            "unsupported long-run backend: "
+            f"{self.config.backend!r}; expected chroma or postgres"
+        )
 
     def _rebuild_runtime_objects(self) -> None:
-        self.engines = build_persistent_namespace_engines(self.run_dir / "engines")
-        self.pipeline = IngestPipeline(self.engines)
-        self.pipeline.parser = self._build_parser()
-        self.maintenance_worker = MaintenanceWorker(self.engines)
-        self.projection_worker = ProjectionWorker(self.engines)
+        engines = self._build_namespace_engines()
+        self._engines = engines
+        self._pipeline = IngestPipeline(engines)
+        self._pipeline.parser = self._build_parser()
+        self._maintenance_worker = MaintenanceWorker(engines)
+        self._projection_worker = ProjectionWorker(engines)
         self.dumper = DiagnosticDumper(self.run_dir, self)
 
     def prepare(self) -> None:
         self._prepare_run_directory()
-        materialize_maintenance_designs(self.engines.workflow)
-        self._materialize_workflow_design()
         loaded = False
         if self.config.mode == "continue":
             loaded = self._load_checkpoint_state(strict=True)
@@ -405,12 +504,14 @@ class LongRunHarness:
             )
         if not loaded:
             self._reset_run_directory()
-            self._rebuild_runtime_objects()
-            self._prepare_run_directory()
-            materialize_maintenance_designs(self.engines.workflow)
-            self._materialize_workflow_design()
+        self._rebuild_runtime_objects()
+        self._prepare_run_directory()
+        materialize_maintenance_designs(self.engines.workflow)
+        self._materialize_workflow_design()
+        if not loaded:
             self._generate_corpus()
         else:
+            self._restore_checkpoint_history()
             self._restore_missing_documents_from_dump()
             self._restore_progress_from_records()
         self.dumper.dump(reason="prepared")
@@ -425,8 +526,9 @@ class LongRunHarness:
             if self.aborted:
                 break
             previous_state = self._state_signature()
+            outcome = "succeeded"
             try:
-                self._run_document_workflow(record)
+                outcome = self._run_document_workflow(record)
             except Exception as exc:  # noqa: BLE001
                 failure = self._classify_exception(exc, doc_id=record.doc_id, phase="runtime")
                 self._record_failure(failure)
@@ -434,6 +536,10 @@ class LongRunHarness:
                     self._abort(f"circuit breaker tripped: {failure.fingerprint}")
                     break
                 self._move_failed_or_quarantine(record, failure)
+                continue
+            if outcome == "suspended":
+                self.dumper.dump(reason=f"suspended_{record.doc_id}", final=True)
+                return
             self._poll_maintenance_once(phase="document_loop")
             if self._state_signature() == previous_state:
                 idle_loops += 1
@@ -465,7 +571,7 @@ class LongRunHarness:
             end_ms = record.ended_at_ms or _now_ms()
             elapsed_ms = max(0, int(end_ms - record.started_at_ms))
         return {
-            "run_id": self.run_id,
+            "run_id": record.run_id or self.run_id,
             "doc_id": record.doc_id,
             "title": record.title,
             "source_uri": record.source_uri,
@@ -480,6 +586,13 @@ class LongRunHarness:
             "maintenance_job_id": record.maintenance_job_id,
             "promotion_evidence_pack_id": record.promotion_evidence_pack_id,
             "promoted_entity_id": record.promoted_entity_id,
+            "parsed_node_ids": list(record.parsed_node_ids),
+            "parsed_edge_ids": list(record.parsed_edge_ids),
+            "resume_checkpoint_step_seq": record.resume_checkpoint_step_seq,
+            "resume_checkpoint_namespace": record.resume_checkpoint_namespace,
+            "resume_suspended_node_id": record.resume_suspended_node_id,
+            "resume_suspended_token_id": record.resume_suspended_token_id,
+            "resumed_from_checkpoint": record.resumed_from_checkpoint,
             "last_step_name": record.last_step_name,
             "last_step_at_ms": record.last_step_at_ms,
             "llm_quality_failures": list(record.llm_quality_failures),
@@ -538,13 +651,16 @@ class LongRunHarness:
                     surface_id=f"{self.config.workspace_id}:longrun",
                     surface_kind="longrun_harness",
                     status="running" if not self.aborted else "aborted",
-                    details={
-                        "run_id": self.run_id,
-                        "doc_count": len(self.records),
-                        "current_document_id": self._active_document_id(),
-                        "current_step": self._active_step_name(),
-                        "last_completed_step": self._last_completed_step_name(),
-                        "last_progress_at_ms": self._last_progress_at_ms(),
+                details={
+                    "run_id": self.run_id,
+                    "backend": self.config.backend,
+                    "dsn_present": self.config.dsn is not None,
+                    "resume_probe_enabled": self.config.resume_probe_enabled,
+                    "doc_count": len(self.records),
+                    "current_document_id": self._active_document_id(),
+                    "current_step": self._active_step_name(),
+                    "last_completed_step": self._last_completed_step_name(),
+                    "last_progress_at_ms": self._last_progress_at_ms(),
                     },
                 )
             ],
@@ -557,17 +673,28 @@ class LongRunHarness:
         return {
             "run_id": self.run_id,
             "workspace_id": self.config.workspace_id,
+            "backend": self.config.backend,
+            "resume_probe_enabled": self.config.resume_probe_enabled,
             "doc_count": len(self.records),
-            "checkpoint_loaded": self.checkpoint_loaded,
-            "checkpoint_manifest_path": str(self.checkpoint_manifest_path) if self.checkpoint_manifest_path else None,
+            "manifest_checkpoint_loaded": self.checkpoint_loaded,
+            "manifest_checkpoint_path": (
+                str(self.checkpoint_manifest_path) if self.checkpoint_manifest_path else None
+            ),
             "completed_count": counts.get("COMPLETED", 0),
             "failed_count": counts.get("FAILED", 0),
             "quarantined_count": counts.get("QUARANTINED", 0),
+            "suspended_count": counts.get("SUSPENDED", 0),
             "current_document_id": self.active_document_id or (active.doc_id if active else None),
             "current_step": self.active_step_name,
             "last_completed_step": self.last_completed_step_name,
             "last_progress_at_ms": self.last_progress_at_ms,
             "active_document_status": None if active is None else active.status,
+            "suspended_document_ids": sorted(
+                record.doc_id for record in self.records if record.status == "SUSPENDED"
+            ),
+            "resumed_document_ids": sorted(
+                record.doc_id for record in self.records if record.resumed_from_checkpoint
+            ),
         }
 
     def maintenance_summary(self) -> dict[str, Any]:
@@ -583,13 +710,21 @@ class LongRunHarness:
             replies = self.engines.conversation.list_projected_lane_messages(
                 inbox_id="inbox:foreground"
             )
-            steps = self.engines.conversation.read.get_nodes(
+            step_nodes = self.engines.conversation.read.get_nodes(
                 where=_and_where(
                     {"entity_type": "workflow_step_exec"},
                     {"workspace_id": self.config.workspace_id},
                 ),
                 limit=10_000,
             )
+        maintenance_steps = [
+            node
+            for node in step_nodes
+            if (
+                str((node.metadata or {}).get("workflow_id") or "") == DERIVED_KNOWLEDGE_WORKFLOW_ID
+                or str((node.metadata or {}).get("workflow_id") or "").startswith("maintenance.")
+            )
+        ]
         with _temporary_namespace(self.engines.derived_knowledge_engine(), ns.derived_knowledge):
             derived = self.engines.derived_knowledge_engine().read.get_nodes(
                 where=_and_where(
@@ -602,9 +737,19 @@ class LongRunHarness:
             "maintenance_poll_count": self.maintenance_poll_count,
             "job_status_counts": dict(Counter(str(job.status) for job in jobs)),
             "jobs": [_job_to_dict(job) for job in jobs],
+            "maintenance_job_ids": [str(job.job_id) for job in jobs],
+            "maintenance_source_document_ids": sorted(
+                {
+                    str(job.entity_id)
+                    for job in jobs
+                    if str(getattr(job, "entity_id", "") or "")
+                }
+            ),
             "maintenance_lane_messages": [_lane_row_to_dict(row) for row in lane_rows],
             "foreground_replies": [_lane_row_to_dict(row) for row in replies],
-            "workflow_step_count": len(steps),
+            "workflow_step_count": len(maintenance_steps),
+            "maintenance_workflow_step_count": len(maintenance_steps),
+            "maintenance_workflow_step_ids": [str(node.id) for node in maintenance_steps],
             "derived_artifact_count": len(derived),
             "derived_artifact_ids": [str(node.id) for node in derived],
         }
@@ -649,34 +794,53 @@ class LongRunHarness:
             ],
         }
 
-    def _run_document_workflow(self, record: DocumentRecord) -> None:
+    def _run_document_workflow(self, record: DocumentRecord) -> str:
         self._mark_document_progress(record, step_name="workflow_start")
         if record.started_at_ms is None:
             record.started_at_ms = _now_ms()
+        if record.resume_suspended_token_id and record.resume_suspended_node_id:
+            self._resume_document_workflow(record)
+            return "succeeded"
+        if record.status == "SUSPENDED":
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"suspended checkpoint for {record.doc_id} is missing resume metadata",
+                phase="await_resume",
+            )
         resolver = self._build_resolver()
         runtime = WorkflowRuntime(
             workflow_engine=self.engines.workflow,
             conversation_engine=self.engines.conversation,
             step_resolver=resolver,
             predicate_registry={},
+            checkpoint_every_n_steps=1,
         )
         run_id = f"{self.run_id}:{record.doc_id}"
         record.run_id = run_id
-        with _temporary_namespace(
-            self.engines.conversation,
-            WorkspaceNamespaces(self.config.workspace_id).conv_bg,
-        ):
-            result = runtime.run(
-                workflow_id=WORKFLOW_ID,
+        result = runtime.run(
+            workflow_id=WORKFLOW_ID,
+            conversation_id=f"longrun:{self.config.workspace_id}",
+            turn_node_id=record.doc_id,
+            initial_state={
+                "workspace_id": self.config.workspace_id,
+                "doc_id": record.doc_id,
+                "_deps": {"harness": self},
+            },
+            run_id=run_id,
+        )
+        if result.status == "suspended":
+            resume_checkpoint_step_seq = 10_000_000 + len(self.status_transitions)
+            runtime._persist_checkpoint(
                 conversation_id=f"longrun:{self.config.workspace_id}",
-                turn_node_id=record.doc_id,
-                initial_state={
-                    "workspace_id": self.config.workspace_id,
-                    "doc_id": record.doc_id,
-                    "_deps": {"harness": self},
-                },
+                workflow_id=WORKFLOW_ID,
                 run_id=run_id,
+                step_seq=resume_checkpoint_step_seq,
+                state=dict(result.final_state),
+                last_exec_node=None,
             )
+            self._capture_resume_checkpoint(record, run_id=run_id)
+            record.run_id = run_id
+            return "suspended"
         if result.status != "succeeded":
             raise LongRunDocumentError(
                 "document_parse_failed",
@@ -685,6 +849,7 @@ class LongRunHarness:
             )
         record.ended_at_ms = _now_ms()
         self._mark_document_progress(record, step_name="workflow_done")
+        return "succeeded"
 
     def _prepare_run_directory(self) -> None:
         for name in ("input", "processing", "completed", "failed", "quarantine", "dump", "engines", "projection_vault"):
@@ -701,6 +866,25 @@ class LongRunHarness:
                     child.unlink()
                 except FileNotFoundError:
                     pass
+
+    def _restore_checkpoint_history(self) -> None:
+        self.status_transitions = self._load_jsonl_rows(self.dumper.dump_dir / "status_transitions.jsonl")
+        self.failure_records = [
+            FailureRecord(**row)
+            for row in self._load_jsonl_rows(self.dumper.dump_dir / "failure_records.jsonl")
+        ]
+
+    def _load_jsonl_rows(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                rows.append(json.loads(line))
+        return rows
 
     def _load_checkpoint_state(self, *, strict: bool) -> bool:
         manifest = self.dumper.dump_dir / "manifest.jsonl"
@@ -733,10 +917,18 @@ class LongRunHarness:
                     promotion_evidence_pack_id=row.get("promotion_evidence_pack_id"),
                     promotion_candidate_id=row.get("promotion_candidate_id"),
                     promoted_entity_id=row.get("promoted_entity_id"),
+                    parsed_node_ids=list(row.get("parsed_node_ids") or []),
+                    parsed_edge_ids=list(row.get("parsed_edge_ids") or []),
+                    resume_checkpoint_step_seq=row.get("resume_checkpoint_step_seq"),
+                    resume_checkpoint_namespace=row.get("resume_checkpoint_namespace"),
+                    resume_suspended_node_id=row.get("resume_suspended_node_id"),
+                    resume_suspended_token_id=row.get("resume_suspended_token_id"),
+                    resumed_from_checkpoint=bool(row.get("resumed_from_checkpoint", False)),
                     last_step_name=row.get("last_step_name"),
                     last_step_at_ms=row.get("last_step_at_ms"),
                     llm_quality_failures=list(row.get("llm_quality_failures") or []),
                 )
+                self._hydrate_record_artifacts(record)
                 records.append(record)
         if not records:
             return False
@@ -752,7 +944,123 @@ class LongRunHarness:
         self.contexts = {record.doc_id: record for record in records}
         self.checkpoint_loaded = True
         self.checkpoint_manifest_path = manifest
+        self.resume_gate_consumed = any(
+            record.resumed_from_checkpoint or record.resume_suspended_token_id is not None
+            for record in records
+        )
         return True
+
+    def _latest_runtime_checkpoint(self, run_id: str) -> dict[str, Any] | None:
+        ns = WorkspaceNamespaces(self.config.workspace_id)
+        namespace_candidates: list[str | None] = [ns.conv_bg, ns.conv_fg, ns.kg, None]
+        best: dict[str, Any] | None = None
+        for namespace in namespace_candidates:
+            context = _temporary_namespace(self.engines.conversation, namespace) if namespace else nullcontext()
+            with context:
+                checkpoints = self.engines.conversation.read.get_nodes(
+                    where=_and_where(
+                        {"entity_type": "workflow_checkpoint"},
+                        {"run_id": run_id},
+                    ),
+                    limit=10_000,
+                )
+            if not checkpoints:
+                continue
+            latest = max(
+                checkpoints,
+                key=lambda node: int((getattr(node, "metadata", {}) or {}).get("step_seq", -1)),
+            )
+            metadata = dict(getattr(latest, "metadata", {}) or {})
+            state_json = metadata.get("state_json")
+            if isinstance(state_json, str):
+                state = json.loads(state_json)
+            elif isinstance(state_json, dict):
+                state = dict(state_json)
+            else:
+                state = {}
+            candidate = {
+                "step_seq": int(metadata.get("step_seq") or 0),
+                "node_id": str(getattr(latest, "id", "")),
+                "metadata": metadata,
+                "state": state,
+                "namespace": namespace,
+            }
+            if best is None or candidate["step_seq"] > best["step_seq"]:
+                best = candidate
+        return best
+
+    def _capture_resume_checkpoint(self, record: DocumentRecord, *, run_id: str) -> None:
+        latest = self._latest_runtime_checkpoint(run_id)
+        if not latest:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"missing workflow checkpoint for suspended document {record.doc_id}",
+                phase="await_resume",
+            )
+        state = latest["state"] or {}
+        rt_join = state.get("_rt_join") or {}
+        suspended = list(rt_join.get("suspended") or [])
+        if not suspended:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"workflow checkpoint for {record.doc_id} is missing suspended token state",
+                phase="await_resume",
+            )
+        suspended_node_id, _, suspended_token_id, _parent_token_id = suspended[0]
+        record.resume_checkpoint_step_seq = int(latest["step_seq"])
+        record.resume_checkpoint_namespace = str(latest.get("namespace") or "")
+        record.resume_suspended_node_id = str(suspended_node_id)
+        record.resume_suspended_token_id = str(suspended_token_id)
+        self.resume_gate_consumed = True
+
+    def _hydrate_record_artifacts(self, record: DocumentRecord) -> None:
+        if record.parse_result is None:
+            record.parse_result = SimpleNamespace(
+                semantic_tree=SimpleNamespace(title=record.title)
+            )
+        if record.graph_extraction is None and (record.parsed_node_ids or record.parsed_edge_ids):
+            record.graph_extraction = SimpleNamespace(
+                nodes=[SimpleNamespace(id=node_id) for node_id in record.parsed_node_ids],
+                edges=[SimpleNamespace(id=edge_id) for edge_id in record.parsed_edge_ids],
+            )
+
+    def _resume_document_workflow(self, record: DocumentRecord) -> None:
+        if not record.resume_suspended_node_id or not record.resume_suspended_token_id:
+            raise AssertionError(
+                f"document {record.doc_id} has no suspended checkpoint state to resume"
+            )
+        self._hydrate_record_artifacts(record)
+        run_id = record.run_id or f"{self.run_id}:{record.doc_id}"
+        runtime = WorkflowRuntime(
+            workflow_engine=self.engines.workflow,
+            conversation_engine=self.engines.conversation,
+            step_resolver=self._build_resolver(),
+            predicate_registry={},
+            checkpoint_every_n_steps=1,
+        )
+        result = runtime.resume_run(
+            run_id=run_id,
+            suspended_node_id=str(record.resume_suspended_node_id),
+            suspended_token_id=str(record.resume_suspended_token_id),
+            client_result=RunSuccess(
+                state_update=[("u", {"resumed_from_checkpoint": True})]
+            ),
+            workflow_id=WORKFLOW_ID,
+            conversation_id=f"longrun:{self.config.workspace_id}",
+            turn_node_id=record.doc_id,
+        )
+        if result.status != "succeeded":
+            raise LongRunDocumentError(
+                "document_parse_failed",
+                f"resume returned {result.status}",
+                phase="runtime_resume",
+            )
+        record.resumed_from_checkpoint = True
+        record.run_id = run_id
+        if record.ended_at_ms is None:
+            record.ended_at_ms = _now_ms()
+        self._mark_document_progress(record, step_name="resume_document")
+        self._mark_document_progress(record, step_name="workflow_done")
 
     def _restore_missing_documents_from_dump(self) -> None:
         raw_dir = self.dumper.dump_dir / "raw_documents"
@@ -859,6 +1167,14 @@ class LongRunHarness:
                     parse_result=record.parse_result,
                     source_document_id=source_document_id,
                 )
+                record.parsed_node_ids = [
+                    str(getattr(node, "id"))
+                    for node in getattr(record.graph_extraction, "nodes", [])
+                ]
+                record.parsed_edge_ids = [
+                    str(getattr(edge, "id"))
+                    for edge in getattr(record.graph_extraction, "edges", [])
+                ]
                 self.pipeline.ingest_parse_result(
                     request=request,
                     source_document_id=source_document_id,
@@ -872,7 +1188,41 @@ class LongRunHarness:
                     phase="persist_document",
                 ) from exc
             self._transition(record, "PERSISTED", phase="persist_document")
-            return RunSuccess(state_update=[("u", {"persisted": True})])
+            return RunSuccess(
+                state_update=[
+                    (
+                        "u",
+                        {
+                            "persisted": True,
+                            "parsed_node_ids": list(record.parsed_node_ids),
+                            "parsed_edge_ids": list(record.parsed_edge_ids),
+                        },
+                    )
+                ]
+            )
+
+        @resolver.register("await_resume")
+        def _await_resume(ctx):
+            record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="await_resume")
+            if not self.config.resume_probe_enabled or self.resume_gate_consumed:
+                return RunSuccess(state_update=[("u", {"resume_gate_skipped": True})])
+            self.resume_gate_consumed = True
+            self._transition(
+                record,
+                "SUSPENDED",
+                phase="await_resume",
+                resume_gate=True,
+            )
+            return RunSuspended(
+                state_update=[("u", {"resume_gate_suspended": True})],
+                resume_payload={
+                    "doc_id": record.doc_id,
+                    "workspace_id": self.config.workspace_id,
+                    "run_id": record.run_id or f"{self.run_id}:{record.doc_id}",
+                    "gate": "longrun_resume_probe",
+                },
+            )
 
         @resolver.register("enqueue_background_maintenance")
         def _enqueue(ctx):
@@ -909,12 +1259,23 @@ class LongRunHarness:
                 promotion_evidence_pack_digest=promotion_evidence_pack_digest,
                 namespace=ns.conv_bg,
             )
+            promotion_decision = self.pipeline.policies.promotion.decide(
+                promotion_mode=request.promotion_mode,
+                auto_accept_threshold=request.auto_accept_threshold,
+                metadata={
+                    "workspace_id": request.workspace_id,
+                    "source_document_id": source_document_id,
+                    "promotion_candidate_id": promotion_candidate_id,
+                    "promotion_evidence_pack_id": promotion_evidence_pack_id,
+                },
+            )
             promoted_entity_id = self.pipeline.promote_to_knowledge(
                 request=request,
                 source_document_id=source_document_id,
                 promotion_candidate_id=promotion_candidate_id,
                 promotion_evidence_pack_id=promotion_evidence_pack_id,
                 promotion_evidence_pack_digest=promotion_evidence_pack_digest,
+                promotion_decision=promotion_decision,
                 namespace=ns.kg,
             )
             record.maintenance_job_id = maintenance_job_id
@@ -1193,7 +1554,7 @@ class LongRunHarness:
             )
         pack = packs[0]
         pack_md = pack.metadata or {}
-        digest = pack_md.get("promotion_evidence_pack_digest") or {}
+        digest = _decode_metadata_json(pack_md.get("promotion_evidence_pack_digest"))
         if pack_md.get("artifact_kind") != "promotion_evidence_pack":
             raise LongRunSystemicError(
                 "graph_invariant_violation",
@@ -1235,7 +1596,7 @@ class LongRunHarness:
         maintenance = self.maintenance_summary()
         useful_maintenance = (
             maintenance["derived_artifact_count"] > 0
-            or maintenance["workflow_step_count"] > 0
+            or maintenance["maintenance_workflow_step_count"] > 0
             or maintenance["job_status_counts"].get("DONE", 0) > 0
             or bool(maintenance["foreground_replies"])
         )
@@ -1575,6 +1936,15 @@ def _and_where(*clauses: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     return {"$and": [dict(clause) for clause in clauses]}
 
 
+def _decode_metadata_json(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        parsed = json.loads(value)
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _model_to_dict(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         try:
@@ -1667,17 +2037,6 @@ def test_longrun_checkpoint_state_is_loaded_across_reruns(tmp_path: Path, monkey
     def _dummy_parse_result():
         return SimpleNamespace(nodes=[], edges=[])
 
-    def _install_dummy_pipeline(harness: LongRunHarness) -> None:
-        harness.pipeline.parse_source = lambda **kwargs: _dummy_parse_result()
-        harness.pipeline.register_source = lambda **kwargs: None
-        harness.pipeline.translate_parse_result = lambda **kwargs: _dummy_parse_result()
-        harness.pipeline.ingest_parse_result = lambda **kwargs: None
-        harness.pipeline.create_maintenance_request = lambda **kwargs: "maintenance-job"
-        harness.pipeline.create_candidate_link = lambda **kwargs: "candidate-link"
-        harness.pipeline.create_promotion_candidate = lambda **kwargs: "promotion-candidate"
-        harness.pipeline.promote_to_knowledge = lambda **kwargs: "promoted-knowledge"
-        harness._verify_document = lambda record: None
-
     def _complete_record(harness: LongRunHarness, record: DocumentRecord) -> None:
         record.started_at_ms = record.started_at_ms or _now_ms()
         harness._transition(record, "CLAIMED", phase="claim_document")
@@ -1694,9 +2053,17 @@ def test_longrun_checkpoint_state_is_loaded_across_reruns(tmp_path: Path, monkey
         record.ended_at_ms = _now_ms()
 
     first = LongRunHarness(run_dir=run_dir, config=config)
-    _install_dummy_pipeline(first)
     first.prepare()
     _complete_record(first, first.records[0])
+    first._record_failure(
+        first._failure_record(
+            doc_id=first.records[0].doc_id,
+            phase="token_check",
+            code="token_count_out_of_range",
+            scope="document",
+            message="synthetic checkpoint failure for history rehydration",
+        )
+    )
     first.dumper.dump(reason="probe_checkpoint")
 
     manifest_path = run_dir / "dump" / "manifest.jsonl"
@@ -1706,17 +2073,326 @@ def test_longrun_checkpoint_state_is_loaded_across_reruns(tmp_path: Path, monkey
     assert any('"doc-002"' in line and '"status": "PENDING"' in line for line in first_manifest)
 
     second = LongRunHarness(run_dir=run_dir, config=config)
-    _install_dummy_pipeline(second)
     second.prepare()
     assert second.checkpoint_loaded is True
-    assert second.progress_summary()["checkpoint_loaded"] is True
+    assert second.progress_summary()["manifest_checkpoint_loaded"] is True
     assert second.progress_summary()["completed_count"] >= 1
     assert second.progress_summary()["current_document_id"] == "doc-002"
+    assert second.status_transitions
+    assert second.status_transitions[0]["doc_id"] == "doc-001"
+    assert second.failure_records
+    assert second.failure_records[0].doc_id == "doc-001"
+    assert second.failure_records[0].code == "token_count_out_of_range"
     _complete_record(second, second.records[1])
     second.dumper.dump(reason="probe_resume")
     final_manifest = (run_dir / "dump" / "manifest.jsonl").read_text(encoding="utf-8").splitlines()
     assert any('"doc-001"' in line and '"status": "COMPLETED"' in line for line in final_manifest)
     assert any('"doc-002"' in line and '"status": "COMPLETED"' in line for line in final_manifest)
+    final_status_transitions = (run_dir / "dump" / "status_transitions.jsonl").read_text(encoding="utf-8").splitlines()
+    final_failure_records = (run_dir / "dump" / "failure_records.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any('"doc_id":"doc-001"' in line or '"doc_id": "doc-001"' in line for line in final_status_transitions)
+    assert any(
+        '"code":"token_count_out_of_range"' in line or '"code": "token_count_out_of_range"' in line
+        for line in final_failure_records
+    )
+
+
+def test_longrun_maintenance_summary_counts_only_maintenance_steps(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "maintenance-summary", config=config)
+    harness.prepare()
+
+    step_nodes = [
+        SimpleNamespace(
+            id="ingest-step",
+            metadata={"entity_type": "workflow_step_exec", "workflow_id": WORKFLOW_ID},
+        ),
+        SimpleNamespace(
+            id="maintenance-step-1",
+            metadata={"entity_type": "workflow_step_exec", "workflow_id": DERIVED_KNOWLEDGE_WORKFLOW_ID},
+        ),
+        SimpleNamespace(
+            id="maintenance-step-2",
+            metadata={"entity_type": "workflow_step_exec", "workflow_id": "maintenance.execution_wisdom.v1"},
+        ),
+    ]
+    jobs = [SimpleNamespace(job_id="job-1", entity_id="doc-001", status="DONE")]
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(harness.engines.conversation.meta_sqlite, "list_index_jobs", lambda **kwargs: jobs)
+    monkeypatch.setattr(
+        harness.engines.conversation,
+        "list_projected_lane_messages",
+        lambda inbox_id: [SimpleNamespace(message_id="reply-1")] if inbox_id == "inbox:foreground" else [],
+    )
+    monkeypatch.setattr(
+        harness.engines.conversation.read,
+        "get_nodes",
+        lambda **kwargs: step_nodes,
+    )
+    monkeypatch.setattr(
+        harness.engines.derived_knowledge_engine().read,
+        "get_nodes",
+        lambda **kwargs: [SimpleNamespace(id="derived-1")],
+    )
+    try:
+        summary = harness.maintenance_summary()
+    finally:
+        monkeypatch.undo()
+
+    assert summary["workflow_step_count"] == 2
+    assert summary["maintenance_workflow_step_count"] == 2
+    assert summary["maintenance_job_ids"] == ["job-1"]
+    assert summary["maintenance_source_document_ids"] == ["doc-001"]
+    assert summary["job_status_counts"]["DONE"] == 1
+    assert summary["derived_artifact_count"] == 1
+
+
+def _stub_longrun_invariant_dependencies(
+    harness: LongRunHarness,
+    *,
+    maintenance_summary: dict[str, Any],
+) -> pytest.MonkeyPatch:
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(harness, "_verify_document", lambda record: None)
+    monkeypatch.setattr(harness, "_verify_runtime_events_have_run_ids", lambda: None)
+    monkeypatch.setattr(harness, "_verify_derived_nodes_have_provenance", lambda: None)
+    monkeypatch.setattr(
+        harness,
+        "promotion_provenance_summary",
+        lambda: {"missing_count": 0, "missing_document_ids": []},
+    )
+    monkeypatch.setattr(harness, "maintenance_summary", lambda: maintenance_summary)
+    monkeypatch.setattr(harness, "projection_summary", lambda: {"snapshot_status": "ok", "snapshot_error": None})
+    monkeypatch.setattr(harness, "progress_summary", lambda: {"doc_count": len(harness.records)})
+    return monkeypatch
+
+
+def test_longrun_run_invariant_fails_without_maintenance_evidence(tmp_path: Path):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "maintenance-invariant-fail",
+        config=LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            doc_count=1,
+            ollama_model="gemma4:e2b",
+            ollama_base_url="http://localhost:11434",
+            max_repeated_systemic_errors=3,
+            max_post_doc_maintenance_steps=1,
+        ),
+    )
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Maintenance invariant",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+        status="COMPLETED",
+        source_document_id="source-doc-1",
+    )
+    harness.records = [record]
+    harness.contexts = {record.doc_id: record}
+    monkeypatch = _stub_longrun_invariant_dependencies(
+        harness,
+        maintenance_summary={
+            "derived_artifact_count": 0,
+            "maintenance_workflow_step_count": 0,
+            "job_status_counts": {},
+            "foreground_replies": [],
+            "maintenance_job_ids": [],
+            "maintenance_source_document_ids": [],
+            "jobs": [],
+            "maintenance_lane_messages": [],
+        },
+    )
+    try:
+        with pytest.raises(AssertionError, match="background maintenance did not produce persisted evidence"):
+            harness._verify_run_invariants()
+    finally:
+        monkeypatch.undo()
+
+
+def test_longrun_run_invariant_passes_with_maintenance_evidence(tmp_path: Path):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "maintenance-invariant-pass",
+        config=LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            doc_count=1,
+            ollama_model="gemma4:e2b",
+            ollama_base_url="http://localhost:11434",
+            max_repeated_systemic_errors=3,
+            max_post_doc_maintenance_steps=1,
+        ),
+    )
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Maintenance invariant",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+        status="COMPLETED",
+        source_document_id="source-doc-1",
+    )
+    harness.records = [record]
+    harness.contexts = {record.doc_id: record}
+    monkeypatch = _stub_longrun_invariant_dependencies(
+        harness,
+        maintenance_summary={
+            "derived_artifact_count": 0,
+            "maintenance_workflow_step_count": 0,
+            "job_status_counts": {"DONE": 1},
+            "foreground_replies": [],
+            "maintenance_job_ids": ["job-1"],
+            "maintenance_source_document_ids": ["source-doc-1"],
+            "jobs": [{"job_id": "job-1"}],
+            "maintenance_lane_messages": [],
+        },
+    )
+    try:
+        harness._verify_run_invariants()
+    finally:
+        monkeypatch.undo()
+
+
+def test_longrun_config_from_env_accepts_backend_selection(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "KOGWISTAR_LONGRUN_DSN",
+        "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo",
+    )
+    config = LongRunConfig.from_env()
+    assert config.backend == "postgres"
+    assert config.dsn == "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
+
+
+def test_longrun_config_from_env_rejects_missing_postgres_dsn(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "postgres")
+    for env_name in (
+        "KOGWISTAR_LONGRUN_DSN",
+        "KOGWISTAR_LLM_WIKI_TEST_PG_DSN",
+        "GKE_PG_DSN",
+        "PG_DSN",
+        "DATABASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    with pytest.raises(ValueError, match="requires a DSN"):
+        LongRunConfig.from_env()
+
+
+def test_longrun_config_from_env_rejects_unsupported_backend(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "memory")
+    with pytest.raises(ValueError, match="must be one of"):
+        LongRunConfig.from_env()
+
+
+@pytest.mark.parametrize(
+    ("backend", "expected_factory"),
+    [
+        ("chroma", "persistent"),
+        ("postgres", "postgres"),
+    ],
+)
+def test_longrun_backend_dispatch_uses_selected_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    expected_factory: str,
+):
+    build_calls: dict[str, Any] = {}
+
+    def _fake_persistent(base_dir, split_derived_knowledge=False):
+        build_calls["persistent"] = {
+            "base_dir": Path(base_dir),
+            "split_derived_knowledge": split_derived_knowledge,
+        }
+        return SimpleNamespace(kind="persistent")
+
+    def _fake_postgres(base_dir, dsn, split_derived_knowledge=False):
+        build_calls["postgres"] = {
+            "base_dir": Path(base_dir),
+            "dsn": dsn,
+            "split_derived_knowledge": split_derived_knowledge,
+        }
+        return SimpleNamespace(kind="postgres")
+
+    monkeypatch.setattr(sys.modules[__name__], "build_persistent_namespace_engines", _fake_persistent)
+    monkeypatch.setattr(sys.modules[__name__], "build_postgres_namespace_engines", _fake_postgres)
+
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        backend=backend,
+        dsn="postgresql+psycopg://demo:demo@127.0.0.1:5432/demo" if backend == "postgres" else None,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / f"backend-{backend}", config=config)
+
+    engines = harness._build_namespace_engines()
+
+    assert engines.kind == expected_factory
+    assert build_calls[expected_factory]["base_dir"] == harness.run_dir / "engines"
+    if backend == "postgres":
+        assert build_calls["postgres"]["dsn"] == "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
+        assert "persistent" not in build_calls
+    else:
+        assert build_calls["persistent"]["split_derived_knowledge"] is False
+        assert "postgres" not in build_calls
+
+
+def test_longrun_fresh_prepare_resets_run_directory_before_engine_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import sys
+
+    run_dir = tmp_path / "fresh-reset-order"
+    stale_marker = run_dir / "engines" / "stale.marker"
+    stale_marker.parent.mkdir(parents=True, exist_ok=True)
+    stale_marker.write_text("stale", encoding="utf-8")
+
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+
+    original_build = build_persistent_namespace_engines
+    build_calls: list[Path] = []
+
+    def _build(path: Path):
+        build_calls.append(path)
+        assert not stale_marker.exists()
+        return original_build(path)
+
+    monkeypatch.setattr(sys.modules[__name__], "build_persistent_namespace_engines", _build)
+
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness.prepare()
+
+    assert build_calls
+    assert not stale_marker.exists()
 
 
 def test_longrun_auto_checkpoint_mismatch_falls_back_to_fresh(tmp_path: Path):
@@ -1792,6 +2468,7 @@ def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypa
     )
     monkeypatch.setattr(harness.pipeline, "ingest_parse_result", lambda **kwargs: None)
     monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
+    monkeypatch.setattr(harness, "_verify_document", lambda record: None)
 
     harness._run_document_workflow(record)
 
@@ -1820,9 +2497,137 @@ def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypa
         packs = harness.engines.conversation.read.get_nodes(ids=[record.promotion_evidence_pack_id], limit=1)
     assert len(packs) == 1
     pack = packs[0]
-    digest = pack.metadata.get("promotion_evidence_pack_digest") or {}
+    digest = _decode_metadata_json(pack.metadata.get("promotion_evidence_pack_digest"))
     assert digest.get("node_ids") == ["parsed-node-1", "parsed-node-2"]
     assert digest.get("edge_ids") == ["parsed-edge-1"]
+
+
+def test_longrun_resume_probe_suspends_and_resumes_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    run_dir = tmp_path / "resume-probe"
+    fresh_config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        resume_probe_enabled=True,
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    first = LongRunHarness(run_dir=run_dir, config=fresh_config)
+    first.prepare()
+
+    first_record = first.records[0]
+    parsed_nodes = [SimpleNamespace(id="parsed-node-1"), SimpleNamespace(id="parsed-node-2")]
+    parsed_edges = [SimpleNamespace(id="parsed-edge-1")]
+    monkeypatch.setattr(
+        first.pipeline,
+        "parse_source",
+        lambda **kwargs: SimpleNamespace(semantic_tree=SimpleNamespace(title=first_record.title)),
+    )
+    monkeypatch.setattr(first.pipeline, "register_source", lambda **kwargs: None)
+    monkeypatch.setattr(
+        first.pipeline,
+        "translate_parse_result",
+        lambda **kwargs: SimpleNamespace(nodes=parsed_nodes, edges=parsed_edges),
+    )
+    monkeypatch.setattr(first.pipeline, "ingest_parse_result", lambda **kwargs: None)
+
+    first.run()
+
+    assert first_record.status == "SUSPENDED"
+    assert first_record.resume_suspended_node_id
+    assert first_record.resume_suspended_token_id
+    assert first_record.resume_checkpoint_step_seq is not None
+    assert first.progress_summary()["suspended_count"] == 1
+    assert first.progress_summary()["suspended_document_ids"] == [first_record.doc_id]
+
+    continue_config = LongRunConfig(
+        enabled=False,
+        mode="continue",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        resume_probe_enabled=True,
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    second = LongRunHarness(run_dir=run_dir, config=continue_config)
+    second.prepare()
+    resumed_record = second.records[0]
+    monkeypatch.setattr(
+        second.pipeline,
+        "parse_source",
+        lambda **kwargs: SimpleNamespace(semantic_tree=SimpleNamespace(title=resumed_record.title)),
+    )
+    monkeypatch.setattr(second.pipeline, "register_source", lambda **kwargs: None)
+    monkeypatch.setattr(
+        second.pipeline,
+        "translate_parse_result",
+        lambda **kwargs: SimpleNamespace(nodes=parsed_nodes, edges=parsed_edges),
+    )
+    monkeypatch.setattr(second.pipeline, "ingest_parse_result", lambda **kwargs: None)
+    monkeypatch.setattr(second, "_poll_maintenance_once", lambda **kwargs: None)
+    monkeypatch.setattr(second, "_verify_document", lambda record: None)
+
+    second._run_document_workflow(resumed_record)
+    second.dumper.dump(reason="probe_resume")
+
+    assert second.checkpoint_loaded is True
+    assert resumed_record.resumed_from_checkpoint is True
+    assert resumed_record.resume_suspended_node_id == first_record.resume_suspended_node_id
+    assert resumed_record.resume_suspended_token_id == first_record.resume_suspended_token_id
+    assert resumed_record.resume_checkpoint_step_seq == first_record.resume_checkpoint_step_seq
+    assert resumed_record.status == "COMPLETED"
+    assert second.progress_summary()["resumed_document_ids"] == [resumed_record.doc_id]
+
+
+def test_longrun_suspended_checkpoint_without_resume_tokens_fails(tmp_path: Path):
+    run_dir = tmp_path / "resume-metadata-missing"
+    dump_dir = run_dir / "dump"
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    manifest_row = {
+        "run_id": "resume-metadata-missing:doc-001",
+        "doc_id": "doc-001",
+        "title": "Resume metadata missing",
+        "source_uri": "file:///doc-001.md",
+        "current_path": str(run_dir / "processing" / "doc-001.md"),
+        "status": "SUSPENDED",
+        "started_at_ms": _now_ms(),
+        "ended_at_ms": None,
+        "elapsed_ms": None,
+        "token_count": 512,
+        "tokenizer_method": TOKENIZER_METHOD,
+        "source_document_id": "source-doc-001",
+        "maintenance_job_id": None,
+        "candidate_link_id": None,
+        "promotion_evidence_pack_id": None,
+        "promotion_candidate_id": None,
+        "promoted_entity_id": None,
+        "resume_checkpoint_step_seq": None,
+        "resume_suspended_node_id": None,
+        "resume_suspended_token_id": None,
+        "resumed_from_checkpoint": False,
+        "last_step_name": "await_resume",
+        "last_step_at_ms": _now_ms(),
+        "llm_quality_failures": [],
+    }
+    (dump_dir / "manifest.jsonl").write_text(json.dumps(manifest_row) + "\n", encoding="utf-8")
+
+    config = LongRunConfig(
+        enabled=False,
+        mode="continue",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness.prepare()
+
+    with pytest.raises(LongRunSystemicError, match="missing resume metadata"):
+        harness._run_document_workflow(harness.records[0])
 
 
 def test_longrun_promoted_node_without_promotion_pack_fails_invariant(tmp_path: Path):

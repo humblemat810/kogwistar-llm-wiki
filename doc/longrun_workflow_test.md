@@ -21,24 +21,50 @@ $env:KOGWISTAR_LLM_WIKI_LONGRUN='1'
 .\.venv\Scripts\python.exe -m pytest -m "longrun" tests/integration/test_longrun_workflow_ingestion.py -q -p no:cacheprovider
 ```
 
+Backend selection is explicit too:
+
+- `KOGWISTAR_LONGRUN_BACKEND=chroma` uses the local persistent Chroma-backed namespace engines.
+- `KOGWISTAR_LONGRUN_BACKEND=postgres` uses the repo's disposable Postgres test-container path and requires `KOGWISTAR_LONGRUN_DSN` or `KOGWISTAR_LLM_WIKI_TEST_PG_DSN`.
+- `in_memory` is not supported for the long-run soak because crash-continuation needs durable state.
+
 If you prefer a VSCode button, use the launch configurations in
 `.vscode/launch.json`:
 
-- `Longrun: Fresh Start (20 docs)`
-- `Longrun: Continue (20 docs)`
-- `Longrun: Fresh Start (3 docs)`
-- `Longrun: Continue (3 docs)`
-- `Longrun: Fresh Start (1 doc)`
-- `Longrun: Continue (1 doc)`
+- `Longrun: Chroma Fresh (20 docs)`
+- `Longrun: Chroma Continue (20 docs)`
+- `Longrun: Chroma Fresh (3 docs)`
+- `Longrun: Chroma Continue (3 docs)`
+- `Longrun: Chroma Fresh (1 doc)`
+- `Longrun: Chroma Continue (1 doc)`
+- `Longrun: Postgres Fresh (20 docs)`
+- `Longrun: Postgres Continue (20 docs)`
+- `Longrun: Postgres Fresh (3 docs)`
+- `Longrun: Postgres Continue (3 docs)`
+- `Longrun: Postgres Fresh (1 doc)`
+- `Longrun: Postgres Continue (1 doc)`
 
 The fresh configurations clear the run directory first via harness mode, and
-the continue configurations reuse the same stable run directory.
+the continue configurations reuse the same stable run directory. Use separate
+run directories per backend so chroma and postgres runs do not share checkpoint
+state.
+
+Operator guidance:
+
+- `1 doc` and `3 docs` are diagnostic probes for checking parse, persistence,
+  maintenance, and projection behavior quickly.
+- `20 docs` is the full acceptance soak and is the one that should be used
+  before treating the harness as healthy for the long-run contract.
+- The continue launch configs reload prior dump history and resume suspended
+  document workflows through `WorkflowRuntime.resume_run(...)` when the
+  manifest contains suspended token metadata.
 
 Defaults:
 
 - `KOGWISTAR_OLLAMA_MODEL=gemma4:e2b`
 - `KOGWISTAR_OLLAMA_BASE_URL=http://localhost:11434`
 - `KOGWISTAR_LONGRUN_DOC_COUNT=20`
+- `KOGWISTAR_LONGRUN_BACKEND=chroma|postgres`
+- `KOGWISTAR_LONGRUN_DSN` is only needed when `KOGWISTAR_LONGRUN_BACKEND=postgres`
 - `KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS=3`
 - `KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS=100`
 - `KOGWISTAR_LONGRUN_RUN_DIR` can point the harness at a stable run directory
@@ -81,7 +107,17 @@ The harness runs like a single bounded daemon:
 If `KOGWISTAR_LONGRUN_RUN_DIR` is set, the harness reuses that run directory
 and loads the latest manifest checkpoint from `dump/manifest.jsonl` before it
 starts. That lets a repeated invocation compare progress against the previous
-run instead of treating every rerun as a fresh corpus.
+run instead of treating every rerun as a fresh corpus. Continue and auto reruns
+also reload `status_transitions.jsonl` and `failure_records.jsonl` so the dump
+keeps earlier transition and failure history.
+
+When `KOGWISTAR_LONGRUN_RESUME_PROBE=1`, the document workflow deliberately
+suspends after parsed graph persistence and before background maintenance. The
+dump records the runtime checkpoint step, suspended node id, and suspended token
+id. A later continue run uses those values with `WorkflowRuntime.resume_run(...)`
+so the same document workflow continues past the suspension point instead of
+starting from a fresh initial state. If a document is marked `SUSPENDED` without
+that token metadata, continue mode fails loudly.
 
 If `KOGWISTAR_LONGRUN_MODE` is:
 
@@ -154,7 +190,8 @@ The dump includes:
 - `graph_export.json`
 - `promotion_evidence_pack` records for promoted documents
 - `projection_summary.json`
-- `maintenance_summary.json`
+- `maintenance_summary.json` with maintenance job ids, source document ids,
+  and maintenance-specific step counts
 - `llm_calls_summary.json`
 - `sampled_prompts_and_responses.jsonl`
 - `raw_documents/`

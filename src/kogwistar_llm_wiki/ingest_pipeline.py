@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import re
 from pathlib import Path
@@ -27,6 +28,18 @@ from .models import (
 from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import WorkspaceNamespaces
 from .projection import ProjectionManager
+
+
+def _metadata_digest_value(digest: dict[str, Any] | None) -> str | None:
+    if digest is None:
+        return None
+    return json.dumps(digest, sort_keys=True, separators=(",", ":"))
+
+
+def _metadata_list_value(items: list[str] | None) -> list[str] | None:
+    if not items:
+        return None
+    return list(items)
 
 
 class _TinyEmbeddingFunction:
@@ -722,14 +735,16 @@ class IngestPipeline:
             extra_metadata={
                 "candidate_link_id": candidate_link_id,
                 "promotion_evidence_pack_id": promotion_evidence_pack_id,
-                "promotion_evidence_pack_digest": promotion_evidence_pack_digest,
+                "promotion_evidence_pack_digest": _metadata_digest_value(promotion_evidence_pack_digest),
                 "promotion_mode": request.promotion_mode,
                 "queue_state": "pending",
                 "queue_previous_id": None,
                 "queue_next_id": None,
                 "lineage_source_ids": [source_document_id, candidate_link_id],
-                "lineage_node_ids": list(lineage_node_ids or [source_document_id, candidate_link_id]),
-                "lineage_edge_ids": list(lineage_edge_ids or []),
+                "lineage_node_ids": _metadata_list_value(
+                    list(lineage_node_ids or [source_document_id, candidate_link_id])
+                ),
+                "lineage_edge_ids": _metadata_list_value(list(lineage_edge_ids or [])),
                 "review_namespace": self.namespaces_for(request.workspace_id).review,
             },
         )
@@ -788,7 +803,7 @@ class IngestPipeline:
                 "node_ids": list(node_ids),
                 "edge_ids": list(edge_ids),
                 "evidence_pack_hash": digest.evidence_pack_hash,
-                "promotion_evidence_pack_digest": digest.model_dump(mode="python"),
+                "promotion_evidence_pack_digest": _metadata_digest_value(digest.model_dump(mode="python")),
             },
         )
         with _temporary_namespace(self.engines.conversation, namespace):
@@ -841,9 +856,13 @@ class IngestPipeline:
                 "projection_visible": True,
                 "promotion_candidate_id": promotion_candidate_id,
                 "promotion_evidence_pack_id": promotion_evidence_pack_id,
-                "promotion_evidence_pack_digest": promotion_evidence_pack_digest,
+                "promotion_evidence_pack_digest": _metadata_digest_value(promotion_evidence_pack_digest),
                 "promotion_decision_reason": promotion_decision.reason if promotion_decision else None,
-                "promotion_decision_metadata": dict(promotion_decision.metadata or {}) if promotion_decision else {},
+                "promotion_decision_metadata": json.dumps(
+                    dict(promotion_decision.metadata or {}) if promotion_decision else {},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
             },
         )
         with _temporary_namespace(self.engines.kg, namespace):

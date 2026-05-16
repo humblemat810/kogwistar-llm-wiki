@@ -1,6 +1,18 @@
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 
 
+import json
+
+
+def _decode_metadata_json(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def test_promote_creates_kg_visible_node_not_workflow_artifact(pipeline, ingest_request):
     ingest_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
     ns = WorkspaceNamespaces(ingest_request.workspace_id)
@@ -37,7 +49,8 @@ def test_promote_creates_kg_visible_node_not_workflow_artifact(pipeline, ingest_
     assert promoted.metadata.get("promotion_evidence_pack_id") == str(evidence_pack.id)
     assert promoted.metadata.get("promotion_evidence_pack_digest")
     assert promoted.metadata.get("promotion_decision_reason") == "explicit promotion approval accepted by default policy"
-    assert promoted.metadata.get("promotion_decision_metadata", {}).get("promotion_approved") is True
+    decision_metadata = _decode_metadata_json(promoted.metadata.get("promotion_decision_metadata"))
+    assert decision_metadata.get("promotion_approved") is True
 
     workflow_nodes = pipeline.engines.workflow.read.get_nodes(
         where={"artifact_kind": "promoted_knowledge"}

@@ -17,6 +17,15 @@ from kogwistar.runtime.models import WorkflowStepExecNode
 import json
 
 
+def _decode_metadata_json(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _sync_request(request, **updates):
     return request.model_copy(update={"promotion_mode": "sync", **updates})
 
@@ -231,7 +240,8 @@ def test_knowledge_derivation_preserves_promotion_provenance_walk(pipeline, inge
     assert promoted.metadata.get("promotion_decision_reason") == (
         "explicit promotion approval accepted by default policy"
     )
-    assert promoted.metadata.get("promotion_decision_metadata", {}).get("promotion_approved") is True
+    decision_metadata = _decode_metadata_json(promoted.metadata.get("promotion_decision_metadata"))
+    assert decision_metadata.get("promotion_approved") is True
 
     with _temporary_namespace(engines.conversation, ns.conv_bg):
         evidence_packs = engines.conversation.read.get_nodes(ids=[traced.promotion_evidence_pack_id])
@@ -247,15 +257,16 @@ def test_knowledge_derivation_preserves_promotion_provenance_walk(pipeline, inge
 
     parsed_node_ids = sorted(str(node.id) for node in traced.graph_extraction.nodes)
     parsed_edge_ids = sorted(str(edge.id) for edge in traced.graph_extraction.edges)
+    digest = _decode_metadata_json(evidence_pack.metadata.get("promotion_evidence_pack_digest"))
     assert sorted(evidence_pack.metadata.get("node_ids", [])) == parsed_node_ids
     assert sorted(evidence_pack.metadata.get("edge_ids", [])) == parsed_edge_ids
-    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("node_ids") == parsed_node_ids
-    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("edge_ids") == parsed_edge_ids
-    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("evidence_pack_hash") == (
+    assert digest.get("node_ids") == parsed_node_ids
+    assert digest.get("edge_ids") == parsed_edge_ids
+    assert digest.get("evidence_pack_hash") == (
         evidence_pack.metadata.get("evidence_pack_hash")
     )
 
-    assert evidence_pack.metadata.get("promotion_evidence_pack_digest", {}).get("evidence_pack_hash")
+    assert digest.get("evidence_pack_hash")
     assert promoted.metadata.get("promotion_evidence_pack_id") == str(evidence_pack.id)
     assert promoted.metadata.get("promotion_candidate_id") == traced.promotion_candidate_id
 

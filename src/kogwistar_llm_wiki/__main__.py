@@ -23,7 +23,7 @@ any process-shared local backend.
 The persistent commands expect ``--data-dir`` or ``KOGWISTAR_DATA_DIR`` to
 point at a directory containing the local backend state. ``--data-dir`` wins
 when both are provided. Use ``--backend postgres`` and ``--dsn`` to switch to a
-PostgreSQL/pgvector-backed store.
+PostgreSQL-backed store.
 """
 from __future__ import annotations
 
