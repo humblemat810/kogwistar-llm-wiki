@@ -9,6 +9,9 @@ dump that can be shared with ChatGPT for post-run analysis.
 See the workflow diagrams in [diagrams.md](./diagrams.md#long-run-workflow-test)
 for the step flow and document-state view.
 
+Known implementation review items are tracked in
+[longrun_workflow_review_findings_checklist.md](./longrun_workflow_review_findings_checklist.md).
+
 ## Enable It
 
 The test is skipped by default. Run it explicitly:
@@ -18,6 +21,19 @@ $env:KOGWISTAR_LLM_WIKI_LONGRUN='1'
 .\.venv\Scripts\python.exe -m pytest -m "longrun" tests/integration/test_longrun_workflow_ingestion.py -q -p no:cacheprovider
 ```
 
+If you prefer a VSCode button, use the launch configurations in
+`.vscode/launch.json`:
+
+- `Longrun: Fresh Start (20 docs)`
+- `Longrun: Continue (20 docs)`
+- `Longrun: Fresh Start (3 docs)`
+- `Longrun: Continue (3 docs)`
+- `Longrun: Fresh Start (1 doc)`
+- `Longrun: Continue (1 doc)`
+
+The fresh configurations clear the run directory first via harness mode, and
+the continue configurations reuse the same stable run directory.
+
 Defaults:
 
 - `KOGWISTAR_OLLAMA_MODEL=gemma4:e2b`
@@ -25,6 +41,13 @@ Defaults:
 - `KOGWISTAR_LONGRUN_DOC_COUNT=20`
 - `KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS=3`
 - `KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS=100`
+- `KOGWISTAR_LONGRUN_RUN_DIR` can point the harness at a stable run directory
+  for crash-continuation probes and repeated manual reruns.
+- `KOGWISTAR_LONGRUN_MODE=fresh|continue|auto` selects whether the harness
+  wipes the run directory first, reuses an existing checkpoint, or tries to
+  reuse a matching checkpoint and otherwise falls back to fresh.
+- `KOGWISTAR_LONGRUN_DOC_COUNT=1|3|20` is supported for the VSCode launch
+  buttons. Smaller corpora require `KOGWISTAR_LONGRUN_ALLOW_SMALL=1`.
 
 If the long-run flag is set and Ollama is unavailable, the test fails with a
 minimal dump instead of silently skipping.
@@ -54,6 +77,19 @@ The harness runs like a single bounded daemon:
 5. Drain maintenance for up to 100 post-document steps or until the queue is quiet.
 6. Run projection/read checks and graph invariants.
 7. Finalize the dump and optional zip.
+
+If `KOGWISTAR_LONGRUN_RUN_DIR` is set, the harness reuses that run directory
+and loads the latest manifest checkpoint from `dump/manifest.jsonl` before it
+starts. That lets a repeated invocation compare progress against the previous
+run instead of treating every rerun as a fresh corpus.
+
+If `KOGWISTAR_LONGRUN_MODE` is:
+
+- `fresh`, the harness clears the run directory before starting.
+- `continue`, the harness requires a compatible checkpoint manifest and fails
+  if one is not available.
+- `auto`, the harness continues when the checkpoint matches the requested
+  document count and otherwise starts fresh.
 
 The workflow stages are:
 
@@ -113,6 +149,8 @@ The dump includes:
 - `failure_records.jsonl`
 - `error_fingerprints.json`
 - `folder_inventory.json`
+- `progress_summary.json`
+- `recovery_summary.json`
 - `graph_export.json`
 - `promotion_evidence_pack` records for promoted documents
 - `projection_summary.json`

@@ -11,6 +11,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +27,7 @@ from kogwistar.runtime import MappingStepResolver
 from kogwistar.runtime.models import RunSuccess, WorkflowEdge, WorkflowNode
 from kogwistar.runtime.runtime import WorkflowRuntime
 from kogwistar.engine_core.models import Grounding, Span
+from kogwistar.engine_core import RecoverySurface
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.ingest_pipeline import (
@@ -109,7 +111,7 @@ class LongRunSystemicError(RuntimeError):
 @dataclass(frozen=True)
 class LongRunConfig:
     enabled: bool
-    resume_enabled: bool
+    mode: str
     doc_count: int
     ollama_model: str
     ollama_base_url: str
@@ -120,6 +122,7 @@ class LongRunConfig:
     token_min: int = 500
     token_max: int = 2000
     workspace_id: str = "longrun"
+    checkpoint_run_dir: str | None = None
 
     @classmethod
     def from_env(cls) -> "LongRunConfig":
@@ -131,7 +134,7 @@ class LongRunConfig:
             )
         return cls(
             enabled=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
-            resume_enabled=os.getenv("KOGWISTAR_LONGRUN_RESUME") == "1",
+            mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
             ollama_model=os.getenv("KOGWISTAR_OLLAMA_MODEL", "gemma4:e2b"),
             ollama_base_url=os.getenv("KOGWISTAR_OLLAMA_BASE_URL", "http://localhost:11434"),
@@ -141,12 +144,13 @@ class LongRunConfig:
             max_post_doc_maintenance_steps=int(
                 os.getenv("KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS", "100")
             ),
+            checkpoint_run_dir=os.getenv("KOGWISTAR_LONGRUN_RUN_DIR"),
         )
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
-            "resume_enabled": self.resume_enabled,
+            "mode": self.mode,
             "doc_count": self.doc_count,
             "ollama_model": self.ollama_model,
             "ollama_base_url": self.ollama_base_url,
@@ -158,6 +162,7 @@ class LongRunConfig:
             "token_max": self.token_max,
             "tokenizer_method": TOKENIZER_METHOD,
             "workspace_id": self.workspace_id,
+            "checkpoint_run_dir": self.checkpoint_run_dir,
         }
 
 
@@ -169,13 +174,18 @@ class DocumentRecord:
     input_path: Path
     current_path: Path
     status: str = "PENDING"
+    started_at_ms: int | None = None
+    ended_at_ms: int | None = None
     token_count: int | None = None
     run_id: str | None = None
     source_document_id: str | None = None
     maintenance_job_id: str | None = None
     candidate_link_id: str | None = None
+    promotion_evidence_pack_id: str | None = None
     promotion_candidate_id: str | None = None
     promoted_entity_id: str | None = None
+    last_step_name: str | None = None
+    last_step_at_ms: int | None = None
     parse_result: Any | None = field(default=None, repr=False)
     graph_extraction: Any | None = field(default=None, repr=False)
     llm_quality_failures: list[str] = field(default_factory=list)
@@ -237,6 +247,9 @@ class DiagnosticDumper:
         self._write_jsonl("failure_records.jsonl", [record.__dict__ for record in self.harness.failure_records])
         self._write_json("error_fingerprints.json", self.harness.circuit_breaker.as_dict())
         self._write_json("folder_inventory.json", self.harness.folder_inventory())
+        self._write_json("progress_summary.json", self.harness.progress_summary())
+        self._write_json("recovery_summary.json", self.harness.recovery_summary())
+        self._write_json("promotion_provenance_summary.json", self.harness.promotion_provenance_summary())
         self._write_json("graph_export.json", self.harness.graph_export())
         self._write_json("projection_summary.json", self.harness.projection_summary())
         self._write_json("maintenance_summary.json", self.harness.maintenance_summary())
@@ -276,6 +289,8 @@ class DiagnosticDumper:
 
     def _write_report(self, *, reason: str) -> None:
         counts = Counter(record.status for record in self.harness.records)
+        progress = self.harness.progress_summary()
+        recovery = self.harness.recovery_summary()
         lines = [
             "# Long-Run Workflow Diagnostic Report",
             "",
@@ -284,6 +299,10 @@ class DiagnosticDumper:
             f"- Workspace: `{self.harness.config.workspace_id}`",
             f"- Dump directory: `{self.dump_dir}`",
             f"- Dump zip: `{self.run_dir / 'longrun-dump.zip'}`",
+            f"- Current document: `{progress['current_document_id']}`",
+            f"- Current step: `{progress['current_step']}`",
+            f"- Last completed step: `{progress['last_completed_step']}`",
+            f"- Last progress at ms: `{progress['last_progress_at_ms']}`",
             "",
             "## Document Counts",
             "",
@@ -317,6 +336,18 @@ class DiagnosticDumper:
                 "## Projection Summary",
                 "",
                 f"```json\n{json.dumps(_jsonable(self.harness.projection_summary()), indent=2, sort_keys=True)}\n```",
+                "",
+                "## Progress Summary",
+                "",
+                f"```json\n{json.dumps(_jsonable(progress), indent=2, sort_keys=True)}\n```",
+                "",
+                "## Recovery Summary",
+                "",
+                f"```json\n{json.dumps(_jsonable(recovery), indent=2, sort_keys=True)}\n```",
+                "",
+                "## Promotion Provenance Summary",
+                "",
+                f"```json\n{json.dumps(_jsonable(self.harness.promotion_provenance_summary()), indent=2, sort_keys=True)}\n```",
             ]
         )
         (self.dump_dir / "final_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -338,27 +369,50 @@ class LongRunHarness:
         self.projection_poll_count = 0
         self.aborted = False
         self.abort_reason: str | None = None
-        if self.config.resume_enabled:
-            self.engines = build_persistent_namespace_engines(run_dir / "engines")
-        else:
-            self.engines = build_in_memory_namespace_engines(run_dir / "engines")
+        self._rebuild_runtime_objects()
+        self.active_document_id: str | None = None
+        self.active_step_name: str | None = None
+        self.last_completed_step_name: str | None = None
+        self.last_progress_at_ms: int | None = None
+        self.checkpoint_loaded = False
+        self.checkpoint_manifest_path: Path | None = None
+
+    def _rebuild_runtime_objects(self) -> None:
+        self.engines = build_persistent_namespace_engines(self.run_dir / "engines")
         self.pipeline = IngestPipeline(self.engines)
         self.pipeline.parser = self._build_parser()
         self.maintenance_worker = MaintenanceWorker(self.engines)
         self.projection_worker = ProjectionWorker(self.engines)
-        self.dumper = DiagnosticDumper(run_dir, self)
+        self.dumper = DiagnosticDumper(self.run_dir, self)
 
     def prepare(self) -> None:
-        for name in ("input", "processing", "completed", "failed", "quarantine", "dump"):
-            (self.run_dir / name).mkdir(parents=True, exist_ok=True)
+        self._prepare_run_directory()
         materialize_maintenance_designs(self.engines.workflow)
         self._materialize_workflow_design()
-        if self.config.resume_enabled and (self.dumper.dump_dir / "manifest.jsonl").exists():
-            self._load_checkpoint_state()
-        if not self.records:
+        loaded = False
+        if self.config.mode == "continue":
+            loaded = self._load_checkpoint_state(strict=True)
+            if not loaded:
+                raise AssertionError(
+                    "continue mode requires a checkpoint manifest matching the configured "
+                    f"doc_count={self.config.doc_count} in {self.dumper.dump_dir}"
+                )
+        elif self.config.mode == "auto":
+            loaded = self._load_checkpoint_state(strict=False)
+        elif self.config.mode != "fresh":
+            raise ValueError(
+                f"unsupported KOGWISTAR_LONGRUN_MODE={self.config.mode!r}; expected fresh, continue, or auto"
+            )
+        if not loaded:
+            self._reset_run_directory()
+            self._rebuild_runtime_objects()
+            self._prepare_run_directory()
+            materialize_maintenance_designs(self.engines.workflow)
+            self._materialize_workflow_design()
             self._generate_corpus()
         else:
-            self._ensure_existing_inputs()
+            self._restore_missing_documents_from_dump()
+            self._restore_progress_from_records()
         self.dumper.dump(reason="prepared")
 
     def run(self) -> None:
@@ -391,6 +445,7 @@ class LongRunHarness:
             if time.monotonic() - started > self.config.max_runtime_seconds:
                 self._abort("runtime_worker_stuck: max runtime exceeded")
                 break
+            self._mark_document_progress(record, step_name="document_complete")
             self.dumper.dump(reason=f"checkpoint_{record.doc_id}")
 
         if self.aborted:
@@ -405,6 +460,10 @@ class LongRunHarness:
         self.dumper.dump(reason="success", final=True)
 
     def manifest_row(self, record: DocumentRecord) -> dict[str, Any]:
+        elapsed_ms = None
+        if record.started_at_ms is not None:
+            end_ms = record.ended_at_ms or _now_ms()
+            elapsed_ms = max(0, int(end_ms - record.started_at_ms))
         return {
             "run_id": self.run_id,
             "doc_id": record.doc_id,
@@ -412,11 +471,17 @@ class LongRunHarness:
             "source_uri": record.source_uri,
             "current_path": str(record.current_path),
             "status": record.status,
+            "started_at_ms": record.started_at_ms,
+            "ended_at_ms": record.ended_at_ms,
+            "elapsed_ms": elapsed_ms,
             "token_count": record.token_count,
             "tokenizer_method": TOKENIZER_METHOD,
             "source_document_id": record.source_document_id,
             "maintenance_job_id": record.maintenance_job_id,
+            "promotion_evidence_pack_id": record.promotion_evidence_pack_id,
             "promoted_entity_id": record.promoted_entity_id,
+            "last_step_name": record.last_step_name,
+            "last_step_at_ms": record.last_step_at_ms,
             "llm_quality_failures": list(record.llm_quality_failures),
         }
 
@@ -457,6 +522,54 @@ class LongRunHarness:
             ),
         }
 
+    def recovery_summary(self) -> dict[str, Any]:
+        ns = WorkspaceNamespaces(self.config.workspace_id)
+        report = self.engines.conversation.recovery.inspect(
+            workspace_id=self.config.workspace_id,
+            namespaces=[
+                ns.conv_fg,
+                ns.conv_bg,
+                ns.maintenance_jobs,
+                ns.projection_jobs,
+                ns.kg,
+            ],
+            app_surfaces=[
+                RecoverySurface(
+                    surface_id=f"{self.config.workspace_id}:longrun",
+                    surface_kind="longrun_harness",
+                    status="running" if not self.aborted else "aborted",
+                    details={
+                        "run_id": self.run_id,
+                        "doc_count": len(self.records),
+                        "current_document_id": self._active_document_id(),
+                        "current_step": self._active_step_name(),
+                        "last_completed_step": self._last_completed_step_name(),
+                        "last_progress_at_ms": self._last_progress_at_ms(),
+                    },
+                )
+            ],
+        )
+        return _jsonable(report)
+
+    def progress_summary(self) -> dict[str, Any]:
+        counts = Counter(record.status for record in self.records)
+        active = next((record for record in self.records if record.status not in TERMINAL_STATES), None)
+        return {
+            "run_id": self.run_id,
+            "workspace_id": self.config.workspace_id,
+            "doc_count": len(self.records),
+            "checkpoint_loaded": self.checkpoint_loaded,
+            "checkpoint_manifest_path": str(self.checkpoint_manifest_path) if self.checkpoint_manifest_path else None,
+            "completed_count": counts.get("COMPLETED", 0),
+            "failed_count": counts.get("FAILED", 0),
+            "quarantined_count": counts.get("QUARANTINED", 0),
+            "current_document_id": self.active_document_id or (active.doc_id if active else None),
+            "current_step": self.active_step_name,
+            "last_completed_step": self.last_completed_step_name,
+            "last_progress_at_ms": self.last_progress_at_ms,
+            "active_document_status": None if active is None else active.status,
+        }
+
     def maintenance_summary(self) -> dict[str, Any]:
         ns = WorkspaceNamespaces(self.config.workspace_id)
         jobs = self.engines.conversation.meta_sqlite.list_index_jobs(
@@ -471,12 +584,18 @@ class LongRunHarness:
                 inbox_id="inbox:foreground"
             )
             steps = self.engines.conversation.read.get_nodes(
-                where={"entity_type": "workflow_step_exec", "workspace_id": self.config.workspace_id},
+                where=_and_where(
+                    {"entity_type": "workflow_step_exec"},
+                    {"workspace_id": self.config.workspace_id},
+                ),
                 limit=10_000,
             )
         with _temporary_namespace(self.engines.derived_knowledge_engine(), ns.derived_knowledge):
             derived = self.engines.derived_knowledge_engine().read.get_nodes(
-                where={"artifact_kind": "derived_knowledge", "workspace_id": self.config.workspace_id},
+                where=_and_where(
+                    {"artifact_kind": "derived_knowledge"},
+                    {"workspace_id": self.config.workspace_id},
+                ),
                 limit=10_000,
             )
         return {
@@ -531,6 +650,9 @@ class LongRunHarness:
         }
 
     def _run_document_workflow(self, record: DocumentRecord) -> None:
+        self._mark_document_progress(record, step_name="workflow_start")
+        if record.started_at_ms is None:
+            record.started_at_ms = _now_ms()
         resolver = self._build_resolver()
         runtime = WorkflowRuntime(
             workflow_engine=self.engines.workflow,
@@ -561,18 +683,122 @@ class LongRunHarness:
                 f"workflow returned {result.status}",
                 phase="runtime",
             )
+        record.ended_at_ms = _now_ms()
+        self._mark_document_progress(record, step_name="workflow_done")
+
+    def _prepare_run_directory(self) -> None:
+        for name in ("input", "processing", "completed", "failed", "quarantine", "dump", "engines", "projection_vault"):
+            (self.run_dir / name).mkdir(parents=True, exist_ok=True)
+
+    def _reset_run_directory(self) -> None:
+        if not self.run_dir.exists():
+            return
+        for child in self.run_dir.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                try:
+                    child.unlink()
+                except FileNotFoundError:
+                    pass
+
+    def _load_checkpoint_state(self, *, strict: bool) -> bool:
+        manifest = self.dumper.dump_dir / "manifest.jsonl"
+        if not manifest.exists():
+            return False
+        records: list[DocumentRecord] = []
+        with manifest.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                current_path_value = str(row.get("current_path") or "").strip()
+                if not current_path_value:
+                    continue
+                current_path = Path(current_path_value)
+                record = DocumentRecord(
+                    doc_id=str(row["doc_id"]),
+                    title=str(row.get("title", "")),
+                    source_uri=str(row.get("source_uri", "")),
+                    input_path=Path(str(row.get("input_path") or current_path)),
+                    current_path=current_path,
+                    status=str(row.get("status", "PENDING")),
+                    started_at_ms=row.get("started_at_ms"),
+                    ended_at_ms=row.get("ended_at_ms"),
+                    token_count=row.get("token_count"),
+                    run_id=str(row.get("run_id") or self.run_id),
+                    source_document_id=row.get("source_document_id"),
+                    maintenance_job_id=row.get("maintenance_job_id"),
+                    candidate_link_id=row.get("candidate_link_id"),
+                    promotion_evidence_pack_id=row.get("promotion_evidence_pack_id"),
+                    promotion_candidate_id=row.get("promotion_candidate_id"),
+                    promoted_entity_id=row.get("promoted_entity_id"),
+                    last_step_name=row.get("last_step_name"),
+                    last_step_at_ms=row.get("last_step_at_ms"),
+                    llm_quality_failures=list(row.get("llm_quality_failures") or []),
+                )
+                records.append(record)
+        if not records:
+            return False
+        if len(records) != self.config.doc_count:
+            if strict:
+                raise AssertionError(
+                    "checkpoint manifest doc count does not match the configured long-run doc count "
+                    f"(checkpoint={len(records)}, configured={self.config.doc_count}, "
+                    f"mode={self.config.mode!r}, manifest={manifest})"
+                )
+            return False
+        self.records = records
+        self.contexts = {record.doc_id: record for record in records}
+        self.checkpoint_loaded = True
+        self.checkpoint_manifest_path = manifest
+        return True
+
+    def _restore_missing_documents_from_dump(self) -> None:
+        raw_dir = self.dumper.dump_dir / "raw_documents"
+        if not raw_dir.exists():
+            return
+        for record in self.records:
+            if record.current_path.exists():
+                continue
+            backup = raw_dir / record.current_path.name
+            if backup.exists():
+                record.current_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup, record.current_path)
+
+    def _restore_progress_from_records(self) -> None:
+        if not self.records:
+            return
+        active = next((record for record in self.records if record.status not in TERMINAL_STATES), None)
+        if active is not None:
+            self.active_document_id = active.doc_id
+            self.active_step_name = active.last_step_name
+            self.last_progress_at_ms = active.last_step_at_ms or active.started_at_ms
+        else:
+            latest = max(
+                (record for record in self.records if record.last_step_at_ms is not None),
+                key=lambda record: record.last_step_at_ms or 0,
+                default=None,
+            )
+            if latest is not None:
+                self.last_completed_step_name = latest.last_step_name
+                self.last_progress_at_ms = latest.last_step_at_ms
+                self.active_document_id = latest.doc_id
+                self.active_step_name = latest.last_step_name
 
     def _build_resolver(self) -> MappingStepResolver:
         resolver = MappingStepResolver()
 
         @resolver.register("noop")
         def _noop(ctx):
-            del ctx
+            record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="noop")
             return RunSuccess(state_update=[("u", {"noop": True})])
 
         @resolver.register("claim_document")
         def _claim(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="claim_document")
             target = self.run_dir / "processing" / record.input_path.name
             if record.current_path != target:
                 shutil.move(str(record.current_path), str(target))
@@ -583,6 +809,7 @@ class LongRunHarness:
         @resolver.register("token_check")
         def _token_check(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="token_check")
             text = record.current_path.read_text(encoding="utf-8")
             count = _count_tokens(text)
             record.token_count = count
@@ -598,6 +825,7 @@ class LongRunHarness:
         @resolver.register("parse_document")
         def _parse(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="parse_document")
             request = self._request_for(record)
             source_document_id = self.pipeline._source_document_id(request)
             try:
@@ -617,6 +845,7 @@ class LongRunHarness:
         @resolver.register("persist_document")
         def _persist(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="persist_document")
             request = self._request_for(record)
             source_document_id = str(record.source_document_id)
             ns = self.pipeline.namespaces_for(request.workspace_id)
@@ -648,6 +877,7 @@ class LongRunHarness:
         @resolver.register("enqueue_background_maintenance")
         def _enqueue(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="enqueue_background_maintenance")
             request = self._request_for(record)
             ns = self.pipeline.namespaces_for(request.workspace_id)
             source_document_id = str(record.source_document_id)
@@ -662,20 +892,34 @@ class LongRunHarness:
                 parse_result=record.parse_result,
                 namespace=ns.conv_bg,
             )
+            promotion_evidence_pack_id, promotion_evidence_pack_digest = (
+                self.pipeline.create_promotion_evidence_pack(
+                    request=request,
+                    source_document_id=source_document_id,
+                    candidate_link_id=candidate_link_id,
+                    graph_extraction=record.graph_extraction,
+                    namespace=ns.conv_bg,
+                )
+            )
             promotion_candidate_id = self.pipeline.create_promotion_candidate(
                 request=request,
                 source_document_id=source_document_id,
                 candidate_link_id=candidate_link_id,
+                promotion_evidence_pack_id=promotion_evidence_pack_id,
+                promotion_evidence_pack_digest=promotion_evidence_pack_digest,
                 namespace=ns.conv_bg,
             )
             promoted_entity_id = self.pipeline.promote_to_knowledge(
                 request=request,
                 source_document_id=source_document_id,
                 promotion_candidate_id=promotion_candidate_id,
+                promotion_evidence_pack_id=promotion_evidence_pack_id,
+                promotion_evidence_pack_digest=promotion_evidence_pack_digest,
                 namespace=ns.kg,
             )
             record.maintenance_job_id = maintenance_job_id
             record.candidate_link_id = candidate_link_id
+            record.promotion_evidence_pack_id = promotion_evidence_pack_id
             record.promotion_candidate_id = promotion_candidate_id
             record.promoted_entity_id = promoted_entity_id
             self._transition(record, "MAINTENANCE_ENQUEUED", phase="enqueue_background_maintenance")
@@ -685,6 +929,7 @@ class LongRunHarness:
                         "u",
                         {
                             "maintenance_job_id": maintenance_job_id,
+                            "promotion_evidence_pack_id": promotion_evidence_pack_id,
                             "promoted_entity_id": promoted_entity_id,
                         },
                     )
@@ -694,6 +939,7 @@ class LongRunHarness:
         @resolver.register("observe_background_maintenance")
         def _observe(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="observe_background_maintenance")
             try:
                 self._poll_maintenance_once(phase="observe_background_maintenance")
             except Exception as exc:  # noqa: BLE001
@@ -716,17 +962,20 @@ class LongRunHarness:
         @resolver.register("verify_document_artifacts")
         def _verify(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="verify_document_artifacts")
             self._verify_document(record)
             return RunSuccess(state_update=[("u", {"verified": True})])
 
         @resolver.register("move_completed")
         def _move_completed(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="move_completed")
             target = self.run_dir / "completed" / record.current_path.name
             if record.current_path.exists() and record.current_path != target:
                 shutil.move(str(record.current_path), str(target))
                 record.current_path = target
             self._transition(record, "COMPLETED", phase="move_completed")
+            record.ended_at_ms = _now_ms()
             return RunSuccess(state_update=[("u", {"completed_path": str(target)})])
 
         return resolver
@@ -748,6 +997,12 @@ class LongRunHarness:
         if status not in STATUSES:
             raise ValueError(f"unknown long-run status {status!r}")
         record.status = status
+        record.last_step_name = phase
+        record.last_step_at_ms = _now_ms()
+        if status in TERMINAL_STATES and record.ended_at_ms is None:
+            record.ended_at_ms = record.last_step_at_ms
+        self.last_completed_step_name = phase
+        self.last_progress_at_ms = record.last_step_at_ms
         self.status_transitions.append(
             {
                 "run_id": record.run_id or self.run_id,
@@ -842,6 +1097,23 @@ class LongRunHarness:
         vault_root = self.run_dir / "projection_vault"
         self.projection_worker.process_pending_projections(self.config.workspace_id, str(vault_root))
 
+    def _mark_document_progress(self, record: DocumentRecord, *, step_name: str) -> None:
+        self.active_document_id = record.doc_id
+        self.active_step_name = step_name
+        self.last_progress_at_ms = _now_ms()
+
+    def _active_document_id(self) -> str | None:
+        return self.active_document_id
+
+    def _active_step_name(self) -> str | None:
+        return self.active_step_name
+
+    def _last_completed_step_name(self) -> str | None:
+        return self.last_completed_step_name
+
+    def _last_progress_at_ms(self) -> int | None:
+        return self.last_progress_at_ms
+
     def _verify_document(self, record: DocumentRecord) -> None:
         if not record.source_document_id:
             raise LongRunSystemicError(
@@ -877,6 +1149,71 @@ class LongRunHarness:
                 f"parsed node without source provenance for {record.source_document_id}",
                 phase="verify_document_artifacts",
             )
+        if record.promoted_entity_id:
+            self._verify_promotion_provenance(record)
+
+    def _verify_promotion_provenance(self, record: DocumentRecord) -> dict[str, Any]:
+        if not record.promoted_entity_id:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"{record.doc_id} has no promoted entity id to verify",
+                phase="verify_document_artifacts",
+            )
+        promoted_nodes = self.engines.kg.read.get_nodes(ids=[record.promoted_entity_id], limit=1)
+        if not promoted_nodes:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"promoted node {record.promoted_entity_id} missing for {record.doc_id}",
+                phase="verify_document_artifacts",
+            )
+        promoted = promoted_nodes[0]
+        promoted_md = promoted.metadata or {}
+        required = [
+            "promotion_candidate_id",
+            "promotion_evidence_pack_id",
+            "promotion_evidence_pack_digest",
+            "promotion_decision_reason",
+        ]
+        missing = [key for key in required if not promoted_md.get(key)]
+        if missing:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"promoted node {record.promoted_entity_id} missing metadata {missing} for {record.doc_id}",
+                phase="verify_document_artifacts",
+            )
+        pack_id = str(promoted_md["promotion_evidence_pack_id"])
+        ns = WorkspaceNamespaces(self.config.workspace_id)
+        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            packs = self.engines.conversation.read.get_nodes(ids=[pack_id], limit=1)
+        if not packs:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"promotion evidence pack {pack_id} missing for {record.doc_id}",
+                phase="verify_document_artifacts",
+            )
+        pack = packs[0]
+        pack_md = pack.metadata or {}
+        digest = pack_md.get("promotion_evidence_pack_digest") or {}
+        if pack_md.get("artifact_kind") != "promotion_evidence_pack":
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"promotion evidence pack {pack_id} has wrong artifact kind",
+                phase="verify_document_artifacts",
+            )
+        if not digest.get("node_ids") or digest.get("edge_ids") is None:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"promotion evidence pack {pack_id} is missing typed evidence ids",
+                phase="verify_document_artifacts",
+            )
+        return {
+            "doc_id": record.doc_id,
+            "promoted_entity_id": record.promoted_entity_id,
+            "promotion_candidate_id": promoted_md["promotion_candidate_id"],
+            "promotion_evidence_pack_id": pack_id,
+            "promotion_evidence_pack_node_count": len(list(digest.get("node_ids") or [])),
+            "promotion_evidence_pack_edge_count": len(list(digest.get("edge_ids") or [])),
+        }
 
     def _verify_run_invariants(self) -> None:
         if any(record.status not in TERMINAL_STATES for record in self.records):
@@ -890,6 +1227,11 @@ class LongRunHarness:
                 failure.doc_id == record.doc_id for failure in self.failure_records
             ):
                 raise AssertionError(f"{record.doc_id} is terminal failure without failure record")
+        provenance = self.promotion_provenance_summary()
+        if provenance["missing_count"] > 0:
+            raise AssertionError(
+                f"promotion provenance missing for {provenance['missing_document_ids']}"
+            )
         maintenance = self.maintenance_summary()
         useful_maintenance = (
             maintenance["derived_artifact_count"] > 0
@@ -904,6 +1246,34 @@ class LongRunHarness:
         projection = self.projection_summary()
         if projection["snapshot_status"] != "ok":
             raise AssertionError(f"projection read failed: {projection['snapshot_error']}")
+        progress = self.progress_summary()
+        if progress["doc_count"] != len(self.records):
+            raise AssertionError("progress summary doc count mismatch")
+
+    def promotion_provenance_summary(self) -> dict[str, Any]:
+        verified: list[dict[str, Any]] = []
+        missing: list[dict[str, Any]] = []
+        for record in self.records:
+            if record.status != "COMPLETED" or not record.promoted_entity_id:
+                continue
+            try:
+                verified.append(self._verify_promotion_provenance(record))
+            except Exception as exc:  # noqa: BLE001
+                missing.append(
+                    {
+                        "doc_id": record.doc_id,
+                        "promoted_entity_id": record.promoted_entity_id,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+        return {
+            "promoted_count": len(verified) + len(missing),
+            "verified_count": len(verified),
+            "missing_count": len(missing),
+            "verified": verified,
+            "missing": missing,
+            "missing_document_ids": [row["doc_id"] for row in missing],
+        }
 
     def _verify_runtime_events_have_run_ids(self) -> None:
         with _temporary_namespace(
@@ -928,7 +1298,10 @@ class LongRunHarness:
         ns = WorkspaceNamespaces(self.config.workspace_id)
         with _temporary_namespace(self.engines.derived_knowledge_engine(), ns.derived_knowledge):
             derived = self.engines.derived_knowledge_engine().read.get_nodes(
-                where={"artifact_kind": "derived_knowledge", "workspace_id": self.config.workspace_id},
+                where=_and_where(
+                    {"artifact_kind": "derived_knowledge"},
+                    {"workspace_id": self.config.workspace_id},
+                ),
                 limit=10_000,
             )
         for node in derived:
@@ -975,89 +1348,6 @@ class LongRunHarness:
             self.records.append(record)
             self.contexts[doc_id] = record
             self._transition(record, "PENDING", phase="discover_pending", token_count=token_count)
-
-    def _ensure_existing_inputs(self) -> None:
-        for record in self.records:
-            input_target = self.run_dir / "input" / f"{record.doc_id}.md"
-            if record.status == "PENDING" and not input_target.exists():
-                input_target.write_text(generate_longrun_document(
-                    index=int(record.doc_id.split("-")[-1]),
-                    title=record.title,
-                    topic="urban watershed resilience and stormwater infrastructure",
-                ), encoding="utf-8")
-            if record.status not in TERMINAL_STATES and record.current_path.exists():
-                continue
-            if record.status == "COMPLETED":
-                record.current_path = self.run_dir / "completed" / record.current_path.name
-            elif record.status == "FAILED":
-                record.current_path = self.run_dir / "failed" / record.current_path.name
-            elif record.status == "QUARANTINED":
-                record.current_path = self.run_dir / "quarantine" / record.current_path.name
-            else:
-                record.current_path = input_target
-
-    def _load_checkpoint_state(self) -> None:
-        manifest_path = self.dumper.dump_dir / "manifest.jsonl"
-        if not manifest_path.exists():
-            return
-        loaded_records: list[DocumentRecord] = []
-        with manifest_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                input_path = self.run_dir / "input" / f"{row['doc_id']}.md"
-                current_path = Path(row.get("current_path") or input_path)
-                if not current_path.is_absolute():
-                    current_path = self.run_dir / current_path.name if current_path.parts and current_path.parts[0] in {"input", "processing", "completed", "failed", "quarantine"} else current_path
-                record = DocumentRecord(
-                    doc_id=str(row["doc_id"]),
-                    title=str(row["title"]),
-                    source_uri=str(row["source_uri"]),
-                    input_path=input_path,
-                    current_path=current_path,
-                    status=str(row.get("status") or "PENDING"),
-                    token_count=row.get("token_count"),
-                    run_id=str(row["run_id"]) if row.get("run_id") else None,
-                    source_document_id=row.get("source_document_id"),
-                    maintenance_job_id=row.get("maintenance_job_id"),
-                    candidate_link_id=row.get("candidate_link_id"),
-                    promotion_candidate_id=row.get("promotion_candidate_id"),
-                    promoted_entity_id=row.get("promoted_entity_id"),
-                    llm_quality_failures=list(row.get("llm_quality_failures") or []),
-                )
-                loaded_records.append(record)
-        self.records = loaded_records
-        self.contexts = {record.doc_id: record for record in self.records}
-        self.status_transitions = []
-        status_path = self.dumper.dump_dir / "status_transitions.jsonl"
-        if status_path.exists():
-            with status_path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if line:
-                        self.status_transitions.append(json.loads(line))
-        failure_path = self.dumper.dump_dir / "failure_records.jsonl"
-        if failure_path.exists():
-            with failure_path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    row = json.loads(line)
-                    self.failure_records.append(
-                        FailureRecord(
-                            run_id=str(row["run_id"]),
-                            doc_id=row.get("doc_id"),
-                            phase=str(row["phase"]),
-                            code=str(row["code"]),
-                            scope=str(row["scope"]),
-                            message=str(row["message"]),
-                            fingerprint=str(row["fingerprint"]),
-                            timestamp_ms=int(row["timestamp_ms"]),
-                        )
-                    )
 
     def _materialize_workflow_design(self) -> None:
         grounding = [Grounding(spans=[Span.from_dummy_for_workflow(WORKFLOW_ID)])]
@@ -1281,9 +1571,16 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _and_where(*clauses: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    return {"$and": [dict(clause) for clause in clauses]}
+
+
 def _model_to_dict(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
+        try:
+            return value.model_dump()
+        except TypeError:
+            return value.model_dump(mode="python")
     return dict(getattr(value, "__dict__", {}) or {})
 
 
@@ -1355,6 +1652,223 @@ def test_longrun_failure_classifier_and_circuit_breaker_are_bounded():
     )
 
 
+def test_longrun_checkpoint_state_is_loaded_across_reruns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    run_dir = tmp_path / "continuation-probe"
+    config = LongRunConfig(
+        enabled=False,
+        mode="auto",
+        doc_count=2,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+
+    def _dummy_parse_result():
+        return SimpleNamespace(nodes=[], edges=[])
+
+    def _install_dummy_pipeline(harness: LongRunHarness) -> None:
+        harness.pipeline.parse_source = lambda **kwargs: _dummy_parse_result()
+        harness.pipeline.register_source = lambda **kwargs: None
+        harness.pipeline.translate_parse_result = lambda **kwargs: _dummy_parse_result()
+        harness.pipeline.ingest_parse_result = lambda **kwargs: None
+        harness.pipeline.create_maintenance_request = lambda **kwargs: "maintenance-job"
+        harness.pipeline.create_candidate_link = lambda **kwargs: "candidate-link"
+        harness.pipeline.create_promotion_candidate = lambda **kwargs: "promotion-candidate"
+        harness.pipeline.promote_to_knowledge = lambda **kwargs: "promoted-knowledge"
+        harness._verify_document = lambda record: None
+
+    def _complete_record(harness: LongRunHarness, record: DocumentRecord) -> None:
+        record.started_at_ms = record.started_at_ms or _now_ms()
+        harness._transition(record, "CLAIMED", phase="claim_document")
+        harness._transition(record, "TOKEN_CHECKED", phase="token_check", token_count=record.token_count)
+        harness._transition(record, "PARSED", phase="parse_document")
+        harness._transition(record, "PERSISTED", phase="persist_document")
+        harness._transition(record, "MAINTENANCE_ENQUEUED", phase="enqueue_background_maintenance")
+        harness._transition(record, "MAINTENANCE_OBSERVED", phase="observe_background_maintenance")
+        target = harness.run_dir / "completed" / record.current_path.name
+        if record.current_path.exists() and record.current_path != target:
+            shutil.move(str(record.current_path), str(target))
+            record.current_path = target
+        harness._transition(record, "COMPLETED", phase="move_completed")
+        record.ended_at_ms = _now_ms()
+
+    first = LongRunHarness(run_dir=run_dir, config=config)
+    _install_dummy_pipeline(first)
+    first.prepare()
+    _complete_record(first, first.records[0])
+    first.dumper.dump(reason="probe_checkpoint")
+
+    manifest_path = run_dir / "dump" / "manifest.jsonl"
+    assert manifest_path.exists()
+    first_manifest = manifest_path.read_text(encoding="utf-8").splitlines()
+    assert any('"status": "COMPLETED"' in line for line in first_manifest)
+    assert any('"doc-002"' in line and '"status": "PENDING"' in line for line in first_manifest)
+
+    second = LongRunHarness(run_dir=run_dir, config=config)
+    _install_dummy_pipeline(second)
+    second.prepare()
+    assert second.checkpoint_loaded is True
+    assert second.progress_summary()["checkpoint_loaded"] is True
+    assert second.progress_summary()["completed_count"] >= 1
+    assert second.progress_summary()["current_document_id"] == "doc-002"
+    _complete_record(second, second.records[1])
+    second.dumper.dump(reason="probe_resume")
+    final_manifest = (run_dir / "dump" / "manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any('"doc-001"' in line and '"status": "COMPLETED"' in line for line in final_manifest)
+    assert any('"doc-002"' in line and '"status": "COMPLETED"' in line for line in final_manifest)
+
+
+def test_longrun_auto_checkpoint_mismatch_falls_back_to_fresh(tmp_path: Path):
+    run_dir = tmp_path / "checkpoint-mismatch"
+    dump_dir = run_dir / "dump"
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    stale_manifest = {
+        "run_id": "stale",
+        "doc_id": "doc-001",
+        "title": "Stale checkpoint document",
+        "source_uri": "file:///doc-001.md",
+        "current_path": str(run_dir / "input" / "doc-001.md"),
+        "status": "COMPLETED",
+        "started_at_ms": _now_ms(),
+        "ended_at_ms": _now_ms(),
+        "elapsed_ms": 1,
+        "token_count": 512,
+        "tokenizer_method": TOKENIZER_METHOD,
+        "source_document_id": "stale-source",
+        "maintenance_job_id": None,
+        "promoted_entity_id": None,
+        "last_step_name": "move_completed",
+        "last_step_at_ms": _now_ms(),
+        "llm_quality_failures": [],
+    }
+    (dump_dir / "manifest.jsonl").write_text(json.dumps(stale_manifest) + "\n", encoding="utf-8")
+
+    config = LongRunConfig(
+        enabled=False,
+        mode="auto",
+        doc_count=2,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness.prepare()
+
+    assert harness.checkpoint_loaded is False
+    assert len(harness.records) == 2
+    assert {record.doc_id for record in harness.records} == {"doc-001", "doc-002"}
+    assert all(record.status == "PENDING" for record in harness.records)
+
+
+def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "promotion-provenance", config=config)
+    harness.prepare()
+
+    record = harness.records[0]
+    parsed_nodes = [SimpleNamespace(id="parsed-node-1"), SimpleNamespace(id="parsed-node-2")]
+    parsed_edges = [SimpleNamespace(id="parsed-edge-1")]
+
+    monkeypatch.setattr(
+        harness.pipeline,
+        "parse_source",
+        lambda **kwargs: SimpleNamespace(semantic_tree=SimpleNamespace(title=record.title)),
+    )
+    monkeypatch.setattr(harness.pipeline, "register_source", lambda **kwargs: None)
+    monkeypatch.setattr(
+        harness.pipeline,
+        "translate_parse_result",
+        lambda **kwargs: SimpleNamespace(nodes=parsed_nodes, edges=parsed_edges),
+    )
+    monkeypatch.setattr(harness.pipeline, "ingest_parse_result", lambda **kwargs: None)
+    monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
+
+    harness._run_document_workflow(record)
+
+    ns = WorkspaceNamespaces(config.workspace_id)
+    assert record.promotion_evidence_pack_id
+    assert record.promotion_candidate_id
+    assert record.promoted_entity_id
+
+    with _temporary_namespace(harness.engines.kg, ns.kg):
+        promoted_nodes = harness.engines.kg.read.get_nodes(ids=[record.promoted_entity_id], limit=1)
+    assert len(promoted_nodes) == 1
+    promoted = promoted_nodes[0]
+    assert promoted.metadata.get("promotion_candidate_id") == record.promotion_candidate_id
+    assert promoted.metadata.get("promotion_evidence_pack_id") == record.promotion_evidence_pack_id
+    assert promoted.metadata.get("promotion_evidence_pack_digest")
+    assert promoted.metadata.get("promotion_decision_reason")
+
+    with _temporary_namespace(harness.engines.conversation, ns.conv_bg):
+        candidate_nodes = harness.engines.conversation.read.get_nodes(ids=[record.promotion_candidate_id], limit=1)
+    assert len(candidate_nodes) == 1
+    candidate = candidate_nodes[0]
+    assert candidate.metadata.get("promotion_evidence_pack_id") == record.promotion_evidence_pack_id
+    assert candidate.metadata.get("promotion_evidence_pack_digest")
+
+    with _temporary_namespace(harness.engines.conversation, ns.conv_bg):
+        packs = harness.engines.conversation.read.get_nodes(ids=[record.promotion_evidence_pack_id], limit=1)
+    assert len(packs) == 1
+    pack = packs[0]
+    digest = pack.metadata.get("promotion_evidence_pack_digest") or {}
+    assert digest.get("node_ids") == ["parsed-node-1", "parsed-node-2"]
+    assert digest.get("edge_ids") == ["parsed-edge-1"]
+
+
+def test_longrun_promoted_node_without_promotion_pack_fails_invariant(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="auto",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "promotion-invariant", config=config)
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Broken promotion provenance",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+        status="COMPLETED",
+        source_document_id="source-doc-1",
+        promoted_entity_id="promoted-node-1",
+    )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        harness.engines.kg.read,
+        "get_nodes",
+        lambda **kwargs: [
+            SimpleNamespace(
+                id="promoted-node-1",
+                metadata={
+                    "promotion_candidate_id": "candidate-node-1",
+                    "promotion_evidence_pack_digest": {"node_ids": ["n-1"], "edge_ids": []},
+                    "promotion_decision_reason": "explicit promotion approval accepted by default policy",
+                },
+            )
+        ],
+    )
+    try:
+        with pytest.raises(LongRunSystemicError, match="missing metadata"):
+            harness._verify_promotion_provenance(record)
+    finally:
+        monkeypatch.undo()
+
+
 @pytest.mark.integration
 @pytest.mark.longrun
 @pytest.mark.requires_ollama
@@ -1363,7 +1877,7 @@ def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
     if not config.enabled:
         pytest.skip("set KOGWISTAR_LLM_WIKI_LONGRUN=1 to run the long-run workflow ingestion test")
 
-    run_dir = tmp_path / "longrun-workflow"
+    run_dir = Path(config.checkpoint_run_dir).expanduser() if config.checkpoint_run_dir else tmp_path / "longrun-workflow"
     harness = LongRunHarness(run_dir=run_dir, config=config)
     harness.prepare()
 
