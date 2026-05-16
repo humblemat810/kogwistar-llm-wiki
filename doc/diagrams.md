@@ -261,14 +261,27 @@ flowchart TB
 ```mermaid
 flowchart LR
     SRC["source_uri + workspace_id"] --> DOC["stable source_document_id"]
-    DOC --> CL["candidate_link\nstable id"]
+    DOC --> PARSED["parsed graph extraction\nnode_ids + edge_ids"]
+    PARSED --> CL["candidate_link\nstable id"]
+    PARSED --> EP["promotion_evidence_pack\nstable id"]
     CL --> PC["promotion_candidate\nstable id"]
+    EP --> PC
     PC --> DEC{"promotion policy"}
     DEC -->|promote| PK["promoted_knowledge\nstable id"]
+    PK -->|source_node_ids| DK["derived_knowledge\nstable id"]
     DOC --> MR["maintenance request\nstable node id"]
     MR --> LM["maintenance lane request\nidempotency key"]
     PK --> PJ["projection job\ncoalesced durable job"]
 ```
+
+The promotion chain is intentionally explicit:
+
+- The parsed graph extraction is the source material. It contains the raw node and edge IDs that were actually produced from the document.
+- `candidate_link` stays a normal artifact node. It summarizes the ingest path, but it is not the provenance bundle itself.
+- `promotion_evidence_pack` is the durable provenance bundle for promotion. It records the exact `node_ids` and `edge_ids` used to justify the promotion.
+- `promotion_candidate` points to the evidence pack so a reviewer can inspect both the workflow lineage and the evidence bundle.
+- `promoted_knowledge` points to the chosen candidate and the same evidence pack, so later readers can follow the chain without guessing.
+- `derived_knowledge` points to promoted knowledge through `source_node_ids`, which means the promotion evidence pack remains reachable indirectly from maintenance-derived artifacts too.
 
 ---
 
@@ -475,6 +488,12 @@ flowchart TB
 The long-run workflow test is an opt-in diagnostic harness, not a production
 command. It uses runtime workflow execution for each document and a bounded
 daemon-like loop to observe background maintenance and projection state.
+
+The harness is meant to prove three things at once:
+
+- document ingest still converges under runtime orchestration
+- background maintenance does real work and leaves a durable trace
+- the diagnostic dump is rich enough to reconstruct the run later
 
 For the full prose contract, folder semantics, and dump checklist, see
 [longrun_workflow_test.md](./longrun_workflow_test.md).

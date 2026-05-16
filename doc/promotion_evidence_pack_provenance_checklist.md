@@ -75,14 +75,14 @@ Any promoted knowledge must point to a durable evidence/provenance pack that ide
 
 ## Docs And Diagrams
 
-- [ ] Update `doc/diagrams.md` so the promotion lineage diagram says:
+- [x] Update `doc/diagrams.md` so the promotion lineage diagram says:
   - `candidate_link` is a node, not a hyperedge
   - promotion evidence pack records typed `node_ids` and `edge_ids`
   - promoted knowledge points to the evidence pack
   - derived knowledge points to promoted knowledge, then indirectly to the evidence pack.
-- [ ] Add a short example showing one promoted node and the fields a reader follows.
-- [ ] Update `doc/longrun_workflow_test.md` so the long-run dump must include promotion evidence-pack records.
-- [ ] Add a note that losing typed promotion evidence is a correctness bug, not just missing metadata.
+- [x] Add a short example showing one promoted node and the fields a reader follows.
+- [x] Update `doc/longrun_workflow_test.md` so the long-run dump must include promotion evidence-pack records.
+- [x] Add a note that losing typed promotion evidence is a correctness bug, not just missing metadata.
 
 ## Tests
 

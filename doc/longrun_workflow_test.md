@@ -114,6 +114,7 @@ The dump includes:
 - `error_fingerprints.json`
 - `folder_inventory.json`
 - `graph_export.json`
+- `promotion_evidence_pack` records for promoted documents
 - `projection_summary.json`
 - `maintenance_summary.json`
 - `llm_calls_summary.json`

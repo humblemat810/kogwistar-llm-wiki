@@ -71,5 +71,5 @@ $env:KOGWISTAR_OLLAMA_BASE_URL='http://localhost:11434'
 
 Use `-p no:cacheprovider` for a quick local signal on Windows. The test writes a
 diagnostic dump after the run starts, including raw documents, status
-transitions, graph/projection summaries, maintenance evidence, failure records,
-and a final report.
+transitions, graph/projection summaries, maintenance evidence, promotion
+evidence packs, failure records, and a final report.
