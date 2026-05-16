@@ -28,7 +28,10 @@ from kogwistar.runtime.runtime import WorkflowRuntime
 from kogwistar.engine_core.models import Grounding, Span
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
-from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
+from kogwistar_llm_wiki.ingest_pipeline import (
+    build_in_memory_namespace_engines,
+    build_persistent_namespace_engines,
+)
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
@@ -106,6 +109,7 @@ class LongRunSystemicError(RuntimeError):
 @dataclass(frozen=True)
 class LongRunConfig:
     enabled: bool
+    resume_enabled: bool
     doc_count: int
     ollama_model: str
     ollama_base_url: str
@@ -127,6 +131,7 @@ class LongRunConfig:
             )
         return cls(
             enabled=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
+            resume_enabled=os.getenv("KOGWISTAR_LONGRUN_RESUME") == "1",
             doc_count=doc_count,
             ollama_model=os.getenv("KOGWISTAR_OLLAMA_MODEL", "gemma4:e2b"),
             ollama_base_url=os.getenv("KOGWISTAR_OLLAMA_BASE_URL", "http://localhost:11434"),
@@ -141,6 +146,7 @@ class LongRunConfig:
     def as_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
+            "resume_enabled": self.resume_enabled,
             "doc_count": self.doc_count,
             "ollama_model": self.ollama_model,
             "ollama_base_url": self.ollama_base_url,
@@ -332,7 +338,10 @@ class LongRunHarness:
         self.projection_poll_count = 0
         self.aborted = False
         self.abort_reason: str | None = None
-        self.engines = build_in_memory_namespace_engines(run_dir / "engines")
+        if self.config.resume_enabled:
+            self.engines = build_persistent_namespace_engines(run_dir / "engines")
+        else:
+            self.engines = build_in_memory_namespace_engines(run_dir / "engines")
         self.pipeline = IngestPipeline(self.engines)
         self.pipeline.parser = self._build_parser()
         self.maintenance_worker = MaintenanceWorker(self.engines)
@@ -344,7 +353,12 @@ class LongRunHarness:
             (self.run_dir / name).mkdir(parents=True, exist_ok=True)
         materialize_maintenance_designs(self.engines.workflow)
         self._materialize_workflow_design()
-        self._generate_corpus()
+        if self.config.resume_enabled and (self.dumper.dump_dir / "manifest.jsonl").exists():
+            self._load_checkpoint_state()
+        if not self.records:
+            self._generate_corpus()
+        else:
+            self._ensure_existing_inputs()
         self.dumper.dump(reason="prepared")
 
     def run(self) -> None:
@@ -352,6 +366,8 @@ class LongRunHarness:
         idle_loops = 0
         self.dumper.dump(reason="run_started")
         for record in self.records:
+            if record.status in TERMINAL_STATES:
+                continue
             if self.aborted:
                 break
             previous_state = self._state_signature()
@@ -375,6 +391,7 @@ class LongRunHarness:
             if time.monotonic() - started > self.config.max_runtime_seconds:
                 self._abort("runtime_worker_stuck: max runtime exceeded")
                 break
+            self.dumper.dump(reason=f"checkpoint_{record.doc_id}")
 
         if self.aborted:
             self.dumper.dump(reason="abort_snapshot")
@@ -547,6 +564,11 @@ class LongRunHarness:
 
     def _build_resolver(self) -> MappingStepResolver:
         resolver = MappingStepResolver()
+
+        @resolver.register("noop")
+        def _noop(ctx):
+            del ctx
+            return RunSuccess(state_update=[("u", {"noop": True})])
 
         @resolver.register("claim_document")
         def _claim(ctx):
@@ -953,6 +975,89 @@ class LongRunHarness:
             self.records.append(record)
             self.contexts[doc_id] = record
             self._transition(record, "PENDING", phase="discover_pending", token_count=token_count)
+
+    def _ensure_existing_inputs(self) -> None:
+        for record in self.records:
+            input_target = self.run_dir / "input" / f"{record.doc_id}.md"
+            if record.status == "PENDING" and not input_target.exists():
+                input_target.write_text(generate_longrun_document(
+                    index=int(record.doc_id.split("-")[-1]),
+                    title=record.title,
+                    topic="urban watershed resilience and stormwater infrastructure",
+                ), encoding="utf-8")
+            if record.status not in TERMINAL_STATES and record.current_path.exists():
+                continue
+            if record.status == "COMPLETED":
+                record.current_path = self.run_dir / "completed" / record.current_path.name
+            elif record.status == "FAILED":
+                record.current_path = self.run_dir / "failed" / record.current_path.name
+            elif record.status == "QUARANTINED":
+                record.current_path = self.run_dir / "quarantine" / record.current_path.name
+            else:
+                record.current_path = input_target
+
+    def _load_checkpoint_state(self) -> None:
+        manifest_path = self.dumper.dump_dir / "manifest.jsonl"
+        if not manifest_path.exists():
+            return
+        loaded_records: list[DocumentRecord] = []
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                input_path = self.run_dir / "input" / f"{row['doc_id']}.md"
+                current_path = Path(row.get("current_path") or input_path)
+                if not current_path.is_absolute():
+                    current_path = self.run_dir / current_path.name if current_path.parts and current_path.parts[0] in {"input", "processing", "completed", "failed", "quarantine"} else current_path
+                record = DocumentRecord(
+                    doc_id=str(row["doc_id"]),
+                    title=str(row["title"]),
+                    source_uri=str(row["source_uri"]),
+                    input_path=input_path,
+                    current_path=current_path,
+                    status=str(row.get("status") or "PENDING"),
+                    token_count=row.get("token_count"),
+                    run_id=str(row["run_id"]) if row.get("run_id") else None,
+                    source_document_id=row.get("source_document_id"),
+                    maintenance_job_id=row.get("maintenance_job_id"),
+                    candidate_link_id=row.get("candidate_link_id"),
+                    promotion_candidate_id=row.get("promotion_candidate_id"),
+                    promoted_entity_id=row.get("promoted_entity_id"),
+                    llm_quality_failures=list(row.get("llm_quality_failures") or []),
+                )
+                loaded_records.append(record)
+        self.records = loaded_records
+        self.contexts = {record.doc_id: record for record in self.records}
+        self.status_transitions = []
+        status_path = self.dumper.dump_dir / "status_transitions.jsonl"
+        if status_path.exists():
+            with status_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if line:
+                        self.status_transitions.append(json.loads(line))
+        failure_path = self.dumper.dump_dir / "failure_records.jsonl"
+        if failure_path.exists():
+            with failure_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    row = json.loads(line)
+                    self.failure_records.append(
+                        FailureRecord(
+                            run_id=str(row["run_id"]),
+                            doc_id=row.get("doc_id"),
+                            phase=str(row["phase"]),
+                            code=str(row["code"]),
+                            scope=str(row["scope"]),
+                            message=str(row["message"]),
+                            fingerprint=str(row["fingerprint"]),
+                            timestamp_ms=int(row["timestamp_ms"]),
+                        )
+                    )
 
     def _materialize_workflow_design(self) -> None:
         grounding = [Grounding(spans=[Span.from_dummy_for_workflow(WORKFLOW_ID)])]
