@@ -15,7 +15,7 @@ from kogwistar.engine_core.models import Document, GraphExtractionWithIDs, Groun
 from kogwistar.id_provider import stable_id
 from kogwistar.policy import PromotionDecision
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
-from kg_doc_parser.workflow_ingest.page_index import PageIndexParseResult, parse_page_index_document
+from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from .models import (
@@ -60,7 +60,7 @@ class _TinyEmbeddingFunction:
 
 
 
-ParserFn = Callable[..., PageIndexParseResult]
+ParserFn = Callable[..., Any]
 
 
 def build_in_memory_namespace_engines(
@@ -377,7 +377,7 @@ class IngestPipeline:
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_document(document)
 
-    def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> PageIndexParseResult:
+    def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> Any:
         parser_kwargs = self._build_parser_kwargs(request=request, source_document_id=source_document_id)
         return self.parser(**parser_kwargs)
 
@@ -441,9 +441,14 @@ class IngestPipeline:
     def translate_parse_result(
         self,
         *,
-        parse_result: PageIndexParseResult,
+        parse_result: Any,
         source_document_id: str,
     ) -> GraphExtractionWithIDs:
+        graph_payload = getattr(parse_result, "graph_payload", None)
+        if graph_payload is not None:
+            payload = dict(graph_payload)
+            payload["doc_id"] = source_document_id
+            return GraphExtractionWithIDs.model_validate(payload)
         payload = semantic_tree_to_kge_payload(parse_result.semantic_tree, doc_id=source_document_id)
         return GraphExtractionWithIDs.model_validate(payload)
 
@@ -674,7 +679,7 @@ class IngestPipeline:
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
-        parse_result: PageIndexParseResult,
+        parse_result: Any,
         namespace: str,
     ) -> str:
         node_id = str(

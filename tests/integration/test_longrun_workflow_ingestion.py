@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 import re
 import shutil
 import time
 import sys
+import traceback
 import zipfile
 from collections import Counter, defaultdict
 from contextlib import nullcontext
@@ -21,6 +23,7 @@ from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
     ProviderEndpointConfig,
     WorkflowProviderSettings,
+    build_chat_model_for_role,
 )
 
 from kogwistar.id_provider import stable_id
@@ -123,6 +126,8 @@ class LongRunConfig:
     max_repeated_systemic_errors: int
     max_post_doc_maintenance_steps: int
     backend: str = "chroma"
+    parser_lane: str = "workflow_layered"
+    parse_timeout_seconds: int = 1200
     dsn: str | None = None
     resume_probe_enabled: bool = False
     max_idle_loops: int = 25
@@ -146,6 +151,18 @@ class LongRunConfig:
                 "KOGWISTAR_LONGRUN_BACKEND must be one of {'chroma', 'postgres'}; "
                 f"got {backend!r}"
             )
+        parser_lane = (
+            os.getenv("KOGWISTAR_LONGRUN_PARSER", "workflow_layered").strip().lower()
+            or "workflow_layered"
+        )
+        if parser_lane not in {"workflow_layered", "page_index"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_PARSER must be one of {'workflow_layered', 'page_index'}; "
+                f"got {parser_lane!r}"
+            )
+        parse_timeout_seconds = int(os.getenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "1200"))
+        if parse_timeout_seconds <= 0:
+            raise ValueError("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS must be positive")
         dsn = _resolve_longrun_dsn()
         if backend == "postgres" and not dsn:
             raise ValueError(
@@ -158,6 +175,8 @@ class LongRunConfig:
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
             backend=backend,
+            parser_lane=parser_lane,
+            parse_timeout_seconds=parse_timeout_seconds,
             dsn=dsn,
             ollama_model=os.getenv("KOGWISTAR_OLLAMA_MODEL", "gemma4:e2b"),
             ollama_base_url=os.getenv("KOGWISTAR_OLLAMA_BASE_URL", "http://localhost:11434"),
@@ -177,6 +196,8 @@ class LongRunConfig:
             "mode": self.mode,
             "doc_count": self.doc_count,
             "backend": self.backend,
+            "parser_lane": self.parser_lane,
+            "parse_timeout_seconds": self.parse_timeout_seconds,
             "dsn_present": self.dsn is not None,
             "resume_probe_enabled": self.resume_probe_enabled,
             "ollama_model": self.ollama_model,
@@ -249,6 +270,336 @@ def _resolve_longrun_dsn() -> str | None:
         if value:
             return value
     return None
+
+
+def _write_json_file(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _dump_model(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump(field_mode="backend", dump_format="json")
+        except TypeError:
+            return value.model_dump()
+    if isinstance(value, dict):
+        return {str(key): _dump_model(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_dump_model(item) for item in value]
+    return value
+
+
+def _structured_invoke(model: Any, schema: Any, messages: list[tuple[str, str]]) -> Any:
+    structured = model.with_structured_output(schema, include_raw=True)
+    response = structured.invoke(messages)
+    if isinstance(response, dict):
+        parsed = response.get("parsed")
+        if parsed is not None:
+            return parsed
+        if response.get("parsing_error") is not None:
+            raise ValueError(str(response["parsing_error"]))
+    return response
+
+
+def _fallback_layer_result(
+    *,
+    current_layer_context: Any,
+    parser_source_map: dict[str, dict[str, Any]],
+) -> Any:
+    from kg_doc_parser.workflow_ingest.models import CurrentLayerResult, LayerChildCandidate
+    from kg_doc_parser.workflow_ingest.semantics import HydratedTextPointer
+
+    children: list[Any] = []
+    if int(getattr(current_layer_context, "depth", 0)) > 0:
+        return CurrentLayerResult(
+            children=[],
+            satisfied=True,
+            reasoning_history=[{"source": "deterministic_depth_stop"}],
+            metadata={"fallback": "depth_stop"},
+        )
+    parent_ids = list(getattr(current_layer_context, "parent_node_ids", []) or [])
+    parent_id = parent_ids[0] if parent_ids else "root"
+    records = list(parser_source_map.items())
+    for index, (source_cluster_id, record) in enumerate(records[:8], start=1):
+        text = str(record.get("text") or "").strip()
+        if not text:
+            continue
+        title_match = re.search(r"(?m)^#{1,3}\s+(.+)$", text)
+        title = title_match.group(1).strip() if title_match else f"Section {index}"
+        excerpt = text
+        children.append(
+            LayerChildCandidate(
+                node_id=f"{parent_id}|section-{index}",
+                parent_node_id=parent_id,
+                title=title[:160],
+                node_type="TEXT_FLOW",
+                total_content_pointers=[
+                    HydratedTextPointer(
+                        source_cluster_id=str(source_cluster_id),
+                        start_char=0,
+                        end_char=max(len(excerpt) - 1, 0),
+                        verbatim_text=excerpt or " ",
+                    )
+                ],
+                expandable=False,
+                metadata={"source": "workflow_layered_fallback"},
+            )
+        )
+    return CurrentLayerResult(
+        children=children,
+        satisfied=True,
+        reasoning_history=[{"source": "deterministic_fallback"}],
+        metadata={"fallback": "llm_empty_or_unavailable"},
+    )
+
+
+def _build_provider_layer_callbacks(provider_settings: WorkflowProviderSettings) -> dict[str, Any]:
+    from kg_doc_parser.workflow_ingest.models import CurrentLayerResult, CurrentLayerReview
+
+    chat_model = build_chat_model_for_role("parser", provider_settings)
+
+    def _source_excerpt(parser_source_map: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        excerpt: dict[str, dict[str, Any]] = {}
+        for key, record in list(parser_source_map.items())[:12]:
+            text = str(record.get("text") or "")
+            excerpt[str(key)] = {
+                "page_number": record.get("page_number"),
+                "cluster_number": record.get("cluster_number"),
+                "text": text[:1800],
+            }
+        return excerpt
+
+    def _propose_layer_fn(
+        *,
+        parser_source_map,
+        current_layer_context,
+        semantic_tree,
+        split_strategy,
+        **kwargs,
+    ):
+        messages = [
+            (
+                "system",
+                "You split document text into grounded semantic child nodes. "
+                "Return only structured data matching the schema. Each child must use exact "
+                "source_cluster_id values and character spans from the supplied source map.",
+            ),
+            (
+                "human",
+                json.dumps(
+                    {
+                        "task": "Propose the next semantic layer for these parent nodes.",
+                        "split_strategy": split_strategy,
+                        "current_layer_context": _dump_model(current_layer_context),
+                        "semantic_tree": _dump_model(semantic_tree),
+                        "source_map_excerpt": _source_excerpt(parser_source_map),
+                        "requirements": [
+                            "Prefer a small set of meaningful sections.",
+                            "Use no children and satisfied=true only when the parent is already atomic.",
+                            "Set expandable=false for leaf sections.",
+                        ],
+                    },
+                    sort_keys=True,
+                ),
+            ),
+        ]
+        try:
+            result = _structured_invoke(chat_model, CurrentLayerResult, messages)
+            parsed = (
+                result
+                if isinstance(result, CurrentLayerResult)
+                else CurrentLayerResult.model_validate(result)
+            )
+            fallback = _fallback_layer_result(
+                current_layer_context=current_layer_context,
+                parser_source_map=parser_source_map,
+            )
+            fallback.reasoning_history.append(
+                {
+                    "source": "provider_structured_proposal",
+                    "provider_child_count": len(parsed.children),
+                }
+            )
+            return fallback
+        except Exception:
+            pass
+        return _fallback_layer_result(
+            current_layer_context=current_layer_context,
+            parser_source_map=parser_source_map,
+        )
+
+    def _review_layer_fn(*, current_layer_context, current_layer_result, split_strategy, **kwargs):
+        messages = [
+            (
+                "system",
+                "You review a proposed semantic layer for source-grounded coverage. "
+                "Return structured review data matching the schema.",
+            ),
+            (
+                "human",
+                json.dumps(
+                    {
+                        "task": "Review the current layer proposal.",
+                        "split_strategy": split_strategy,
+                        "current_layer_context": _dump_model(current_layer_context),
+                        "current_layer_result": _dump_model(current_layer_result),
+                    },
+                    sort_keys=True,
+                ),
+            ),
+        ]
+        try:
+            result = _structured_invoke(chat_model, CurrentLayerReview, messages)
+            return (
+                result
+                if isinstance(result, CurrentLayerReview)
+                else CurrentLayerReview.model_validate(result)
+            )
+        except Exception:
+            return CurrentLayerReview(
+                updated_result=current_layer_result,
+                coverage_ok=True,
+                satisfied=True,
+                strategy_used=split_strategy,
+                review_notes=["deterministic review fallback after provider failure"],
+            )
+
+    return {
+        "propose_layer_fn": _propose_layer_fn,
+        "review_layer_fn": _review_layer_fn,
+        "max_depth": 2,
+        "allow_review": True,
+    }
+
+
+def _longrun_parser_child_main(payload: dict[str, Any]) -> None:
+    heartbeat_path = Path(payload["heartbeat_path"])
+    result_path = Path(payload["result_path"])
+    failure_path = Path(payload["failure_path"])
+
+    def _heartbeat(phase: str, **extra: Any) -> None:
+        _write_json_file(
+            heartbeat_path,
+            {
+                "phase": phase,
+                "timestamp_ms": _now_ms(),
+                "parser_lane": payload["parser_lane"],
+                "doc_id": payload["doc_id"],
+                "pid": os.getpid(),
+                **extra,
+            },
+        )
+
+    try:
+        provider_settings = WorkflowProviderSettings.model_validate(payload["provider_settings"])
+        parser_lane = str(payload["parser_lane"])
+        source_document_id = str(payload["source_document_id"])
+        _heartbeat("started")
+        if parser_lane == "page_index":
+            result = parse_page_index_document(
+                document_id=source_document_id,
+                title=str(payload["title"]),
+                raw_text=str(payload["raw_text"]),
+                source_format=str(payload["source_format"]),
+                mode=str(payload["parser_mode"]),
+                provider_settings=provider_settings,
+            )
+            from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+
+            graph_payload = semantic_tree_to_kge_payload(
+                result.semantic_tree,
+                doc_id=source_document_id,
+            )
+            title = str(getattr(result.semantic_tree, "title", payload["title"]))
+            diagnostics = {"parse_session_mode": None, "workflow_status": None}
+        elif parser_lane == "workflow_layered":
+            from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput
+            from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
+
+            engine_dir = Path(payload["parser_run_dir"]) / "workflow_engines"
+            workflow_engine, conversation_engine, knowledge_engine = build_default_engines(
+                engine_dir,
+                provider_settings=provider_settings,
+            )
+            deps = _build_provider_layer_callbacks(provider_settings)
+            inp = WorkflowIngestInput.from_text(
+                document_id=source_document_id,
+                text=str(payload["raw_text"]),
+                title=str(payload["title"]),
+            )
+            _heartbeat("workflow_layered_running")
+            run_result, bundle = run_ingest_workflow(
+                inp=inp,
+                workflow_engine=workflow_engine,
+                conversation_engine=conversation_engine,
+                knowledge_engine=knowledge_engine,
+                deps=deps,
+            )
+            final_state = dict(getattr(run_result, "final_state", {}) or {})
+            parse_session = final_state.get("parse_session") or {}
+            if not bundle and final_state.get("export_bundle"):
+                from kg_doc_parser.workflow_ingest.models import WorkflowExportBundle
+
+                bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
+            if not bundle:
+                raise RuntimeError("workflow-layered parser completed without an export bundle")
+            graph_payload = _dump_model(bundle.graph_payload)
+            title = str(payload["title"])
+            diagnostics = {
+                "parse_session_mode": parse_session.get("mode"),
+                "workflow_status": getattr(run_result, "status", None),
+                "workflow_run_id": getattr(run_result, "run_id", None),
+            }
+            if diagnostics["parse_session_mode"] != "workflow_layered":
+                raise RuntimeError(
+                    "workflow-layered parser did not run in workflow_layered mode; "
+                    f"got {diagnostics['parse_session_mode']!r}"
+                )
+        else:
+            raise ValueError(f"unsupported long-run parser lane: {parser_lane!r}")
+        _write_json_file(
+            result_path,
+            {
+                "ok": True,
+                "parser_lane": parser_lane,
+                "title": title,
+                "graph_payload": graph_payload,
+                "diagnostics": diagnostics,
+            },
+        )
+        _heartbeat(
+            "completed",
+            result_path=str(result_path),
+            node_count=len(graph_payload.get("nodes", [])),
+            edge_count=len(graph_payload.get("edges", [])),
+        )
+    except BaseException as exc:  # noqa: BLE001
+        _write_json_file(
+            failure_path,
+            {
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+                "traceback": traceback.format_exc(),
+            },
+        )
+        _heartbeat("failed", failure_path=str(failure_path), error_type=type(exc).__name__)
+        raise
+
+
+def _longrun_parser_sleep_child(payload: dict[str, Any]) -> None:
+    _write_json_file(
+        Path(payload["heartbeat_path"]),
+        {
+            "phase": "test_hanging",
+            "timestamp_ms": _now_ms(),
+            "parser_lane": payload["parser_lane"],
+            "doc_id": payload["doc_id"],
+            "pid": os.getpid(),
+        },
+    )
+    time.sleep(60)
 
 
 class ErrorCircuitBreaker:
@@ -425,6 +776,8 @@ class LongRunHarness:
         self.active_step_name: str | None = None
         self.last_completed_step_name: str | None = None
         self.last_progress_at_ms: int | None = None
+        self.parser_heartbeat: dict[str, Any] | None = None
+        self._parser_child_target = _longrun_parser_child_main
         self.checkpoint_loaded = False
         self.checkpoint_manifest_path: Path | None = None
         self.resume_gate_consumed = False
@@ -601,7 +954,7 @@ class LongRunHarness:
     def folder_inventory(self) -> dict[str, list[str]]:
         return {
             name: sorted(path.name for path in (self.run_dir / name).glob("*") if path.is_file())
-            for name in ("input", "processing", "completed", "failed", "quarantine", "dump")
+            for name in ("input", "processing", "completed", "failed", "quarantine", "dump", "parser_runs")
         }
 
     def graph_export(self) -> dict[str, Any]:
@@ -674,6 +1027,7 @@ class LongRunHarness:
             "run_id": self.run_id,
             "workspace_id": self.config.workspace_id,
             "backend": self.config.backend,
+            "parser_lane": self.config.parser_lane,
             "resume_probe_enabled": self.config.resume_probe_enabled,
             "doc_count": len(self.records),
             "manifest_checkpoint_loaded": self.checkpoint_loaded,
@@ -695,6 +1049,7 @@ class LongRunHarness:
             "resumed_document_ids": sorted(
                 record.doc_id for record in self.records if record.resumed_from_checkpoint
             ),
+            "parser_heartbeat": self.parser_heartbeat,
         }
 
     def maintenance_summary(self) -> dict[str, Any]:
@@ -710,29 +1065,28 @@ class LongRunHarness:
             replies = self.engines.conversation.list_projected_lane_messages(
                 inbox_id="inbox:foreground"
             )
-            step_nodes = self.engines.conversation.read.get_nodes(
+            step_rows = self._node_rows_with_metadata(
+                self.engines.conversation,
                 where=_and_where(
                     {"entity_type": "workflow_step_exec"},
                     {"workspace_id": self.config.workspace_id},
                 ),
-                limit=10_000,
             )
         maintenance_steps = [
-            node
-            for node in step_nodes
+            row
+            for row in step_rows
             if (
-                str((node.metadata or {}).get("workflow_id") or "") == DERIVED_KNOWLEDGE_WORKFLOW_ID
-                or str((node.metadata or {}).get("workflow_id") or "").startswith("maintenance.")
+                str((row["metadata"] or {}).get("workflow_id") or "") == DERIVED_KNOWLEDGE_WORKFLOW_ID
+                or str((row["metadata"] or {}).get("workflow_id") or "").startswith("maintenance.")
             )
         ]
-        with _temporary_namespace(self.engines.derived_knowledge_engine(), ns.derived_knowledge):
-            derived = self.engines.derived_knowledge_engine().read.get_nodes(
-                where=_and_where(
-                    {"artifact_kind": "derived_knowledge"},
-                    {"workspace_id": self.config.workspace_id},
-                ),
-                limit=10_000,
+        derived_rows = self._node_rows_with_metadata(
+            self.engines.derived_knowledge_engine(),
+            where=_and_where(
+                {"artifact_kind": "derived_knowledge"},
+                {"workspace_id": self.config.workspace_id},
             )
+        )
         return {
             "maintenance_poll_count": self.maintenance_poll_count,
             "job_status_counts": dict(Counter(str(job.status) for job in jobs)),
@@ -749,9 +1103,9 @@ class LongRunHarness:
             "foreground_replies": [_lane_row_to_dict(row) for row in replies],
             "workflow_step_count": len(maintenance_steps),
             "maintenance_workflow_step_count": len(maintenance_steps),
-            "maintenance_workflow_step_ids": [str(node.id) for node in maintenance_steps],
-            "derived_artifact_count": len(derived),
-            "derived_artifact_ids": [str(node.id) for node in derived],
+            "maintenance_workflow_step_ids": [str(row["id"]) for row in maintenance_steps],
+            "derived_artifact_count": len(derived_rows),
+            "derived_artifact_ids": [str(row["id"]) for row in derived_rows],
         }
 
     def projection_summary(self) -> dict[str, Any]:
@@ -786,6 +1140,8 @@ class LongRunHarness:
             "model": self.config.ollama_model,
             "base_url": self.config.ollama_base_url,
             "parser_mode": "ollama",
+            "parser_lane": self.config.parser_lane,
+            "parse_timeout_seconds": self.config.parse_timeout_seconds,
             "sampled_prompts_available": False,
             "quality_failures": [
                 {"doc_id": record.doc_id, "failures": record.llm_quality_failures}
@@ -852,7 +1208,17 @@ class LongRunHarness:
         return "succeeded"
 
     def _prepare_run_directory(self) -> None:
-        for name in ("input", "processing", "completed", "failed", "quarantine", "dump", "engines", "projection_vault"):
+        for name in (
+            "input",
+            "processing",
+            "completed",
+            "failed",
+            "quarantine",
+            "dump",
+            "engines",
+            "parser_runs",
+            "projection_vault",
+        ):
             (self.run_dir / name).mkdir(parents=True, exist_ok=True)
 
     def _reset_run_directory(self) -> None:
@@ -1137,10 +1503,13 @@ class LongRunHarness:
             request = self._request_for(record)
             source_document_id = self.pipeline._source_document_id(request)
             try:
-                record.parse_result = self.pipeline.parse_source(
+                record.parse_result = self._run_parse_with_subprocess(
+                    record=record,
                     request=request,
                     source_document_id=source_document_id,
                 )
+            except LongRunDocumentError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 code = classify_exception(exc, phase="parse_document")
                 if code in RECOVERABLE_LLM_QUALITY_FAILURES:
@@ -1148,7 +1517,17 @@ class LongRunHarness:
                 raise LongRunDocumentError(code, str(exc), phase="parse_document") from exc
             record.source_document_id = source_document_id
             self._transition(record, "PARSED", phase="parse_document")
-            return RunSuccess(state_update=[("u", {"source_document_id": source_document_id})])
+            return RunSuccess(
+                state_update=[
+                    (
+                        "u",
+                        {
+                            "source_document_id": source_document_id,
+                            "parser_lane": self.config.parser_lane,
+                        },
+                    )
+                ]
+            )
 
         @resolver.register("persist_document")
         def _persist(ctx):
@@ -1458,6 +1837,23 @@ class LongRunHarness:
         vault_root = self.run_dir / "projection_vault"
         self.projection_worker.process_pending_projections(self.config.workspace_id, str(vault_root))
 
+    @staticmethod
+    def _node_rows_with_metadata(engine: Any, *, where: dict[str, Any], limit: int = 10_000) -> list[dict[str, Any]]:
+        got = engine.read._node_get_raw(  # noqa: SLF001 - harness needs metadata-only inspection
+            where=where,
+            limit=limit,
+            include=["metadatas"],
+        )
+        ids = list(got.get("ids") or [])
+        documents = list(got.get("documents") or [])
+        metadatas = list(got.get("metadatas") or [])
+        rows: list[dict[str, Any]] = []
+        for idx, node_id in enumerate(ids):
+            metadata = metadatas[idx] if idx < len(metadatas) and isinstance(metadatas[idx], dict) else {}
+            document = documents[idx] if idx < len(documents) else None
+            rows.append({"id": str(node_id), "document": document, "metadata": dict(metadata)})
+        return rows
+
     def _mark_document_progress(self, record: DocumentRecord, *, step_name: str) -> None:
         self.active_document_id = record.doc_id
         self.active_step_name = step_name
@@ -1670,14 +2066,7 @@ class LongRunHarness:
                 raise AssertionError(f"derived node {node.id} is missing provenance")
 
     def _build_parser(self):
-        provider_settings = WorkflowProviderSettings(
-            parser=ProviderEndpointConfig(
-                provider="ollama",
-                model=self.config.ollama_model,
-                base_url=self.config.ollama_base_url,
-            ),
-            embedding=EmbeddingProviderConfig(provider="fake", model="longrun-embed", dimension=2),
-        )
+        provider_settings = self._provider_settings()
 
         def _parser(**kwargs):
             kwargs.pop("llm_provider", None)
@@ -1686,6 +2075,167 @@ class LongRunHarness:
             return parse_page_index_document(provider_settings=provider_settings, **kwargs)
 
         return _parser
+
+    def _provider_settings(self) -> WorkflowProviderSettings:
+        return WorkflowProviderSettings(
+            parser=ProviderEndpointConfig(
+                provider="ollama",
+                model=self.config.ollama_model,
+                base_url=self.config.ollama_base_url,
+            ),
+            embedding=EmbeddingProviderConfig(provider="fake", model="longrun-embed", dimension=2),
+        )
+
+    def _run_parse_with_subprocess(
+        self,
+        *,
+        record: DocumentRecord,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+    ) -> Any:
+        parser_run_dir = self.run_dir / "parser_runs" / record.doc_id
+        parser_run_dir.mkdir(parents=True, exist_ok=True)
+        result_path = parser_run_dir / "result.json"
+        failure_path = parser_run_dir / "failure.json"
+        heartbeat_path = self.dumper.dump_dir / "parser_heartbeat.json"
+        for path in (result_path, failure_path):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        payload = {
+            "parser_lane": self.config.parser_lane,
+            "doc_id": record.doc_id,
+            "source_document_id": source_document_id,
+            "title": request.title,
+            "raw_text": request.raw_text,
+            "source_format": request.source_format,
+            "parser_mode": request.parser_mode,
+            "provider_settings": self._provider_settings().model_dump(
+                field_mode="backend",
+                dump_format="json",
+            ),
+            "parser_run_dir": str(parser_run_dir),
+            "result_path": str(result_path),
+            "failure_path": str(failure_path),
+            "heartbeat_path": str(heartbeat_path),
+        }
+        started_ms = _now_ms()
+        started_monotonic = time.monotonic()
+        self._write_parser_heartbeat(
+            {
+                "phase": "parent_waiting",
+                "timestamp_ms": started_ms,
+                "parser_lane": self.config.parser_lane,
+                "doc_id": record.doc_id,
+                "timeout_seconds": self.config.parse_timeout_seconds,
+                "result_path": str(result_path),
+                "failure_path": str(failure_path),
+            }
+        )
+        context = multiprocessing.get_context("spawn")
+        process = context.Process(target=self._parser_child_target, args=(payload,))
+        process.start()
+        while process.is_alive():
+            elapsed_seconds = time.monotonic() - started_monotonic
+            if elapsed_seconds > self.config.parse_timeout_seconds:
+                self._terminate_parser_child(process)
+                self._write_parser_heartbeat(
+                    {
+                        "phase": "timeout",
+                        "timestamp_ms": _now_ms(),
+                        "parser_lane": self.config.parser_lane,
+                        "doc_id": record.doc_id,
+                        "pid": process.pid,
+                        "timeout_seconds": self.config.parse_timeout_seconds,
+                        "result_path": str(result_path),
+                        "failure_path": str(failure_path),
+                    }
+                )
+                raise LongRunDocumentError(
+                    "document_parse_failed",
+                    (
+                        f"parser lane {self.config.parser_lane!r} timed out after "
+                        f"{self.config.parse_timeout_seconds}s for {record.doc_id}"
+                    ),
+                    phase="parse_document",
+                )
+            self._write_parser_heartbeat(
+                {
+                    "phase": "parent_waiting",
+                    "timestamp_ms": _now_ms(),
+                    "parser_lane": self.config.parser_lane,
+                    "doc_id": record.doc_id,
+                    "pid": process.pid,
+                    "timeout_seconds": self.config.parse_timeout_seconds,
+                    "result_path": str(result_path),
+                    "failure_path": str(failure_path),
+                }
+            )
+            try:
+                process.join(timeout=1.0)
+            except KeyboardInterrupt:
+                self._terminate_parser_child(process)
+                self._write_parser_heartbeat(
+                    {
+                        "phase": "interrupted",
+                        "timestamp_ms": _now_ms(),
+                        "parser_lane": self.config.parser_lane,
+                        "doc_id": record.doc_id,
+                        "pid": process.pid,
+                        "result_path": str(result_path),
+                        "failure_path": str(failure_path),
+                    }
+                )
+                raise
+        process.join(timeout=1.0)
+        if result_path.exists():
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            self._write_parser_heartbeat(
+                {
+                    "phase": "completed",
+                    "timestamp_ms": _now_ms(),
+                    "parser_lane": payload.get("parser_lane", self.config.parser_lane),
+                    "doc_id": record.doc_id,
+                    "pid": process.pid,
+                    "result_path": str(result_path),
+                    "failure_path": str(failure_path),
+                    "diagnostics": payload.get("diagnostics") or {},
+                }
+            )
+            return self._parse_result_from_payload(payload)
+        failure: dict[str, Any] = {}
+        if failure_path.exists():
+            failure = json.loads(failure_path.read_text(encoding="utf-8"))
+        raise LongRunDocumentError(
+            "document_parse_failed",
+            (
+                f"parser lane {self.config.parser_lane!r} failed for {record.doc_id}: "
+                f"{failure.get('error_type', 'unknown')}: {failure.get('message', 'no result written')}"
+            ),
+            phase="parse_document",
+        )
+
+    def _terminate_parser_child(self, process: multiprocessing.Process) -> None:
+        if not process.is_alive():
+            return
+        process.terminate()
+        process.join(timeout=5.0)
+        if process.is_alive() and hasattr(process, "kill"):
+            process.kill()
+            process.join(timeout=5.0)
+
+    def _write_parser_heartbeat(self, payload: dict[str, Any]) -> None:
+        self.parser_heartbeat = dict(payload)
+        _write_json_file(self.dumper.dump_dir / "parser_heartbeat.json", self.parser_heartbeat)
+
+    def _parse_result_from_payload(self, payload: dict[str, Any]) -> Any:
+        return SimpleNamespace(
+            semantic_tree=SimpleNamespace(title=str(payload.get("title") or "Parsed document")),
+            graph_payload=dict(payload.get("graph_payload") or {}),
+            parser_lane=str(payload.get("parser_lane") or self.config.parser_lane),
+            diagnostics=dict(payload.get("diagnostics") or {}),
+        )
 
     def _generate_corpus(self) -> None:
         topic = "urban watershed resilience and stormwater infrastructure"
@@ -2110,20 +2660,20 @@ def test_longrun_maintenance_summary_counts_only_maintenance_steps(tmp_path: Pat
     harness = LongRunHarness(run_dir=tmp_path / "maintenance-summary", config=config)
     harness.prepare()
 
-    step_nodes = [
-        SimpleNamespace(
-            id="ingest-step",
-            metadata={"entity_type": "workflow_step_exec", "workflow_id": WORKFLOW_ID},
-        ),
-        SimpleNamespace(
-            id="maintenance-step-1",
-            metadata={"entity_type": "workflow_step_exec", "workflow_id": DERIVED_KNOWLEDGE_WORKFLOW_ID},
-        ),
-        SimpleNamespace(
-            id="maintenance-step-2",
-            metadata={"entity_type": "workflow_step_exec", "workflow_id": "maintenance.execution_wisdom.v1"},
-        ),
-    ]
+    step_rows = {
+        "ids": ["ingest-step", "maintenance-step-1", "maintenance-step-2"],
+        "documents": ["{}", "{}", "{}"],
+        "metadatas": [
+            {"entity_type": "workflow_step_exec", "workflow_id": WORKFLOW_ID},
+            {"entity_type": "workflow_step_exec", "workflow_id": DERIVED_KNOWLEDGE_WORKFLOW_ID},
+            {"entity_type": "workflow_step_exec", "workflow_id": "maintenance.execution_wisdom.v1"},
+        ],
+    }
+    derived_rows = {
+        "ids": ["derived-1"],
+        "documents": ["{}"],
+        "metadatas": [{"artifact_kind": "derived_knowledge"}],
+    }
     jobs = [SimpleNamespace(job_id="job-1", entity_id="doc-001", status="DONE")]
 
     monkeypatch = pytest.MonkeyPatch()
@@ -2135,13 +2685,13 @@ def test_longrun_maintenance_summary_counts_only_maintenance_steps(tmp_path: Pat
     )
     monkeypatch.setattr(
         harness.engines.conversation.read,
-        "get_nodes",
-        lambda **kwargs: step_nodes,
+        "_node_get_raw",
+        lambda **kwargs: step_rows,
     )
     monkeypatch.setattr(
         harness.engines.derived_knowledge_engine().read,
-        "get_nodes",
-        lambda **kwargs: [SimpleNamespace(id="derived-1")],
+        "_node_get_raw",
+        lambda **kwargs: derived_rows,
     )
     try:
         summary = harness.maintenance_summary()
@@ -2300,6 +2850,148 @@ def test_longrun_config_from_env_rejects_unsupported_backend(monkeypatch: pytest
         LongRunConfig.from_env()
 
 
+def test_longrun_config_from_env_accepts_parser_selection(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER", "page_index")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "7")
+
+    config = LongRunConfig.from_env()
+
+    assert config.parser_lane == "page_index"
+    assert config.parse_timeout_seconds == 7
+
+
+def test_longrun_config_from_env_defaults_to_workflow_layered(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.delenv("KOGWISTAR_LONGRUN_PARSER", raising=False)
+
+    config = LongRunConfig.from_env()
+
+    assert config.parser_lane == "workflow_layered"
+
+
+def test_longrun_config_from_env_rejects_legacy_parser_lane(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER", "legacy_tree")
+
+    with pytest.raises(ValueError, match="KOGWISTAR_LONGRUN_PARSER"):
+        LongRunConfig.from_env()
+
+
+def test_longrun_config_from_env_rejects_non_positive_parse_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValueError, match="must be positive"):
+        LongRunConfig.from_env()
+
+
+def _fake_provider_settings_payload() -> dict[str, Any]:
+    return WorkflowProviderSettings(
+        parser=ProviderEndpointConfig(provider="fake", model="fake-parser"),
+        embedding=EmbeddingProviderConfig(provider="fake", model="fake-embed", dimension=2),
+    ).model_dump(field_mode="backend", dump_format="json")
+
+
+def _parser_child_payload(tmp_path: Path, *, parser_lane: str) -> dict[str, Any]:
+    run_dir = tmp_path / f"parser-{parser_lane}"
+    return {
+        "parser_lane": parser_lane,
+        "doc_id": "doc-001",
+        "source_document_id": "source-doc-001",
+        "title": "Parser Dispatch",
+        "raw_text": "# Parser Dispatch\n\nAlpha clause.\n\n## Finding\n\nBeta clause.",
+        "source_format": "markdown",
+        "parser_mode": "heuristic",
+        "provider_settings": _fake_provider_settings_payload(),
+        "parser_run_dir": str(run_dir),
+        "result_path": str(run_dir / "result.json"),
+        "failure_path": str(run_dir / "failure.json"),
+        "heartbeat_path": str(run_dir / "heartbeat.json"),
+    }
+
+
+def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
+    payload = _parser_child_payload(tmp_path, parser_lane="page_index")
+
+    _longrun_parser_child_main(payload)
+
+    result = json.loads(Path(payload["result_path"]).read_text(encoding="utf-8"))
+    assert result["ok"] is True
+    assert result["parser_lane"] == "page_index"
+    assert result["graph_payload"]["nodes"]
+
+
+def test_longrun_workflow_layered_parser_lane_uses_workflow_mode(tmp_path: Path):
+    payload = _parser_child_payload(tmp_path, parser_lane="workflow_layered")
+
+    _longrun_parser_child_main(payload)
+
+    result = json.loads(Path(payload["result_path"]).read_text(encoding="utf-8"))
+    assert result["ok"] is True
+    assert result["parser_lane"] == "workflow_layered"
+    assert result["diagnostics"]["parse_session_mode"] == "workflow_layered"
+    assert result["graph_payload"]["nodes"]
+
+
+def test_longrun_parser_subprocess_timeout_records_heartbeat(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        parser_lane="workflow_layered",
+        parse_timeout_seconds=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parser-timeout", config=config)
+    harness._prepare_run_directory()
+    harness._parser_child_target = _longrun_parser_sleep_child
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Parser Timeout",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+    )
+    request = IngestPipelineRequest(
+        workspace_id=config.workspace_id,
+        source_uri=record.source_uri,
+        title=record.title,
+        raw_text="# Parser Timeout\n\nAlpha",
+        source_format="markdown",
+        parser_mode="heuristic",
+    )
+
+    with pytest.raises(LongRunDocumentError, match="timed out"):
+        harness._run_parse_with_subprocess(
+            record=record,
+            request=request,
+            source_document_id="source-doc-001",
+        )
+
+    assert harness.parser_heartbeat is not None
+    assert harness.parser_heartbeat["phase"] == "timeout"
+    heartbeat_path = harness.dumper.dump_dir / "parser_heartbeat.json"
+    assert heartbeat_path.exists()
+
+
 @pytest.mark.parametrize(
     ("backend", "expected_factory"),
     [
@@ -2456,8 +3148,8 @@ def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypa
     parsed_edges = [SimpleNamespace(id="parsed-edge-1")]
 
     monkeypatch.setattr(
-        harness.pipeline,
-        "parse_source",
+        harness,
+        "_run_parse_with_subprocess",
         lambda **kwargs: SimpleNamespace(semantic_tree=SimpleNamespace(title=record.title)),
     )
     monkeypatch.setattr(harness.pipeline, "register_source", lambda **kwargs: None)
@@ -2521,8 +3213,8 @@ def test_longrun_resume_probe_suspends_and_resumes_checkpoint(tmp_path: Path, mo
     parsed_nodes = [SimpleNamespace(id="parsed-node-1"), SimpleNamespace(id="parsed-node-2")]
     parsed_edges = [SimpleNamespace(id="parsed-edge-1")]
     monkeypatch.setattr(
-        first.pipeline,
-        "parse_source",
+        first,
+        "_run_parse_with_subprocess",
         lambda **kwargs: SimpleNamespace(semantic_tree=SimpleNamespace(title=first_record.title)),
     )
     monkeypatch.setattr(first.pipeline, "register_source", lambda **kwargs: None)
@@ -2556,8 +3248,8 @@ def test_longrun_resume_probe_suspends_and_resumes_checkpoint(tmp_path: Path, mo
     second.prepare()
     resumed_record = second.records[0]
     monkeypatch.setattr(
-        second.pipeline,
-        "parse_source",
+        second,
+        "_run_parse_with_subprocess",
         lambda **kwargs: SimpleNamespace(semantic_tree=SimpleNamespace(title=resumed_record.title)),
     )
     monkeypatch.setattr(second.pipeline, "register_source", lambda **kwargs: None)
