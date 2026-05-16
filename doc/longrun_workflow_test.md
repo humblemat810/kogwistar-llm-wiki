@@ -6,6 +6,9 @@ test drives a generated corpus through the same runtime, ingestion, projection,
 and maintenance primitives that normal app code uses, then writes a diagnostic
 dump that can be shared with ChatGPT for post-run analysis.
 
+See the workflow diagrams in [diagrams.md](./diagrams.md#long-run-workflow-test)
+for the step flow and document-state view.
+
 ## Enable It
 
 The test is skipped by default. Run it explicitly:
@@ -122,3 +125,7 @@ The dump includes:
 On abort, the harness writes an abort snapshot, moves active processing
 documents to `quarantine/`, and then finalizes the dump so the report matches
 the final folder state.
+
+For the longer architectural explanation of why the harness exists, see
+[diagrams.md](./diagrams.md#long-run-workflow-test) and
+[testing_guide.md](./testing_guide.md#long-run-workflow-test).

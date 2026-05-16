@@ -371,17 +371,82 @@ flowchart LR
 
 ## Knowledge Policy Boundary
 
+This boundary is the handoff between the app's own words and the reusable core
+policy. The app is allowed to name its modes however it wants. The core policy
+does not care about those mode names. It only needs a generic yes/no approval
+signal plus the numeric threshold that controls how conservative the default
+policy should be.
+
+In other words:
+
+- `kogwistar-llm-wiki` decides what counts as a positive promotion signal in
+  app terms.
+- The core policy receives that decision as a boolean `promotion_approved`
+  value.
+- The core policy then applies the threshold rule.
+- If the app did not explicitly approve promotion, the core policy does not
+  promote.
+
+This is why the app can keep using `promotion_mode="sync"` while the reusable
+core stays vocabulary-agnostic.
+
+Three examples that match the current semantics:
+
+- Loose: `promotion_approved=True`, `auto_accept_threshold=0.50`, `default_accept_threshold=0.95` -> promote.
+- Balanced: `promotion_approved=True`, `auto_accept_threshold=0.95`, `default_accept_threshold=0.95` -> promote.
+- Strict: `promotion_approved=True`, `auto_accept_threshold=0.96`, `default_accept_threshold=0.95` -> do not promote.
+
+If `promotion_approved=False`, the result is always "do not promote" regardless of threshold.
+
+Concrete app-to-core mapping:
+
+```python
+# llm-wiki app vocabulary
+promotion_mode = "sync"
+auto_accept_threshold = 0.90
+
+# app boundary translation into the core signal
+promotion_approved = True
+
+# core policy sees only the generic contract
+PromotionContext(
+    promotion_mode="sync",
+    auto_accept_threshold=0.90,
+    default_accept_threshold=0.95,
+    promotion_approved=True,
+)
+# -> should_promote=True
+```
+
+```python
+# non-sync app vocabulary
+promotion_mode = "manual"
+auto_accept_threshold = 0.90
+
+# app boundary translation into the core signal
+promotion_approved = False
+
+# core policy sees only the generic contract
+PromotionContext(
+    promotion_mode="manual",
+    auto_accept_threshold=0.90,
+    default_accept_threshold=0.95,
+    promotion_approved=False,
+)
+# -> should_promote=False
+```
+
 ```mermaid
 flowchart TB
-    CORE["kogwistar.policy\nprotocols + conservative defaults"]
-    APPPOL["llm-wiki policies\nconfigured policy instances"]
-    TAX["LlmWikiArtifactTaxonomy\napp artifact names"]
-    CALLS["ingest / maintenance / projection call sites"]
+    CORE["Core policy\npromote or do not promote"]
+    APPPOL["llm-wiki policy\nmaps app wording to core inputs"]
+    TAX["App artifact types\nmaintenance_job_request, promoted_knowledge,\nderived_knowledge, execution_wisdom"]
+    CALLS["Ingest, maintenance, projection call sites"]
 
-    CORE -->|generic decisions| APPPOL
-    TAX -->|app vocabulary| APPPOL
-    APPPOL --> CALLS
-    CORE -.does not classify app vocabulary.-> TAX
+    TAX -->|names the app's artifact types| APPPOL
+    APPPOL -->|sets promotion_approved and passes threshold| CORE
+    CORE -->|returns promote / do not promote| CALLS
+    CORE -.does not need app mode names.-> TAX
 ```
 
 ---
@@ -410,6 +475,9 @@ flowchart TB
 The long-run workflow test is an opt-in diagnostic harness, not a production
 command. It uses runtime workflow execution for each document and a bounded
 daemon-like loop to observe background maintenance and projection state.
+
+For the full prose contract, folder semantics, and dump checklist, see
+[longrun_workflow_test.md](./longrun_workflow_test.md).
 
 ```mermaid
 flowchart TD
