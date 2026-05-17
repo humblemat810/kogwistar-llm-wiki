@@ -2684,6 +2684,12 @@ def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
     result = json.loads(Path(payload["result_path"]).read_text(encoding="utf-8"))
     assert result["ok"] is True
     assert result["parser_lane"] == "page_index"
+    assert result["diagnostics"]["parser_lane"] == "page_index"
+    assert result["diagnostics"]["page_index"]["assignment_mode"] in {
+        "heuristic_deterministic",
+        "ollama_flat_assignment",
+        "deterministic_fallback",
+    }
     assert result["graph_payload"]["nodes"]
 
 

@@ -281,7 +281,10 @@ def run_longrun_parser_child(payload: dict[str, Any]) -> None:
             )
             _trace("child_page_index_graph_payload_done")
             title = str(getattr(result.semantic_tree, "title", payload["title"]))
-            diagnostics = {"parse_session_mode": None, "workflow_status": None}
+            diagnostics = {
+                "parser_lane": "page_index",
+                "page_index": _dump_model(result.diagnostics),
+            }
         elif parser_lane == "workflow_layered":
             from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput
             from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
