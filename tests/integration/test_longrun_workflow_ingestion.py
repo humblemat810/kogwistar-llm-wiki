@@ -40,7 +40,10 @@ from kogwistar_llm_wiki.ingest_pipeline import (
     build_postgres_namespace_engines,
 )
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
-from kogwistar_llm_wiki.longrun_parser_worker import run_longrun_parser_child
+from kogwistar_llm_wiki.longrun_parser_worker import (
+    _basic_sense_eval_from_graph_payload,
+    run_longrun_parser_child,
+)
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.maintenance_policy import DERIVED_KNOWLEDGE_WORKFLOW_ID
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
@@ -138,6 +141,8 @@ class LongRunConfig:
     token_max: int = 2000
     workspace_id: str = "longrun"
     checkpoint_run_dir: str | None = None
+    doc_profile: str = "medium"
+    skip_maintenance_invariant: bool = False
 
     @classmethod
     def from_env(cls) -> "LongRunConfig":
@@ -147,6 +152,17 @@ class LongRunConfig:
                 "KOGWISTAR_LONGRUN_DOC_COUNT must be at least 20 unless "
                 "KOGWISTAR_LONGRUN_ALLOW_SMALL=1 is set"
             )
+        doc_profile = os.getenv("KOGWISTAR_LONGRUN_DOC_PROFILE", "medium").strip().lower() or "medium"
+        if doc_profile not in {"tiny", "small", "medium"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_DOC_PROFILE must be one of {'tiny', 'small', 'medium'}; "
+                f"got {doc_profile!r}"
+            )
+        profile_token_min, profile_token_max = _longrun_doc_profile_token_bounds(doc_profile)
+        token_min = int(os.getenv("KOGWISTAR_LONGRUN_TOKEN_MIN", str(profile_token_min)))
+        token_max = int(os.getenv("KOGWISTAR_LONGRUN_TOKEN_MAX", str(profile_token_max)))
+        if token_min <= 0 or token_max <= 0 or token_min > token_max:
+            raise ValueError("KOGWISTAR_LONGRUN_TOKEN_MIN/MAX must define a positive ascending range")
         backend = os.getenv("KOGWISTAR_LONGRUN_BACKEND", "chroma").strip().lower() or "chroma"
         if backend not in {"chroma", "postgres"}:
             raise ValueError(
@@ -176,6 +192,7 @@ class LongRunConfig:
             enabled=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
+            doc_profile=doc_profile,
             backend=backend,
             parser_lane=parser_lane,
             parse_timeout_seconds=parse_timeout_seconds,
@@ -188,8 +205,11 @@ class LongRunConfig:
             max_post_doc_maintenance_steps=int(
                 os.getenv("KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS", "100")
             ),
+            token_min=token_min,
+            token_max=token_max,
             checkpoint_run_dir=os.getenv("KOGWISTAR_LONGRUN_RUN_DIR"),
             resume_probe_enabled=os.getenv("KOGWISTAR_LONGRUN_RESUME_PROBE") == "1",
+            skip_maintenance_invariant=os.getenv("KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT") == "1",
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -197,6 +217,7 @@ class LongRunConfig:
             "enabled": self.enabled,
             "mode": self.mode,
             "doc_count": self.doc_count,
+            "doc_profile": self.doc_profile,
             "backend": self.backend,
             "parser_lane": self.parser_lane,
             "parse_timeout_seconds": self.parse_timeout_seconds,
@@ -213,6 +234,7 @@ class LongRunConfig:
             "tokenizer_method": TOKENIZER_METHOD,
             "workspace_id": self.workspace_id,
             "checkpoint_run_dir": self.checkpoint_run_dir,
+            "skip_maintenance_invariant": self.skip_maintenance_invariant,
         }
 
 
@@ -382,6 +404,8 @@ class DiagnosticDumper:
         counts = Counter(record.status for record in self.harness.records)
         progress = self.harness.progress_summary()
         recovery = self.harness.recovery_summary()
+        parser_eval = self.harness.parser_eval_summary()
+        parser_eval_json = json.dumps(_jsonable(parser_eval), indent=2, sort_keys=True)
         lines = [
             "# Long-Run Workflow Diagnostic Report",
             "",
@@ -431,6 +455,14 @@ class DiagnosticDumper:
                 "## Progress Summary",
                 "",
                 f"```json\n{json.dumps(_jsonable(progress), indent=2, sort_keys=True)}\n```",
+                "",
+                "## Parser Evaluation",
+                "",
+                f"- Composite verdict: `{parser_eval['composite_verdict'] or 'n/a'}`",
+                f"- Average basic sense score: `{parser_eval['average_basic_sense_score'] if parser_eval['average_basic_sense_score'] is not None else 'n/a'}`",
+                f"- Evaluated documents: `{parser_eval['evaluated_count']}/{parser_eval['document_count']}`",
+                "",
+                f"```json\n{parser_eval_json}\n```",
                 "",
                 "## Recovery Summary",
                 "",
@@ -725,7 +757,9 @@ class LongRunHarness:
             "workspace_id": self.config.workspace_id,
             "backend": self.config.backend,
             "parser_lane": self.config.parser_lane,
+            "doc_profile": self.config.doc_profile,
             "resume_probe_enabled": self.config.resume_probe_enabled,
+            "skip_maintenance_invariant": self.config.skip_maintenance_invariant,
             "doc_count": len(self.records),
             "manifest_checkpoint_loaded": self.checkpoint_loaded,
             "manifest_checkpoint_path": (
@@ -747,6 +781,7 @@ class LongRunHarness:
                 record.doc_id for record in self.records if record.resumed_from_checkpoint
             ),
             "parser_heartbeat": self.parser_heartbeat,
+            "parser_eval": self.parser_eval_summary(),
         }
 
     def maintenance_summary(self) -> dict[str, Any]:
@@ -845,6 +880,42 @@ class LongRunHarness:
                 for record in self.records
                 if record.llm_quality_failures
             ],
+        }
+
+    def parser_eval_summary(self) -> dict[str, Any]:
+        documents: list[dict[str, Any]] = []
+        verdict_counts: Counter[str] = Counter()
+        scores: list[float] = []
+        for record in self.records:
+            parse_result = record.parse_result
+            evaluation = getattr(parse_result, "evaluation", None) if parse_result is not None else None
+            if not isinstance(evaluation, dict):
+                continue
+            entry = {"doc_id": record.doc_id, "title": record.title, **evaluation}
+            documents.append(entry)
+            verdict = str(evaluation.get("basic_sense_verdict") or "").strip()
+            if verdict:
+                verdict_counts[verdict] += 1
+            score = evaluation.get("basic_sense_score")
+            if isinstance(score, (int, float)):
+                scores.append(float(score))
+        average_score = round(sum(scores) / len(scores), 1) if scores else None
+        if average_score is None:
+            composite_verdict = None
+        elif average_score >= 70.0 and verdict_counts.get("weak", 0) == 0:
+            composite_verdict = "good"
+        elif average_score >= 40.0:
+            composite_verdict = "mixed"
+        else:
+            composite_verdict = "weak"
+        return {
+            "enabled": bool(documents),
+            "document_count": len(self.records),
+            "evaluated_count": len(documents),
+            "composite_verdict": composite_verdict,
+            "average_basic_sense_score": average_score,
+            "verdict_counts": dict(verdict_counts),
+            "documents": documents,
         }
 
     def _run_document_workflow(self, record: DocumentRecord) -> str:
@@ -1699,7 +1770,7 @@ class LongRunHarness:
             or maintenance["job_status_counts"].get("DONE", 0) > 0
             or bool(maintenance["foreground_replies"])
         )
-        if not useful_maintenance:
+        if not useful_maintenance and not self.config.skip_maintenance_invariant:
             raise AssertionError("background maintenance did not produce persisted evidence")
         self._verify_runtime_events_have_run_ids()
         self._verify_derived_nodes_have_provenance()
@@ -1964,6 +2035,7 @@ class LongRunHarness:
             graph_payload=dict(payload.get("graph_payload") or {}),
             parser_lane=str(payload.get("parser_lane") or self.config.parser_lane),
             diagnostics=dict(payload.get("diagnostics") or {}),
+            evaluation=dict(payload.get("evaluation") or {}),
         )
 
     def _generate_corpus(self) -> None:
@@ -1972,7 +2044,12 @@ class LongRunHarness:
             doc_id = f"doc-{index:03d}"
             title = f"Watershed Resilience Brief {index:03d}"
             path = self.run_dir / "input" / f"{doc_id}.md"
-            text = generate_longrun_document(index=index, title=title, topic=topic)
+            text = generate_longrun_document(
+                index=index,
+                title=title,
+                topic=topic,
+                profile=self.config.doc_profile,
+            )
             token_count = _count_tokens(text)
             if not (self.config.token_min <= token_count <= self.config.token_max):
                 raise AssertionError(f"generated {doc_id} has invalid token count {token_count}")
@@ -2128,7 +2205,18 @@ def normalized_fingerprint(*, code: str, phase: str, message: str) -> str:
     return f"{code}|{phase}|{normalized}"
 
 
-def generate_longrun_document(*, index: int, title: str, topic: str) -> str:
+def generate_longrun_document(*, index: int, title: str, topic: str, profile: str = "medium") -> str:
+    profile = str(profile or "medium").strip().lower()
+    section_counts = {
+        "tiny": 2,
+        "small": 4,
+        "medium": 7,
+    }
+    intro_by_profile = {
+        "tiny": f"This brief studies {topic} with a focus on {title.lower()}.",
+        "small": f"This brief studies {topic} with emphasis on watershed priorities and local maintenance.",
+        "medium": f"This brief studies {topic} with emphasis on {['green streets', 'detention basins', 'sensor networks', 'community stewardship', 'combined sewer overflow controls'][index % 5]}.",
+    }
     subtopic = [
         "green streets",
         "detention basins",
@@ -2139,7 +2227,7 @@ def generate_longrun_document(*, index: int, title: str, topic: str) -> str:
     sections = [
         f"# {title}",
         "",
-        f"This brief studies {topic} with emphasis on {subtopic}.",
+        intro_by_profile.get(profile, intro_by_profile["medium"]),
         "",
     ]
     paragraph = (
@@ -2153,18 +2241,68 @@ def generate_longrun_document(*, index: int, title: str, topic: str) -> str:
         "tracks equity, because the most flood-prone blocks often have less canopy, older drainage "
         "records, and fewer safe routes during intense storms. "
     )
-    for section in range(1, 8):
+    section_count = section_counts.get(profile, section_counts["medium"])
+    for section in range(1, section_count + 1):
         sections.append(f"## Finding {section}")
         sections.append("")
         sections.append(
-            paragraph
-            + f"The finding for cycle {section} links inspection evidence to a maintenance decision, "
-            f"so future reviews can distinguish source observations from derived planning guidance. "
-            "This provenance matters when a later model summary is incomplete, unsupported, or too "
-            "confident about benefits that were not measured in the source record."
+            (
+                paragraph
+                if profile == "medium"
+                else (
+                    f"In district {index}, the team records {topic} observations and chooses a small response. "
+                    f"The finding for cycle {section} keeps the decision tied to the source record."
+                    if profile == "tiny"
+                    else (
+                        f"In district {index}, the team records {topic} observations and chooses a small response. "
+                        f"The finding for cycle {section} stays linked to the source record and the maintenance plan."
+                    )
+                )
+            )
+            + (
+                " This provenance matters when a later model summary is incomplete, unsupported, or too "
+                "confident about benefits that were not measured in the source record."
+                if profile == "medium"
+                else ""
+            )
         )
         sections.append("")
     return "\n".join(sections)
+
+
+def _longrun_doc_profile_token_bounds(profile: str) -> tuple[int, int]:
+    profile = str(profile or "medium").strip().lower()
+    bounds = {
+        "tiny": (70, 150),
+        "small": (150, 800),
+        "medium": (500, 2000),
+    }
+    return bounds.get(profile, bounds["medium"])
+
+
+def test_generate_longrun_document_profiles_scale_by_size():
+    topic = "urban watershed resilience and stormwater infrastructure"
+    tiny = generate_longrun_document(index=1, title="Watershed Brief 001", topic=topic, profile="tiny")
+    small = generate_longrun_document(index=1, title="Watershed Brief 001", topic=topic, profile="small")
+    medium = generate_longrun_document(index=1, title="Watershed Brief 001", topic=topic, profile="medium")
+
+    tiny_tokens = _count_tokens(tiny)
+    small_tokens = _count_tokens(small)
+    medium_tokens = _count_tokens(medium)
+
+    assert tiny_tokens < small_tokens < medium_tokens
+    assert 70 <= tiny_tokens <= 150
+    assert 150 <= small_tokens <= 520
+    assert 500 <= medium_tokens <= 2000
+    assert tiny.count("## Finding") == 2
+    assert small.count("## Finding") == 4
+    assert medium.count("## Finding") == 7
+
+
+def test_longrun_doc_profile_token_bounds_are_applied_by_default():
+    assert _longrun_doc_profile_token_bounds("tiny") == (70, 150)
+    assert _longrun_doc_profile_token_bounds("small") == (150, 800)
+    assert _longrun_doc_profile_token_bounds("medium") == (500, 2000)
 
 
 def _check_ollama_available(config: LongRunConfig) -> tuple[bool, str | None]:
@@ -2605,6 +2743,27 @@ def test_longrun_config_from_env_defaults_to_workflow_layered(monkeypatch: pytes
     assert config.parser_lane == "workflow_layered"
 
 
+def test_longrun_config_from_env_supports_one_doc_no_resume_probe(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER", "page_index")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_RESUME_PROBE", "0")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_PROFILE", "tiny")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT", "1")
+
+    config = LongRunConfig.from_env()
+
+    assert config.mode == "fresh"
+    assert config.doc_count == 1
+    assert config.parser_lane == "page_index"
+    assert config.resume_probe_enabled is False
+    assert config.doc_profile == "tiny"
+    assert (config.token_min, config.token_max) == _longrun_doc_profile_token_bounds("tiny")
+    assert config.skip_maintenance_invariant is True
+
+
 def test_longrun_config_from_env_rejects_legacy_parser_lane(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
@@ -2676,6 +2835,206 @@ def _parser_child_payload(tmp_path: Path, *, parser_lane: str) -> dict[str, Any]
     }
 
 
+def _basic_sense_graph_payload(*, repeated_excerpt: bool = False) -> dict[str, Any]:
+    excerpt_a = "Alpha heading"
+    excerpt_b = excerpt_a if repeated_excerpt else "Beta section"
+    return {
+        "nodes": [
+            {
+                "id": "n-1",
+                "metadata": {"semantic_node_type": "SECTION", "level_from_root": 0},
+                "mentions": [
+                    {
+                        "spans": [
+                            {
+                                "excerpt": excerpt_a,
+                                "source_cluster_id": "cluster-1",
+                                "start_char": 0,
+                                "end_char": 40,
+                            }
+                        ]
+                    }
+                ],
+            },
+            {
+                "id": "n-2",
+                "metadata": {"semantic_node_type": "SUBSECTION", "level_from_root": 1},
+                "mentions": [
+                    {
+                        "spans": [
+                            {
+                                "excerpt": excerpt_b,
+                                "source_cluster_id": "cluster-1",
+                                "start_char": 40,
+                                "end_char": 80,
+                            }
+                        ]
+                    }
+                ],
+            },
+            {
+                "id": "n-3",
+                "metadata": {"semantic_node_type": "PARAGRAPH", "level_from_root": 2},
+                "mentions": [
+                    {
+                        "spans": [
+                            {
+                                "excerpt": "Closing detail",
+                                "source_cluster_id": "cluster-1",
+                                "start_char": 80,
+                                "end_char": 100,
+                            }
+                        ]
+                    }
+                ],
+            },
+        ],
+        "edges": [],
+    }
+
+
+def test_longrun_basic_sense_eval_scores_structurally_healthy_tree_higher_than_repetitive_tree():
+    healthy_eval = _basic_sense_eval_from_graph_payload(
+        graph_payload=_basic_sense_graph_payload(repeated_excerpt=False),
+        diagnostics={
+            "parser_lane": "page_index",
+            "page_index": {"assignment_mode": "heuristic_deterministic"},
+        },
+    )
+    weak_eval = _basic_sense_eval_from_graph_payload(
+        graph_payload={
+            "nodes": [
+                {
+                    "id": "n-weak",
+                    "metadata": {"semantic_node_type": "SECTION", "level_from_root": 0},
+                    "mentions": [],
+                }
+            ],
+            "edges": [],
+        },
+        diagnostics={
+            "parser_lane": "page_index",
+            "page_index": {
+                "assignment_mode": "deterministic_fallback",
+                "fallback_reason": "validation_failed",
+            },
+        },
+    )
+
+    assert healthy_eval["basic_sense_score"] > weak_eval["basic_sense_score"]
+    assert healthy_eval["basic_sense_verdict"] in {"good", "mixed"}
+    assert weak_eval["basic_sense_verdict"] == "weak"
+    assert healthy_eval["fallback_used"] is False
+    assert weak_eval["fallback_used"] is True
+
+
+def test_longrun_final_report_renders_parser_eval_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        parser_lane="page_index",
+        resume_probe_enabled=False,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parser-eval-report", config=config)
+    harness.prepare()
+    record = harness.records[0]
+    harness._transition(record, "COMPLETED", phase="probe_done")
+    record.parse_result = SimpleNamespace(
+        semantic_tree=SimpleNamespace(title=record.title),
+        evaluation=_basic_sense_eval_from_graph_payload(
+            graph_payload=_basic_sense_graph_payload(repeated_excerpt=False),
+            diagnostics={
+                "parser_lane": "page_index",
+                "page_index": {"assignment_mode": "heuristic_deterministic"},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        harness,
+        "maintenance_summary",
+        lambda: {
+            "maintenance_poll_count": 0,
+            "job_status_counts": {},
+            "jobs": [],
+            "maintenance_job_ids": [],
+            "maintenance_source_document_ids": [],
+            "maintenance_lane_messages": [],
+            "foreground_replies": [],
+            "workflow_step_count": 0,
+            "maintenance_workflow_step_count": 0,
+            "maintenance_workflow_step_ids": [],
+            "derived_artifact_count": 0,
+            "derived_artifact_ids": [],
+        },
+    )
+    monkeypatch.setattr(
+        harness,
+        "projection_summary",
+        lambda: {
+            "projection_poll_count": 0,
+            "snapshot_status": "ok",
+            "snapshot_error": None,
+            "entity_count": 0,
+            "entity_ids": [],
+            "manifest": None,
+        },
+    )
+    monkeypatch.setattr(
+        harness,
+        "promotion_provenance_summary",
+        lambda: {
+            "promoted_count": 0,
+            "verified_count": 0,
+            "missing_count": 0,
+            "verified": [],
+            "missing": [],
+            "missing_document_ids": [],
+        },
+    )
+    monkeypatch.setattr(harness, "graph_export", lambda: {})
+    monkeypatch.setattr(
+        harness,
+        "recovery_summary",
+        lambda: {
+            "status": "ok",
+            "documents": [],
+        },
+    )
+    monkeypatch.setattr(
+        harness,
+        "llm_summary",
+        lambda: {
+            "provider": "ollama",
+            "model": config.ollama_model,
+            "base_url": config.ollama_base_url,
+            "parser_mode": "ollama",
+            "parser_lane": config.parser_lane,
+            "parse_timeout_seconds": config.parse_timeout_seconds,
+            "sampled_prompts_available": False,
+            "quality_failures": [],
+        },
+    )
+
+    harness.dumper.dump(reason="probe", final=True)
+
+    progress = json.loads((harness.dumper.dump_dir / "progress_summary.json").read_text(encoding="utf-8"))
+    assert progress["parser_eval"]["evaluated_count"] == 1
+    assert progress["parser_eval"]["composite_verdict"] in {"good", "mixed"}
+    assert progress["parser_eval"]["documents"][0]["basic_sense_verdict"] in {"good", "mixed"}
+
+    report = (harness.dumper.dump_dir / "final_report.md").read_text(encoding="utf-8")
+    assert "## Parser Evaluation" in report
+    assert "Composite verdict" in report
+    assert "Average basic sense score" in report
+
+
 def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
     payload = _parser_child_payload(tmp_path, parser_lane="page_index")
 
@@ -2690,6 +3049,16 @@ def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
         "ollama_flat_assignment",
         "deterministic_fallback",
     }
+    assert set(result["evaluation"]) >= {
+        "basic_sense_score",
+        "basic_sense_verdict",
+        "coverage_ratio",
+        "max_depth",
+        "node_count",
+        "node_type_diversity",
+        "duplicate_excerpt_hits",
+        "fallback_used",
+    }
     assert result["graph_payload"]["nodes"]
 
 
@@ -2702,6 +3071,16 @@ def test_longrun_workflow_layered_parser_lane_uses_workflow_mode(tmp_path: Path)
     assert result["ok"] is True
     assert result["parser_lane"] == "workflow_layered"
     assert result["diagnostics"]["parse_session_mode"] == "workflow_layered"
+    assert set(result["evaluation"]) >= {
+        "basic_sense_score",
+        "basic_sense_verdict",
+        "coverage_ratio",
+        "max_depth",
+        "node_count",
+        "node_type_diversity",
+        "duplicate_excerpt_hits",
+        "fallback_used",
+    }
     assert result["graph_payload"]["nodes"]
 
 
