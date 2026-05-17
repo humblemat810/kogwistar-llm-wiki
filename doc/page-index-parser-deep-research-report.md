@@ -1,4 +1,4 @@
-# Robust Page Index Parsing on 8GB Ollama
+﻿# Robust Page Index Parsing on 8GB Ollama
 
 ## Executive summary
 
