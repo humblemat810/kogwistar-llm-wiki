@@ -70,49 +70,48 @@ The key semantic correction is:
 
 **Goal:** add explicit graph-space vocabulary without changing storage behavior.
 
-- [ ] Add a `GraphSpace` enum or equivalent app-level constants in
+- [x] Add a `GraphSpace` enum or equivalent app-level constants in
   `kogwistar-llm-wiki`.
-- [ ] Add typed namespace builder helpers for:
+- [x] Add typed namespace builder helpers for:
   `source`, `base_kg`, `curated_kg`, `conversation`, `workflow`, `review`,
   `wisdom`, `policy`, and `projection`.
-- [ ] Preserve existing properties as compatibility aliases:
+- [x] Preserve existing properties as compatibility aliases:
   `conv_fg`, `conv_bg`, `kg`, `derived_knowledge`, `workflow_maintenance`,
   `review`, `projection_jobs`, and `maintenance_jobs`.
-- [ ] Prefer new names such as `curated_kg` over ambiguous `kg`.
-- [ ] Add helper metadata fields such as:
-  `workspace_id`, `graph_space`, `graph_lane`, `knowledge_layer`, and
-  `legacy_namespace`.
-- [ ] Add invariant helper that can validate namespace/metadata agreement.
+- [x] Prefer new names such as `curated_kg` over ambiguous `kg`.
+- [x] Add helper metadata fields such as:
+  `workspace_id`, `graph_space`, `graph_lane`, and `legacy_namespace`.
+- [x] Add invariant helper that can validate namespace/metadata agreement.
 
 Acceptance criteria:
 
-- [ ] Existing namespace tests still pass unchanged.
-- [ ] New tests prove graph-space namespace strings are deterministic.
-- [ ] New tests prove old aliases still resolve.
-- [ ] New tests prove namespace/metadata mismatch is detectable.
-- [ ] No ingestion behavior changes in this phase.
+- [x] Existing namespace tests still pass unchanged.
+- [x] New tests prove graph-space namespace strings are deterministic.
+- [x] New tests prove old aliases still resolve.
+- [x] New tests prove namespace/metadata mismatch is detectable.
+- [x] No ingestion behavior changes in this phase.
 
 ## Phase 2: Source Graph Write Path
 
 **Goal:** make parsed source documents directly queryable in `SOURCE`.
 
-- [ ] Write raw source documents to `SOURCE`.
-- [ ] Write parsed document graph payloads to `SOURCE`.
-- [ ] Keep legacy foreground conversation write temporarily if needed for
+- [x] Write raw source documents to `SOURCE`.
+- [x] Write parsed document graph payloads to `SOURCE`.
+- [x] Keep legacy foreground conversation write temporarily if needed for
   compatibility.
-- [ ] Add `graph_space="source"` metadata to source documents, nodes, and edges.
-- [ ] Ensure deterministic parser provenance and span grounding survive the
+- [x] Add `graph_space="source"` metadata to source documents, nodes, and edges.
+- [x] Ensure deterministic parser provenance and span grounding survive the
   write path.
-- [ ] Update long-run artifacts/reporting to show source graph writes
+- [x] Update long-run artifacts/reporting to show source graph writes
   separately from conversation lane writes.
 
 Acceptance criteria:
 
-- [ ] Parsed document is queryable from `SOURCE` before promotion.
-- [ ] Parsed document is not required to exist in `CURATED_KG`.
-- [ ] Existing long-run ingestion tests continue passing.
-- [ ] Source spans remain grounded and validate against source text.
-- [ ] No source document is stored only in conversation.
+- [x] Parsed document is queryable from `SOURCE` before promotion.
+- [x] Parsed document is not required to exist in `CURATED_KG`.
+- [x] Existing long-run ingestion tests continue passing.
+- [x] Source spans remain grounded and validate against source text.
+- [x] No source document is stored only in conversation.
 
 ## Phase 3: Query Graph-Space Selection
 

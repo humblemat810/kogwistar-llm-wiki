@@ -362,20 +362,34 @@ class IngestPipeline:
         )
 
     def register_source(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> None:
-        document = Document(
+        source_namespace = self.namespaces_for(request.workspace_id).source_space
+        source_metadata = {
+            "workspace_id": request.workspace_id,
+            "graph_space": "source",
+            "source_uri": request.source_uri,
+            "title": request.title,
+            "source_format": request.source_format,
+            "parser_mode": request.parser_mode,
+        }
+        source_document = Document(
             id=source_document_id,
             content=request.raw_text,
             type="text",
-            metadata={
-                "workspace_id": request.workspace_id,
-                "source_uri": request.source_uri,
-                "title": request.title,
-                "source_format": request.source_format,
-                "parser_mode": request.parser_mode,
-            },
+            metadata=dict(source_metadata),
         )
+        compatibility_metadata = dict(source_metadata)
+        compatibility_metadata["legacy_namespace"] = namespace
+        compatibility_document = Document(
+            id=source_document_id,
+            content=request.raw_text,
+            type="text",
+            metadata=compatibility_metadata,
+        )
+
+        with _temporary_namespace(self.engines.kg, source_namespace):
+            self.engines.kg.write.add_document(source_document)
         with _temporary_namespace(self.engines.conversation, namespace):
-            self.engines.conversation.write.add_document(document)
+            self.engines.conversation.write.add_document(compatibility_document)
 
     def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> Any:
         parser_kwargs = self._build_parser_kwargs(request=request, source_document_id=source_document_id)
@@ -586,13 +600,31 @@ class IngestPipeline:
         graph_extraction: GraphExtractionWithIDs,
         namespace: str,
     ) -> None:
-        del request
+        source_namespace = self.namespaces_for(request.workspace_id).source_space
+        source_parsed = self._source_graph_extraction(
+            request=request,
+            source_document_id=source_document_id,
+            graph_extraction=graph_extraction,
+        )
+        compatibility_parsed = self._source_graph_extraction(
+            request=request,
+            source_document_id=source_document_id,
+            graph_extraction=graph_extraction,
+            legacy_namespace=namespace,
+        )
+
+        with _temporary_namespace(self.engines.kg, source_namespace):
+            self.engines.kg.persist_document_graph_extraction(
+                doc_id=source_document_id,
+                parsed=source_parsed,
+                mode="append",
+            )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.persist_document_graph_extraction(
                 doc_id=source_document_id,
-                parsed=graph_extraction,
+                parsed=compatibility_parsed,
                 mode="append",
-        )
+            )
 
     def create_maintenance_request(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
         node_id = str(
@@ -1033,3 +1065,32 @@ class IngestPipeline:
                 "source_cluster_id": None,
             }
         )
+
+    def _source_graph_extraction(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        graph_extraction: GraphExtractionWithIDs,
+        legacy_namespace: str | None = None,
+    ) -> GraphExtractionWithIDs:
+        enriched = graph_extraction.model_copy(deep=True)
+        metadata = {
+            "workspace_id": request.workspace_id,
+            "graph_space": "source",
+            "source_document_id": source_document_id,
+            "source_uri": request.source_uri,
+        }
+        for node in enriched.nodes:
+            node_metadata = dict(getattr(node, "metadata", {}) or {})
+            node_metadata.update(metadata)
+            if legacy_namespace is not None:
+                node_metadata["legacy_namespace"] = legacy_namespace
+            node.metadata = node_metadata
+        for edge in enriched.edges:
+            edge_metadata = dict(getattr(edge, "metadata", {}) or {})
+            edge_metadata.update(metadata)
+            if legacy_namespace is not None:
+                edge_metadata["legacy_namespace"] = legacy_namespace
+            edge.metadata = edge_metadata
+        return enriched

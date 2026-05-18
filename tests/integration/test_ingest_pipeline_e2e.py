@@ -2,11 +2,23 @@ from __future__ import annotations
 
 
 import inspect
+import json
 import os
 
 import pytest
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.utils import _temporary_namespace
+
+
+def _doc_metadata(row: dict) -> dict:
+    payload = row.get("metadata")
+    if isinstance(payload, str) and payload:
+        return json.loads(payload)
+    if isinstance(payload, dict):
+        return payload
+    return {}
 
 
 def _supports_gemini_mode() -> bool:
@@ -50,13 +62,24 @@ def test_ingest_pipeline_e2e(pipeline, ingest_request, parser_mode, llm_provider
     kg_nodes = pipeline.engines.kg.read.get_nodes(
         where={"workspace_id": ingest_request.workspace_id}
     )
+    ns = WorkspaceNamespaces(ingest_request.workspace_id)
     stored_document = pipeline.engines.conversation.backend.document_get(
+        ids=[artifacts.source_document_id],
+        include=["documents", "metadatas"],
+    )
+    source_document = pipeline.engines.kg.backend.document_get(
         ids=[artifacts.source_document_id],
         include=["documents", "metadatas"],
     )
 
     assert stored_document["ids"] == [artifacts.source_document_id]
+    assert source_document["ids"] == [artifacts.source_document_id]
     assert pipeline.engines.conversation.read.get_nodes(where={"doc_id": artifacts.source_document_id})
+    with _temporary_namespace(pipeline.engines.kg, ns.source_space):
+        source_nodes = pipeline.engines.kg.read.get_nodes(where={"doc_id": artifacts.source_document_id})
+    assert source_nodes
+    assert all(node.metadata.get("graph_space") == "source" for node in source_nodes)
+    assert all(node.metadata.get("source_document_id") == artifacts.source_document_id for node in source_nodes)
     assert any(
         node.metadata.get("artifact_kind") == "candidate_link"
         and node.metadata.get("namespace") == "ws:demo:conv:bg"
@@ -75,6 +98,8 @@ def test_ingest_pipeline_e2e(pipeline, ingest_request, parser_mode, llm_provider
     )
     assert not any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
     assert not any(node.metadata.get("artifact_kind") == "promoted_knowledge" for node in kg_nodes)
+    assert _doc_metadata(source_document["metadatas"][0])["graph_space"] == "source"
+    assert _doc_metadata(stored_document["metadatas"][0])["legacy_namespace"] == "ws:demo:conv:fg"
     assert artifacts.promoted_entity_id is None
 
     snapshot = pipeline.build_projection_snapshot(workspace_id=ingest_request.workspace_id)

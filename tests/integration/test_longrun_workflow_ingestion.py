@@ -1662,6 +1662,16 @@ class LongRunHarness:
                 f"source document {record.source_document_id} was not persisted",
                 phase="verify_document_artifacts",
             )
+        source_document = self.engines.kg.backend.document_get(
+            ids=[record.source_document_id],
+            include=["documents", "metadatas"],
+        )
+        if source_document["ids"] != [record.source_document_id]:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"source document {record.source_document_id} was not persisted to SOURCE",
+                phase="verify_document_artifacts",
+            )
         ns = WorkspaceNamespaces(self.config.workspace_id)
         with _temporary_namespace(self.engines.conversation, ns.conv_fg):
             parsed_nodes = self.engines.conversation.read.get_nodes(
@@ -1672,6 +1682,23 @@ class LongRunHarness:
             raise LongRunSystemicError(
                 "graph_invariant_violation",
                 f"no parsed nodes for source document {record.source_document_id}",
+                phase="verify_document_artifacts",
+            )
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            source_nodes = self.engines.kg.read.get_nodes(
+                where={"doc_id": record.source_document_id},
+                limit=10_000,
+            )
+        if not source_nodes:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"no source nodes for source document {record.source_document_id}",
+                phase="verify_document_artifacts",
+            )
+        if not all(node.metadata.get("graph_space") == "source" for node in source_nodes):
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"source node without source graph_space for {record.source_document_id}",
                 phase="verify_document_artifacts",
             )
         if not all(_node_has_doc_provenance(node, record.source_document_id) for node in parsed_nodes):

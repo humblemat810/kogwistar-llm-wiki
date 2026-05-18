@@ -11,12 +11,14 @@ from .models import (
     ProjectionSnapshot,
 )
 from .policies import LlmWikiPolicies, build_default_policies
-from .namespaces import WorkspaceNamespaces
+from .namespaces import GraphSpace, GraphSpaceNamespace, WorkspaceNamespaces
 
 __all__ = [
     "IngestPipeline",
     "IngestPipelineArtifacts",
     "IngestPipelineRequest",
+    "GraphSpace",
+    "GraphSpaceNamespace",
     "NamespaceEngines",
     "ObsidianBuildResult",
     "LlmWikiPolicies",

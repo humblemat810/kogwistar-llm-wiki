@@ -1,4 +1,17 @@
+from __future__ import annotations
+
+import json
+
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+
+
+def _doc_metadata(row: dict) -> dict:
+    payload = row.get("metadata")
+    if isinstance(payload, str) and payload:
+        return json.loads(payload)
+    if isinstance(payload, dict):
+        return payload
+    return {}
 
 
 def test_run_registers_source_and_invokes_parser(pipeline, ingest_request, monkeypatch):
@@ -40,3 +53,15 @@ def test_run_registers_source_and_invokes_parser(pipeline, ingest_request, monke
     )
     assert stored["ids"] == [artifacts.source_document_id]
     assert stored["metadatas"][0]["doc_id"] == artifacts.source_document_id
+
+    source_stored = pipeline.engines.kg.backend.document_get(
+        ids=[artifacts.source_document_id],
+        include=["documents", "metadatas"],
+    )
+    assert source_stored["ids"] == [artifacts.source_document_id]
+    assert source_stored["metadatas"][0]["doc_id"] == artifacts.source_document_id
+    assert _doc_metadata(source_stored["metadatas"][0])["graph_space"] == "source"
+
+    conv_meta = _doc_metadata(stored["metadatas"][0])
+    assert conv_meta["graph_space"] == "source"
+    assert conv_meta["legacy_namespace"] == "ws:demo:conv:fg"
