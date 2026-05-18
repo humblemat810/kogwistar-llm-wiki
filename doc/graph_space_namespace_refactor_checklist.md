@@ -134,17 +134,19 @@ Acceptance criteria:
 - [x] Results expose graph space so callers can explain where answers came
   from.
 
-## Phase 4: Base KG Projection
+## Phase 4: Base KG Reference Projection
 
-**Goal:** add automatically extracted but unverified knowledge as `BASE_KG`.
+**Goal:** add an explicit reference layer in `BASE_KG` that points back to
+`SOURCE` instead of duplicating source truth.
 
-- [ ] Add a configurable source-to-base extraction path.
+- [ ] Add a configurable source-to-base reference projection path.
 - [ ] Support inputs from page-index parsing, iterative layerwise workflow, or
   user-provided pre-parsed content.
-- [ ] Mark base facts/entities/relations as:
-  `source_extracted`, `machine_extracted`, and `unverified`.
-- [ ] Link every base fact/entity/relation back to `SOURCE` evidence.
-- [ ] Do not write base extraction outputs into `CURATED_KG`.
+- [ ] Mark base references as `source_referenced`, `machine_extracted`, and
+  `unverified`.
+- [ ] Link every base reference back to `SOURCE` evidence via explicit pointer
+  artifacts.
+- [ ] Do not write base projection outputs into `CURATED_KG`.
 - [ ] Do not call this step promotion.
 
 Acceptance criteria:

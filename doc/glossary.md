@@ -237,13 +237,13 @@ Contains:
 - terms
 - candidate facts
 - candidate relations
-- source-extracted graph projections
+- source-referenced graph projections
 
 Characteristics:
 
 - queryable immediately
 - marked unverified or machine-extracted
-- linked back to SOURCE spans/evidence
+- linked back to SOURCE via explicit reference artifacts
 - not equivalent to curated/promoted knowledge
 
 Example metadata:
@@ -472,7 +472,7 @@ Source ingestion is not promotion.
 
 ### Base Extraction
 
-The act of extracting machine-generated knowledge from SOURCE into BASE_KG.
+The act of projecting machine-generated references from SOURCE into BASE_KG.
 
 Base extraction is not promotion. It may be driven by page-index parsing,
 iterative layerwise parsing, user-provided parsed input, deterministic
@@ -564,13 +564,16 @@ A mechanism to stabilize or anchor a reference to an artifact across contexts.
 
 ### Ref
 
-A reference from one node to another.
+An explicit reference artifact that points from one graph object to another.
 
 Used for:
 
 - linking
 - reuse
 - contextualization
+
+A ref is not any node or edge that merely happens to have similar fields. The
+artifact must explicitly mark itself as a reference.
 
 ---
 
