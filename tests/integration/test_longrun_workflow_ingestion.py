@@ -1720,6 +1720,7 @@ class LongRunHarness:
                 f"{record.doc_id} has no promoted entity id to verify",
                 phase="verify_document_artifacts",
             )
+        ns = WorkspaceNamespaces(self.config.workspace_id)
         with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
             promoted_nodes = self.engines.kg.read.get_nodes(ids=[record.promoted_entity_id], limit=1)
         if not promoted_nodes:
@@ -1744,7 +1745,6 @@ class LongRunHarness:
                 phase="verify_document_artifacts",
             )
         pack_id = str(promoted_md["promotion_evidence_pack_id"])
-        ns = WorkspaceNamespaces(self.config.workspace_id)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
             packs = self.engines.conversation.read.get_nodes(ids=[pack_id], limit=1)
         if not packs:

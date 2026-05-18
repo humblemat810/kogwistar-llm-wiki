@@ -301,6 +301,48 @@ def test_knowledge_derivation_replay_reuses_existing_artifact(pipeline, ingest_r
     assert derived_nodes[0].label == "Replay Entity"
 
 
+def test_step_distill_uses_chroma_safe_where_filter(pipeline, ingest_request, monkeypatch):
+    workspace_id = "distill_filter_workspace"
+    engines = pipeline.engines
+    materialize_maintenance_designs(engines.workflow)
+
+    _run_sync_ingest(
+        pipeline,
+        _sync_request(
+            ingest_request,
+            workspace_id=workspace_id,
+            title="Filter Entity",
+            source_uri="file://filter-entity.txt",
+        ),
+    )
+
+    worker = MaintenanceWorker(engines)
+    ctx = SimpleNamespace(state_view={"workspace_id": workspace_id, "_deps": {"engines": engines}})
+    captured_where: dict[str, object] = {}
+    original_get_nodes = engines.kg.read.get_nodes
+
+    def wrapped_get_nodes(*args, **kwargs):
+        where = kwargs.get("where")
+        if isinstance(where, dict) and any(
+            isinstance(item, dict) and item.get("artifact_kind") == "promoted_knowledge"
+            for item in where.get("$and", [])
+        ):
+            captured_where.clear()
+            captured_where.update(where)
+        return original_get_nodes(*args, **kwargs)
+
+    monkeypatch.setattr(engines.kg.read, "get_nodes", wrapped_get_nodes)
+
+    worker._step_distill(ctx)
+
+    assert captured_where == {
+        "$and": [
+            {"artifact_kind": "promoted_knowledge"},
+            {"workspace_id": workspace_id},
+        ]
+    }
+
+
 def test_same_engine_derived_knowledge_uses_namespace_isolation(pipeline, ingest_request):
     workspace_id = "same_engine_workspace"
     ns = WorkspaceNamespaces(workspace_id)

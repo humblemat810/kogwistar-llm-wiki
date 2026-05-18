@@ -28,6 +28,11 @@ from .utils import _temporary_namespace
 logger = logging.getLogger(__name__)
 
 
+def _and_where(*clauses: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Compose a Chroma-compatible conjunction filter from simple metadata clauses."""
+    return {"$and": [dict(clause) for clause in clauses]}
+
+
 class BaseWorker(ABC):
     """Base class for background workers polling the Kogwistar artifact stream."""
 
@@ -349,7 +354,10 @@ class MaintenanceWorker(BaseWorker):
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(engines.kg, ns.curated_kg_space):
             promoted_nodes = engines.kg.read.get_nodes(
-                where={"artifact_kind": "promoted_knowledge", "workspace_id": workspace_id}
+                where=_and_where(
+                    {"artifact_kind": "promoted_knowledge"},
+                    {"workspace_id": workspace_id},
+                )
             )
 
         if not promoted_nodes:
