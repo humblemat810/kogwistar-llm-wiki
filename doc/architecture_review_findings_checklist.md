@@ -539,7 +539,7 @@ Required search themes for this branch:
   - Search for `demo` code paths that write graph state differently than mainline app workflows.
   - Search patterns: `"persist_demo_graph_extraction"`, `"demo"`, `"sync ingest"`, `"promoted_knowledge"`.
 - Discovered during implementation:
-  - [x] Demo enrichment is intentionally demo-only and mirrors a filtered semantic tree into KG to approximate a post-maintenance/post-promotion view for the one-process shortcut; regular ingest keeps the production contract focused on source and working artifacts first.
+  - [x] Demo rendering is intentionally demo-only and now reads `BASE_KG` through explicit graph-space selection to approximate the readable post-maintenance/post-promotion view; regular ingest keeps the production contract focused on source and working artifacts first.
 - Regression tests to add/update:
   - `tests/unit/test_projection_consistency.py`
 - Done means:

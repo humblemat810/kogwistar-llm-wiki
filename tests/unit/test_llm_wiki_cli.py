@@ -10,7 +10,7 @@ import pytest
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.models import ObsidianBuildResult
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.namespaces import GraphSpace, WorkspaceNamespaces
 
 
 @dataclass
@@ -27,6 +27,7 @@ class _FakePipeline:
         self.engines = engines
         self.requests: list[object] = []
         self.calls: list[str] = []
+        self.last_build_obsidian_vault_kwargs: dict[str, object] | None = None
 
     def run(self, request):
         self.requests.append(request)
@@ -54,9 +55,6 @@ class _FakePipeline:
         self._record("translate_parse_result")
         return SimpleNamespace(nodes=[], edges=[])
 
-    def persist_demo_graph_extraction(self, **kwargs):
-        self._record("persist_demo_graph_extraction")
-
     def ingest_parse_result(self, **kwargs):
         self._record("ingest_parse_result")
 
@@ -72,8 +70,24 @@ class _FakePipeline:
         self._record("create_promotion_candidate")
         return "promo-1"
 
-    def build_obsidian_vault(self, vault_root, *, workspace_id, version=None, event_seq=None):
+    def build_obsidian_vault(
+        self,
+        vault_root,
+        *,
+        workspace_id,
+        graph_spaces=None,
+        projection_filter=None,
+        version=None,
+        event_seq=None,
+    ):
         self._record("build_obsidian_vault")
+        self.last_build_obsidian_vault_kwargs = {
+            "workspace_id": workspace_id,
+            "graph_spaces": graph_spaces,
+            "projection_filter": projection_filter,
+            "version": version,
+            "event_seq": event_seq,
+        }
         return ObsidianBuildResult(vault_root=Path(vault_root), notes=7, canvases=7, dangling_links=0)
 
     def materialize_maintenance_designs(self):
@@ -141,13 +155,15 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
     assert payload["artifacts"]["promoted_entity_id"] is None
     assert payload["vault_result"]["notes"] == 7
     pipeline = captured["pipeline"]
+    assert pipeline.last_build_obsidian_vault_kwargs is not None
+    assert pipeline.last_build_obsidian_vault_kwargs["graph_spaces"] == [GraphSpace.BASE_KG]
+    assert pipeline.last_build_obsidian_vault_kwargs["projection_filter"] == "demo"
     assert pipeline.calls == [
         "namespaces_for",
         "_source_document_id",
         "register_source",
         "parse_source",
         "translate_parse_result",
-        "persist_demo_graph_extraction",
         "ingest_parse_result",
         "create_maintenance_request",
         "create_candidate_link",
@@ -172,6 +188,7 @@ def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch,
         assert engines is fake_engines
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline
+        pipeline._captured = captured
         return pipeline
 
     class _FakeMaintenanceWorker:

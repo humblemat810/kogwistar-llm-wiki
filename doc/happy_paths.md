@@ -4,10 +4,10 @@
 
 upload → parse → ingest → maintenance → promotion → projection
 
-Regular ingest does not imply the same immediate KG shape as the demo shortcut.
-The demo path can mirror a filtered semantic tree into KG so the one-process
-walkthrough approximates a later post-maintenance/post-promotion view and saves
-cost and time.
+Regular ingest does not imply the same immediate KG shape as the demo view.
+The demo path now renders from `BASE_KG` through explicit graph-space reads so
+the one-process walkthrough stays aligned with the same source/base write path
+as normal ingest while still keeping the vault readable.
 
 ```mermaid
 flowchart LR

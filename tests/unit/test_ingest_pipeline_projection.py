@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.namespaces import GraphSpace, WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
@@ -120,34 +120,20 @@ def test_demo_projection_reifies_section_hyperedges(pipeline, ingest_request):
         }
     )
     workspace_id = request.workspace_id
-    source_document_id = pipeline._source_document_id(request)
-
-    pipeline.register_source(
-        request=request,
-        source_document_id=source_document_id,
-        namespace=pipeline.namespaces_for(workspace_id).conv_fg,
-    )
-    parse_result = pipeline.parse_source(request=request, source_document_id=source_document_id)
-    graph_extraction = pipeline.translate_parse_result(
-        parse_result=parse_result,
-        source_document_id=source_document_id,
-    )
-    pipeline.persist_demo_graph_extraction(
-        request=request,
-        source_document_id=source_document_id,
-        graph_extraction=graph_extraction,
-        namespace=pipeline.namespaces_for(workspace_id).curated_kg_space,
-    )
+    artifacts = pipeline.run(request)
 
     kg_nodes = pipeline.engines.kg.read.get_nodes(where={"workspace_id": workspace_id})
-    assert any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
-    assert any(
-        node.metadata.get("projection_visible") is True
-        and node.metadata.get("demo_graph_extraction") is True
-        for node in kg_nodes
-    )
+    assert not any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
+    assert artifacts.promoted_entity_id is None
 
-    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    curated_snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    assert curated_snapshot.entities == []
+
+    snapshot = pipeline.build_projection_snapshot(
+        workspace_id=workspace_id,
+        graph_spaces=[GraphSpace.BASE_KG],
+        projection_filter="demo",
+    )
     entities_by_title = {entity.title: entity for entity in snapshot.entities}
 
     assert {"Contacts", "Alice", "Bob"} <= set(entities_by_title)
@@ -172,29 +158,16 @@ def test_demo_projection_hides_sentence_like_leaf_nodes(pipeline, ingest_request
         }
     )
     workspace_id = request.workspace_id
-    source_document_id = pipeline._source_document_id(request)
-
-    pipeline.register_source(
-        request=request,
-        source_document_id=source_document_id,
-        namespace=pipeline.namespaces_for(workspace_id).conv_fg,
-    )
-    parse_result = pipeline.parse_source(request=request, source_document_id=source_document_id)
-    graph_extraction = pipeline.translate_parse_result(
-        parse_result=parse_result,
-        source_document_id=source_document_id,
-    )
-    pipeline.persist_demo_graph_extraction(
-        request=request,
-        source_document_id=source_document_id,
-        graph_extraction=graph_extraction,
-        namespace=pipeline.namespaces_for(workspace_id).curated_kg_space,
-    )
+    pipeline.run(request)
 
     kg_nodes = pipeline.engines.kg.read.get_nodes(where={"workspace_id": workspace_id})
-    assert any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
+    assert not any(node.metadata.get("demo_graph_extraction") is True for node in kg_nodes)
 
-    snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
+    snapshot = pipeline.build_projection_snapshot(
+        workspace_id=workspace_id,
+        graph_spaces=[GraphSpace.BASE_KG],
+        projection_filter="demo",
+    )
     titles = {entity.title for entity in snapshot.entities}
 
     assert "Contacts" in titles

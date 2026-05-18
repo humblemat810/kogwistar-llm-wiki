@@ -120,12 +120,11 @@ Convergent promotion path:
 
 Demo shortcut:
 
-- The `demo` command uses the same source parsing pipeline but additionally
-  mirrors filtered semantic-tree structure into KG so the one-process demo can
-  approximate a post-maintenance/post-promotion view without extra LLM cost or
-  time.
-- That enrichment is intentionally demo-only and is meant for fast inspection
-  and projection legibility, not as the canonical production ingest contract.
+- The `demo` command uses the same source parsing pipeline as normal ingest but
+  renders its vault from explicit `BASE_KG` reads instead of mirroring parsed
+  semantic-tree structure into curated KG.
+- Demo legibility is handled at projection time, so the stored source/base graph
+  path stays aligned with the normal ingest contract.
 
 ---
 

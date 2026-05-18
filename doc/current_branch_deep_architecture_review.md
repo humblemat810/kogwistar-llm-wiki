@@ -585,7 +585,7 @@ pipeline = IngestPipeline(engines)
 
 Evidence:
 
-- Demo path calls `persist_demo_graph_extraction(...)` to mirror a richer semantic tree into KG.
+- Demo path now reads `BASE_KG` explicitly for vault rendering instead of mirroring a richer semantic tree into curated KG.
 - Regular `run(...)` promotes one app artifact node with summary text.
 
 Code references:

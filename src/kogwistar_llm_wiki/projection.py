@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, List, Set
@@ -12,7 +13,7 @@ from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 
 from .models import NamespaceEngines, ProjectionSnapshot, ObsidianBuildResult
 from .policies import LlmWikiPolicies, build_default_policies
-from .namespaces import WorkspaceNamespaces
+from .namespaces import GraphSpace, WorkspaceNamespaces
 from .utils import _temporary_namespace
 
 
@@ -29,31 +30,41 @@ class ProjectionManager:
         self.engines = engines
         self.policies = policies or build_default_policies()
 
-    def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
-        """Returns the current 'KG-visible' state for a workspace."""
+    def build_projection_snapshot(
+        self,
+        workspace_id: str,
+        *,
+        graph_spaces: list[GraphSpace | str] | None = None,
+        projection_filter: str | None = None,
+    ) -> ProjectionSnapshot:
+        """Returns the current graph-space visible state for a workspace."""
         ns = WorkspaceNamespaces(workspace_id)
+        requested_spaces = self._normalize_graph_spaces(graph_spaces)
+        namespaces = [self._namespace_for_graph_space(ns, graph_space) for graph_space in requested_spaces]
         all_nodes = self._read_workspace_nodes(
             workspace_id=workspace_id,
-            namespaces=[ns.curated_kg_space],
+            namespaces=namespaces,
         )
         # Edge reads are workspace-scoped first, with endpoint filtering kept as a
         # second line of defense for relationship visibility.
         all_edges = self._read_workspace_edges(
             workspace_id=workspace_id,
-            namespaces=[ns.curated_kg_space],
+            namespaces=namespaces,
         )
-        manifest_ids = self._load_projection_manifest_ids(workspace_id)
+        manifest_ids = self._load_projection_manifest_ids(workspace_id) if requested_spaces == [GraphSpace.CURATED_KG] else None
+        adjacency = self._build_adjacency(all_edges)
 
-        if manifest_ids is None:
-            visible_nodes = [
-                node
-                for node in all_nodes
-                if self.policies.projection.is_projection_eligible(node.metadata or {})
-            ]
-            visible_ids = {str(node.id) for node in visible_nodes}
-        else:
-            visible_nodes = [node for node in all_nodes if str(node.id) in manifest_ids]
-            visible_ids = {str(node.id) for node in visible_nodes}
+        visible_nodes = self._select_visible_nodes(
+            all_nodes=all_nodes,
+            requested_spaces=requested_spaces,
+            manifest_ids=manifest_ids,
+        )
+        if str(projection_filter or "").strip().lower() == "demo":
+            visible_nodes = self._apply_demo_projection_filter(
+                visible_nodes=visible_nodes,
+                adjacency=adjacency,
+            )
+        visible_ids = {str(node.id) for node in visible_nodes}
 
         source_ids_by_node: dict[str, set[str]] = defaultdict(set)
         target_ids_by_node: dict[str, set[str]] = defaultdict(set)
@@ -124,6 +135,92 @@ class ProjectionManager:
             ]
         )
 
+    def _normalize_graph_spaces(self, graph_spaces: list[GraphSpace | str] | None) -> list[GraphSpace]:
+        spaces = [GraphSpace.CURATED_KG] if graph_spaces is None else graph_spaces
+        normalized: list[GraphSpace] = []
+        for graph_space in spaces:
+            if isinstance(graph_space, GraphSpace):
+                normalized.append(graph_space)
+            else:
+                normalized.append(GraphSpace(str(graph_space).strip().lower()))
+        if not normalized:
+            raise ValueError("graph_spaces must not be empty")
+        return normalized
+
+    def _namespace_for_graph_space(self, ns: WorkspaceNamespaces, graph_space: GraphSpace) -> str:
+        if graph_space == GraphSpace.SOURCE:
+            return ns.source_space
+        if graph_space == GraphSpace.BASE_KG:
+            return ns.base_kg_space
+        if graph_space == GraphSpace.CURATED_KG:
+            return ns.curated_kg_space
+        raise ValueError(f"Projection does not support graph space {graph_space.value!r}")
+
+    def _node_graph_space(self, node: Any) -> str:
+        metadata = dict(getattr(node, "metadata", None) or {})
+        return str(metadata.get("graph_space") or "").strip().lower()
+
+    def _select_visible_nodes(
+        self,
+        *,
+        all_nodes: list[Any],
+        requested_spaces: list[GraphSpace],
+        manifest_ids: set[str] | None,
+    ) -> list[Any]:
+        selected: list[Any] = []
+        seen_ids: set[str] = set()
+        requested_space_values = {space.value for space in requested_spaces}
+        for node in all_nodes:
+            node_id = str(getattr(node, "id", "") or "")
+            if not node_id or node_id in seen_ids:
+                continue
+            node_space = self._node_graph_space(node)
+            if node_space not in requested_space_values:
+                continue
+            if manifest_ids is not None:
+                if node_id not in manifest_ids:
+                    continue
+            elif node_space == GraphSpace.CURATED_KG.value:
+                if not self.policies.projection.is_projection_eligible(dict(getattr(node, "metadata", None) or {})):
+                    continue
+            selected.append(node)
+            seen_ids.add(node_id)
+        return selected
+
+    def _apply_demo_projection_filter(self, *, visible_nodes: list[Any], adjacency: dict[str, set[str]]) -> list[Any]:
+        filtered: list[Any] = []
+        for node in visible_nodes:
+            node_id = str(getattr(node, "id", "") or "")
+            title = str(getattr(node, "label", "") or getattr(node, "summary", "") or "")
+            if title.startswith("This is a starter document for the LLM-Wiki quickstart"):
+                continue
+            if self._is_sentence_like_title(title) and not adjacency.get(node_id):
+                continue
+            filtered.append(node)
+        return filtered
+
+    def _build_adjacency(self, edges: list[Any]) -> dict[str, set[str]]:
+        adjacency: dict[str, set[str]] = defaultdict(set)
+        for edge in edges:
+            edge_sources = [str(item) for item in (getattr(edge, "source_ids", None) or []) if str(item)]
+            edge_targets = [str(item) for item in (getattr(edge, "target_ids", None) or []) if str(item)]
+            for source_id in edge_sources:
+                adjacency[source_id].update(edge_targets)
+            for target_id in edge_targets:
+                adjacency[target_id].update(edge_sources)
+        return adjacency
+
+    @staticmethod
+    def _is_sentence_like_title(title: str) -> bool:
+        text = str(title or "").strip()
+        if text.startswith("This is a starter document for the LLM-Wiki quickstart"):
+            return True
+        if len(text) < 32:
+            return False
+        if text.endswith((".", "!", "?")):
+            return True
+        return bool(re.search(r"\s{3,}", text))
+
     def _read_workspace_nodes(self, *, workspace_id: str, namespaces: list[str]) -> list[Any]:
         node_by_id: dict[str, Any] = {}
         for namespace in namespaces:
@@ -179,11 +276,17 @@ class ProjectionManager:
         vault_root: str | Path,
         *,
         workspace_id: str,
+        graph_spaces: list[GraphSpace | str] | None = None,
+        projection_filter: str | None = None,
         version: int | None = None,
         event_seq: int | None = None,
     ) -> ObsidianBuildResult:
         """Fully materializes a new Obsidian vault from the current projection."""
-        snapshot = self.build_projection_snapshot(workspace_id)
+        snapshot = self.build_projection_snapshot(
+            workspace_id,
+            graph_spaces=graph_spaces,
+            projection_filter=projection_filter,
+        )
         provider = KogwistarDuckProvider(
             entities=snapshot.entities,
             version=version,

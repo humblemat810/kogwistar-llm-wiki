@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import json
 import os
-import re
 from pathlib import Path
 import tempfile
 from typing import Any, Callable, Mapping
@@ -331,12 +330,16 @@ class IngestPipeline:
         vault_root: str | Path,
         *,
         workspace_id: str,
+        graph_spaces: list[GraphSpace | str] | None = None,
+        projection_filter: str | None = None,
         version: int | None = None,
         event_seq: int | None = None,
     ) -> ObsidianBuildResult:
         return self.projection.build_obsidian_vault(
             vault_root,
             workspace_id=workspace_id,
+            graph_spaces=graph_spaces,
+            projection_filter=projection_filter,
             version=version,
             event_seq=event_seq,
         )
@@ -475,132 +478,6 @@ class IngestPipeline:
             return GraphExtractionWithIDs.model_validate(payload)
         payload = semantic_tree_to_kge_payload(parse_result.semantic_tree, doc_id=source_document_id)
         return GraphExtractionWithIDs.model_validate(payload)
-
-    def persist_demo_graph_extraction(
-        self,
-        *,
-        request: IngestPipelineRequest,
-        source_document_id: str,
-        graph_extraction: GraphExtractionWithIDs,
-        namespace: str,
-    ) -> None:
-        """Persist a KG-visible copy of the semantic tree for the one-process demo.
-
-        The regular ingestion path keeps its existing promotion behavior. The demo
-        path intentionally mirrors a filtered semantic tree into KG so the graph view
-        approximates a post-maintenance/post-promotion view while remaining
-        single-process and ephemeral. That shortcut saves cost and time for the
-        one-process demo.
-        """
-        enriched = self._filter_demo_graph_extraction(graph_extraction)
-        kg_document = Document(
-            id=source_document_id,
-            content=request.raw_text,
-            type="text",
-            metadata={
-                "workspace_id": request.workspace_id,
-                "source_uri": request.source_uri,
-                "title": request.title,
-                "source_format": request.source_format,
-                "parser_mode": request.parser_mode,
-                "visibility": "projection",
-                "projection_visible": True,
-                "demo_graph_extraction": True,
-            },
-        )
-        for node in enriched.nodes:
-            metadata = dict(getattr(node, "metadata", {}) or {})
-            metadata.update(
-                {
-                    "workspace_id": request.workspace_id,
-                    "source_document_id": source_document_id,
-                    "source_uri": request.source_uri,
-                    "visibility": "projection",
-                    "projection_visible": True,
-                    "demo_graph_extraction": True,
-                }
-            )
-            node.metadata = metadata
-        for edge in enriched.edges:
-            metadata = dict(getattr(edge, "metadata", {}) or {})
-            metadata.update(
-                {
-                    "workspace_id": request.workspace_id,
-                    "source_document_id": source_document_id,
-                    "source_uri": request.source_uri,
-                    "visibility": "projection",
-                    "projection_visible": True,
-                    "demo_graph_extraction": True,
-                }
-            )
-            edge.metadata = metadata
-        with _temporary_namespace(self.engines.kg, namespace):
-            self.engines.kg.write.add_document(kg_document)
-            self.engines.kg.persist_document_graph_extraction(
-                doc_id=source_document_id,
-                parsed=enriched,
-                mode="append",
-            )
-
-    @staticmethod
-    def _is_sentence_like_title(title: str) -> bool:
-        text = str(title or "").strip()
-        if text.startswith("This is a starter document for the LLM-Wiki quickstart"):
-            return True
-        if len(text) < 32:
-            return False
-        if text.endswith((".", "!", "?")):
-            return True
-        return bool(re.search(r"\s{3,}", text))
-
-    def _filter_demo_graph_extraction(self, graph_extraction: GraphExtractionWithIDs) -> GraphExtractionWithIDs:
-        """Drop sentence-like leaf nodes from the demo graph while keeping hyperedge structure."""
-        enriched = graph_extraction.model_copy(deep=True)
-        parent_by_child: dict[str, str] = {}
-        for edge in enriched.edges:
-            sources = [str(item) for item in (getattr(edge, "source_ids", None) or []) if str(item)]
-            targets = [str(item) for item in (getattr(edge, "target_ids", None) or []) if str(item)]
-            if not sources or not targets:
-                continue
-            for source_id in sources:
-                for target_id in targets:
-                    parent_by_child[target_id] = source_id
-
-        retained_nodes = []
-        removed_ids: set[str] = set()
-        for node in enriched.nodes:
-            node_id = str(getattr(node, "id", "") or "")
-            if not node_id:
-                continue
-            title = str(getattr(node, "label", "") or getattr(node, "summary", "") or "")
-            semantic_type = str((getattr(node, "metadata", {}) or {}).get("semantic_node_type") or "")
-            is_leaf = node_id not in parent_by_child
-            if title.startswith("This is a starter document for the LLM-Wiki quickstart"):
-                removed_ids.add(node_id)
-                continue
-            if (
-                semantic_type not in {"DOCUMENT_ROOT"}
-                and is_leaf
-                and self._is_sentence_like_title(title)
-            ):
-                removed_ids.add(node_id)
-                continue
-            retained_nodes.append(node)
-
-        if not removed_ids:
-            return enriched
-
-        retained_edges = []
-        for edge in enriched.edges:
-            sources = [str(item) for item in (getattr(edge, "source_ids", None) or []) if str(item)]
-            targets = [str(item) for item in (getattr(edge, "target_ids", None) or []) if str(item)]
-            if any(source in removed_ids for source in sources) or any(target in removed_ids for target in targets):
-                continue
-            retained_edges.append(edge)
-
-        enriched.nodes = retained_nodes
-        enriched.edges = retained_edges
-        return enriched
 
     def ingest_parse_result(
         self,
@@ -988,8 +865,18 @@ class IngestPipeline:
         )
         return job_id
 
-    def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
-        return self.projection.build_projection_snapshot(workspace_id=workspace_id)
+    def build_projection_snapshot(
+        self,
+        workspace_id: str,
+        *,
+        graph_spaces: list[GraphSpace | str] | None = None,
+        projection_filter: str | None = None,
+    ) -> ProjectionSnapshot:
+        return self.projection.build_projection_snapshot(
+            workspace_id,
+            graph_spaces=graph_spaces,
+            projection_filter=projection_filter,
+        )
 
     def query_nodes(
         self,

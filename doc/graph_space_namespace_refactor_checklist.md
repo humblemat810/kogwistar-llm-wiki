@@ -28,8 +28,8 @@ The key semantic correction is:
 - Review-like artifacts such as candidate links, evidence packs, and promotion
   candidates are written to the background conversation namespace.
 - Promoted knowledge is written to CURATED_KG.
-- Demo curated mirroring still writes parsed semantic-tree content as a
-  shortcut.
+- Demo vault rendering now reads `BASE_KG` explicitly instead of mirroring
+  parsed semantic-tree content into curated KG.
 - Legacy `kg` namespace naming has been removed from app graph-space routing.
 
 ## Target Graph Spaces
@@ -206,17 +206,17 @@ Acceptance criteria:
 
 **Goal:** remove demo-only violations of graph-space invariants.
 
-- [ ] Stop mirroring parsed source graph directly into curated KG.
-- [ ] Write demo parsed source graph to `SOURCE`.
-- [ ] Optionally run BASE_KG extraction if demo configuration requests it.
-- [ ] Show demo graph output through explicit graph-space query/projection
+- [x] Stop mirroring parsed source graph directly into curated KG.
+- [x] Write demo parsed source graph to `SOURCE`.
+- [x] Optionally run BASE_KG extraction if demo configuration requests it.
+- [x] Show demo graph output through explicit graph-space query/projection
   choices.
 
 Acceptance criteria:
 
-- [ ] Demo no longer places raw parsed source into `CURATED_KG`.
-- [ ] Demo still shows useful queryable content via `SOURCE` or `BASE_KG`.
-- [ ] Demo and normal ingestion obey the same graph-space invariants.
+- [x] Demo no longer places raw parsed source into `CURATED_KG`.
+- [x] Demo still shows useful queryable content via `SOURCE` or `BASE_KG`.
+- [x] Demo and normal ingestion obey the same graph-space invariants.
 
 ## Phase 8: Policy And ACL Alignment
 
@@ -261,17 +261,17 @@ Acceptance criteria:
 - [ ] Namespace builder tests for every graph space.
 - [ ] Namespace/metadata agreement invariant tests.
 - [x] `kg` alias rejection tests.
-- [ ] Parsed document is written to SOURCE.
-- [ ] Parsed document remains queryable before promotion.
-- [ ] Parsed document is not written to CURATED_KG by default.
-- [ ] Source-extracted fact goes to BASE_KG, not CURATED_KG.
-- [ ] Promoted conclusion goes to CURATED_KG, not SOURCE or BASE_KG.
-- [ ] Review artifacts go to REVIEW.
-- [ ] Conversation messages stay in CONVERSATION.
-- [ ] Workflow jobs/traces stay in WORKFLOW/job namespaces.
-- [ ] Projection reads curated/promoted state by default.
-- [ ] Demo path obeys source/base/curated separation.
-- [ ] Query helper can search explicit graph-space lists.
+- [x] Parsed document is written to SOURCE.
+- [x] Parsed document remains queryable before promotion.
+- [x] Parsed document is not written to CURATED_KG by default.
+- [x] Source-extracted fact goes to BASE_KG, not CURATED_KG.
+- [x] Promoted conclusion goes to CURATED_KG, not SOURCE or BASE_KG.
+- [x] Review artifacts go to REVIEW.
+- [x] Conversation messages stay in CONVERSATION.
+- [x] Workflow jobs/traces stay in WORKFLOW/job namespaces.
+- [x] Projection reads curated/promoted state by default.
+- [x] Demo path obeys source/base/curated separation.
+- [x] Query helper can search explicit graph-space lists.
 
 ## Resolved Decisions
 

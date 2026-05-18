@@ -4,9 +4,9 @@ Sub-commands
 ------------
 demo --workspace <id> --source <path> --vault <path> [--title <text>]
     Run the ephemeral end-to-end demo in one process. Uses the in-memory
-    engine bundle, mirrors a filtered semantic tree into KG as a shortcut that
-    approximates a post-maintenance/post-promotion view, then writes the
-    Obsidian vault to disk before exiting.
+    engine bundle, writes the same source and base-knowledge graph spaces as
+    normal ingest, then renders the Obsidian vault from explicit graph-space
+    reads before exiting.
 
 ingest --workspace <id> --source <path> [--title <text>] [--promotion-mode <mode>]
     Read a source document and populate the workspace state.
@@ -106,6 +106,7 @@ def _cmd_demo(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
     from kogwistar_llm_wiki.models import IngestPipelineArtifacts
+    from kogwistar_llm_wiki.namespaces import GraphSpace
     from kogwistar_llm_wiki.worker import MaintenanceWorker
 
     source_path, request = _read_request_from_source(args)
@@ -128,12 +129,6 @@ def _cmd_demo(args: argparse.Namespace) -> None:
     graph_extraction = pipeline.translate_parse_result(
         parse_result=parse_result,
         source_document_id=source_document_id,
-    )
-    pipeline.persist_demo_graph_extraction(
-        request=request,
-        source_document_id=source_document_id,
-        graph_extraction=graph_extraction,
-        namespace=ns.curated_kg_space,
     )
     materialize_maintenance_designs(engines.workflow)
     pipeline.ingest_parse_result(
@@ -167,7 +162,12 @@ def _cmd_demo(args: argparse.Namespace) -> None:
         promoted_entity_id=None,
     )
     MaintenanceWorker(engines).process_pending_jobs(args.workspace)
-    vault_result = pipeline.build_obsidian_vault(vault_root, workspace_id=args.workspace)
+    vault_result = pipeline.build_obsidian_vault(
+        vault_root,
+        workspace_id=args.workspace,
+        graph_spaces=[GraphSpace.BASE_KG],
+        projection_filter="demo",
+    )
 
     print(
         json.dumps(
