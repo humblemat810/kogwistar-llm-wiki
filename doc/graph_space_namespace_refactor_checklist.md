@@ -179,24 +179,28 @@ Acceptance criteria:
 - [x] Legacy `kg` alias tests are replaced with explicit rejection or
   curated-space assertions.
 
-## Phase 6: Review Graph Cleanup
+## Phase 6: Review Query Helper Only
 
-**Goal:** move review lifecycle artifacts out of background conversation.
+**Goal:** keep review artifacts in background conversation, but make review
+lookup explicit and low-friction.
 
-- [ ] Write promotion candidates to `REVIEW`.
-- [ ] Write evidence packs to `REVIEW`.
-- [ ] Write approval/rejection decisions to `REVIEW`.
-- [ ] Keep legacy `conv_bg` lookup fallback during migration if necessary.
-- [ ] Ensure review artifacts link back to SOURCE, BASE_KG, or CURATED_KG
-  evidence.
+- [ ] Add an app-level helper for review artifact queries in `conv_bg`.
+- [ ] Expose convenience wrappers for candidate links, promotion candidates,
+  evidence packs, and review-chain lookup.
+- [ ] Keep review lookup based on existing metadata links and `artifact_kind`.
+- [ ] Avoid introducing a new `REVIEW` graph space or new review taxonomy
+  fields in this phase.
+- [ ] Do not change write paths, promotion flow, or long-run artifact
+  placement.
 
 Acceptance criteria:
 
-- [ ] Review artifacts are queryable from `REVIEW`.
-- [ ] Conversation background contains lane messages, not the only durable
-  review record.
-- [ ] Promotion can find evidence packs from `REVIEW`.
-- [ ] Long-run promotion provenance checks still pass.
+- [ ] Review artifacts are queryable through a helper, not only by ad hoc
+  conversation scans.
+- [ ] Helper results stay workspace-scoped and exclude ordinary lane messages.
+- [ ] Review-chain lookup can resolve promoted node -> candidate -> evidence
+  pack -> evidence ids.
+- [ ] Existing promotion provenance checks still pass.
 
 ## Phase 7: Demo Path Migration
 

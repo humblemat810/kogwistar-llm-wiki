@@ -146,8 +146,9 @@ Examples:
 - `derived_knowledge`
 - `execution_wisdom`
 
-Artifact kind is not graph space. A `promotion_candidate` typically belongs in
-REVIEW, while `promoted_knowledge` belongs in CURATED_KG.
+Artifact kind is not graph space. A `promotion_candidate` is a review-shaped
+artifact stored in background conversation, while `promoted_knowledge`
+belongs in CURATED_KG.
 
 ---
 
@@ -327,7 +328,8 @@ Contains:
 - rejection reasons
 - audit decisions
 
-Review artifacts should not be stored only as background conversation artifacts.
+Review artifacts should remain queryable through explicit helper methods rather
+than only by generic lane-message scans.
 
 ---
 

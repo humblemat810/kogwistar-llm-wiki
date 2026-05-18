@@ -35,6 +35,7 @@ from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import GraphSpace, WorkspaceNamespaces
 from .projection import ProjectionManager
+from .review_query import ReviewQueryService
 
 
 def _metadata_digest_value(digest: dict[str, Any] | None) -> str | None:
@@ -237,6 +238,7 @@ class IngestPipeline:
         self.policies = policies or build_default_policies()
         self.projection = ProjectionManager(engines, policies=self.policies)
         self.query_service = GraphSpaceQueryService(engines)
+        self.review_query_service = ReviewQueryService(engines)
 
     def namespaces_for(self, workspace_id: str) -> WorkspaceNamespaces:
         return WorkspaceNamespaces(workspace_id)

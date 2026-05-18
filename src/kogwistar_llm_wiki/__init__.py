@@ -12,6 +12,7 @@ from .models import (
 )
 from .policies import LlmWikiPolicies, build_default_policies
 from .query import GraphSpaceQueryResult, GraphSpaceQueryService, workspace_graph_spaces
+from .review_query import ReviewChainResult, ReviewQueryService
 from .namespaces import GraphSpace, GraphSpaceNamespace, WorkspaceNamespaces
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "GraphSpaceNamespace",
     "GraphSpaceQueryResult",
     "GraphSpaceQueryService",
+    "ReviewChainResult",
+    "ReviewQueryService",
     "NamespaceEngines",
     "ObsidianBuildResult",
     "LlmWikiPolicies",
