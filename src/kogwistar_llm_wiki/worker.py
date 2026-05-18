@@ -347,7 +347,7 @@ class MaintenanceWorker(BaseWorker):
             return RunSuccess(state_update=[("u", {"error": "Missing context"})])
 
         ns = WorkspaceNamespaces(workspace_id)
-        with _temporary_namespace(engines.kg, ns.kg):
+        with _temporary_namespace(engines.kg, ns.curated_kg_space):
             promoted_nodes = engines.kg.read.get_nodes(
                 where={"artifact_kind": "promoted_knowledge", "workspace_id": workspace_id}
             )
@@ -362,7 +362,7 @@ class MaintenanceWorker(BaseWorker):
         template_result = run_grouped_maintenance_template(
             engines.kg,
             target_engine=derived_engine,
-            source_namespace=ns.kg,
+            source_namespace=ns.curated_kg_space,
             target_namespace=ns.derived_knowledge,
             source_where=self.policies.derived_knowledge.source_query(
                 workspace_id=workspace_id,

@@ -272,8 +272,8 @@ Characteristics:
 - linked back to REVIEW evidence and SOURCE/BASE_KG provenance
 - projected to user-facing knowledge surfaces when eligible
 
-Use `curated_kg` instead of ambiguous `kg` in new semantics. Existing `kg`
-strings may remain as legacy aliases during migration.
+Use `curated_kg` instead of ambiguous `kg` in application semantics. The
+legacy `kg` namespace string is no longer a graph-space alias.
 
 ---
 

@@ -133,7 +133,7 @@ def _cmd_demo(args: argparse.Namespace) -> None:
         request=request,
         source_document_id=source_document_id,
         graph_extraction=graph_extraction,
-        namespace=ns.kg,
+        namespace=ns.curated_kg_space,
     )
     materialize_maintenance_designs(engines.workflow)
     pipeline.ingest_parse_result(

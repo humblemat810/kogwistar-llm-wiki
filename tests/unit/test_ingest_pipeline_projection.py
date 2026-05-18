@@ -3,6 +3,7 @@ from __future__ import annotations
 from kogwistar.engine_core.models import Grounding, Node, Span
 
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
 def _projection_span(doc_id: str) -> Span:
@@ -46,15 +47,17 @@ def test_projection_reads_kg_visible_state_only(pipeline, ingest_request):
             "source_cluster_id": None,
         }
     )
+    ns = WorkspaceNamespaces(ingest_request.workspace_id)
     visible_node = Node(
         label="Manual Knowledge",
         type="entity",
         summary="Manual Knowledge",
         doc_id=source_document_id,
         mentions=[Grounding(spans=[visible_span])],
-        metadata={"visibility": "projection", "workspace_id": ingest_request.workspace_id},
+        metadata={"graph_space": "curated_kg", "visibility": "projection", "workspace_id": ingest_request.workspace_id},
     )
-    pipeline.engines.kg.write.add_node(visible_node)
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
+        pipeline.engines.kg.write.add_node(visible_node)
 
     snapshot = pipeline.build_projection_snapshot(workspace_id=ingest_request.workspace_id)
     titles = {entity.title for entity in snapshot.entities}
@@ -73,7 +76,7 @@ def test_projection_manifest_overrides_visibility_metadata(pipeline, ingest_requ
         summary="Visible Knowledge",
         doc_id=source_document_id,
         mentions=[Grounding(spans=[_projection_span(source_document_id)])],
-        metadata={"visibility": "projection", "workspace_id": workspace_id},
+        metadata={"graph_space": "curated_kg", "visibility": "projection", "workspace_id": workspace_id},
     )
     hidden_node = Node(
         label="Manifest Knowledge",
@@ -81,10 +84,11 @@ def test_projection_manifest_overrides_visibility_metadata(pipeline, ingest_requ
         summary="Manifest Knowledge",
         doc_id=source_document_id,
         mentions=[Grounding(spans=[_projection_span(source_document_id)])],
-        metadata={"visibility": "internal", "workspace_id": workspace_id},
+        metadata={"graph_space": "curated_kg", "visibility": "internal", "workspace_id": workspace_id},
     )
-    pipeline.engines.kg.write.add_node(visible_node)
-    pipeline.engines.kg.write.add_node(hidden_node)
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
+        pipeline.engines.kg.write.add_node(visible_node)
+        pipeline.engines.kg.write.add_node(hidden_node)
 
     pipeline.engines.conversation.meta_sqlite.replace_named_projection(
         namespace=ns.projection_manifest,
@@ -132,7 +136,7 @@ def test_demo_projection_reifies_section_hyperedges(pipeline, ingest_request):
         request=request,
         source_document_id=source_document_id,
         graph_extraction=graph_extraction,
-        namespace=pipeline.namespaces_for(workspace_id).kg,
+        namespace=pipeline.namespaces_for(workspace_id).curated_kg_space,
     )
 
     kg_nodes = pipeline.engines.kg.read.get_nodes(where={"workspace_id": workspace_id})
@@ -184,7 +188,7 @@ def test_demo_projection_hides_sentence_like_leaf_nodes(pipeline, ingest_request
         request=request,
         source_document_id=source_document_id,
         graph_extraction=graph_extraction,
-        namespace=pipeline.namespaces_for(workspace_id).kg,
+        namespace=pipeline.namespaces_for(workspace_id).curated_kg_space,
     )
 
     kg_nodes = pipeline.engines.kg.read.get_nodes(where={"workspace_id": workspace_id})

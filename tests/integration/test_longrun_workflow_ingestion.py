@@ -700,10 +700,10 @@ class LongRunHarness:
                 where={"workspace_id": workspace_id},
                 namespace=ns.conv_bg,
             ),
-            "kg": self._export_engine(
+            "curated_kg": self._export_engine(
                 self.engines.kg,
                 where={"workspace_id": workspace_id},
-                namespace=ns.kg,
+                namespace=ns.curated_kg_space,
             ),
             "derived_knowledge": self._export_engine(
                 self.engines.derived_knowledge_engine(),
@@ -726,7 +726,7 @@ class LongRunHarness:
                 ns.conv_bg,
                 ns.maintenance_jobs,
                 ns.projection_jobs,
-                ns.kg,
+                ns.curated_kg_space,
             ],
             app_surfaces=[
                 RecoverySurface(
@@ -1089,7 +1089,7 @@ class LongRunHarness:
 
     def _latest_runtime_checkpoint(self, run_id: str) -> dict[str, Any] | None:
         ns = WorkspaceNamespaces(self.config.workspace_id)
-        namespace_candidates: list[str | None] = [ns.conv_bg, ns.conv_fg, ns.kg, None]
+        namespace_candidates: list[str | None] = [ns.conv_bg, ns.conv_fg, ns.curated_kg_space, None]
         best: dict[str, Any] | None = None
         for namespace in namespace_candidates:
             context = _temporary_namespace(self.engines.conversation, namespace) if namespace else nullcontext()
@@ -1429,7 +1429,7 @@ class LongRunHarness:
                 promotion_evidence_pack_id=promotion_evidence_pack_id,
                 promotion_evidence_pack_digest=promotion_evidence_pack_digest,
                 promotion_decision=promotion_decision,
-                namespace=ns.kg,
+                namespace=ns.curated_kg_space,
             )
             record.maintenance_job_id = maintenance_job_id
             record.candidate_link_id = candidate_link_id
@@ -1686,7 +1686,7 @@ class LongRunHarness:
             )
         with _temporary_namespace(self.engines.kg, ns.source_space):
             source_nodes = self.engines.kg.read.get_nodes(
-                where={"doc_id": record.source_document_id},
+                where={"doc_id": record.source_document_id, "graph_space": "source"},
                 limit=10_000,
             )
         if not source_nodes:
@@ -1717,7 +1717,8 @@ class LongRunHarness:
                 f"{record.doc_id} has no promoted entity id to verify",
                 phase="verify_document_artifacts",
             )
-        promoted_nodes = self.engines.kg.read.get_nodes(ids=[record.promoted_entity_id], limit=1)
+        with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
+            promoted_nodes = self.engines.kg.read.get_nodes(ids=[record.promoted_entity_id], limit=1)
         if not promoted_nodes:
             raise LongRunSystemicError(
                 "graph_invariant_violation",
@@ -3331,7 +3332,7 @@ def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypa
     assert record.promotion_candidate_id
     assert record.promoted_entity_id
 
-    with _temporary_namespace(harness.engines.kg, ns.kg):
+    with _temporary_namespace(harness.engines.kg, ns.curated_kg_space):
         promoted_nodes = harness.engines.kg.read.get_nodes(ids=[record.promoted_entity_id], limit=1)
     assert len(promoted_nodes) == 1
     promoted = promoted_nodes[0]
@@ -3339,6 +3340,7 @@ def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypa
     assert promoted.metadata.get("promotion_evidence_pack_id") == record.promotion_evidence_pack_id
     assert promoted.metadata.get("promotion_evidence_pack_digest")
     assert promoted.metadata.get("promotion_decision_reason")
+    assert promoted.metadata.get("graph_space") == "curated_kg"
 
     with _temporary_namespace(harness.engines.conversation, ns.conv_bg):
         candidate_nodes = harness.engines.conversation.read.get_nodes(ids=[record.promotion_candidate_id], limit=1)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from kogwistar.engine_core.models import Grounding, Node, Span
 
 from kogwistar_llm_wiki import GraphSpace, GraphSpaceQueryService, WorkspaceNamespaces, workspace_graph_spaces
@@ -34,6 +36,7 @@ def _curated_node(*, workspace_id: str, doc_id: str, label: str) -> Node:
         mentions=[Grounding(spans=[_span(doc_id)])],
         metadata={
             "workspace_id": workspace_id,
+            "graph_space": "curated_kg",
             "artifact_kind": "promoted_knowledge",
             "visibility": "knowledge",
         },
@@ -74,32 +77,34 @@ def test_curated_query_excludes_raw_source_by_default(pipeline, ingest_request):
     assert results == []
 
 
-def test_legacy_curated_alias_support_reads_promoted_nodes_from_kg(pipeline, ingest_request):
+def test_curated_query_reads_promoted_nodes_from_curated_space(pipeline, ingest_request):
     ns = WorkspaceNamespaces(ingest_request.workspace_id)
-    curated_label = "Legacy Curated Knowledge"
+    curated_label = "Curated Knowledge"
     node = _curated_node(
         workspace_id=ingest_request.workspace_id,
         doc_id=pipeline._source_document_id(ingest_request),
         label=curated_label,
     )
 
-    with _temporary_namespace(pipeline.engines.kg, ns.kg):
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
         pipeline.engines.kg.write.add_node(node)
 
     results = pipeline.query_nodes(
         workspace_id=ingest_request.workspace_id,
         graph_spaces=["curated_kg"],
     )
-    alias_results = pipeline.query_nodes(
-        workspace_id=ingest_request.workspace_id,
-        graph_spaces=["kg"],
-    )
 
     assert any(result.node.label == curated_label for result in results)
-    assert any(result.node.label == curated_label for result in alias_results)
     assert all(result.graph_space == "curated_kg" for result in results)
-    assert all(result.graph_space == "curated_kg" for result in alias_results)
-    assert any(result.namespace in {ns.curated_kg_space, ns.kg} for result in results)
+    assert all(result.namespace == ns.curated_kg_space for result in results)
+
+
+def test_legacy_kg_query_alias_is_removed(pipeline, ingest_request):
+    with pytest.raises(ValueError):
+        pipeline.query_nodes(
+            workspace_id=ingest_request.workspace_id,
+            graph_spaces=["kg"],
+        )
 
 
 def test_workspace_query_preset_can_return_source_and_curated_results(pipeline, ingest_request):
@@ -112,7 +117,7 @@ def test_workspace_query_preset_can_return_source_and_curated_results(pipeline, 
     )
 
     pipeline.run(ingest_request)
-    with _temporary_namespace(pipeline.engines.kg, ns.kg):
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
         pipeline.engines.kg.write.add_node(node)
 
     results = pipeline.query_nodes(
@@ -166,7 +171,7 @@ def test_query_respects_workspace_scope(pipeline, ingest_request):
     matching = _curated_node(workspace_id=ingest_request.workspace_id, doc_id=doc_id, label=shared_label)
     foreign = _curated_node(workspace_id="other-workspace", doc_id=doc_id, label=shared_label)
 
-    with _temporary_namespace(pipeline.engines.kg, ns.kg):
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
         pipeline.engines.kg.write.add_node(matching)
         pipeline.engines.kg.write.add_node(foreign)
 

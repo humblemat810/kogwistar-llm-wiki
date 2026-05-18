@@ -81,10 +81,10 @@ So maintenance should not be reduced to conversation alone.
 | Credibility critique | conversation | `ws:{id}:conv:bg` | `credibility_critique` | `maintenance_critiques` | reasoning-shaped artifact |
 | Reliability assessment | conversation | `ws:{id}:conv:bg` | `reliability_assessment` | `maintenance_assesses_reliability_of` | may remain background-only |
 | Promotion candidate | conversation or workflow | `ws:{id}:review` or `ws:{id}:wf:maintenance` | `promotion_candidate` | `proposes_promotion_of` | app policy decides location |
-| Accepted alias relation | knowledge | `ws:{id}:kg` | `entity` or `alias_relation` | `alias_of` | durable knowledge |
-| Accepted contradiction marker | knowledge | `ws:{id}:kg` | `contradiction_set` | `contradicts` | durable, projection policy-dependent |
+| Accepted alias relation | knowledge | `ws:{id}:g:curated_kg` | `entity` or `alias_relation` | `alias_of` | durable curated knowledge |
+| Accepted contradiction marker | knowledge | `ws:{id}:g:curated_kg` | `contradiction_set` | `contradicts` | durable curated, projection policy-dependent |
 | Synthesis artifact draft | conversation | `ws:{id}:conv:bg` | `synthesis_draft` | `derived_from` | may later promote |
-| Accepted synthesis artifact | knowledge | `ws:{id}:kg` | `topic_synthesis` | `summarizes` | visible candidate for projection |
+| Accepted synthesis artifact | knowledge | `ws:{id}:g:curated_kg` | `topic_synthesis` | `summarizes` | visible candidate for projection |
 | Wisdom candidate | workflow or conversation | `ws:{id}:wf:maintenance` or `ws:{id}:conv:bg` | `wisdom_candidate` | `derived_from_execution` | before distillation |
 | Wisdom artifact | wisdom | `ws:{id}:wisdom` | `wisdom_artifact` | `derived_from_execution` | reusable lesson |
 

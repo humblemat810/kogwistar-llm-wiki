@@ -19,15 +19,18 @@ The key semantic correction is:
 
 ## Current State
 
-- Raw source documents are written to the foreground conversation namespace.
-- Parsed document graph payloads are written to the foreground conversation
-  namespace.
+- Raw source documents are written to SOURCE, with a temporary foreground
+  conversation copy for compatibility.
+- Parsed document graph payloads are written to SOURCE, with a temporary
+  foreground conversation copy for compatibility.
+- BASE_KG is populated as explicit reference artifacts that point back to
+  SOURCE.
 - Review-like artifacts such as candidate links, evidence packs, and promotion
   candidates are written to the background conversation namespace.
-- Promoted knowledge is written to the current `kg` namespace.
-- Demo KG mirroring writes parsed semantic-tree content into KG as a shortcut.
-- `kg` is ambiguous and should become a legacy alias rather than a preferred
-  semantic term.
+- Promoted knowledge is written to CURATED_KG.
+- Demo curated mirroring still writes parsed semantic-tree content as a
+  shortcut.
+- Legacy `kg` namespace naming has been removed from app graph-space routing.
 
 ## Target Graph Spaces
 
@@ -75,8 +78,8 @@ The key semantic correction is:
 - [x] Add typed namespace builder helpers for:
   `source`, `base_kg`, `curated_kg`, `conversation`, `workflow`, `review`,
   `wisdom`, `policy`, and `projection`.
-- [x] Preserve existing properties as compatibility aliases:
-  `conv_fg`, `conv_bg`, `kg`, `derived_knowledge`, `workflow_maintenance`,
+- [x] Preserve existing non-KG properties as compatibility aliases:
+  `conv_fg`, `conv_bg`, `derived_knowledge`, `workflow_maintenance`,
   `review`, `projection_jobs`, and `maintenance_jobs`.
 - [x] Prefer new names such as `curated_kg` over ambiguous `kg`.
 - [x] Add helper metadata fields such as:
@@ -87,7 +90,7 @@ Acceptance criteria:
 
 - [x] Existing namespace tests still pass unchanged.
 - [x] New tests prove graph-space namespace strings are deterministic.
-- [x] New tests prove old aliases still resolve.
+- [x] New tests prove retained aliases still resolve.
 - [x] New tests prove namespace/metadata mismatch is detectable.
 - [x] No ingestion behavior changes in this phase.
 
@@ -139,42 +142,42 @@ Acceptance criteria:
 **Goal:** add an explicit reference layer in `BASE_KG` that points back to
 `SOURCE` instead of duplicating source truth.
 
-- [ ] Add a configurable source-to-base reference projection path.
-- [ ] Support inputs from page-index parsing, iterative layerwise workflow, or
+- [x] Add a configurable source-to-base reference projection path.
+- [x] Support inputs from page-index parsing, iterative layerwise workflow, or
   user-provided pre-parsed content.
-- [ ] Mark base references as `source_referenced`, `machine_extracted`, and
+- [x] Mark base references as `source_referenced`, `machine_extracted`, and
   `unverified`.
-- [ ] Link every base reference back to `SOURCE` evidence via explicit pointer
+- [x] Link every base reference back to `SOURCE` evidence via explicit pointer
   artifacts.
-- [ ] Do not write base projection outputs into `CURATED_KG`.
-- [ ] Do not call this step promotion.
+- [x] Do not write base projection outputs into `CURATED_KG`.
+- [x] Do not call this step promotion.
 
 Acceptance criteria:
 
-- [ ] Source-extracted fact goes to `BASE_KG`, not `CURATED_KG`.
-- [ ] Base KG result is queryable immediately.
-- [ ] Base KG result carries source provenance.
-- [ ] Curated KG remains clean unless promotion occurs.
+- [x] Source-extracted fact goes to `BASE_KG`, not `CURATED_KG`.
+- [x] Base KG result is queryable immediately.
+- [x] Base KG result carries source provenance.
+- [x] Curated KG remains clean unless promotion occurs.
 
 ## Phase 5: Curated KG Promotion Cleanup
 
 **Goal:** make promotion mean accepted curated knowledge only.
 
-- [ ] Rename app-facing semantics from `kg` to `curated_kg`.
-- [ ] Keep `kg` as a legacy alias during migration.
-- [ ] Ensure `promote_to_knowledge(...)` writes to `CURATED_KG`.
-- [ ] Ensure promoted artifacts include review/evidence/source provenance.
-- [ ] Ensure promotion does not move or mutate SOURCE or BASE_KG nodes.
-- [ ] Update projection to read from `CURATED_KG` instead of ambiguous `kg`.
+- [x] Rename app-facing semantics from `kg` to `curated_kg`.
+- [x] Remove `kg` as a legacy alias from app graph-space routing.
+- [x] Ensure `promote_to_knowledge(...)` writes to `CURATED_KG`.
+- [x] Ensure promoted artifacts include review/evidence/source provenance.
+- [x] Ensure promotion does not move or mutate SOURCE or BASE_KG nodes.
+- [x] Update projection to read from `CURATED_KG` instead of ambiguous `kg`.
 
 Acceptance criteria:
 
-- [ ] Promoted conclusion goes to `CURATED_KG`.
-- [ ] Source and base nodes remain in their original graph spaces.
-- [ ] Projection reads curated/promoted state only unless explicitly configured
+- [x] Promoted conclusion goes to `CURATED_KG`.
+- [x] Source and base nodes remain in their original graph spaces.
+- [x] Projection reads curated/promoted state only unless explicitly configured
   otherwise.
-- [ ] Legacy `kg` tests either pass through aliasing or are updated with
-  explicit compatibility notes.
+- [x] Legacy `kg` alias tests are replaced with explicit rejection or
+  curated-space assertions.
 
 ## Phase 6: Review Graph Cleanup
 
@@ -237,7 +240,7 @@ Acceptance criteria:
 - [ ] Update lane namespace convention to avoid implying source documents belong
   in conversation.
 - [ ] Update ADRs/checklists that describe `kg` as the only knowledge graph.
-- [ ] Document legacy aliases and migration behavior.
+- [x] Document resolved graph-space decisions and removed `kg` compatibility.
 - [ ] Add diagrams showing SOURCE, BASE_KG, CURATED_KG, REVIEW, CONVERSATION,
   WORKFLOW, WISDOM, POLICY, and PROJECTION.
 
@@ -247,13 +250,13 @@ Acceptance criteria:
   meant.
 - [ ] Docs consistently call SOURCE/BASE_KG/CURATED_KG graph spaces, not engine
   graph types.
-- [ ] Migration notes explain which old namespace strings remain aliases.
+- [x] Migration notes explain that `kg` is no longer a graph-space alias.
 
 ## Tests To Add
 
 - [ ] Namespace builder tests for every graph space.
 - [ ] Namespace/metadata agreement invariant tests.
-- [ ] Legacy alias compatibility tests.
+- [x] `kg` alias rejection tests.
 - [ ] Parsed document is written to SOURCE.
 - [ ] Parsed document remains queryable before promotion.
 - [ ] Parsed document is not written to CURATED_KG by default.
@@ -266,15 +269,15 @@ Acceptance criteria:
 - [ ] Demo path obeys source/base/curated separation.
 - [ ] Query helper can search explicit graph-space lists.
 
-## Open Questions
+## Resolved Decisions
 
-- [ ] Should SOURCE/BASE_KG/CURATED_KG initially share the existing knowledge
-  engine with separate namespaces, or should SOURCE receive a dedicated engine
-  later?
-- [ ] Should workspace-style query include WISDOM by default, or only when
-  explicitly requested?
-- [ ] What is the first BASE_KG extractor policy: deterministic only, LLM-backed,
-  user-provided pre-parsed, or configurable per ingest request?
-- [ ] What metadata field name should be canonical: `graph_space`,
-  `semantic_layer`, or another term?
-- [ ] When can legacy `kg` naming be removed from user-facing APIs?
+- [x] SOURCE, BASE_KG, and CURATED_KG initially share the existing knowledge
+  engine and are separated by explicit graph-space namespaces.
+- [x] Workspace-style query defaults to SOURCE and CURATED_KG. WISDOM is
+  opt-in through `include_wisdom=True`.
+- [x] The first BASE_KG policy is deterministic source-reference projection from
+  parsed graph outputs. It does not run a separate LLM extraction step.
+- [x] `graph_space` is the canonical metadata field for the application graph
+  space.
+- [x] Legacy `kg` naming can be removed from user-facing APIs and graph-space
+  compatibility aliases immediately.

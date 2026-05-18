@@ -8,8 +8,7 @@ def test_namespaces_include_wisdom_and_review():
     assert ns.conv_bg == "ws:demo:conv:bg"
     assert ns.workflow_maintenance == "ws:demo:wf:maintenance"
     assert ns.review == "ws:demo:review"
-    assert ns.kg == "ws:demo:kg"
-    assert ns.derived_knowledge == "ws:demo:kg:derived"
+    assert ns.derived_knowledge == "ws:demo:derived_knowledge"
     assert ns.wisdom == "ws:demo:wisdom"
     assert ns.maintenance_jobs == "ws:demo:maintenance_jobs"
     assert ns.projection_jobs == "ws:demo:projection_jobs"
@@ -18,6 +17,7 @@ def test_namespaces_include_wisdom_and_review():
     assert ns.source_space == "ws:demo:g:source"
     assert ns.base_kg_space == "ws:demo:g:base_kg"
     assert ns.curated_kg_space == "ws:demo:g:curated_kg"
+    assert not hasattr(ns, "kg")
     assert ns.conversation_fg_space == "ws:demo:g:conversation:lane:foreground"
     assert ns.conversation_bg_space == "ws:demo:g:conversation:lane:background"
     assert ns.workflow_space == "ws:demo:g:workflow"
@@ -47,7 +47,7 @@ def test_job_and_manifest_namespaces_do_not_collide():
     assert ns.maintenance_jobs != ns.conv_bg
     assert ns.projection_jobs != ns.conv_bg
     assert ns.maintenance_jobs != ns.projection_jobs
-    assert ns.derived_knowledge != ns.kg
+    assert ns.derived_knowledge != ns.curated_kg_space
     assert ns.derived_knowledge != ns.wisdom
     assert ns.projection_manifest != ns.maintenance_jobs
     assert ns.projection_manifest != ns.projection_jobs

@@ -84,10 +84,6 @@ class WorkspaceNamespaces:
         return self.space(GraphSpace.REVIEW)
 
     @property
-    def kg(self) -> str:
-        return f"ws:{self.workspace_id}:kg"
-
-    @property
     def curated_kg_space(self) -> str:
         return self.space(GraphSpace.CURATED_KG)
 
@@ -101,7 +97,7 @@ class WorkspaceNamespaces:
 
     @property
     def derived_knowledge(self) -> str:
-        return f"ws:{self.workspace_id}:kg:derived"
+        return f"ws:{self.workspace_id}:derived_knowledge"
 
     @property
     def wisdom(self) -> str:

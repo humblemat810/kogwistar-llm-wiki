@@ -66,7 +66,7 @@ class IngestPipelineRequest(ModeSlicingMixin, BaseModel):
 class NamespaceEngines:
     conversation: GraphKnowledgeEngine  # Shared by conv:fg and conv:bg
     workflow: GraphKnowledgeEngine      # For wf:maintenance
-    kg: GraphKnowledgeEngine            # For kg
+    kg: GraphKnowledgeEngine            # Knowledge-family engine
     wisdom: GraphKnowledgeEngine        # For wisdom
     derived_knowledge: GraphKnowledgeEngine | None = None
 

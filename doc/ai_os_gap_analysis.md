@@ -129,7 +129,8 @@ identities for long-running operational processes.
 **What an OS has:** A single namespace (`/`) where all resources â€” files, devices, sockets, processes â€” are addressable via a common path.
 
 **What exists today:** Resources live in different namespaces:
-- Knowledge graph nodes: addressed by UUID + workspace namespace (`ws:demo:kg`)
+- Knowledge graph nodes: addressed by UUID + workspace graph-space namespace
+  such as `ws:demo:g:curated_kg`
 - Obsidian files: addressed by filesystem path
 - Workflow runs: addressed by run_id
 - Conversation turns: addressed by conversation_id + turn_node_id

@@ -107,7 +107,7 @@ resume requires explicit restartable markers and a caller-provided resume hook.
 ### 4a. `derived_knowledge` hosting tradeoff
 
 **Currently (app layer):**
-- `derived_knowledge` can either share the KG engine with a separate namespace (`ws:{id}:kg:derived`) or live on its own engine selected by `--split-derived-knowledge`
+- `derived_knowledge` can either share the knowledge-family engine with a separate namespace (`ws:{id}:derived_knowledge`) or live on its own engine selected by `--split-derived-knowledge`
 - The authoring policy is identical in both layouts; only the query/search topology changes
 
 **What is already pinned:**

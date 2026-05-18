@@ -57,7 +57,9 @@ def test_run_invokes_kogwistar_ingest(pipeline, ingest_request, monkeypatch):
 
     ns = WorkspaceNamespaces(ingest_request.workspace_id)
     with _temporary_namespace(pipeline.engines.kg, ns.source_space):
-        source_nodes = pipeline.engines.kg.read.get_nodes(where={"doc_id": artifacts.source_document_id})
+        source_nodes = pipeline.engines.kg.read.get_nodes(
+            where={"doc_id": artifacts.source_document_id, "graph_space": "source"}
+        )
     with _temporary_namespace(pipeline.engines.conversation, ns.conv_fg):
         compat_nodes = pipeline.engines.conversation.read.get_nodes(
             where={"doc_id": artifacts.source_document_id}

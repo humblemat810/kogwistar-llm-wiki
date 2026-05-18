@@ -13,6 +13,7 @@ from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 from .models import NamespaceEngines, ProjectionSnapshot, ObsidianBuildResult
 from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import WorkspaceNamespaces
+from .utils import _temporary_namespace
 
 
 logger = logging.getLogger(__name__)
@@ -31,10 +32,16 @@ class ProjectionManager:
     def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
         """Returns the current 'KG-visible' state for a workspace."""
         ns = WorkspaceNamespaces(workspace_id)
-        all_nodes = list(self.engines.kg.read.get_nodes(where={"workspace_id": workspace_id}))
+        all_nodes = self._read_workspace_nodes(
+            workspace_id=workspace_id,
+            namespaces=[ns.curated_kg_space],
+        )
         # Edge reads are workspace-scoped first, with endpoint filtering kept as a
         # second line of defense for relationship visibility.
-        all_edges = list(self.engines.kg.read.get_edges(where={"workspace_id": workspace_id}))
+        all_edges = self._read_workspace_edges(
+            workspace_id=workspace_id,
+            namespaces=[ns.curated_kg_space],
+        )
         manifest_ids = self._load_projection_manifest_ids(workspace_id)
 
         if manifest_ids is None:
@@ -116,6 +123,34 @@ class ProjectionManager:
                 for node in visible_nodes
             ]
         )
+
+    def _read_workspace_nodes(self, *, workspace_id: str, namespaces: list[str]) -> list[Any]:
+        node_by_id: dict[str, Any] = {}
+        for namespace in namespaces:
+            for node in self._read_nodes(namespace=namespace, where={"workspace_id": workspace_id}):
+                node_id = str(getattr(node, "id", "") or "")
+                if not node_id or node_id in node_by_id:
+                    continue
+                node_by_id[node_id] = node
+        return list(node_by_id.values())
+
+    def _read_workspace_edges(self, *, workspace_id: str, namespaces: list[str]) -> list[Any]:
+        edge_by_id: dict[str, Any] = {}
+        for namespace in namespaces:
+            for edge in self._read_edges(namespace=namespace, where={"workspace_id": workspace_id}):
+                edge_id = str(getattr(edge, "id", "") or "")
+                if not edge_id or edge_id in edge_by_id:
+                    continue
+                edge_by_id[edge_id] = edge
+        return list(edge_by_id.values())
+
+    def _read_nodes(self, *, namespace: str, where: dict[str, Any]) -> list[Any]:
+        with _temporary_namespace(self.engines.kg, namespace):
+            return list(self.engines.kg.read.get_nodes(where=dict(where), limit=10_000))
+
+    def _read_edges(self, *, namespace: str, where: dict[str, Any]) -> list[Any]:
+        with _temporary_namespace(self.engines.kg, namespace):
+            return list(self.engines.kg.read.get_edges(where=dict(where), limit=10_000))
 
     def _load_projection_manifest_ids(self, workspace_id: str) -> set[str] | None:
         meta = self.engines.conversation.meta_sqlite

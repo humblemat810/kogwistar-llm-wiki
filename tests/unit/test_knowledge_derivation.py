@@ -110,7 +110,7 @@ def _run_sync_ingest_with_trace(pipeline, request):
             promotion_evidence_pack_id=promotion_evidence_pack_id,
             promotion_evidence_pack_digest=promotion_evidence_pack_digest,
             promotion_decision=promotion_decision,
-            namespace=ns.kg,
+            namespace=ns.curated_kg_space,
         )
 
     return SimpleNamespace(
@@ -227,7 +227,7 @@ def test_knowledge_derivation_preserves_promotion_provenance_walk(pipeline, inge
     assert derived.metadata.get("replaces_ids") is not None
     assert derived.metadata["source_node_ids"] == [traced.promoted_entity_id]
 
-    with _temporary_namespace(engines.kg, ns.kg):
+    with _temporary_namespace(engines.kg, ns.curated_kg_space):
         promoted_nodes = engines.kg.read.get_nodes(ids=[traced.promoted_entity_id])
 
     assert len(promoted_nodes) == 1
@@ -660,8 +660,8 @@ def test_knowledge_derivation_can_use_separate_engine(namespace_engines, ingest_
 
     MaintenanceWorker(split_engines).process_pending_jobs(workspace_id)
 
-    with _temporary_namespace(split_engines.kg, ns.kg):
-        raw_kg_nodes = split_engines.kg.read.get_nodes(
+    with _temporary_namespace(split_engines.kg, ns.curated_kg_space):
+        curated_nodes = split_engines.kg.read.get_nodes(
             where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id}
         )
     with _temporary_namespace(split_engines.derived_knowledge_engine(), ns.derived_knowledge):
@@ -669,6 +669,6 @@ def test_knowledge_derivation_can_use_separate_engine(namespace_engines, ingest_
             where={"artifact_kind": "derived_knowledge", "workspace_id": workspace_id}
         )
 
-    assert len(raw_kg_nodes) == 0
+    assert len(curated_nodes) == 0
     assert len(derived_nodes) == 1
     assert derived_nodes[0].label == "Split Engine Entity"

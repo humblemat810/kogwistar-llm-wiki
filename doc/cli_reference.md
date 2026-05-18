@@ -20,7 +20,7 @@ llm-wiki [--data-dir <path>] [--split-derived-knowledge] <command>
 
 Hosting tradeoff for `derived_knowledge`:
 
-- Default same-engine mode keeps raw KG and `derived_knowledge` on the same backend, but in different namespaces (`ws:{id}:kg` versus `ws:{id}:kg:derived`).
+- Default same-engine mode keeps curated knowledge and `derived_knowledge` on the same backend, but in different namespaces (`ws:{id}:g:curated_kg` versus `ws:{id}:derived_knowledge`).
 - Split-engine mode isolates storage and indexing cost, but cross-surface search must query two engines deliberately.
 - The semantic contract is the same in both layouts: `derived_knowledge` never lives in the raw KG namespace.
 
@@ -85,7 +85,7 @@ Each poll cycle:
 
 Current semantics:
 
-- `distill` writes replacement `derived_knowledge` nodes in `ws:{id}:kg:derived`.
+- `distill` writes replacement `derived_knowledge` nodes in `ws:{id}:derived_knowledge`.
 - `execution_wisdom` scans failure traces and emits `execution_wisdom` nodes.
 - Interrupted work is recovered by core projection repair plus lease redelivery.
 - Delivery remains at-least-once; duplicate execution should converge through deterministic IDs, completion checks, and versioned replacement.

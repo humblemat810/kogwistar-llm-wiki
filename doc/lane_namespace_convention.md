@@ -24,8 +24,12 @@ Suggested patterns, refer to kogwistar style first, if not, below is a possible 
   - `ws:{workspace_id}:conv:bg`
 - Maintenance workflow:
   - `ws:{workspace_id}:wf:maintenance`
-- Knowledge:
-  - `ws:{workspace_id}:kg`
+- Curated knowledge:
+  - `ws:{workspace_id}:g:curated_kg`
+- Source:
+  - `ws:{workspace_id}:g:source`
+- Base KG:
+  - `ws:{workspace_id}:g:base_kg`
 - Wisdom:
   - `ws:{workspace_id}:wisdom`
 

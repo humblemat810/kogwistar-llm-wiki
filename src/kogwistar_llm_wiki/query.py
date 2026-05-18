@@ -83,8 +83,6 @@ class GraphSpaceQueryService:
         if isinstance(graph_space, GraphSpace):
             return graph_space
         text = str(graph_space or "").strip().lower()
-        if text == "kg":
-            text = GraphSpace.CURATED_KG.value
         return GraphSpace(text)
 
     def _engine_for_graph_space(self, graph_space: GraphSpace):
@@ -98,10 +96,7 @@ class GraphSpaceQueryService:
         if graph_space == GraphSpace.BASE_KG:
             return [(ns.base_kg_space, GraphSpace.BASE_KG.value)]
         if graph_space == GraphSpace.CURATED_KG:
-            namespaces = [(ns.curated_kg_space, GraphSpace.CURATED_KG.value)]
-            if ns.kg != ns.curated_kg_space:
-                namespaces.append((ns.kg, GraphSpace.CURATED_KG.value))
-            return namespaces
+            return [(ns.curated_kg_space, GraphSpace.CURATED_KG.value)]
         return []
 
     def _read_nodes(self, *, engine: Any, namespace: str, where: Mapping[str, Any]) -> list[Node]:
@@ -118,9 +113,7 @@ class GraphSpaceQueryService:
         if graph_space == GraphSpace.BASE_KG:
             return resolved_graph_space == GraphSpace.BASE_KG.value
         if graph_space == GraphSpace.CURATED_KG:
-            if resolved_graph_space == GraphSpace.CURATED_KG.value:
-                return True
-            return artifact_kind == "promoted_knowledge"
+            return resolved_graph_space == GraphSpace.CURATED_KG.value
         return False
 
     def _result_for_node(

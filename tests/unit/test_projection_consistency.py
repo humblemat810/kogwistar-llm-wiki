@@ -320,14 +320,16 @@ def test_projection_snapshot_excludes_cross_workspace_edges(pipeline, ingest_req
         local_entity_before.relationships[0].relation_type if local_entity_before.relationships else "cross_workspace"
     )
 
-    pipeline.engines.kg.write.add_edge(
-        _cross_workspace_edge(
-            source_id=str(local_artifacts.promoted_entity_id),
-            target_id=str(foreign_artifacts.promoted_entity_id),
-            relation=shared_relation_label,
-            workspace_id=foreign_workspace_id,
+    ns = WorkspaceNamespaces(workspace_id)
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
+        pipeline.engines.kg.write.add_edge(
+            _cross_workspace_edge(
+                source_id=str(local_artifacts.promoted_entity_id),
+                target_id=str(foreign_artifacts.promoted_entity_id),
+                relation=shared_relation_label,
+                workspace_id=foreign_workspace_id,
+            )
         )
-    )
 
     snapshot = pipeline.build_projection_snapshot(workspace_id=workspace_id)
     local_entity = next(

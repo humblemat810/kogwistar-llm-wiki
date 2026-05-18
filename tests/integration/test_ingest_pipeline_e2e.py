@@ -76,7 +76,9 @@ def test_ingest_pipeline_e2e(pipeline, ingest_request, parser_mode, llm_provider
     assert source_document["ids"] == [artifacts.source_document_id]
     assert pipeline.engines.conversation.read.get_nodes(where={"doc_id": artifacts.source_document_id})
     with _temporary_namespace(pipeline.engines.kg, ns.source_space):
-        source_nodes = pipeline.engines.kg.read.get_nodes(where={"doc_id": artifacts.source_document_id})
+        source_nodes = pipeline.engines.kg.read.get_nodes(
+            where={"doc_id": artifacts.source_document_id, "graph_space": "source"}
+        )
     assert source_nodes
     assert all(node.metadata.get("graph_space") == "source" for node in source_nodes)
     assert all(node.metadata.get("source_document_id") == artifacts.source_document_id for node in source_nodes)

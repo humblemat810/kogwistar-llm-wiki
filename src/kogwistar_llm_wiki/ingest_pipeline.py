@@ -313,7 +313,7 @@ class IngestPipeline:
                 promotion_evidence_pack_id=promotion_evidence_pack_id,
                 promotion_evidence_pack_digest=promotion_evidence_pack_digest,
                 promotion_decision=promotion_decision,
-                namespace=ns.kg,
+                namespace=ns.curated_kg_space,
             )
 
         return IngestPipelineArtifacts(
@@ -872,6 +872,7 @@ class IngestPipeline:
         promotion_decision: PromotionDecision | None = None,
         namespace: str,
     ) -> str:
+        curated_namespace = self.namespaces_for(request.workspace_id).curated_kg_space
         node_id = str(
             stable_id(
                 "kogwistar_llm_wiki.promoted_knowledge",
@@ -879,51 +880,51 @@ class IngestPipeline:
                 source_document_id,
             )
         )
-        if self._node_exists(self.engines.kg, namespace=namespace, node_id=node_id):
-            promoted_id = node_id
-            if not self._job_exists(
-                namespace=self.namespaces_for(request.workspace_id).projection_jobs,
-                entity_kind="projection_request",
-                entity_id=promoted_id,
-                job_kind="projection_request",
-            ):
-                self._enqueue_projection_job(
-                    request=request,
-                    promoted_id=promoted_id,
-                    namespace=self.namespaces_for(request.workspace_id).projection_jobs,
-                )
-            return promoted_id
-        node = self._artifact_node(
-            request=request,
-            source_document_id=source_document_id,
-            namespace=namespace,
-            node_id=node_id,
-            artifact_kind="promoted_knowledge",
-            lane="knowledge",
-            visibility="projection",
-            label=request.title,
-            summary=f"Promoted knowledge derived from {request.title}",
-            extra_metadata={
-                "projection_visible": True,
-                "promotion_candidate_id": promotion_candidate_id,
-                "promotion_evidence_pack_id": promotion_evidence_pack_id,
-                "promotion_evidence_pack_digest": _metadata_digest_value(promotion_evidence_pack_digest),
-                "promotion_decision_reason": promotion_decision.reason if promotion_decision else None,
-                "promotion_decision_metadata": json.dumps(
-                    dict(promotion_decision.metadata or {}) if promotion_decision else {},
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            },
-        )
-        with _temporary_namespace(self.engines.kg, namespace):
-            self.engines.kg.write.add_node(node)
-        self._enqueue_projection_job(
-            request=request,
-            promoted_id=str(node.id),
-            namespace=self.namespaces_for(request.workspace_id).projection_jobs,
-        )
-        return str(node.id)
+        curated_exists = self._node_exists(self.engines.kg, namespace=curated_namespace, node_id=node_id)
+
+        projection_namespace = self.namespaces_for(request.workspace_id).projection_jobs
+        promoted_common_metadata = {
+            "graph_space": "curated_kg",
+            "projection_visible": True,
+            "promotion_candidate_id": promotion_candidate_id,
+            "promotion_evidence_pack_id": promotion_evidence_pack_id,
+            "promotion_evidence_pack_digest": _metadata_digest_value(promotion_evidence_pack_digest),
+            "promotion_decision_reason": promotion_decision.reason if promotion_decision else None,
+            "promotion_decision_metadata": json.dumps(
+                dict(promotion_decision.metadata or {}) if promotion_decision else {},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+
+        if not curated_exists:
+            node = self._artifact_node(
+                request=request,
+                source_document_id=source_document_id,
+                namespace=curated_namespace,
+                node_id=node_id,
+                artifact_kind="promoted_knowledge",
+                lane="knowledge",
+                visibility="projection",
+                label=request.title,
+                summary=f"Promoted knowledge derived from {request.title}",
+                extra_metadata=dict(promoted_common_metadata),
+            )
+            with _temporary_namespace(self.engines.kg, curated_namespace):
+                self.engines.kg.write.add_node(node)
+
+        if not self._job_exists(
+            namespace=projection_namespace,
+            entity_kind="projection_request",
+            entity_id=node_id,
+            job_kind="projection_request",
+        ):
+            self._enqueue_projection_job(
+                request=request,
+                promoted_id=node_id,
+                namespace=projection_namespace,
+            )
+        return node_id
 
     def _enqueue_maintenance_job(
         self,

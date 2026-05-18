@@ -25,7 +25,7 @@ or knowledge-maintenance architecture rather than a one-off wiki quirk.
 At the same time, the current implementation still embeds product-specific choices
 inside app code:
 
-- exact namespace scheme such as `ws:{id}:conv:bg` and `ws:{id}:kg:derived`
+- exact namespace scheme such as `ws:{id}:conv:bg`, `ws:{id}:g:curated_kg`, and `ws:{id}:derived_knowledge`
 - artifact vocabulary such as `candidate_link`, `promotion_candidate`,
   `promoted_knowledge`, `derived_knowledge`, and `execution_wisdom`
 - promotion threshold behavior in the ingest path
