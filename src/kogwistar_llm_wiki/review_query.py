@@ -1,3 +1,10 @@
+"""Helpers for querying review-shaped artifacts from background conversation.
+
+This module keeps Phase 6 intentionally small: review remains stored in the
+conversation background lane, and the app exposes a thin, explicit query
+surface for the existing review artifact chain.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,6 +19,8 @@ from .utils import _temporary_namespace
 
 @dataclass(frozen=True, slots=True)
 class ReviewChainResult:
+    """Resolved review chain for a promoted node."""
+
     promoted_node: Any
     candidate_link: Any | None = None
     promotion_candidate: Any | None = None
@@ -31,6 +40,7 @@ class ReviewQueryService:
         artifact_kinds: Sequence[str] | None = None,
         where: Mapping[str, Any] | None = None,
     ) -> list[Node]:
+        """Return review artifacts from the background conversation namespace."""
         ns = WorkspaceNamespaces(workspace_id)
         query_where = dict(where or {})
         query_where["workspace_id"] = workspace_id
@@ -59,6 +69,7 @@ class ReviewQueryService:
         workspace_id: str,
         where: Mapping[str, Any] | None = None,
     ) -> list[Node]:
+        """Return candidate-link artifacts for a workspace."""
         return self.get_review_nodes(
             workspace_id=workspace_id,
             artifact_kinds=["candidate_link"],
@@ -72,6 +83,7 @@ class ReviewQueryService:
         candidate_link_id: str | None = None,
         where: Mapping[str, Any] | None = None,
     ) -> list[Node]:
+        """Return promotion-candidate artifacts, optionally scoped to a link."""
         query_where = dict(where or {})
         if candidate_link_id is not None:
             query_where["candidate_link_id"] = candidate_link_id
@@ -88,6 +100,7 @@ class ReviewQueryService:
         candidate_link_id: str | None = None,
         where: Mapping[str, Any] | None = None,
     ) -> list[Node]:
+        """Return promotion-evidence-pack artifacts, optionally scoped to a link."""
         query_where = dict(where or {})
         if candidate_link_id is not None:
             query_where["candidate_link_id"] = candidate_link_id
@@ -103,6 +116,7 @@ class ReviewQueryService:
         workspace_id: str,
         promoted_node_id: str,
     ) -> ReviewChainResult | None:
+        """Resolve the review chain that led to a promoted curated node."""
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
             promoted_nodes = self.engines.kg.read.get_nodes(

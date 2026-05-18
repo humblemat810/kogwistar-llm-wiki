@@ -1,3 +1,9 @@
+"""Tests for the lightweight review query helper.
+
+The phase 6 slice keeps review artifacts in the background conversation lane
+and exposes a thin query helper over the existing persisted metadata chain.
+"""
+
 from __future__ import annotations
 
 from kogwistar.engine_core.models import Grounding, Node, Span
@@ -7,6 +13,7 @@ from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
 def _sync_request(ingest_request, *, workspace_id: str, source_uri: str) -> object:
+    """Build a sync-mode ingest request for the review query tests."""
     return ingest_request.model_copy(
         update={
             "workspace_id": workspace_id,
@@ -17,6 +24,7 @@ def _sync_request(ingest_request, *, workspace_id: str, source_uri: str) -> obje
 
 
 def _span(doc_id: str) -> Span:
+    """Create a tiny grounding span used for the synthetic lane-noise node."""
     return Span.model_validate(
         {
             "collection_page_url": f"document_collection/{doc_id}",
@@ -36,6 +44,7 @@ def _span(doc_id: str) -> Span:
 
 
 def _lane_noise_node(*, workspace_id: str, doc_id: str) -> Node:
+    """Build a background conversation node that should be excluded by review queries."""
     return Node(
         label="Lane Noise",
         type="entity",
@@ -52,6 +61,7 @@ def _lane_noise_node(*, workspace_id: str, doc_id: str) -> Node:
 
 
 def test_review_query_helper_returns_review_chain(pipeline, ingest_request):
+    """The helper should recover the candidate, evidence pack, and promoted node chain."""
     request = _sync_request(
         ingest_request,
         workspace_id="review-helper-chain",
@@ -112,6 +122,7 @@ def test_review_query_helper_returns_review_chain(pipeline, ingest_request):
 
 
 def test_review_query_helper_is_workspace_scoped(pipeline, ingest_request):
+    """Review queries must not leak artifacts across workspaces."""
     first = _sync_request(
         ingest_request,
         workspace_id="review-helper-a",

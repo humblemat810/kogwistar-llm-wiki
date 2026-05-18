@@ -184,23 +184,23 @@ Acceptance criteria:
 **Goal:** keep review artifacts in background conversation, but make review
 lookup explicit and low-friction.
 
-- [ ] Add an app-level helper for review artifact queries in `conv_bg`.
-- [ ] Expose convenience wrappers for candidate links, promotion candidates,
+- [x] Add an app-level helper for review artifact queries in `conv_bg`.
+- [x] Expose convenience wrappers for candidate links, promotion candidates,
   evidence packs, and review-chain lookup.
-- [ ] Keep review lookup based on existing metadata links and `artifact_kind`.
-- [ ] Avoid introducing a new `REVIEW` graph space or new review taxonomy
+- [x] Keep review lookup based on existing metadata links and `artifact_kind`.
+- [x] Avoid introducing a new `REVIEW` graph space or new review taxonomy
   fields in this phase.
-- [ ] Do not change write paths, promotion flow, or long-run artifact
+- [x] Do not change write paths, promotion flow, or long-run artifact
   placement.
 
 Acceptance criteria:
 
-- [ ] Review artifacts are queryable through a helper, not only by ad hoc
+- [x] Review artifacts are queryable through a helper, not only by ad hoc
   conversation scans.
-- [ ] Helper results stay workspace-scoped and exclude ordinary lane messages.
-- [ ] Review-chain lookup can resolve promoted node -> candidate -> evidence
+- [x] Helper results stay workspace-scoped and exclude ordinary lane messages.
+- [x] Review-chain lookup can resolve promoted node -> candidate -> evidence
   pack -> evidence ids.
-- [ ] Existing promotion provenance checks still pass.
+- [x] Existing promotion provenance checks still pass.
 
 ## Phase 7: Demo Path Migration
 
