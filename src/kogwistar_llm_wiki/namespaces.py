@@ -1,3 +1,10 @@
+"""App-level graph-space namespace helpers for `kogwistar-llm-wiki`.
+
+This module keeps the semantic routing vocabulary explicit for the app layer:
+workspace scope, graph spaces, lane namespaces, and namespace/metadata
+agreement checks.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,3 +1,9 @@
+"""Projection helpers for turning app graph spaces into vault output.
+
+This module owns the read-side selection rules for curated and demo vault
+materialization, including graph-space routing and projection-time filtering.
+"""
+
 from __future__ import annotations
 
 import json

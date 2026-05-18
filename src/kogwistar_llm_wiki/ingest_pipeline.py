@@ -1,3 +1,9 @@
+"""Ingestion orchestration for `kogwistar-llm-wiki`.
+
+This pipeline wires parsing, source/base/curated write paths, review artifact
+creation, and the app-level projection/query helpers into one place.
+"""
+
 from __future__ import annotations
 
 import inspect
@@ -254,6 +260,12 @@ class IngestPipeline:
         parse_result = self.parse_source(
             request=request,
             source_document_id=source_document_id,
+        )
+        self.create_parse_retry_history(
+            request=request,
+            source_document_id=source_document_id,
+            parse_result=parse_result,
+            namespace=ns.conv_bg,
         )
         graph_extraction = self.translate_parse_result(
             parse_result=parse_result,
@@ -598,6 +610,125 @@ class IngestPipeline:
                 lane_message_id=lane_message_id,
             )
         return request_node_id
+
+    def create_parse_retry_history(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        parse_result: Any,
+        namespace: str,
+    ) -> str | None:
+        """Persist compact parse retry history into the background conversation graph."""
+        diagnostics = dict(getattr(parse_result, "diagnostics", {}) or {})
+        page_index_diag = dict(diagnostics.get("page_index") or {})
+        parser_lane = str(diagnostics.get("parser_lane") or page_index_diag.get("parser_lane") or "page_index")
+        assignment_mode = str(page_index_diag.get("assignment_mode") or diagnostics.get("assignment_mode") or "")
+        final_outcome = str(page_index_diag.get("final_outcome") or diagnostics.get("final_outcome") or "")
+        assignment_attempt_count = int(page_index_diag.get("assignment_attempt_count") or diagnostics.get("assignment_attempt_count") or 0)
+        assignment_retry_used = bool(page_index_diag.get("assignment_retry_used") or diagnostics.get("assignment_retry_used"))
+        assignment_retry_succeeded = bool(
+            page_index_diag.get("assignment_retry_succeeded") or diagnostics.get("assignment_retry_succeeded")
+        )
+        structure_retry_used = bool(page_index_diag.get("structure_retry_used") or diagnostics.get("structure_retry_used"))
+        structure_retry_succeeded = bool(
+            page_index_diag.get("structure_retry_succeeded") or diagnostics.get("structure_retry_succeeded")
+        )
+        retry_used = bool(page_index_diag.get("retry_used") or diagnostics.get("retry_used"))
+        retry_succeeded = bool(page_index_diag.get("retry_succeeded") or diagnostics.get("retry_succeeded"))
+        fallback_reason = str(page_index_diag.get("fallback_reason") or diagnostics.get("fallback_reason") or "")
+        if not (retry_used or fallback_reason or assignment_attempt_count > 1):
+            return None
+
+        first_validation_errors = list(page_index_diag.get("first_validation_errors") or diagnostics.get("first_validation_errors") or [])
+        retry_validation_errors = list(page_index_diag.get("retry_validation_errors") or diagnostics.get("retry_validation_errors") or [])
+        assignment_validation_errors = list(
+            page_index_diag.get("assignment_validation_errors") or diagnostics.get("assignment_validation_errors") or []
+        )
+        structure_validation_errors = list(
+            page_index_diag.get("structure_validation_errors") or diagnostics.get("structure_validation_errors") or []
+        )
+        validation_errors = list(page_index_diag.get("validation_errors") or diagnostics.get("validation_errors") or [])
+        history_payload = {
+            "workspace_id": request.workspace_id,
+            "source_document_id": source_document_id,
+            "source_uri": request.source_uri,
+            "parser_lane": parser_lane,
+            "assignment_mode": assignment_mode,
+            "final_outcome": final_outcome or None,
+            "assignment_attempt_count": assignment_attempt_count,
+            "assignment_retry_used": assignment_retry_used,
+            "assignment_retry_succeeded": assignment_retry_succeeded,
+            "structure_retry_used": structure_retry_used,
+            "structure_retry_succeeded": structure_retry_succeeded,
+            "retry_used": retry_used,
+            "retry_succeeded": retry_succeeded,
+            "fallback_reason": fallback_reason or None,
+            "assignment_validation_errors": assignment_validation_errors,
+            "structure_validation_errors": structure_validation_errors,
+            "first_validation_errors": first_validation_errors,
+            "retry_validation_errors": retry_validation_errors,
+            "validation_errors": validation_errors,
+            "workflow_run_id": diagnostics.get("workflow_run_id") or page_index_diag.get("workflow_run_id"),
+            "workflow_status": diagnostics.get("workflow_status") or page_index_diag.get("workflow_status"),
+            "retry_prompt_summary": page_index_diag.get("retry_prompt_summary"),
+            "structure_retry_prompt_summary": page_index_diag.get("structure_retry_prompt_summary")
+            or diagnostics.get("structure_retry_prompt_summary"),
+        }
+        node_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.parse_retry_history",
+                request.workspace_id,
+                source_document_id,
+                assignment_mode or "unknown",
+                final_outcome or "unknown",
+                str(retry_used),
+                str(retry_succeeded),
+                fallback_reason or "none",
+            )
+        )
+        if self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
+            return node_id
+
+        summary = (
+            f"Parse retry history for {request.title}: attempts={assignment_attempt_count} "
+            f"retry_used={retry_used} retry_succeeded={retry_succeeded} mode={assignment_mode or 'unknown'}"
+        )
+        node = self._artifact_node(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            node_id=node_id,
+            artifact_kind="parse_retry_history",
+            lane="background",
+            visibility="internal",
+            label=f"Parse retry history: {request.title}",
+            summary=summary,
+            extra_metadata={
+                "retry_history_json": json.dumps(history_payload, sort_keys=True, separators=(",", ":")),
+                "parser_lane": parser_lane,
+                "assignment_mode": assignment_mode,
+                "final_outcome": final_outcome or None,
+                "assignment_attempt_count": assignment_attempt_count,
+                "assignment_retry_used": assignment_retry_used,
+                "assignment_retry_succeeded": assignment_retry_succeeded,
+                "structure_retry_used": structure_retry_used,
+                "structure_retry_succeeded": structure_retry_succeeded,
+                "retry_used": retry_used,
+                "retry_succeeded": retry_succeeded,
+                "fallback_reason": fallback_reason or None,
+                "assignment_validation_errors": assignment_validation_errors,
+                "structure_validation_errors": structure_validation_errors,
+                "first_validation_errors": first_validation_errors,
+                "retry_validation_errors": retry_validation_errors,
+                "validation_errors": validation_errors,
+                "workflow_run_id": history_payload["workflow_run_id"],
+                "workflow_status": history_payload["workflow_status"],
+            },
+        )
+        with _temporary_namespace(self.engines.conversation, namespace):
+            self.engines.conversation.write.add_node(node)
+        return str(node.id)
 
     def create_candidate_link(
         self,

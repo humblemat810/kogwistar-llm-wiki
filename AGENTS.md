@@ -16,3 +16,4 @@
   shutdown problem, not a product regression. Confirm the cache path before
   chasing app logic.
 - See `doc/testing_guide.md` before inventing a new pytest cache workaround.
+- Plans should always first think if kogwistar primitives can be reused.

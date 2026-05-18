@@ -376,6 +376,20 @@ def run_longrun_parser_child(payload: dict[str, Any]) -> None:
                 graph_payload=graph_payload,
                 diagnostics={"parser_lane": "page_index", "page_index": _dump_model(result.diagnostics)},
             )
+            page_index_diag = dict(_dump_model(result.diagnostics) or {})
+            evaluation.update(
+                {
+                    "assignment_attempt_count": int(page_index_diag.get("assignment_attempt_count") or 0),
+                    "assignment_retry_used": bool(page_index_diag.get("assignment_retry_used")),
+                    "assignment_retry_succeeded": bool(page_index_diag.get("assignment_retry_succeeded")),
+                    "structure_retry_used": bool(page_index_diag.get("structure_retry_used")),
+                    "structure_retry_succeeded": bool(page_index_diag.get("structure_retry_succeeded")),
+                    "retry_used": bool(page_index_diag.get("retry_used")),
+                    "retry_succeeded": bool(page_index_diag.get("retry_succeeded")),
+                    "assignment_mode": str(page_index_diag.get("assignment_mode") or ""),
+                    "final_outcome": str(page_index_diag.get("final_outcome") or ""),
+                }
+            )
             diagnostics = {
                 "parser_lane": "page_index",
                 "page_index": _dump_model(result.diagnostics),

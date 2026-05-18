@@ -1686,7 +1686,10 @@ class LongRunHarness:
             )
         with _temporary_namespace(self.engines.kg, ns.source_space):
             source_nodes = self.engines.kg.read.get_nodes(
-                where={"doc_id": record.source_document_id, "graph_space": "source"},
+                where=_and_where(
+                    {"doc_id": record.source_document_id},
+                    {"graph_space": "source"},
+                ),
                 limit=10_000,
             )
         if not source_nodes:
@@ -3074,7 +3077,9 @@ def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
     assert result["diagnostics"]["parser_lane"] == "page_index"
     assert result["diagnostics"]["page_index"]["assignment_mode"] in {
         "heuristic_deterministic",
-        "ollama_flat_assignment",
+        "llm_flat_assignment",
+        "llm_flat_assignment_retry",
+        "llm_flat_assignment_structure_retry",
         "deterministic_fallback",
     }
     assert set(result["evaluation"]) >= {
@@ -3087,6 +3092,17 @@ def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
         "duplicate_excerpt_hits",
         "fallback_used",
     }
+    assert {
+        "assignment_attempt_count",
+        "assignment_retry_used",
+        "assignment_retry_succeeded",
+        "structure_retry_used",
+        "structure_retry_succeeded",
+        "retry_used",
+        "retry_succeeded",
+        "assignment_mode",
+        "final_outcome",
+    } <= set(result["evaluation"])
     assert result["graph_payload"]["nodes"]
 
 

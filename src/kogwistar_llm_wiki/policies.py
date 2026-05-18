@@ -1,6 +1,6 @@
-from __future__ import annotations
+"""`llm-wiki` policy instances built on top of reusable kogwistar core protocols."""
 
-"""llm-wiki policy instances built on top of reusable kogwistar core protocols."""
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping

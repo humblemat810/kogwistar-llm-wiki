@@ -1,3 +1,9 @@
+"""Graph-space query helpers for explicit app-level reads.
+
+The service in this module centralizes source/base/curated selection so callers
+do not need to reach into engine namespaces directly.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

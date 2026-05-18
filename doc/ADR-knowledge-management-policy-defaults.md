@@ -36,6 +36,14 @@ inside app code:
 We need to decide whether the existing knowledge-management approach should be
 treated as a generic core default or kept mostly application-specific.
 
+A second semantic question also matters now that the graph-space refactor is in
+flight:
+
+- `BASE_KG` is a machine-extracted reference layer over `SOURCE`, not a second
+  copy of source truth.
+- Review artifacts remain an application-level background-conversation concern
+  for now; the helper/query surface is the supported lookup path.
+
 ## Decision
 
 We treat the **overall knowledge-management approach** used by `llm-wiki` as a
@@ -55,11 +63,18 @@ In practice:
    - working memory -> maintenance/review -> promoted knowledge -> derived knowledge -> wisdom -> projection
 2. The current `llm-wiki` choices are not assumed to be universally correct just
    because the pattern is reusable.
-3. Future policy extraction to core should move:
+3. `BASE_KG` should be treated as a reference projection over `SOURCE`:
+   - explicit reference artifacts point back to source
+   - a reference targets exactly one object in v1
+   - `reference_pointer` remains the canonical node-shaped reference artifact
+   - edge-shaped proxies are allowed only when topology must remain traversable
+4. Review continues to be an app-specific background-conversation workflow for
+   now, not a core storage migration.
+5. Future policy extraction to core should move:
    - policy interfaces
    - generic default policy classes
    - reusable decision points
-4. Future policy extraction should not automatically move:
+6. Future policy extraction should not automatically move:
    - `llm-wiki` artifact names
    - `llm-wiki` review thresholds
    - `llm-wiki` projection-specific conventions
@@ -75,6 +90,10 @@ The current app architecture already shows a strong generic shape:
 - derived knowledge is versioned synthesis over promoted knowledge
 - wisdom is distilled from execution outcomes
 - projection is explicitly rebuildable and non-authoritative
+- `BASE_KG` is an explicit reference layer over `SOURCE`, not duplicated
+  source truth
+- review artifacts are currently kept in background conversation and queried
+  through an explicit helper surface
 
 Those are reusable knowledge-system principles, not wiki-only hacks.
 
@@ -131,6 +150,7 @@ Recommended classification for existing behavior:
   - derived knowledge as synthesis over promoted knowledge
   - wisdom as execution-derived reusable lessons
   - projection as rebuildable non-authoritative view
+  - reference-layer extraction over source as a separate base knowledge step
 
 - **Core protocol, app configured**
   - promotion thresholds
@@ -138,12 +158,14 @@ Recommended classification for existing behavior:
   - wisdom extraction thresholds
   - artifact visibility policy
   - restart / recovery policy decisions
+  - reference-pointer shape rules for pointer artifacts
 
 - **Remain app-specific**
   - namespace naming scheme
   - artifact vocabulary specific to `llm-wiki`
   - Obsidian-specific projection and manifest conventions
   - product meanings of maintenance kinds and review flows
+  - whether review stays in conversation or migrates to a separate storage host
 
 ## Current Code Anchors
 
@@ -165,6 +187,8 @@ Recommended classification for existing behavior:
   [namespaces.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/namespaces.py:55)
 - Projection filtering behavior:
   [projection.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/projection.py:29)
+- Review query helper:
+  [review_query.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/review_query.py:1)
 
 ## Follow-Up
 
@@ -182,6 +206,9 @@ Implementation note:
 - The vocabulary boundary cleanup is implemented: core defaults no longer
   classify `llm-wiki` artifact names directly, and `llm-wiki` owns
   `LlmWikiArtifactTaxonomy`
+- The `BASE_KG` reference layer and the review-query helper are intentionally
+  app-level semantics; they are documented here so future policy extraction
+  does not accidentally flatten them into generic graph truth
 
 Next useful step:
 
