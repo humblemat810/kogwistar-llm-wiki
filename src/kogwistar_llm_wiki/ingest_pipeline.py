@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 import tempfile
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .utils import _temporary_namespace
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -25,8 +25,9 @@ from .models import (
     NamespaceEngines,
     ProjectionSnapshot,
 )
+from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 from .policies import LlmWikiPolicies, build_default_policies
-from .namespaces import WorkspaceNamespaces
+from .namespaces import GraphSpace, WorkspaceNamespaces
 from .projection import ProjectionManager
 
 
@@ -229,6 +230,7 @@ class IngestPipeline:
         self.parser = parser
         self.policies = policies or build_default_policies()
         self.projection = ProjectionManager(engines, policies=self.policies)
+        self.query_service = GraphSpaceQueryService(engines)
 
     def namespaces_for(self, workspace_id: str) -> WorkspaceNamespaces:
         return WorkspaceNamespaces(workspace_id)
@@ -973,6 +975,19 @@ class IngestPipeline:
 
     def build_projection_snapshot(self, workspace_id: str) -> ProjectionSnapshot:
         return self.projection.build_projection_snapshot(workspace_id=workspace_id)
+
+    def query_nodes(
+        self,
+        *,
+        workspace_id: str,
+        graph_spaces: list[GraphSpace | str],
+        where: Mapping[str, Any] | None = None,
+    ) -> list[GraphSpaceQueryResult]:
+        return self.query_service.get_nodes(
+            workspace_id=workspace_id,
+            graph_spaces=graph_spaces,
+            where=where,
+        )
 
     def _artifact_node(
         self,

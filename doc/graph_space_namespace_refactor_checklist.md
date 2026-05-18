@@ -117,21 +117,21 @@ Acceptance criteria:
 
 **Goal:** make retrieval choose graph spaces explicitly.
 
-- [ ] Add an app-level query helper that accepts explicit graph spaces.
-- [ ] Support `graph_spaces=["source"]`.
-- [ ] Support `graph_spaces=["base_kg"]` after Phase 4 exists.
-- [ ] Support `graph_spaces=["curated_kg"]`.
-- [ ] Support `graph_spaces=["source", "base_kg", "curated_kg"]` for
+- [x] Add an app-level query helper that accepts explicit graph spaces.
+- [x] Support `graph_spaces=["source"]`.
+- [x] Support `graph_spaces=["base_kg"]` after Phase 4 exists.
+- [x] Support `graph_spaces=["curated_kg"]`.
+- [x] Support `graph_spaces=["source", "base_kg", "curated_kg"]` for
   workspace-style search.
-- [ ] Keep `workspace` as a convenience query preset only, not a graph space.
-- [ ] Return graph-space metadata with each result.
+- [x] Keep `workspace` as a convenience query preset only, not a graph space.
+- [x] Return graph-space metadata with each result.
 
 Acceptance criteria:
 
-- [ ] Querying `SOURCE` returns parsed document content before promotion.
-- [ ] Querying `CURATED_KG` excludes raw parsed source.
-- [ ] Workspace-style search expands to explicit graph spaces.
-- [ ] Results expose graph space so callers can explain where answers came
+- [x] Querying `SOURCE` returns parsed document content before promotion.
+- [x] Querying `CURATED_KG` excludes raw parsed source.
+- [x] Workspace-style search expands to explicit graph spaces.
+- [x] Results expose graph space so callers can explain where answers came
   from.
 
 ## Phase 4: Base KG Projection
