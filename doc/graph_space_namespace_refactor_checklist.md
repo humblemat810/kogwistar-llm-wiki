@@ -29,7 +29,7 @@ The key semantic correction is:
   candidates are written to the background conversation namespace.
 - Promoted knowledge is written to CURATED_KG.
 - Demo vault rendering now reads `BASE_KG` explicitly instead of mirroring
-  parsed semantic-tree content into curated KG.
+  parsed semantic-tree content into curated_kg.
 - Legacy `kg` namespace naming has been removed from app graph-space routing.
 
 ## Target Graph Spaces
@@ -47,27 +47,27 @@ The key semantic correction is:
 
 ## Non-Goals
 
-- [ ] Do not treat graph spaces as Kogwistar engine graph kinds.
-- [ ] Do not move page-index parser logic into Kogwistar core.
-- [ ] Do not blindly promote all parsed source into curated knowledge.
-- [ ] Do not call source ingestion or base extraction "promotion".
-- [ ] Do not physically split databases/backends before logical semantics are
+- [x] Do not treat graph spaces as Kogwistar engine graph kinds.
+- [x] Do not move page-index parser logic into Kogwistar core.
+- [x] Do not blindly promote all parsed source into curated knowledge.
+- [x] Do not call source ingestion or base extraction "promotion".
+- [x] Do not physically split databases/backends before logical semantics are
   stable.
-- [ ] Do not remove legacy namespace aliases in the first slice.
+- [x] Do not remove legacy namespace aliases in the first slice.
 
 ## Invariants
 
-- [ ] `workspace_id` is app/project scope, not workflow and not graph space.
-- [ ] Engine graph kind is broad storage/runtime family, not graph space.
-- [ ] Namespace routes data; metadata explains data.
-- [ ] Namespace graph-space segment and metadata graph-space field must agree.
-- [ ] `SOURCE` is queryable before promotion.
-- [ ] `BASE_KG` is distinguishable from `CURATED_KG`.
-- [ ] `CURATED_KG` contains accepted/promoted knowledge only.
-- [ ] `CONVERSATION` is not the source-document store.
-- [ ] `REVIEW` artifacts are not hidden only in background conversation.
-- [ ] Projection is rebuildable and not authoritative.
-- [ ] Demo paths must obey the same graph-space invariants as normal paths.
+- [x] `workspace_id` is app/project scope, not workflow and not graph space.
+- [x] Engine graph kind is broad storage/runtime family, not graph space.
+- [x] Namespace routes data; metadata explains data.
+- [x] Namespace graph-space segment and metadata graph-space field must agree.
+- [x] `SOURCE` is queryable before promotion.
+- [x] `BASE_KG` is distinguishable from `CURATED_KG`.
+- [x] `CURATED_KG` contains accepted/promoted knowledge only.
+- [x] `CONVERSATION` is not the source-document store.
+- [x] `REVIEW` artifacts are not hidden only in background conversation.
+- [x] Projection is rebuildable and not authoritative.
+- [x] Demo paths must obey the same graph-space invariants as normal paths.
 
 ## Phase 1: Namespace Builder And Vocabulary
 
@@ -222,44 +222,44 @@ Acceptance criteria:
 
 **Goal:** keep owner, principal, and security scope distinct from graph space.
 
-- [ ] Avoid adding `owner_type` / `owner_id` to namespace strings unless an ACL
+- [x] Avoid adding `owner_type` / `owner_id` to namespace strings unless an ACL
   design explicitly requires it.
-- [ ] Store actor fields with precise names such as `principal`, `subject`,
+- [x] Store actor fields with precise names such as `principal`, `subject`,
   `created_by`, or `service_account_id`.
-- [ ] Keep `security_scope`, `storage namespace`, and `execution_namespace`
+- [x] Keep `security_scope`, `storage namespace`, and `execution_namespace`
   distinct.
-- [ ] Add policy tests for graph-space visibility and read eligibility.
+- [x] Add policy tests for graph-space visibility and read eligibility.
 
 Acceptance criteria:
 
-- [ ] Workspace scope is not used as a substitute for ACL.
-- [ ] Graph-space routing is not used as the only visibility check.
-- [ ] User-facing retrieval respects policy before summarization/ranking.
+- [x] Workspace scope is not used as a substitute for ACL.
+- [x] Graph-space routing is not used as the only visibility check.
+- [x] User-facing retrieval respects policy before summarization/ranking.
 
 ## Phase 9: Documentation And Migration Notes
 
 **Goal:** keep terminology and compatibility clear while implementation changes.
 
 - [x] Update glossary to distinguish graph space from engine graph kind.
-- [ ] Update lane namespace convention to avoid implying source documents belong
-  in conversation.
-- [ ] Update ADRs/checklists that describe `kg` as the only knowledge graph.
-- [x] Document resolved graph-space decisions and removed `kg` compatibility.
-- [ ] Add diagrams showing SOURCE, BASE_KG, CURATED_KG, REVIEW, CONVERSATION,
-  WORKFLOW, WISDOM, POLICY, and PROJECTION.
+- [x] Update lane namespace convention to avoid implying source documents belong
+    in conversation.
+- [x] Update ADRs/checklists that describe `kg` as the only knowledge graph.
+  - [x] Document resolved graph-space decisions and removed `kg` compatibility.
+- [x] Add diagrams showing SOURCE, BASE_KG, CURATED_KG, REVIEW, CONVERSATION,
+    WORKFLOW, WISDOM, POLICY, and PROJECTION.
 
 Acceptance criteria:
 
-- [ ] Docs consistently use `curated_kg` where accepted/promoted knowledge is
+- [x] Docs consistently use `curated_kg` where accepted/promoted knowledge is
   meant.
-- [ ] Docs consistently call SOURCE/BASE_KG/CURATED_KG graph spaces, not engine
+- [x] Docs consistently call SOURCE/BASE_KG/CURATED_KG graph spaces, not engine
   graph types.
 - [x] Migration notes explain that `kg` is no longer a graph-space alias.
 
 ## Tests To Add
 
-- [ ] Namespace builder tests for every graph space.
-- [ ] Namespace/metadata agreement invariant tests.
+- [x] Namespace builder tests for every graph space.
+- [x] Namespace/metadata agreement invariant tests.
 - [x] `kg` alias rejection tests.
 - [x] Parsed document is written to SOURCE.
 - [x] Parsed document remains queryable before promotion.

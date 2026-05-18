@@ -22,15 +22,15 @@ Suggested patterns, refer to kogwistar style first, if not, below is a possible 
   - `ws:{workspace_id}:conv:fg`
 - Background maintenance conversation:
   - `ws:{workspace_id}:conv:bg`
+- `SOURCE` graph:
+  - `ws:{workspace_id}:g:source`
 - Maintenance workflow:
   - `ws:{workspace_id}:wf:maintenance`
-- Curated knowledge:
+- `CURATED_KG`:
   - `ws:{workspace_id}:g:curated_kg`
-- Source:
-  - `ws:{workspace_id}:g:source`
-- Base KG:
+- `BASE_KG`:
   - `ws:{workspace_id}:g:base_kg`
-- Wisdom:
+- `WISDOM`:
   - `ws:{workspace_id}:wisdom`
 
 ---
@@ -46,6 +46,7 @@ Recommended `Node.properties` fields:
 Notes:
 
 - metadata handles semantic meaning
+- source documents and parsed source live in `SOURCE`, not in conversation
 - "Inbox" or "Notification" intent is expressed through metadata (e.g., `intent: notification`), not namespaces
 - do not rely on namespace alone for user visibility or policy
 
@@ -113,7 +114,7 @@ Use for:
 
 ### Promotion rule
 
-Background artifacts do not become KG truth automatically unless policy allows it.
+Background artifacts do not become curated_kg truth automatically unless policy allows it.
 
 ---
 

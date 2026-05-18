@@ -22,7 +22,7 @@ Hosting tradeoff for `derived_knowledge`:
 
 - Default same-engine mode keeps curated knowledge and `derived_knowledge` on the same backend, but in different namespaces (`ws:{id}:g:curated_kg` versus `ws:{id}:derived_knowledge`).
 - Split-engine mode isolates storage and indexing cost, but cross-surface search must query two engines deliberately.
-- The semantic contract is the same in both layouts: `derived_knowledge` never lives in the raw KG namespace.
+- The semantic contract is the same in both layouts: `derived_knowledge` never lives in the raw curated_kg namespace.
 
 ## `llm-wiki daemon`
 

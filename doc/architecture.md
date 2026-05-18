@@ -11,7 +11,7 @@ This document defines the architecture for **LLM-Wiki**, a knowledge system buil
 - **Deterministic ingestion**: Stable identities for all inputs and derivations
 - **Separation of concerns**:
   - Conversation Graph = working memory
-  - Knowledge Graph = promoted, durable knowledge
+  - `CURATED_KG` = promoted, durable knowledge
   - **Maintenance Domain = system maintenance semantics across graph kinds (NOT a core graph kind)**
 
 - **Wisdom is a graph**:
@@ -34,7 +34,7 @@ flowchart LR
     C --> D[conv:bg<br/>candidate links]
     C --> E[wf:maintenance<br/>job request]
     D --> F[review<br/>promotion candidate view]
-    F --> G[kg<br/>promoted knowledge]
+    F --> G[curated_kg<br/>promoted knowledge]
     G --> H[wisdom<br/>execution-derived reuse]
     G --> I[Obsidian sink<br/>projection]
 ```
@@ -68,8 +68,8 @@ Responsibilities:
 - Parse documents (PDF, OCR, markdown, etc.)
 - Extract structure (sections, entities, tables)
 - Emit grounded artifacts into conversation-oriented state
-- Regular sync ingest does not imply the same immediate KG shape as the demo
-  shortcut; it reaches richer KG state through maintenance, promotion, and
+- Regular sync ingest does not imply the same immediate curated_kg shape as the demo
+  shortcut; it reaches richer curated_kg state through maintenance, promotion, and
   projection.
 
 Future:
@@ -107,7 +107,7 @@ Responsibilities:
   producing duplicate review, maintenance, or projection work
 - Regular ingest keeps the production contract focused on source and working
   artifacts first; it does not directly mirror the demo's richer semantic-tree
-  KG shape.
+  curated_kg shape.
 
 Convergent promotion path:
 
@@ -122,7 +122,7 @@ Demo shortcut:
 
 - The `demo` command uses the same source parsing pipeline as normal ingest but
   renders its vault from explicit `BASE_KG` reads instead of mirroring parsed
-  semantic-tree structure into curated KG.
+  semantic-tree structure into curated_kg.
 - Demo legibility is handled at projection time, so the stored source/base graph
   path stays aligned with the normal ingest contract.
 
@@ -197,7 +197,7 @@ Notes:
 
 ---
 
-### 3.1.2 Knowledge Graph (KG)
+### 3.1.2 `CURATED_KG`
 
 Purpose:
 
@@ -351,7 +351,7 @@ pin- (ref) from source, and edge from it, edge in source can also be pin as edge
 
 ### 8.1 Criteria
 
-Promotion (Conversation / Maintenance artifacts → KG) requires:
+Promotion (Conversation / Maintenance artifacts -> curated_kg) requires:
 
 - Evidence support (source or multi-signal)
 - No unresolved contradictions at the required confidence threshold
@@ -366,7 +366,7 @@ Promotion (Conversation / Maintenance artifacts → KG) requires:
 2. Maintenance domain generates candidates
 3. Evaluation
 4. Promotion decision
-5. KG update event
+5. curated_kg update event
 6. Projection update
 
 ---
@@ -458,7 +458,7 @@ Important:
 
 Include:
 
-- Accepted KG nodes
+- Accepted curated_kg nodes
 - Selected synthesis artifacts
 
 Exclude by default (but need to be able to opt-in):
@@ -491,7 +491,7 @@ kg_id → deterministic file path
 - Add (ingestion)
 - Parse (structure)
 - Organize (curation)
-- Knowledge (KG)
+- Knowledge (curated_kg)
 - Maintenance (system maintenance semantics)
 - Obsidian (projection)
 - Maintenance workers and daemon control
