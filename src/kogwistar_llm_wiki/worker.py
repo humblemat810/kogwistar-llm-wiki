@@ -277,6 +277,7 @@ class MaintenanceWorker(BaseWorker):
             )
         )
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            reply_message_id: str | None = None
             existing_reply = self.engines.conversation.read.get_nodes(
                 where={
                     "$and": [
@@ -299,7 +300,7 @@ class MaintenanceWorker(BaseWorker):
                     limit=1,
                 )
             if not existing_reply:
-                self.engines.conversation.send_lane_message(
+                sent_reply = self.engines.conversation.send_lane_message(
                     conversation_id=f"maintenance:{source_document_id or request_node_id}",
                     inbox_id="inbox:foreground",
                     sender_id="lane:worker:maintenance",
@@ -313,6 +314,16 @@ class MaintenanceWorker(BaseWorker):
                     reply_to=reply_to_message_id,
                     correlation_id=correlation_id,
                     idempotency_key=reply_idempotency_key,
+                )
+                reply_message_id = str(sent_reply.message_id)
+            else:
+                reply_message_id = str(existing_reply[0].id)
+            if reply_message_id:
+                self.engines.conversation.update_lane_message_status(
+                    message_id=reply_message_id,
+                    status="completed" if status == "completed" else "failed",
+                    error=(payload if status != "completed" else None),
+                    completed=True,
                 )
             self.engines.conversation.update_lane_message_status(
                 message_id=reply_to_message_id,

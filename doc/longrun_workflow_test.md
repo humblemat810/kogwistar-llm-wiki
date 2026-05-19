@@ -24,7 +24,8 @@ $env:KOGWISTAR_LLM_WIKI_LONGRUN='1'
 Backend selection is explicit too:
 
 - `KOGWISTAR_LONGRUN_BACKEND=chroma` uses the local persistent Chroma-backed namespace engines.
-- `KOGWISTAR_LONGRUN_BACKEND=postgres` uses the repo's disposable Postgres test-container path and requires `KOGWISTAR_LONGRUN_DSN` or `KOGWISTAR_LLM_WIKI_TEST_PG_DSN`.
+- `KOGWISTAR_LONGRUN_BACKEND=postgres` uses the repo's Postgres + pgvector path and requires `KOGWISTAR_LONGRUN_DSN` or `KOGWISTAR_LLM_WIKI_TEST_PG_DSN`.
+- `KOGWISTAR_LONGRUN_BACKEND=pgvector` is the explicit alias for the same Postgres + pgvector path. The probe launch now has two entries: one that self-provisions a disposable `testcontainers` Postgres+pgvector container, and one that asks for a custom DSN.
 - `in_memory` is not supported for the long-run soak because crash-continuation needs durable state.
 
 If you prefer a VSCode button, use the launch configurations in
@@ -42,11 +43,18 @@ If you prefer a VSCode button, use the launch configurations in
 - `Longrun: Postgres Continue (3 docs)`
 - `Longrun: Postgres Fresh (1 doc)`
 - `Longrun: Postgres Continue (1 doc)`
+- `Probe: PgVector Fresh (1 doc, size selectable)`
 
 The fresh configurations clear the run directory first via harness mode, and
 the continue configurations reuse the same stable run directory. Use separate
 run directories per backend so chroma and postgres runs do not share checkpoint
 state.
+
+The pgvector probe self-provisions a disposable `testcontainers` database in
+the `Probe: PgVector Fresh (1 doc, size selectable)` launch entry. The
+`Probe: PgVector Custom DSN (1 doc, size selectable)` launch entry uses the DSN
+you type into the prompt, which is useful when you want to point at a
+particular external database.
 
 Operator guidance:
 
@@ -63,8 +71,8 @@ Defaults:
 - `KOGWISTAR_OLLAMA_MODEL=gemma4:e2b`
 - `KOGWISTAR_OLLAMA_BASE_URL=http://localhost:11434`
 - `KOGWISTAR_LONGRUN_DOC_COUNT=20`
-- `KOGWISTAR_LONGRUN_BACKEND=chroma|postgres`
-- `KOGWISTAR_LONGRUN_DSN` is only needed when `KOGWISTAR_LONGRUN_BACKEND=postgres`
+- `KOGWISTAR_LONGRUN_BACKEND=chroma|postgres|pgvector`
+- `KOGWISTAR_LONGRUN_DSN` is only needed when `KOGWISTAR_LONGRUN_BACKEND=postgres|pgvector` and no testcontainer-provided DSN is present
 - `KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS=3`
 - `KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS=100`
 - `KOGWISTAR_LONGRUN_RUN_DIR` can point the harness at a stable run directory

@@ -173,7 +173,7 @@ def test_maintenance_lane_progress_reports_projected_request_and_reply(tmp_path:
     by_type = {item["msg_type"]: item for item in progress["items"]}
     assert by_type["request.maintenance"]["status"] == "completed"
     assert by_type["request.maintenance"]["event_type"] == "worker.completed"
-    assert by_type["reply.maintenance.completed"]["status"] == "pending"
+    assert by_type["reply.maintenance.completed"]["status"] == "completed"
     assert by_type["reply.maintenance.completed"]["inbox_id"] == "inbox:foreground"
 
 

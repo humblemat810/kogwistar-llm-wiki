@@ -164,9 +164,9 @@ class LongRunConfig:
         if token_min <= 0 or token_max <= 0 or token_min > token_max:
             raise ValueError("KOGWISTAR_LONGRUN_TOKEN_MIN/MAX must define a positive ascending range")
         backend = os.getenv("KOGWISTAR_LONGRUN_BACKEND", "chroma").strip().lower() or "chroma"
-        if backend not in {"chroma", "postgres"}:
+        if backend not in {"chroma", "postgres", "pgvector"}:
             raise ValueError(
-                "KOGWISTAR_LONGRUN_BACKEND must be one of {'chroma', 'postgres'}; "
+                "KOGWISTAR_LONGRUN_BACKEND must be one of {'chroma', 'postgres', 'pgvector'}; "
                 f"got {backend!r}"
             )
         parser_lane = (
@@ -182,11 +182,13 @@ class LongRunConfig:
         if parse_timeout_seconds <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS must be positive")
         dsn = _resolve_longrun_dsn()
-        if backend == "postgres" and not dsn:
+        if backend in {"postgres", "pgvector"} and not dsn:
             raise ValueError(
-                "KOGWISTAR_LONGRUN_BACKEND=postgres requires a DSN; set "
+                "KOGWISTAR_LONGRUN_BACKEND=postgres/pgvector requires a DSN; set "
                 "KOGWISTAR_LONGRUN_DSN or KOGWISTAR_LLM_WIKI_TEST_PG_DSN "
-                "(or PG_DSN/DATABASE_URL)"
+                "(or PG_DSN/DATABASE_URL). For `pgvector`, the repo's pytest "
+                "session fixture can start a disposable testcontainers-backed "
+                "database automatically when Docker is available."
             )
         return cls(
             enabled=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
@@ -538,11 +540,13 @@ class LongRunHarness:
         base_dir = self.run_dir / "engines"
         if backend == "chroma":
             return build_persistent_namespace_engines(base_dir)
-        if backend == "postgres":
+        if backend in {"postgres", "pgvector"}:
             if not self.config.dsn:
                 raise ValueError(
-                    "postgres long-run backend requires a DSN; set "
+                    "postgres/pgvector long-run backend requires a DSN; set "
                     "KOGWISTAR_LONGRUN_DSN or KOGWISTAR_LLM_WIKI_TEST_PG_DSN"
+                    " (the pgvector probe can also obtain one from the pytest "
+                    "testcontainers fixture when Docker is available)"
                 )
             return build_postgres_namespace_engines(
                 base_dir=base_dir,
@@ -550,7 +554,7 @@ class LongRunHarness:
             )
         raise ValueError(
             "unsupported long-run backend: "
-            f"{self.config.backend!r}; expected chroma or postgres"
+            f"{self.config.backend!r}; expected chroma, postgres, or pgvector"
         )
 
     def _rebuild_runtime_objects(self) -> None:
@@ -2711,23 +2715,31 @@ def test_longrun_run_invariant_passes_with_maintenance_evidence(tmp_path: Path):
         monkeypatch.undo()
 
 
-def test_longrun_config_from_env_accepts_backend_selection(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("backend", ["postgres", "pgvector"])
+def test_longrun_config_from_env_accepts_backend_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+):
     monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
-    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "postgres")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", backend)
     monkeypatch.setenv(
         "KOGWISTAR_LONGRUN_DSN",
         "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo",
     )
     config = LongRunConfig.from_env()
-    assert config.backend == "postgres"
+    assert config.backend == backend
     assert config.dsn == "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
 
 
-def test_longrun_config_from_env_rejects_missing_postgres_dsn(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("backend", ["postgres", "pgvector"])
+def test_longrun_config_from_env_rejects_missing_postgres_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+):
     monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
-    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "postgres")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", backend)
     for env_name in (
         "KOGWISTAR_LONGRUN_DSN",
         "KOGWISTAR_LLM_WIKI_TEST_PG_DSN",
@@ -3176,6 +3188,7 @@ def test_longrun_parser_subprocess_timeout_records_heartbeat(tmp_path: Path):
     [
         ("chroma", "persistent"),
         ("postgres", "postgres"),
+        ("pgvector", "postgres"),
     ],
 )
 def test_longrun_backend_dispatch_uses_selected_factory(
@@ -3213,7 +3226,11 @@ def test_longrun_backend_dispatch_uses_selected_factory(
         max_repeated_systemic_errors=3,
         max_post_doc_maintenance_steps=1,
         backend=backend,
-        dsn="postgresql+psycopg://demo:demo@127.0.0.1:5432/demo" if backend == "postgres" else None,
+        dsn=(
+            "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
+            if backend in {"postgres", "pgvector"}
+            else None
+        ),
     )
     harness = LongRunHarness(run_dir=tmp_path / f"backend-{backend}", config=config)
 
@@ -3221,7 +3238,7 @@ def test_longrun_backend_dispatch_uses_selected_factory(
 
     assert engines.kind == expected_factory
     assert build_calls[expected_factory]["base_dir"] == harness.run_dir / "engines"
-    if backend == "postgres":
+    if backend in {"postgres", "pgvector"}:
         assert build_calls["postgres"]["dsn"] == "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
         assert "persistent" not in build_calls
     else:

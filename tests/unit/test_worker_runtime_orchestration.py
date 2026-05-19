@@ -134,6 +134,7 @@ def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, i
         )
     assert len(replies) == 1
     assert replies[0].metadata.get("reply_to_message_id") == request_message_id
+    assert replies[0].metadata.get("status") == "completed"
     matching_request = [node for node in request_after if str(node.id) == request_message_id]
     assert len(matching_request) == 1
     assert matching_request[0].metadata.get("status") == "completed"
@@ -267,6 +268,7 @@ def test_maintenance_worker_reply_emission_is_idempotent(
             }
         )
     assert len(replies) == 1
+    assert replies[0].metadata.get("status") == "completed"
 
 
 def test_maintenance_worker_reply_lookup_converges_after_pre_ack_redelivery(

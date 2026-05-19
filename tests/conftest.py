@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -19,6 +20,9 @@ for key in ("TMPDIR", "TEMP", "TMP"):
 
 
 import pytest
+
+
+logger = logging.getLogger(__name__)
 
 
 def pytest_configure(config):
@@ -101,3 +105,73 @@ def ingest_request():
         title="Acme Contract",
         raw_text="Acme shall pay within 30 days. Either party may terminate with notice.",
     )
+
+
+def _normalize_pg_dsn(connection_url: str) -> str:
+    try:
+        from sqlalchemy.engine import make_url
+    except Exception:
+        return connection_url
+    url = make_url(connection_url)
+    return url.set(drivername="postgresql+psycopg").render_as_string(hide_password=False)
+
+
+def _start_longrun_pgvector_container(container_cls, image: str):
+    container = None
+    try:
+        container = container_cls(image)
+        container.start()
+        return container
+    except Exception:
+        if container is not None:
+            try:
+                container.stop()
+            except Exception:
+                logger.exception(
+                    "Failed to stop partially started longrun pgvector test container image=%s",
+                    image,
+                )
+        raise
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _longrun_pgvector_testcontainer():
+    backend = os.getenv("KOGWISTAR_LONGRUN_BACKEND", "").strip().lower()
+    if backend != "pgvector":
+        yield
+        return
+
+    pg_source = os.getenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer").strip().lower() or "testcontainer"
+    if pg_source not in {"testcontainer", "custom"}:
+        raise ValueError(
+            "KOGWISTAR_LONGRUN_PG_SOURCE must be one of {'testcontainer', 'custom'}; "
+            f"got {pg_source!r}"
+        )
+
+    if pg_source == "custom":
+        yield
+        return
+
+    try:
+        from testcontainers.postgres import PostgresContainer
+    except Exception as exc:  # pragma: no cover - optional dependency
+        pytest.skip(f"pgvector long-run probe requires testcontainers[postgresql]: {exc}")
+
+    image = os.getenv("KOGWISTAR_LONGRUN_PG_IMAGE", "pgvector/pgvector:pg17")
+    logger.info("Starting longrun pgvector test container image=%s", image)
+    try:
+        container = _start_longrun_pgvector_container(PostgresContainer, image)
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Failed to start longrun pgvector test container image={image}: {exc}")
+
+    dsn = _normalize_pg_dsn(container.get_connection_url())
+    os.environ["KOGWISTAR_LONGRUN_DSN"] = dsn
+    os.environ["KOGWISTAR_LLM_WIKI_TEST_PG_DSN"] = dsn
+    try:
+        yield
+    finally:
+        logger.info("Stopping longrun pgvector test container image=%s", image)
+        try:
+            container.stop()
+        except Exception:
+            logger.exception("Failed to stop longrun pgvector test container image=%s", image)

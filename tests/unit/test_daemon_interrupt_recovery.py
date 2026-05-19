@@ -82,6 +82,7 @@ def test_maintenance_daemon_startup_repairs_missing_lane_projection_rows(tmp_pat
     assert maintenance_rows[0].status == "completed"
     assert len(foreground_rows) == 1
     assert foreground_rows[0].msg_type == "reply.maintenance.completed"
+    assert foreground_rows[0].status == "completed"
 
 
 def test_projection_daemon_startup_recovery_is_bounded(tmp_path, monkeypatch):
@@ -194,6 +195,7 @@ def test_restart_after_interrupt_reclaims_expired_job_lease(tmp_path, monkeypatc
     assert len(done_jobs) == 1
     assert len(foreground_rows) == 1
     assert foreground_rows[0].msg_type == "reply.maintenance.completed"
+    assert foreground_rows[0].status == "completed"
 
 
 def test_maintenance_daemon_stop_exits_after_current_poll_cycle(monkeypatch):
