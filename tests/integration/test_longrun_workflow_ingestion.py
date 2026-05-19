@@ -181,8 +181,16 @@ class LongRunConfig:
         parse_timeout_seconds = int(os.getenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "1200"))
         if parse_timeout_seconds <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS must be positive")
+        pg_source = os.getenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer").strip().lower() or "testcontainer"
+        if pg_source not in {"testcontainer", "custom"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_PG_SOURCE must be one of {'testcontainer', 'custom'}; "
+                f"got {pg_source!r}"
+            )
         dsn = _resolve_longrun_dsn()
-        if backend in {"postgres", "pgvector"} and not dsn:
+        if backend in {"postgres", "pgvector"} and not dsn and not (
+            backend == "pgvector" and pg_source == "testcontainer"
+        ):
             raise ValueError(
                 "KOGWISTAR_LONGRUN_BACKEND=postgres/pgvector requires a DSN; set "
                 "KOGWISTAR_LONGRUN_DSN or KOGWISTAR_LLM_WIKI_TEST_PG_DSN "
@@ -191,7 +199,10 @@ class LongRunConfig:
                 "database automatically when Docker is available."
             )
         return cls(
-            enabled=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
+            enabled=(
+                os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1"
+                or backend in {"postgres", "pgvector"}
+            ),
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
             doc_profile=doc_profile,
@@ -2737,6 +2748,8 @@ def test_longrun_config_from_env_rejects_missing_postgres_dsn(
     monkeypatch: pytest.MonkeyPatch,
     backend: str,
 ):
+    if backend == "pgvector":
+        monkeypatch.setenv("KOGWISTAR_LONGRUN_PG_SOURCE", "custom")
     monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", backend)
@@ -2805,6 +2818,41 @@ def test_longrun_config_from_env_supports_one_doc_no_resume_probe(monkeypatch: p
     assert config.doc_profile == "tiny"
     assert (config.token_min, config.token_max) == _longrun_doc_profile_token_bounds("tiny")
     assert config.skip_maintenance_invariant is True
+
+
+def test_longrun_config_from_env_auto_enables_pgvector_testcontainer_probe(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("KOGWISTAR_LLM_WIKI_LONGRUN", raising=False)
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "pgvector")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer")
+
+    config = LongRunConfig.from_env()
+
+    assert config.enabled is True
+    assert config.backend == "pgvector"
+    assert config.dsn is None
+
+
+def test_longrun_config_from_env_rejects_pgvector_custom_without_dsn(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("KOGWISTAR_LLM_WIKI_LONGRUN", raising=False)
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "pgvector")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PG_SOURCE", "custom")
+    for env_name in (
+        "KOGWISTAR_LONGRUN_DSN",
+        "KOGWISTAR_LLM_WIKI_TEST_PG_DSN",
+        "GKE_PG_DSN",
+        "PG_DSN",
+        "DATABASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    with pytest.raises(ValueError, match="requires a DSN"):
+        LongRunConfig.from_env()
 
 
 def test_longrun_config_from_env_rejects_legacy_parser_lane(monkeypatch: pytest.MonkeyPatch):
@@ -3568,7 +3616,7 @@ def test_longrun_promoted_node_without_promotion_pack_fails_invariant(tmp_path: 
 @pytest.mark.requires_ollama
 def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
     config = LongRunConfig.from_env()
-    if not config.enabled:
+    if not config.enabled and config.backend != "pgvector":
         pytest.skip("set KOGWISTAR_LLM_WIKI_LONGRUN=1 to run the long-run workflow ingestion test")
 
     run_dir = Path(config.checkpoint_run_dir).expanduser() if config.checkpoint_run_dir else tmp_path / "longrun-workflow"

@@ -63,3 +63,33 @@ def test_start_longrun_pgvector_container_returns_started_container():
 
     assert container.started is True
     assert container.image == "pgvector/pgvector:pg17"
+
+
+def test_apply_longrun_probe_env_materializes_pgvector_testcontainer(monkeypatch):
+    for key in (
+        "KOGWISTAR_LLM_WIKI_LONGRUN",
+        "KOGWISTAR_LONGRUN_MODE",
+        "KOGWISTAR_LONGRUN_BACKEND",
+        "KOGWISTAR_LONGRUN_PG_SOURCE",
+        "KOGWISTAR_LONGRUN_PARSER",
+        "KOGWISTAR_LONGRUN_DOC_COUNT",
+        "KOGWISTAR_LONGRUN_RUN_DIR",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    test_conftest._apply_longrun_probe_env("pgvector-testcontainer")
+
+    assert test_conftest.os.environ["KOGWISTAR_LLM_WIKI_LONGRUN"] == "1"
+    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_MODE"] == "fresh"
+    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_BACKEND"] == "pgvector"
+    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_PG_SOURCE"] == "testcontainer"
+    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_PARSER"] == "page_index"
+    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_DOC_COUNT"] == "1"
+    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_RUN_DIR"].endswith(
+        "tests\\_tmp\\longrun-vscode-pgvector-probe"
+    )
+
+
+def test_apply_longrun_probe_env_rejects_unknown_probe():
+    with pytest.raises(ValueError, match="Unsupported --kogwistar-longrun-probe"):
+        test_conftest._apply_longrun_probe_env("unknown")

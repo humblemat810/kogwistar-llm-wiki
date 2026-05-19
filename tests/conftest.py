@@ -25,11 +25,49 @@ import pytest
 logger = logging.getLogger(__name__)
 
 
+_LONGRUN_PROBE_ENVS: dict[str, dict[str, str]] = {
+    "pgvector-testcontainer": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
+        "KOGWISTAR_LONGRUN_PARSER": "page_index",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "small",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": str(ROOT / "tests" / "_tmp" / "longrun-vscode-pgvector-probe"),
+    },
+}
+
+
+def _apply_longrun_probe_env(probe: str | None) -> None:
+    if not probe:
+        return
+    try:
+        values = _LONGRUN_PROBE_ENVS[probe]
+    except KeyError as exc:
+        supported = ", ".join(sorted(_LONGRUN_PROBE_ENVS))
+        raise ValueError(f"Unsupported --kogwistar-longrun-probe={probe!r}; expected one of: {supported}") from exc
+    os.environ.update(values)
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--kogwistar-longrun-probe",
+        action="store",
+        default=None,
+        choices=sorted(_LONGRUN_PROBE_ENVS),
+        help="Materialize a long-run probe environment from pytest args when VS Code drops launch env.",
+    )
+
+
 def pytest_configure(config):
-    del config
     TEST_TMP.mkdir(parents=True, exist_ok=True)
     for key in ("TMPDIR", "TEMP", "TMP"):
         os.environ[key] = str(TEST_TMP)
+    _apply_longrun_probe_env(config.getoption("kogwistar_longrun_probe", default=None))
 
 
 @pytest.fixture()
