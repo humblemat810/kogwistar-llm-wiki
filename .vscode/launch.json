@@ -156,6 +156,25 @@
       }
     },
     {
+      "name": "kg-doc-parser: Boundary First Smoke",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "kg-doc-parser\\tests\\test_workflow_ingest_layerwise_parser.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-k",
+        "boundary_mode_runs_end_to_end"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "boundaries"
+      }
+    },
+    {
       "name": "Longrun: Chroma Fresh (20 docs)",
       "type": "debugpy",
       "request": "launch",

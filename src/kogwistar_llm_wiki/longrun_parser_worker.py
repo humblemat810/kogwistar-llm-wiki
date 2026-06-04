@@ -61,6 +61,28 @@ def _summarize_budget_events(events: list[Any], *, provider_settings: WorkflowPr
     } | summarize_budget_events(events)
 
 
+def _proposal_mode_summary(final_state: dict[str, Any]) -> dict[str, Any]:
+    current_layer_result = dict(final_state.get("current_layer_result") or {})
+    metadata = dict(current_layer_result.get("metadata") or {})
+    if not metadata:
+        return {}
+    summary: dict[str, Any] = {
+        "proposal_mode": metadata.get("proposal_mode"),
+        "proposal_source": metadata.get("proposal_source"),
+        "proposal_failure_reason": metadata.get("proposal_failure_reason"),
+        "boundary_proposed_count": metadata.get("boundary_proposed_count"),
+        "boundary_accepted_count": metadata.get("boundary_accepted_count"),
+        "boundary_shifted_count": metadata.get("boundary_shifted_count"),
+        "boundary_rejected_count": metadata.get("boundary_rejected_count"),
+        "boundary_refinement_count": metadata.get("boundary_refinement_count"),
+        "boundary_refinement_attempts": metadata.get("boundary_refinement_attempts"),
+        "boundary_summary_count": metadata.get("boundary_summary_count"),
+        "unresolved_interval_count": metadata.get("unresolved_interval_count"),
+        "provider_child_count": metadata.get("provider_child_count"),
+    }
+    return {key: value for key, value in summary.items() if value is not None}
+
+
 def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, Any], diagnostics: dict[str, Any]) -> dict[str, Any]:
     def _normalize_excerpt(text: Any) -> str:
         return " ".join(str(text or "").split()).strip()
@@ -194,6 +216,7 @@ def run_workflow_layered_parse(
         "workflow_layered_provider_settings_loaded",
         provider=provider_settings.parser.provider,
         model=provider_settings.parser.model,
+        proposal_mode=provider_settings.proposal_mode,
     )
     _layer_event("workflow_layered_engines_build_start", engine_dir=str(engine_dir))
     workflow_engine, conversation_engine, knowledge_engine = build_default_engines(
@@ -224,6 +247,7 @@ def run_workflow_layered_parse(
     )
     final_state = dict(getattr(run_result, "final_state", {}) or {})
     parse_session = final_state.get("parse_session") or {}
+    proposal_summary = _proposal_mode_summary(final_state)
     if not bundle and final_state.get("export_bundle"):
         bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
     if not bundle:
@@ -242,12 +266,17 @@ def run_workflow_layered_parse(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
     )
+    if proposal_summary:
+        usage_summary["proposal_summary"] = proposal_summary
+        if proposal_summary.get("proposal_mode") is not None:
+            usage_summary["proposal_mode"] = proposal_summary["proposal_mode"]
     diagnostics = {
         "parser_lane": "workflow_layered",
         "parse_session_mode": parse_session.get("mode"),
         "workflow_status": getattr(run_result, "status", None),
         "workflow_run_id": getattr(run_result, "run_id", None),
         "layer_log": layer_log,
+        "proposal_summary": proposal_summary,
     }
     if diagnostics["parse_session_mode"] != "workflow_layered":
         raise RuntimeError(

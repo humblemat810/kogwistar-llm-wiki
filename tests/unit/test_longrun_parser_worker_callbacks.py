@@ -49,7 +49,22 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
             SimpleNamespace(
                 status="succeeded",
                 run_id="run-1",
-                final_state={"parse_session": {"mode": "workflow_layered"}},
+                final_state={
+                    "parse_session": {"mode": "workflow_layered"},
+                    "current_layer_result": {
+                        "metadata": {
+                            "proposal_mode": "boundaries",
+                            "boundary_proposed_count": 2,
+                            "boundary_accepted_count": 1,
+                            "boundary_shifted_count": 1,
+                            "boundary_rejected_count": 0,
+                            "boundary_refinement_count": 0,
+                            "boundary_refinement_attempts": 0,
+                            "boundary_summary_count": 1,
+                            "unresolved_interval_count": 0,
+                        }
+                    },
+                },
             ),
             SimpleNamespace(graph_payload={"nodes": [], "edges": []}),
         )
@@ -73,3 +88,5 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
     assert captured["workflow_deps"]["propose_layer_fn"] is not None
     assert any(entry["stage"] == "wiring_test" for entry in result.layer_log)
     assert result.diagnostics["parse_session_mode"] == "workflow_layered"
+    assert result.usage_summary["proposal_mode"] == "boundaries"
+    assert result.diagnostics["proposal_summary"]["boundary_proposed_count"] == 2
