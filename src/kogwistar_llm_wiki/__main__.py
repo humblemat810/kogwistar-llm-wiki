@@ -97,7 +97,10 @@ def _read_request_from_source(args: argparse.Namespace):
         raw_text=raw_text,
         source_format=args.source_format,
         parser_mode=args.parser_mode,
+        parser_lane=args.parser_lane,
         promotion_mode=args.promotion_mode,
+        llm_provider=args.llm_provider,
+        llm_model=args.llm_model,
     )
     return source_path, request
 
@@ -307,9 +310,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     demo_p.add_argument(
         "--parser-mode",
-        choices=["heuristic", "ollama", "gemini"],
+        choices=["heuristic", "ollama", "gemini", "openai", "azure_openai"],
         default="heuristic",
         help="Parser mode to use for the document",
+    )
+    demo_p.add_argument(
+        "--parser-lane",
+        choices=["page_index", "workflow_layered"],
+        default="page_index",
+        help="Parser lane to use for the document",
+    )
+    demo_p.add_argument(
+        "--llm-provider",
+        default=None,
+        help="Explicit parser provider override (for example ollama, gemini, openai, or azure_openai)",
+    )
+    demo_p.add_argument(
+        "--llm-model",
+        default=None,
+        help="Explicit parser model or deployment name override",
     )
     demo_p.add_argument(
         "--promotion-mode",
@@ -331,9 +350,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     ingest_p.add_argument(
         "--parser-mode",
-        choices=["heuristic", "ollama", "gemini"],
+        choices=["heuristic", "ollama", "gemini", "openai", "azure_openai"],
         default="heuristic",
         help="Parser mode to use for the document",
+    )
+    ingest_p.add_argument(
+        "--parser-lane",
+        choices=["page_index", "workflow_layered"],
+        default="page_index",
+        help="Parser lane to use for the document",
+    )
+    ingest_p.add_argument(
+        "--llm-provider",
+        default=None,
+        help="Explicit parser provider override (for example ollama, gemini, openai, or azure_openai)",
+    )
+    ingest_p.add_argument(
+        "--llm-model",
+        default=None,
+        help="Explicit parser model or deployment name override",
     )
     ingest_p.add_argument(
         "--promotion-mode",

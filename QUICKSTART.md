@@ -57,6 +57,15 @@ llm-wiki demo --workspace "$workspace" --source "$source" --vault "$vault_dir" -
 ```
 
 After the run, open `logs/llm_wiki_demo/vault` in Obsidian.
+Use `--parser-lane workflow_layered` on the same command if you want the
+iterative layerwise parser path instead of the page-index parser.
+
+The VS Code launch presets also read `.env` automatically and only ask you to
+pick the parser lane:
+- `Demo: Ollama (gemma4:e2b)`
+- `Demo: Azure OpenAI (GPT-4o)`
+- `Demo: Azure OpenAI (GPT-4.1)`
+- `Demo: Azure OpenAI (pick model)`
 
 ### Optional backend equivalents
 
@@ -178,7 +187,52 @@ only and does not populate the `llm-wiki` workspace.
 
 ---
 
-## 7. Run the test suite
+## 7. Real provider examples
+
+If you want to point parsing or maintenance at a real model, set the provider
+and model explicitly. The repo accepts `azure_openai` as an env alias and
+normalizes it to the `openai` chat provider.
+
+Ollama:
+
+```powershell
+$env:KOGWISTAR_PARSER_PROVIDER='ollama'
+$env:KOGWISTAR_PARSER_MODEL='gemma4:e2b'
+$env:KOGWISTAR_PARSER_BASE_URL='http://localhost:11434'
+$env:KOGWISTAR_MAINTENANCE_PROVIDER='ollama'
+$env:KOGWISTAR_MAINTENANCE_MODEL='gemma4:e2b'
+$env:KOGWISTAR_MAINTENANCE_BASE_URL='http://localhost:11434'
+```
+
+Azure OpenAI GPT-4o:
+
+```powershell
+$env:KOGWISTAR_PARSER_PROVIDER='azure_openai'
+$env:KOGWISTAR_PARSER_MODEL='gpt4o'
+$env:KOGWISTAR_PARSER_BASE_URL='https://<your-resource>.openai.azure.com/'
+$env:KOGWISTAR_PARSER_API_KEY_ENV='OPENAI_API_KEY_GPT4O'
+$env:KOGWISTAR_MAINTENANCE_PROVIDER='azure_openai'
+$env:KOGWISTAR_MAINTENANCE_MODEL='gpt4o'
+$env:KOGWISTAR_MAINTENANCE_BASE_URL='https://<your-resource>.openai.azure.com/'
+$env:KOGWISTAR_MAINTENANCE_API_KEY_ENV='OPENAI_API_KEY_GPT4O'
+```
+
+Azure OpenAI GPT-4.1:
+
+```powershell
+$env:KOGWISTAR_PARSER_PROVIDER='azure_openai'
+$env:KOGWISTAR_PARSER_MODEL='gpt41'
+$env:KOGWISTAR_PARSER_BASE_URL='https://<your-resource>.openai.azure.com/'
+$env:KOGWISTAR_PARSER_API_KEY_ENV='OPENAI_API_KEY_GPT4_1'
+$env:KOGWISTAR_MAINTENANCE_PROVIDER='azure_openai'
+$env:KOGWISTAR_MAINTENANCE_MODEL='gpt41'
+$env:KOGWISTAR_MAINTENANCE_BASE_URL='https://<your-resource>.openai.azure.com/'
+$env:KOGWISTAR_MAINTENANCE_API_KEY_ENV='OPENAI_API_KEY_GPT4_1'
+```
+
+---
+
+## 8. Run the test suite
 
 ```bash
 pytest tests/unit/          # fast unit tests, no external services needed

@@ -7,10 +7,16 @@ import time
 import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings, build_chat_model_for_role
+from kg_doc_parser.workflow_ingest.layerwise_llm import build_layerwise_llm_callbacks
+from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
+from kogwistar.runtime.budget_adapters import summarize_budget_events
+from kogwistar.runtime.budget import StateBackedBudgetLedger
+
+from .provider_config import provider_config_summary
 
 
 def _now_ms() -> int:
@@ -39,6 +45,20 @@ def _dump_model(value: Any) -> Any:
     if isinstance(value, list):
         return [_dump_model(item) for item in value]
     return value
+
+
+def _summarize_budget_events(events: list[Any], *, provider_settings: WorkflowProviderSettings) -> dict[str, Any]:
+    provider_summary = provider_config_summary(provider_settings)
+    return {
+        "provider": provider_summary.get("provider"),
+        "model": provider_summary.get("model"),
+        "temperature": provider_summary.get("temperature"),
+        "api_key_env": provider_summary.get("api_key_env"),
+        "base_url": provider_summary.get("base_url"),
+        "project": provider_summary.get("project"),
+        "location": provider_summary.get("location"),
+        "max_retries": provider_summary.get("max_retries"),
+    } | summarize_budget_events(events)
 
 
 def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, Any], diagnostics: dict[str, Any]) -> dict[str, Any]:
@@ -131,187 +151,126 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, Any], diagn
     }
 
 
-def _structured_invoke(model: Any, schema: Any, messages: list[tuple[str, str]]) -> Any:
-    structured = model.with_structured_output(schema, include_raw=True)
-    response = structured.invoke(messages)
-    if isinstance(response, dict):
-        parsed = response.get("parsed")
-        if parsed is not None:
-            return parsed
-        if response.get("parsing_error") is not None:
-            raise ValueError(str(response["parsing_error"]))
-    return response
+def _build_provider_layer_callbacks(provider_settings: WorkflowProviderSettings, *, layer_event: Any | None = None) -> dict[str, Any]:
+    return build_layerwise_llm_callbacks(provider_settings, event_sink=layer_event)
 
 
-def _fallback_layer_result(
+def run_workflow_layered_parse(
     *,
-    current_layer_context: Any,
-    parser_source_map: dict[str, dict[str, Any]],
-) -> Any:
-    from kg_doc_parser.workflow_ingest.models import CurrentLayerResult, LayerChildCandidate
-    from kg_doc_parser.workflow_ingest.semantics import HydratedTextPointer
+    source_document_id: str,
+    title: str,
+    raw_text: str,
+    provider_settings: WorkflowProviderSettings,
+    engine_dir: Path,
+    budget_ledger: StateBackedBudgetLedger | None = None,
+    trace: Any | None = None,
+    heartbeat: Any | None = None,
+) -> SimpleNamespace:
+    from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput, WorkflowExportBundle
+    from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
 
-    children: list[Any] = []
-    if int(getattr(current_layer_context, "depth", 0)) > 0:
-        return CurrentLayerResult(
-            children=[],
-            satisfied=True,
-            reasoning_history=[{"source": "deterministic_depth_stop"}],
-            metadata={"fallback": "depth_stop"},
-        )
-    parent_ids = list(getattr(current_layer_context, "parent_node_ids", []) or [])
-    parent_id = parent_ids[0] if parent_ids else "root"
-    records = list(parser_source_map.items())
-    for index, (source_cluster_id, record) in enumerate(records[:8], start=1):
-        text = str(record.get("text") or "").strip()
-        if not text:
-            continue
-        title_match = re.search(r"(?m)^#{1,3}\s+(.+)$", text)
-        title = title_match.group(1).strip() if title_match else f"Section {index}"
-        excerpt = text
-        children.append(
-            LayerChildCandidate(
-                node_id=f"{parent_id}|section-{index}",
-                parent_node_id=parent_id,
-                title=title[:160],
-                node_type="TEXT_FLOW",
-                total_content_pointers=[
-                    HydratedTextPointer(
-                        source_cluster_id=str(source_cluster_id),
-                        start_char=0,
-                        end_char=max(len(excerpt) - 1, 0),
-                        verbatim_text=excerpt or " ",
-                    )
-                ],
-                expandable=False,
-                metadata={"source": "workflow_layered_fallback"},
-            )
-        )
-    return CurrentLayerResult(
-        children=children,
-        satisfied=True,
-        reasoning_history=[{"source": "deterministic_fallback"}],
-        metadata={"fallback": "llm_empty_or_unavailable"},
+    layer_log: list[dict[str, Any]] = []
+
+    def _layer_event(stage: str, **extra: Any) -> None:
+        entry = {
+            "stage": stage,
+            "timestamp_ms": _now_ms(),
+            "source_document_id": source_document_id,
+            **extra,
+        }
+        layer_log.append(entry)
+        if trace is not None:
+            trace(f"{stage} {json.dumps(extra, sort_keys=True)}")
+
+    budget_ledger = budget_ledger or StateBackedBudgetLedger(
+        {
+            "token_budget": 10_000_000,
+            "budget_scope": "run",
+            "budget_kind": "token",
+        }
     )
+    engine_dir = Path(engine_dir)
+    _layer_event(
+        "workflow_layered_provider_settings_loaded",
+        provider=provider_settings.parser.provider,
+        model=provider_settings.parser.model,
+    )
+    _layer_event("workflow_layered_engines_build_start", engine_dir=str(engine_dir))
+    workflow_engine, conversation_engine, knowledge_engine = build_default_engines(
+        engine_dir,
+        provider_settings=provider_settings,
+    )
+    _layer_event("workflow_layered_engines_build_done")
+    deps = _build_provider_layer_callbacks(provider_settings, layer_event=_layer_event)
+    inp = WorkflowIngestInput.from_text(
+        document_id=source_document_id,
+        text=str(raw_text),
+        title=str(title),
+    )
+    _layer_event("workflow_layered_parse_start")
+    if heartbeat is not None:
+        heartbeat("workflow_layered_parse_start")
+    run_result, bundle = run_ingest_workflow(
+        inp=inp,
+        workflow_engine=workflow_engine,
+        conversation_engine=conversation_engine,
+        knowledge_engine=knowledge_engine,
+        deps={**deps, "budget_ledger": budget_ledger},
+    )
+    _layer_event(
+        "workflow_layered_parse_returned",
+        workflow_status=getattr(run_result, "status", None),
+        workflow_run_id=getattr(run_result, "run_id", None),
+    )
+    final_state = dict(getattr(run_result, "final_state", {}) or {})
+    parse_session = final_state.get("parse_session") or {}
+    if not bundle and final_state.get("export_bundle"):
+        bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
+    if not bundle:
+        raise RuntimeError("workflow-layered parser completed without an export bundle")
 
-
-def _build_provider_layer_callbacks(provider_settings: WorkflowProviderSettings) -> dict[str, Any]:
-    from kg_doc_parser.workflow_ingest.models import CurrentLayerResult, CurrentLayerReview
-
-    chat_model = build_chat_model_for_role("parser", provider_settings)
-
-    def _source_excerpt(parser_source_map: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-        excerpt: dict[str, dict[str, Any]] = {}
-        for key, record in list(parser_source_map.items())[:12]:
-            text = str(record.get("text") or "")
-            excerpt[str(key)] = {
-                "page_number": record.get("page_number"),
-                "cluster_number": record.get("cluster_number"),
-                "text": text[:1800],
-            }
-        return excerpt
-
-    def _propose_layer_fn(
-        *,
-        parser_source_map,
-        current_layer_context,
-        semantic_tree,
-        split_strategy,
-        **kwargs,
-    ):
-        messages = [
-            (
-                "system",
-                "You split document text into grounded semantic child nodes. "
-                "Return only structured data matching the schema. Each child must use exact "
-                "source_cluster_id values and character spans from the supplied source map.",
-            ),
-            (
-                "human",
-                json.dumps(
-                    {
-                        "task": "Propose the next semantic layer for these parent nodes.",
-                        "split_strategy": split_strategy,
-                        "current_layer_context": _dump_model(current_layer_context),
-                        "semantic_tree": _dump_model(semantic_tree),
-                        "source_map_excerpt": _source_excerpt(parser_source_map),
-                        "requirements": [
-                            "Prefer a small set of meaningful sections.",
-                            "Use no children and satisfied=true only when the parent is already atomic.",
-                            "Set expandable=false for leaf sections.",
-                        ],
-                    },
-                    sort_keys=True,
-                ),
-            ),
-        ]
-        try:
-            result = _structured_invoke(chat_model, CurrentLayerResult, messages)
-            parsed = (
-                result
-                if isinstance(result, CurrentLayerResult)
-                else CurrentLayerResult.model_validate(result)
-            )
-            fallback = _fallback_layer_result(
-                current_layer_context=current_layer_context,
-                parser_source_map=parser_source_map,
-            )
-            fallback.reasoning_history.append(
-                {
-                    "source": "provider_structured_proposal",
-                    "provider_child_count": len(parsed.children),
-                }
-            )
-            return fallback
-        except Exception:
-            pass
-        return _fallback_layer_result(
-            current_layer_context=current_layer_context,
-            parser_source_map=parser_source_map,
-        )
-
-    def _review_layer_fn(*, current_layer_context, current_layer_result, split_strategy, **kwargs):
-        messages = [
-            (
-                "system",
-                "You review a proposed semantic layer for source-grounded coverage. "
-                "Return structured review data matching the schema.",
-            ),
-            (
-                "human",
-                json.dumps(
-                    {
-                        "task": "Review the current layer proposal.",
-                        "split_strategy": split_strategy,
-                        "current_layer_context": _dump_model(current_layer_context),
-                        "current_layer_result": _dump_model(current_layer_result),
-                    },
-                    sort_keys=True,
-                ),
-            ),
-        ]
-        try:
-            result = _structured_invoke(chat_model, CurrentLayerReview, messages)
-            return (
-                result
-                if isinstance(result, CurrentLayerReview)
-                else CurrentLayerReview.model_validate(result)
-            )
-        except Exception:
-            return CurrentLayerReview(
-                updated_result=current_layer_result,
-                coverage_ok=True,
-                satisfied=True,
-                strategy_used=split_strategy,
-                review_notes=["deterministic review fallback after provider failure"],
-            )
-
-    return {
-        "propose_layer_fn": _propose_layer_fn,
-        "review_layer_fn": _review_layer_fn,
-        "max_depth": 2,
-        "allow_review": True,
+    graph_payload = _dump_model(bundle.graph_payload)
+    evaluation = _basic_sense_eval_from_graph_payload(
+        graph_payload=graph_payload,
+        diagnostics={
+            "parse_session_mode": parse_session.get("mode"),
+            "workflow_status": getattr(run_result, "status", None),
+            "workflow_run_id": getattr(run_result, "run_id", None),
+        },
+    )
+    usage_summary = _summarize_budget_events(
+        list(getattr(budget_ledger, "events", []) or []),
+        provider_settings=provider_settings,
+    )
+    diagnostics = {
+        "parser_lane": "workflow_layered",
+        "parse_session_mode": parse_session.get("mode"),
+        "workflow_status": getattr(run_result, "status", None),
+        "workflow_run_id": getattr(run_result, "run_id", None),
+        "layer_log": layer_log,
     }
+    if diagnostics["parse_session_mode"] != "workflow_layered":
+        raise RuntimeError(
+            "workflow-layered parser did not run in workflow_layered mode; "
+            f"got {diagnostics['parse_session_mode']!r}"
+        )
+    _layer_event(
+        "workflow_layered_parse_complete",
+        node_count=len(graph_payload.get("nodes", [])),
+        edge_count=len(graph_payload.get("edges", [])),
+        total_cost=usage_summary["total_cost"],
+    )
+    return SimpleNamespace(
+        semantic_tree=SimpleNamespace(title=str(title)),
+        graph_payload=graph_payload,
+        evaluation=evaluation,
+        diagnostics=diagnostics,
+        usage_summary=usage_summary,
+        layer_log=layer_log,
+        parse_session=parse_session,
+        workflow_status=getattr(run_result, "status", None),
+        workflow_run_id=getattr(run_result, "run_id", None),
+    )
 
 
 def run_longrun_parser_child(payload: dict[str, Any]) -> None:
@@ -345,6 +304,13 @@ def run_longrun_parser_child(payload: dict[str, Any]) -> None:
             return
         _trace("child_loading_provider_settings")
         provider_settings = WorkflowProviderSettings.model_validate(payload["provider_settings"])
+        budget_state = {
+            "token_budget": int(payload.get("token_budget") or 10_000_000),
+            "budget_scope": "run",
+            "budget_kind": "token",
+        }
+        budget_ledger = StateBackedBudgetLedger(budget_state)
+        usage_summary = _summarize_budget_events([], provider_settings=provider_settings)
         parser_lane = str(payload["parser_lane"])
         source_document_id = str(payload["source_document_id"])
         _trace(f"child_lane_selected lane={parser_lane} source_document_id={source_document_id}")
@@ -395,60 +361,25 @@ def run_longrun_parser_child(payload: dict[str, Any]) -> None:
                 "page_index": _dump_model(result.diagnostics),
             }
         elif parser_lane == "workflow_layered":
-            from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput
-            from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
-
             engine_dir = Path(payload["parser_run_dir"]) / "workflow_engines"
             _trace(f"child_building_workflow_engines dir={engine_dir}")
-            workflow_engine, conversation_engine, knowledge_engine = build_default_engines(
-                engine_dir,
-                provider_settings=provider_settings,
-            )
-            deps = _build_provider_layer_callbacks(provider_settings)
-            inp = WorkflowIngestInput.from_text(
-                document_id=source_document_id,
-                text=str(payload["raw_text"]),
-                title=str(payload["title"]),
-            )
             _trace("child_before_workflow_layered_parse")
-            _heartbeat("workflow_layered_parse_start")
-            _trace("child_workflow_layered_parse_call_start")
-            run_result, bundle = run_ingest_workflow(
-                inp=inp,
-                workflow_engine=workflow_engine,
-                conversation_engine=conversation_engine,
-                knowledge_engine=knowledge_engine,
-                deps=deps,
+            result = run_workflow_layered_parse(
+                source_document_id=source_document_id,
+                title=str(payload["title"]),
+                raw_text=str(payload["raw_text"]),
+                provider_settings=provider_settings,
+                engine_dir=engine_dir,
+                budget_ledger=budget_ledger,
+                trace=_trace,
+                heartbeat=_heartbeat,
             )
             _trace("child_workflow_layered_parse_call_returned")
-            final_state = dict(getattr(run_result, "final_state", {}) or {})
-            parse_session = final_state.get("parse_session") or {}
-            if not bundle and final_state.get("export_bundle"):
-                from kg_doc_parser.workflow_ingest.models import WorkflowExportBundle
-
-                bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
-            if not bundle:
-                raise RuntimeError("workflow-layered parser completed without an export bundle")
-            graph_payload = _dump_model(bundle.graph_payload)
             title = str(payload["title"])
-            evaluation = _basic_sense_eval_from_graph_payload(
-                graph_payload=graph_payload,
-                diagnostics={
-                    "parse_session_mode": parse_session.get("mode"),
-                    "workflow_status": getattr(run_result, "status", None),
-                    "workflow_run_id": getattr(run_result, "run_id", None),
-                },
-            )
-            diagnostics = {
-                "parse_session_mode": parse_session.get("mode"),
-                "workflow_status": getattr(run_result, "status", None),
-                "workflow_run_id": getattr(run_result, "run_id", None),
-            }
-            if diagnostics["parse_session_mode"] != "workflow_layered":
-                raise RuntimeError(
-                    "workflow-layered parser did not run in workflow_layered mode; "
-                    f"got {diagnostics['parse_session_mode']!r}"
-                )
+            graph_payload = result.graph_payload
+            evaluation = result.evaluation
+            usage_summary = result.usage_summary
+            diagnostics = dict(result.diagnostics)
         else:
             raise ValueError(f"unsupported long-run parser lane: {parser_lane!r}")
         _trace("child_write_result_json")
@@ -460,9 +391,13 @@ def run_longrun_parser_child(payload: dict[str, Any]) -> None:
                 "title": title,
                 "graph_payload": graph_payload,
                 "evaluation": evaluation,
+                "usage_summary": usage_summary,
                 "diagnostics": diagnostics,
+                "layer_log": getattr(result, "layer_log", None) if parser_lane == "workflow_layered" else None,
             },
         )
+        if parser_lane == "workflow_layered" and getattr(result, "layer_log", None):
+            _write_json_file(result_path.with_name("parser_layer_log.json"), list(result.layer_log))
         _heartbeat(
             "completed",
             result_path=str(result_path),

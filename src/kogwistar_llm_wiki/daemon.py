@@ -35,6 +35,7 @@ from kogwistar.engine_core import (
 
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
+from .provider_config import provider_config_summary, resolve_maintenance_provider_settings
 from .projection_worker import ProjectionWorker
 from .worker import MaintenanceWorker
 
@@ -61,6 +62,7 @@ def _declare_service_health(
     deterministic: bool,
     llm_assisted: bool,
     operator_tags: list[str],
+    config_metadata: dict[str, object] | None = None,
     status: str = "starting",
 ) -> None:
     conversation = getattr(engines, "conversation", None)
@@ -77,7 +79,7 @@ def _declare_service_health(
         workspace_id=workspace_id,
         namespace=str(getattr(engines.conversation, "namespace", "conversation") or "conversation"),
         version="1",
-        config_metadata={"workspace_id": workspace_id},
+        config_metadata={"workspace_id": workspace_id, **(config_metadata or {})},
         operator_tags=operator_tags,
     )
     registry.start_instance(
@@ -378,7 +380,8 @@ class MaintenanceDaemon:
         self.engines = engines
         self.workspace_id = workspace_id
         self.poll_interval = poll_interval
-        self._worker = MaintenanceWorker(engines)
+        self.provider_settings = resolve_maintenance_provider_settings()
+        self._worker = MaintenanceWorker(engines, provider_settings=self.provider_settings)
         self._stop_event = threading.Event()
         self._instance_id = f"maintenance-{uuid.uuid4().hex}"
 
@@ -395,6 +398,7 @@ class MaintenanceDaemon:
             deterministic=False,
             llm_assisted=True,
             operator_tags=["maintenance", "distillation", "execution_wisdom"],
+            config_metadata={"provider_settings": provider_config_summary(self.provider_settings)},
             status="starting",
         )
         return _core_startup_recovery(

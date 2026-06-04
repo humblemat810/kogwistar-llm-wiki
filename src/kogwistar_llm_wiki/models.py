@@ -56,6 +56,7 @@ class IngestPipelineRequest(ModeSlicingMixin, BaseModel):
     raw_text: DtoType[str]
     source_format: DtoType[str] = "text"
     parser_mode: DtoType[str] = "heuristic"
+    parser_lane: DtoType[str] = "page_index"
     promotion_mode: DtoType[str] = "pending"
     auto_accept_threshold: DtoType[float] = 0.95
     llm_provider: DtoType[str | None] = None

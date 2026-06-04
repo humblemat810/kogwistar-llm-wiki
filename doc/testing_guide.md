@@ -60,12 +60,25 @@ fix the cache location before debugging product code.
 ## Long-Run Workflow Test
 
 The long-run ingestion workflow test is skipped unless explicitly enabled. It
-requires a local Ollama service and defaults to `gemma4:e2b`:
+defaults to a local Ollama parser, but it can also be pointed at Azure OpenAI
+by setting the parser provider/model env vars:
 
 ```powershell
 $env:KOGWISTAR_LLM_WIKI_LONGRUN='1'
-$env:KOGWISTAR_OLLAMA_MODEL='gemma4:e2b'
-$env:KOGWISTAR_OLLAMA_BASE_URL='http://localhost:11434'
+$env:KOGWISTAR_LONGRUN_PARSER_PROVIDER='ollama'
+$env:KOGWISTAR_LONGRUN_PARSER_MODEL='gemma4:e2b'
+$env:KOGWISTAR_LONGRUN_PARSER_BASE_URL='http://localhost:11434'
+.\.venv\Scripts\python.exe -m pytest -m "longrun" tests/integration/test_longrun_workflow_ingestion.py -q -p no:cacheprovider
+```
+
+Azure OpenAI example:
+
+```powershell
+$env:KOGWISTAR_LLM_WIKI_LONGRUN='1'
+$env:KOGWISTAR_LONGRUN_PARSER_PROVIDER='azure_openai'
+$env:KOGWISTAR_LONGRUN_PARSER_MODEL='gpt4o'
+$env:KOGWISTAR_LONGRUN_PARSER_BASE_URL='https://<your-resource>.openai.azure.com/'
+$env:KOGWISTAR_LONGRUN_PARSER_API_KEY_ENV='OPENAI_API_KEY_GPT4O'
 .\.venv\Scripts\python.exe -m pytest -m "longrun" tests/integration/test_longrun_workflow_ingestion.py -q -p no:cacheprovider
 ```
 

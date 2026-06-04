@@ -44,6 +44,7 @@ from kogwistar_llm_wiki.longrun_parser_worker import (
     _basic_sense_eval_from_graph_payload,
     run_longrun_parser_child,
 )
+from kogwistar_llm_wiki.provider_config import normalize_provider_name
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.maintenance_policy import DERIVED_KNOWLEDGE_WORKFLOW_ID
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
@@ -126,10 +127,14 @@ class LongRunConfig:
     enabled: bool
     mode: str
     doc_count: int
-    ollama_model: str
-    ollama_base_url: str
-    max_repeated_systemic_errors: int
-    max_post_doc_maintenance_steps: int
+    parser_provider: str = "ollama"
+    parser_model: str = "gemma4:e2b"
+    parser_base_url: str = "http://localhost:11434"
+    parser_api_key_env: str | None = None
+    ollama_model: str = "gemma4:e2b"
+    ollama_base_url: str = "http://localhost:11434"
+    max_repeated_systemic_errors: int = 3
+    max_post_doc_maintenance_steps: int = 100
     backend: str = "chroma"
     parser_lane: str = "workflow_layered"
     parse_timeout_seconds: int = 1200
@@ -198,6 +203,31 @@ class LongRunConfig:
                 "session fixture can start a disposable testcontainers-backed "
                 "database automatically when Docker is available."
             )
+        parser_provider = normalize_provider_name(
+            os.getenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER")
+            or os.getenv("KOGWISTAR_PARSER_PROVIDER")
+            or os.getenv("KG_DOC_PARSER_PROVIDER")
+            or "ollama"
+        ) or "ollama"
+        parser_model = (
+            os.getenv("KOGWISTAR_LONGRUN_PARSER_MODEL")
+            or os.getenv("KOGWISTAR_PARSER_MODEL")
+            or os.getenv("KOGWISTAR_OLLAMA_MODEL")
+            or os.getenv("KG_DOC_PARSER_MODEL")
+            or "gemma4:e2b"
+        )
+        parser_base_url = (
+            os.getenv("KOGWISTAR_LONGRUN_PARSER_BASE_URL")
+            or os.getenv("KOGWISTAR_PARSER_BASE_URL")
+            or os.getenv("KOGWISTAR_OLLAMA_BASE_URL")
+            or os.getenv("KG_DOC_PARSER_BASE_URL")
+            or "http://localhost:11434"
+        )
+        parser_api_key_env = (
+            os.getenv("KOGWISTAR_LONGRUN_PARSER_API_KEY_ENV")
+            or os.getenv("KOGWISTAR_PARSER_API_KEY_ENV")
+            or os.getenv("KG_DOC_PARSER_API_KEY_ENV")
+        )
         return cls(
             enabled=(
                 os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1"
@@ -206,12 +236,16 @@ class LongRunConfig:
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
             doc_profile=doc_profile,
+            parser_provider=parser_provider,
+            parser_model=parser_model,
+            parser_base_url=parser_base_url,
+            parser_api_key_env=parser_api_key_env,
             backend=backend,
             parser_lane=parser_lane,
             parse_timeout_seconds=parse_timeout_seconds,
             dsn=dsn,
-            ollama_model=os.getenv("KOGWISTAR_OLLAMA_MODEL", "gemma4:e2b"),
-            ollama_base_url=os.getenv("KOGWISTAR_OLLAMA_BASE_URL", "http://localhost:11434"),
+            ollama_model=parser_model,
+            ollama_base_url=parser_base_url,
             max_repeated_systemic_errors=int(
                 os.getenv("KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS", "3")
             ),
@@ -231,6 +265,10 @@ class LongRunConfig:
             "mode": self.mode,
             "doc_count": self.doc_count,
             "doc_profile": self.doc_profile,
+            "parser_provider": self.parser_provider,
+            "parser_model": self.parser_model,
+            "parser_base_url": self.parser_base_url,
+            "parser_api_key_env": self.parser_api_key_env,
             "backend": self.backend,
             "parser_lane": self.parser_lane,
             "parse_timeout_seconds": self.parse_timeout_seconds,
@@ -471,9 +509,15 @@ class DiagnosticDumper:
                 "",
                 "## Parser Evaluation",
                 "",
+                f"- Parser provider: `{self.harness.config.parser_provider}`",
+                f"- Parser model: `{self.harness.config.parser_model}`",
                 f"- Composite verdict: `{parser_eval['composite_verdict'] or 'n/a'}`",
                 f"- Average basic sense score: `{parser_eval['average_basic_sense_score'] if parser_eval['average_basic_sense_score'] is not None else 'n/a'}`",
                 f"- Evaluated documents: `{parser_eval['evaluated_count']}/{parser_eval['document_count']}`",
+                f"- Total input tokens: `{parser_eval['usage_totals']['input_tokens']}`",
+                f"- Total output tokens: `{parser_eval['usage_totals']['output_tokens']}`",
+                f"- Total tokens: `{parser_eval['usage_totals']['total_tokens']}`",
+                f"- Total cost: `{parser_eval['usage_totals']['total_cost']}`",
                 "",
                 f"```json\n{parser_eval_json}\n```",
                 "",
@@ -883,10 +927,11 @@ class LongRunHarness:
 
     def llm_summary(self) -> dict[str, Any]:
         return {
-            "provider": "ollama",
-            "model": self.config.ollama_model,
-            "base_url": self.config.ollama_base_url,
-            "parser_mode": "ollama",
+            "provider": self.config.parser_provider,
+            "model": self.config.parser_model,
+            "base_url": self.config.parser_base_url,
+            "api_key_env": self.config.parser_api_key_env,
+            "parser_mode": self.config.parser_provider,
             "parser_lane": self.config.parser_lane,
             "parse_timeout_seconds": self.config.parse_timeout_seconds,
             "sampled_prompts_available": False,
@@ -901,12 +946,17 @@ class LongRunHarness:
         documents: list[dict[str, Any]] = []
         verdict_counts: Counter[str] = Counter()
         scores: list[float] = []
+        usage_documents: list[dict[str, Any]] = []
         for record in self.records:
             parse_result = record.parse_result
             evaluation = getattr(parse_result, "evaluation", None) if parse_result is not None else None
             if not isinstance(evaluation, dict):
                 continue
             entry = {"doc_id": record.doc_id, "title": record.title, **evaluation}
+            usage_summary = getattr(parse_result, "usage_summary", None)
+            if isinstance(usage_summary, dict):
+                entry["usage_summary"] = usage_summary
+                usage_documents.append({"doc_id": record.doc_id, "title": record.title, **usage_summary})
             documents.append(entry)
             verdict = str(evaluation.get("basic_sense_verdict") or "").strip()
             if verdict:
@@ -923,6 +973,14 @@ class LongRunHarness:
             composite_verdict = "mixed"
         else:
             composite_verdict = "weak"
+        usage_totals = {
+            "input_tokens": sum(int(item.get("input_tokens") or 0) for item in usage_documents),
+            "output_tokens": sum(int(item.get("output_tokens") or 0) for item in usage_documents),
+            "total_tokens": sum(int(item.get("total_tokens") or 0) for item in usage_documents),
+            "total_cost": round(sum(float(item.get("total_cost") or 0.0) for item in usage_documents), 6),
+            "time_ms": sum(int(item.get("time_ms") or 0) for item in usage_documents),
+            "event_count": sum(int(item.get("event_count") or 0) for item in usage_documents),
+        }
         return {
             "enabled": bool(documents),
             "document_count": len(self.records),
@@ -931,6 +989,8 @@ class LongRunHarness:
             "average_basic_sense_score": average_score,
             "verdict_counts": dict(verdict_counts),
             "documents": documents,
+            "usage_documents": usage_documents,
+            "usage_totals": usage_totals,
         }
 
     def _run_document_workflow(self, record: DocumentRecord) -> str:
@@ -1899,9 +1959,10 @@ class LongRunHarness:
     def _provider_settings(self) -> WorkflowProviderSettings:
         return WorkflowProviderSettings(
             parser=ProviderEndpointConfig(
-                provider="ollama",
-                model=self.config.ollama_model,
-                base_url=self.config.ollama_base_url,
+                provider=self.config.parser_provider,
+                model=self.config.parser_model,
+                base_url=self.config.parser_base_url,
+                api_key_env=self.config.parser_api_key_env,
             ),
             embedding=EmbeddingProviderConfig(provider="fake", model="longrun-embed", dimension=2),
         )
@@ -2036,6 +2097,9 @@ class LongRunHarness:
         if result_path.exists():
             _append_trace_line(dump_trace_path, "parent_read_result_json")
             payload = json.loads(result_path.read_text(encoding="utf-8"))
+            layer_log = payload.get("layer_log")
+            if isinstance(layer_log, list):
+                self._write_json("parser_layer_log.json", layer_log)
             self._write_parser_heartbeat(
                 {
                     "phase": "completed",
@@ -2082,6 +2146,8 @@ class LongRunHarness:
             parser_lane=str(payload.get("parser_lane") or self.config.parser_lane),
             diagnostics=dict(payload.get("diagnostics") or {}),
             evaluation=dict(payload.get("evaluation") or {}),
+            usage_summary=dict(payload.get("usage_summary") or {}),
+            layer_log=list(payload.get("layer_log") or []),
         )
 
     def _generate_corpus(self) -> None:
@@ -2787,6 +2853,24 @@ def test_longrun_config_from_env_accepts_parser_selection(monkeypatch: pytest.Mo
     assert config.parse_timeout_seconds == 7
 
 
+def test_longrun_config_from_env_accepts_parser_provider_and_model(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER", "azure_openai")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_MODEL", "gpt4o")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_BASE_URL", "https://example.openai.azure.com/")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_API_KEY_ENV", "OPENAI_API_KEY_GPT4O")
+
+    config = LongRunConfig.from_env()
+
+    assert config.parser_provider == "openai"
+    assert config.parser_model == "gpt4o"
+    assert config.parser_base_url == "https://example.openai.azure.com/"
+    assert config.parser_api_key_env == "OPENAI_API_KEY_GPT4O"
+
+
 def test_longrun_config_from_env_defaults_to_workflow_layered(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
@@ -3164,6 +3248,7 @@ def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
         "final_outcome",
     } <= set(result["evaluation"])
     assert result["graph_payload"]["nodes"]
+    assert result["layer_log"] is None
 
 
 def test_longrun_workflow_layered_parser_lane_uses_workflow_mode(tmp_path: Path):
@@ -3175,6 +3260,11 @@ def test_longrun_workflow_layered_parser_lane_uses_workflow_mode(tmp_path: Path)
     assert result["ok"] is True
     assert result["parser_lane"] == "workflow_layered"
     assert result["diagnostics"]["parse_session_mode"] == "workflow_layered"
+    assert result["usage_summary"]["provider"] == "fake"
+    assert result["usage_summary"]["event_count"] >= 0
+    layer_log_path = Path(payload["parser_run_dir"]) / "parser_layer_log.json"
+    assert layer_log_path.exists()
+    assert json.loads(layer_log_path.read_text(encoding="utf-8")) == result["layer_log"]
     assert set(result["evaluation"]) >= {
         "basic_sense_score",
         "basic_sense_verdict",

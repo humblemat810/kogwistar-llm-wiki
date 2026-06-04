@@ -22,7 +22,9 @@ from .maintenance_policy import (
 )
 from .maintenance_designs import materialize_maintenance_designs
 from .namespaces import WorkspaceNamespaces
+from .provider_config import resolve_maintenance_provider_settings
 from .utils import _temporary_namespace
+from kogwistar.runtime.budget import StateBackedBudgetLedger
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,7 @@ class MaintenanceWorker(BaseWorker):
         eager_mode: bool = False,
         *,
         policies: LlmWikiPolicies | None = None,
+        provider_settings=None,
     ):
         """
         Initialize the MaintenanceWorker.
@@ -78,6 +81,7 @@ class MaintenanceWorker(BaseWorker):
         super().__init__(engines)
         self.eager_mode = eager_mode
         self.policies = policies or build_default_policies()
+        self.provider_settings = provider_settings or resolve_maintenance_provider_settings()
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
         self.resolver.register("check_done")(self._step_check_done)
@@ -180,6 +184,12 @@ class MaintenanceWorker(BaseWorker):
             return
 
         import warnings
+        budget_state = {
+            "token_budget": 10_000_000,
+            "budget_scope": "run",
+            "budget_kind": "token",
+        }
+        budget_ledger = StateBackedBudgetLedger(budget_state)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
             self.engines.workflow, ns.workflow_maintenance
         ):
@@ -209,7 +219,11 @@ class MaintenanceWorker(BaseWorker):
                             "workspace_id": workspace_id,
                             "request_id": req_node_id,
                             "maintenance_kind": maintenance_kind,
-                            "_deps": self.engines,
+                            "_deps": {
+                                "engines": self.engines,
+                                "provider_settings": self.provider_settings,
+                                "budget_ledger": budget_ledger,
+                            },
                         },
                         conversation_id=ns.conv_bg,
                         turn_node_id=req_node_id,

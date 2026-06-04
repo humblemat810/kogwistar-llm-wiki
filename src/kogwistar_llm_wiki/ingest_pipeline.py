@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
 from .utils import _temporary_namespace
@@ -27,8 +28,10 @@ from kogwistar.logical_refs import (
 from kogwistar.policy import PromotionDecision
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
+from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+from .provider_config import resolve_parser_provider_settings
+from .longrun_parser_worker import run_workflow_layered_parse
 from .models import (
     IngestPipelineArtifacts,
     IngestPipelineRequest,
@@ -417,8 +420,46 @@ class IngestPipeline:
             self.engines.conversation.write.add_document(compatibility_document)
 
     def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> Any:
+        if request.parser_lane == "workflow_layered":
+            return self._parse_workflow_layered_source(
+                request=request,
+                source_document_id=source_document_id,
+            )
         parser_kwargs = self._build_parser_kwargs(request=request, source_document_id=source_document_id)
         return self.parser(**parser_kwargs)
+
+    def _parse_workflow_layered_source(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+    ) -> Any:
+        provider = request.llm_provider or self._provider_from_mode(request.parser_mode)
+        model = request.llm_model or self._model_from_env(provider)
+        if provider is None:
+            raise ValueError(f"missing llm provider for parser_mode={request.parser_mode!r}")
+
+        provider_settings = resolve_parser_provider_settings(
+            provider=provider,
+            model=model,
+        )
+        engine_dir = Path(tempfile.mkdtemp(prefix="kogwistar-workflow-layered-"))
+        result = run_workflow_layered_parse(
+            source_document_id=source_document_id,
+            title=request.title,
+            raw_text=request.raw_text,
+            provider_settings=provider_settings,
+            engine_dir=engine_dir,
+        )
+        return SimpleNamespace(
+            semantic_tree=result.semantic_tree,
+            graph_payload=result.graph_payload,
+            evaluation=result.evaluation,
+            diagnostics=result.diagnostics,
+            usage_summary=result.usage_summary,
+            layer_log=result.layer_log,
+            parse_session=getattr(result, "parse_session", None),
+        )
 
     def _build_parser_kwargs(self, *, request: IngestPipelineRequest, source_document_id: str) -> dict[str, Any]:
         parser_kwargs: dict[str, Any] = {
@@ -436,7 +477,6 @@ class IngestPipeline:
         model = request.llm_model or self._model_from_env(provider)
         if provider is None:
             raise ValueError(f"missing llm provider for parser_mode={request.parser_mode!r}")
-
         sig = inspect.signature(self.parser)
         params = sig.parameters
         supports_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values())
@@ -446,11 +486,9 @@ class IngestPipeline:
         if "model" in params or supports_kwargs:
             parser_kwargs["model"] = model
         if "provider_settings" in params or supports_kwargs:
-            parser_kwargs["provider_settings"] = WorkflowProviderSettings(
-                parser=ProviderEndpointConfig(
-                    provider=provider,
-                    model=model,
-                )
+            parser_kwargs["provider_settings"] = resolve_parser_provider_settings(
+                provider=provider,
+                model=model,
             )
 
         if not supports_kwargs and not any(
@@ -465,17 +503,33 @@ class IngestPipeline:
 
     @staticmethod
     def _provider_from_mode(mode: str) -> str | None:
-        if mode in {"ollama", "gemini"}:
+        if mode in {"ollama", "gemini", "openai", "azure_openai", "azure"}:
+            if mode == "azure_openai":
+                return "azure"
             return mode
         return None
 
     @staticmethod
     def _model_from_env(provider: str | None) -> str | None:
         if provider == "ollama":
-            return os.getenv("OLLAMA_MODEL") or os.getenv("KG_DOC_PARSER_MODEL")
+            return (
+                os.getenv("KOGWISTAR_PARSER_MODEL")
+                or os.getenv("OLLAMA_MODEL")
+                or os.getenv("KG_DOC_PARSER_MODEL")
+            )
         if provider == "gemini":
-            return os.getenv("GEMINI_MODEL") or os.getenv("KG_DOC_PARSER_MODEL")
-        return os.getenv("KG_DOC_PARSER_MODEL")
+            return (
+                os.getenv("KOGWISTAR_PARSER_MODEL")
+                or os.getenv("GEMINI_MODEL")
+                or os.getenv("KG_DOC_PARSER_MODEL")
+            )
+        if provider in {"openai", "azure"}:
+            return (
+                os.getenv("KOGWISTAR_PARSER_MODEL")
+                or os.getenv("OPENAI_MODEL")
+                or os.getenv("KG_DOC_PARSER_MODEL")
+            )
+        return os.getenv("KOGWISTAR_PARSER_MODEL") or os.getenv("KG_DOC_PARSER_MODEL")
 
     def translate_parse_result(
         self,

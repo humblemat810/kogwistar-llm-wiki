@@ -97,6 +97,66 @@ llm-wiki demo --workspace demo --source logs/llm_wiki_demo/my_document.md --vaul
 
 Then open `logs/llm_wiki_demo/vault` in Obsidian.
 
+To try the iterative layerwise parser path, add `--parser-lane workflow_layered`
+to the same command and keep the same provider/model settings.
+
+If you use VS Code, the launch presets already read `.env` and only prompt for
+the parser lane:
+- `Demo: Ollama (gemma4:e2b)`
+- `Demo: Azure OpenAI (GPT-4o)`
+- `Demo: Azure OpenAI (GPT-4.1)`
+- `Demo: Azure OpenAI (pick model)`
+
+### Real provider settings
+
+The repo keeps secrets in `.env`, and `.env.example` is only a placeholder template.
+When you need a specific provider/model pair, set the parser and maintenance
+variables explicitly.
+
+Ollama example:
+
+```bash
+KOGWISTAR_PARSER_PROVIDER=ollama
+KOGWISTAR_PARSER_MODEL=gemma4:e2b
+KOGWISTAR_PARSER_BASE_URL=http://localhost:11434
+
+KOGWISTAR_MAINTENANCE_PROVIDER=ollama
+KOGWISTAR_MAINTENANCE_MODEL=gemma4:e2b
+KOGWISTAR_MAINTENANCE_BASE_URL=http://localhost:11434
+```
+
+Azure OpenAI example using GPT-4o:
+
+```bash
+KOGWISTAR_PARSER_PROVIDER=azure_openai
+KOGWISTAR_PARSER_MODEL=gpt4o
+KOGWISTAR_PARSER_BASE_URL=https://<your-resource>.openai.azure.com/
+KOGWISTAR_PARSER_API_KEY_ENV=OPENAI_API_KEY_GPT4O
+
+KOGWISTAR_MAINTENANCE_PROVIDER=azure_openai
+KOGWISTAR_MAINTENANCE_MODEL=gpt4o
+KOGWISTAR_MAINTENANCE_BASE_URL=https://<your-resource>.openai.azure.com/
+KOGWISTAR_MAINTENANCE_API_KEY_ENV=OPENAI_API_KEY_GPT4O
+```
+
+Azure OpenAI example using GPT-4.1:
+
+```bash
+KOGWISTAR_PARSER_PROVIDER=azure_openai
+KOGWISTAR_PARSER_MODEL=gpt41
+KOGWISTAR_PARSER_BASE_URL=https://<your-resource>.openai.azure.com/
+KOGWISTAR_PARSER_API_KEY_ENV=OPENAI_API_KEY_GPT4_1
+
+KOGWISTAR_MAINTENANCE_PROVIDER=azure_openai
+KOGWISTAR_MAINTENANCE_MODEL=gpt41
+KOGWISTAR_MAINTENANCE_BASE_URL=https://<your-resource>.openai.azure.com/
+KOGWISTAR_MAINTENANCE_API_KEY_ENV=OPENAI_API_KEY_GPT4_1
+```
+
+The provider alias `azure_openai` is normalized to the `azure` chat provider
+used by `kg-doc-parser`, while the model field carries the Azure deployment
+name. Regular OpenAI still uses the `openai` provider.
+
 Optional slower equivalents:
 
 - In-memory, one-process demo: this is the default quick demo.

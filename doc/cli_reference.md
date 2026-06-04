@@ -122,7 +122,20 @@ python -m kogwistar_llm_wiki --help
 | Variable | Used by | Purpose |
 |---|---|---|
 | `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
+| `KOGWISTAR_PARSER_PROVIDER` | CLI, parser workflows | Explicit parser provider alias. `azure_openai` is normalized to the `azure` chat provider. |
+| `KOGWISTAR_PARSER_MODEL` | CLI, parser workflows | Explicit parser model or Azure deployment name |
+| `KOGWISTAR_PARSER_BASE_URL` | CLI, parser workflows | Parser endpoint URL, for example Ollama base URL or Azure OpenAI endpoint |
+| `KOGWISTAR_PARSER_API_KEY_ENV` | CLI, parser workflows | Env var name that holds the parser API key |
+| `KOGWISTAR_PARSER_API_VERSION` | CLI, parser workflows | Azure OpenAI API version to use when building `AzureChatOpenAI` |
+| `KOGWISTAR_MAINTENANCE_PROVIDER` | daemon maintenance | Explicit maintenance provider alias |
+| `KOGWISTAR_MAINTENANCE_MODEL` | daemon maintenance | Explicit maintenance model or Azure deployment name |
+| `KOGWISTAR_MAINTENANCE_BASE_URL` | daemon maintenance | Maintenance endpoint URL |
+| `KOGWISTAR_MAINTENANCE_API_KEY_ENV` | daemon maintenance | Env var name that holds the maintenance API key |
 | `PYTHONPATH` | dev | Ensure `src/` is importable without install |
+
+`demo` and `ingest` also accept `--parser-lane page_index|workflow_layered`. Use
+`workflow_layered` when you want the iterative layerwise parser path instead of
+the page-index parser.
 
 ## Test Commands
 

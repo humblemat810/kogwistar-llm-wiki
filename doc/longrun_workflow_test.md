@@ -201,6 +201,8 @@ The dump includes:
 - `maintenance_summary.json` with maintenance job ids, source document ids,
   and maintenance-specific step counts
 - `llm_calls_summary.json`
+- `parser_layer_log.json` with parser-layer trace entries for workflow-layered
+  runs
 - `sampled_prompts_and_responses.jsonl`
 - `raw_documents/`
 - `final_report.md`

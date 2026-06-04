@@ -138,3 +138,46 @@ def test_parse_source_falls_back_to_provider_settings_for_old_parser_api(namespa
     assert captured["mode"] == "gemini"
     assert captured["provider_settings"].parser.provider == "gemini"
     assert captured["provider_settings"].parser.model == "gemini-2.5-flash"
+
+
+def test_parse_source_uses_workflow_layered_lane(namespace_engines, monkeypatch):
+    captured = {}
+
+    def fake_run_workflow_layered_parse(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            semantic_tree=SimpleNamespace(title=kwargs["title"]),
+            graph_payload={"nodes": [], "edges": []},
+            evaluation={"basic_sense_verdict": "good"},
+            diagnostics={"parser_lane": "workflow_layered", "parse_session_mode": "workflow_layered"},
+            usage_summary={"provider": "openai", "model": "gpt4o", "total_cost": 0.0},
+            layer_log=[{"stage": "workflow_layered_parse_start"}],
+            parse_session={"mode": "workflow_layered"},
+        )
+
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.run_workflow_layered_parse",
+        fake_run_workflow_layered_parse,
+    )
+
+    pipeline = IngestPipeline(namespace_engines)
+    request = IngestPipelineRequest(
+        workspace_id="demo",
+        source_uri="file:///contracts/acme.txt",
+        title="Acme Contract",
+        raw_text="Acme shall pay within 30 days.",
+        parser_mode="openai",
+        parser_lane="workflow_layered",
+        llm_provider="azure_openai",
+        llm_model="gpt4o",
+    )
+
+    result = pipeline.parse_source(request=request, source_document_id="doc-1")
+
+    assert captured["source_document_id"] == "doc-1"
+    assert captured["title"] == "Acme Contract"
+    assert captured["raw_text"] == "Acme shall pay within 30 days."
+    assert captured["provider_settings"].parser.provider == "azure"
+    assert captured["provider_settings"].parser.model == "gpt4o"
+    assert result.semantic_tree.title == "Acme Contract"
+    assert result.layer_log[0]["stage"] == "workflow_layered_parse_start"
