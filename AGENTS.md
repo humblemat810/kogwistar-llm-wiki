@@ -1,5 +1,20 @@
 # Agent Notes
 
+## Scope And Ownership
+
+- Put reusable parser design, parser ADRs, parser checklists, and parser
+  implementation under `kg-doc-parser/`.
+- Put reusable runtime, graph, workflow, budget, and substrate primitives under
+  `kogwistar/`.
+- Put product orchestration, VS Code launch configs, long-run harnesses,
+  promotion policy, and app-level reports under this repo's root `src/`,
+  `.vscode/`, `tests/`, and `doc/`.
+- Root `doc/` is appropriate for `kogwistar-llm-wiki` product docs and
+  cross-repo responsibility notes. Parser-owned docs should live under
+  `kg-doc-parser/doc/`.
+- Plans should always first think if `kogwistar` primitives can be reused
+  before adding app-local runtime behavior.
+
 ## Testing
 
 - Before treating a pytest timeout-after-success as an application failure,
@@ -16,4 +31,3 @@
   shutdown problem, not a product regression. Confirm the cache path before
   chasing app logic.
 - See `doc/testing_guide.md` before inventing a new pytest cache workaround.
-- Plans should always first think if kogwistar primitives can be reused.
