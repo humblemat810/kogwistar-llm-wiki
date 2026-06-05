@@ -15,12 +15,15 @@ from kogwistar.wisdom.template import write_execution_wisdom_artifacts
 from .models import NamespaceEngines, MaintenanceJobResult
 from .policies import LlmWikiPolicies, build_default_policies
 from .maintenance_policy import (
-    DERIVED_KNOWLEDGE_WORKFLOW_ID,
-    EXECUTION_WISDOM_WORKFLOW_ID,
-    is_execution_wisdom_kind,
     workflow_id_for_maintenance_kind,
 )
 from .maintenance_designs import materialize_maintenance_designs
+from .maintenance_patch_apply import apply_maintenance_patch_for_scope
+from .maintenance_patches import MaintenancePatch
+from .maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+    build_default_maintenance_strategy_registry,
+)
 from .namespaces import WorkspaceNamespaces
 from .provider_config import resolve_maintenance_provider_settings
 from .utils import _temporary_namespace
@@ -82,6 +85,7 @@ class MaintenanceWorker(BaseWorker):
         self.eager_mode = eager_mode
         self.policies = policies or build_default_policies()
         self.provider_settings = provider_settings or resolve_maintenance_provider_settings()
+        self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
         self.resolver.register("check_done")(self._step_check_done)
@@ -141,48 +145,110 @@ class MaintenanceWorker(BaseWorker):
                 or "distill"
             )
         logger.info("Processing maintenance job %s", req_node_id)
-        ns = WorkspaceNamespaces(workspace_id)
-        workflow_id = workflow_id_for_maintenance_kind(maintenance_kind)
+        ctx = MaintenanceJobExecutionContext(
+            workspace_id=workspace_id,
+            job=job,
+            job_id=job_id,
+            payload=payload,
+            request_node=request_node,
+            request_node_id=req_node_id,
+            lane_message_id=lane_message_id,
+            maintenance_kind=maintenance_kind,
+        )
+        strategy = self.strategy_registry.resolve(maintenance_kind)
+        strategy.handle(self, ctx)
 
-        if is_execution_wisdom_kind(maintenance_kind):
-            try:
-                emitted = self._emit_execution_wisdom_from_history(workspace_id, self.engines)
-                logger.info(
-                    "Maintenance job %s execution finished: finished (%s emitted=%s)",
-                    req_node_id,
-                    workflow_id,
-                    len(emitted),
-                )
-                self._emit_lane_reply(
-                    workspace_id=workspace_id,
-                    source_document_id=str(payload.get("source_document_id") or ""),
-                    request_node_id=req_node_id,
-                    reply_to_message_id=lane_message_id or None,
-                    status="completed",
-                    payload={
-                        "maintenance_kind": maintenance_kind,
-                        "execution_wisdom_emitted": emitted,
-                    },
-                )
-                if job_id:
-                    self.engines.conversation.jobs.mark_done(job_id)
-            except Exception as e:
-                logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
-                self._emit_lane_reply(
-                    workspace_id=workspace_id,
-                    source_document_id=str(payload.get("source_document_id") or ""),
-                    request_node_id=req_node_id,
-                    reply_to_message_id=lane_message_id or None,
-                    status="failed",
-                    payload={
-                        "maintenance_kind": maintenance_kind,
-                        "error": str(e),
-                    },
-                )
-                if job_id:
-                    self.engines.conversation.jobs.retry_or_fail(job, e)
+    def _handle_execution_wisdom_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
+        workflow_id = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
+        try:
+            emitted = self._emit_execution_wisdom_from_history(ctx.workspace_id, self.engines)
+            logger.info(
+                "Maintenance job %s execution finished: finished (%s emitted=%s)",
+                ctx.request_node_id,
+                workflow_id,
+                len(emitted),
+            )
+            self._emit_lane_reply(
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                request_node_id=ctx.request_node_id,
+                reply_to_message_id=ctx.lane_message_id or None,
+                status="completed",
+                payload={
+                    "maintenance_kind": ctx.maintenance_kind,
+                    "execution_wisdom_emitted": emitted,
+                },
+            )
+            if ctx.job_id:
+                self.engines.conversation.jobs.mark_done(ctx.job_id)
+        except Exception as e:
+            logger.error(f"Maintenance job {ctx.request_node_id} encountered runtime error: {e}", exc_info=True)
+            self._emit_lane_reply(
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                request_node_id=ctx.request_node_id,
+                reply_to_message_id=ctx.lane_message_id or None,
+                status="failed",
+                payload={
+                    "maintenance_kind": ctx.maintenance_kind,
+                    "error": str(e),
+                },
+            )
+            if ctx.job_id:
+                self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
+
+    def _handle_graph_patch_apply_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
+        patch_payload = ctx.payload.get("patch")
+        if not isinstance(patch_payload, dict):
+            self._handle_runtime_workflow_strategy(ctx)
             return
+        try:
+            patch = MaintenancePatch.model_validate(patch_payload)
+            result = apply_maintenance_patch_for_scope(
+                self.engines,
+                patch,
+                namespace_prefix=str(ctx.payload.get("namespace_prefix") or "") or None,
+            )
+            self._emit_lane_reply(
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                request_node_id=ctx.request_node_id,
+                reply_to_message_id=ctx.lane_message_id or None,
+                status="completed" if result.status.value == "applied" else "failed",
+                payload={
+                    "maintenance_kind": ctx.maintenance_kind,
+                    "patch_id": result.patch_id,
+                    "patch_status": result.status.value,
+                    "applied_count": result.applied_count,
+                    "skipped_count": result.skipped_count,
+                    "failed_count": result.failed_count,
+                    "artifact_id": result.artifact_id,
+                },
+            )
+            if result.status.value == "applied":
+                if ctx.job_id:
+                    self.engines.conversation.jobs.mark_done(ctx.job_id)
+            else:
+                raise RuntimeError(f"graph patch apply did not complete: {result.status.value}")
+        except Exception as e:
+            logger.error(f"Maintenance job {ctx.request_node_id} encountered graph patch apply error: {e}", exc_info=True)
+            self._emit_lane_reply(
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                request_node_id=ctx.request_node_id,
+                reply_to_message_id=ctx.lane_message_id or None,
+                status="failed",
+                payload={
+                    "maintenance_kind": ctx.maintenance_kind,
+                    "error": str(e),
+                },
+            )
+            if ctx.job_id:
+                self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
 
+    def _handle_runtime_workflow_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        workflow_id = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         import warnings
         budget_state = {
             "token_budget": 10_000_000,
@@ -202,7 +268,7 @@ class MaintenanceWorker(BaseWorker):
                         ]
                     },
                 )
-            except Exception as exc:
+            except Exception:
                 raise
             if not workflow_exists:
                 materialize_maintenance_designs(self.engines.workflow)
@@ -216,9 +282,9 @@ class MaintenanceWorker(BaseWorker):
                     result = self.runtime.run(
                         workflow_id=workflow_id,
                         initial_state={
-                            "workspace_id": workspace_id,
-                            "request_id": req_node_id,
-                            "maintenance_kind": maintenance_kind,
+                            "workspace_id": ctx.workspace_id,
+                            "request_id": ctx.request_node_id,
+                            "maintenance_kind": ctx.maintenance_kind,
                             "_deps": {
                                 "engines": self.engines,
                                 "provider_settings": self.provider_settings,
@@ -226,45 +292,45 @@ class MaintenanceWorker(BaseWorker):
                             },
                         },
                         conversation_id=ns.conv_bg,
-                        turn_node_id=req_node_id,
+                        turn_node_id=ctx.request_node_id,
                     )
                     status = result.status if hasattr(result, "status") else "finished"
                     logger.info(
                         "Maintenance job %s execution finished: %s (%s)",
-                        req_node_id,
+                        ctx.request_node_id,
                         status,
                         workflow_id,
                     )
                     self._emit_lane_reply(
-                        workspace_id=workspace_id,
-                        source_document_id=str(payload.get("source_document_id") or ""),
-                        request_node_id=req_node_id,
-                        reply_to_message_id=lane_message_id or None,
+                        workspace_id=ctx.workspace_id,
+                        source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                        request_node_id=ctx.request_node_id,
+                        reply_to_message_id=ctx.lane_message_id or None,
                         status="completed",
                         payload={
-                            "maintenance_kind": maintenance_kind,
+                            "maintenance_kind": ctx.maintenance_kind,
                             "workflow_id": workflow_id,
                             "runtime_status": status,
                         },
                     )
-                    if job_id:
-                        self.engines.conversation.jobs.mark_done(job_id)
+                    if ctx.job_id:
+                        self.engines.conversation.jobs.mark_done(ctx.job_id)
                 except Exception as e:
-                    logger.error(f"Maintenance job {req_node_id} encountered runtime error: {e}", exc_info=True)
+                    logger.error(f"Maintenance job {ctx.request_node_id} encountered runtime error: {e}", exc_info=True)
                     self._emit_lane_reply(
-                        workspace_id=workspace_id,
-                        source_document_id=str(payload.get("source_document_id") or ""),
-                        request_node_id=req_node_id,
-                        reply_to_message_id=lane_message_id or None,
+                        workspace_id=ctx.workspace_id,
+                        source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                        request_node_id=ctx.request_node_id,
+                        reply_to_message_id=ctx.lane_message_id or None,
                         status="failed",
                         payload={
-                            "maintenance_kind": maintenance_kind,
+                            "maintenance_kind": ctx.maintenance_kind,
                             "workflow_id": workflow_id,
                             "error": str(e),
                         },
                     )
-                    if job_id:
-                        self.engines.conversation.jobs.retry_or_fail(job, e)
+                    if ctx.job_id:
+                        self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
 
     def _emit_lane_reply(
         self,

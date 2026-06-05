@@ -4,6 +4,13 @@ from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime.models import WorkflowDesignArtifact, WorkflowEdge, WorkflowNode
 
+from .maintenance_policy import (
+    DERIVED_KNOWLEDGE_WORKFLOW_ID,
+    EXECUTION_WISDOM_WORKFLOW_ID,
+    GRAPH_PATCH_APPLY_WORKFLOW_ID,
+    GRAPH_PATCH_PROPOSAL_WORKFLOW_ID,
+)
+
 
 def _dummy_grounding() -> list[Grounding]:
     return [
@@ -68,7 +75,7 @@ def _workflow_edge(
 
 
 def build_derived_knowledge_design(
-    workflow_id: str = "maintenance.derived_knowledge.v1",
+    workflow_id: str = DERIVED_KNOWLEDGE_WORKFLOW_ID,
 ) -> WorkflowDesignArtifact:
     node_distill_id = str(stable_id("wf_node", workflow_id, "distill"))
     node_check_id = str(stable_id("wf_node", workflow_id, "check_done"))
@@ -139,7 +146,7 @@ def build_derived_knowledge_design(
 
 
 def build_execution_wisdom_design(
-    workflow_id: str = "maintenance.execution_wisdom.v1",
+    workflow_id: str = EXECUTION_WISDOM_WORKFLOW_ID,
 ) -> WorkflowDesignArtifact:
     node_extract_id = str(
         stable_id("wf_node", workflow_id, "derive_problem_solving_wisdom_from_history")
@@ -190,10 +197,82 @@ def build_execution_wisdom_design(
 
 
 def build_distillation_design(
-    workflow_id: str = "maintenance.derived_knowledge.v1",
+    workflow_id: str = DERIVED_KNOWLEDGE_WORKFLOW_ID,
 ) -> WorkflowDesignArtifact:
     """Compatibility alias for older imports/tests."""
     return build_derived_knowledge_design(workflow_id=workflow_id)
+
+
+def build_graph_patch_design(
+    workflow_id: str,
+    *,
+    label: str,
+    summary: str,
+) -> WorkflowDesignArtifact:
+    node_noop_id = str(stable_id("wf_node", workflow_id, "noop"))
+    node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
+
+    nodes = [
+        WorkflowNode(
+            id=node_noop_id,
+            label=label,
+            type="entity",
+            summary=summary,
+            mentions=_dummy_grounding(),
+            metadata={
+                "entity_type": "workflow_node",
+                "workflow_id": workflow_id,
+                "wf_op": "noop",
+                "wf_start": True,
+                "default_context_window": 4000,
+            },
+        ),
+        _terminal_node(
+            workflow_id,
+            node_id=node_terminal_id,
+            label=f"{label} Complete",
+            summary=f"Terminal state for {summary.lower()}",
+        ),
+    ]
+
+    edges = [
+        _workflow_edge(
+            workflow_id,
+            edge_key="noop_to_done",
+            source_id=node_noop_id,
+            target_id=node_terminal_id,
+            label="finished",
+            summary="Graph patch workflow completed.",
+        )
+    ]
+
+    return WorkflowDesignArtifact(
+        workflow_id=workflow_id,
+        workflow_version="v1",
+        start_node_id=node_noop_id,
+        nodes=nodes,
+        edges=edges,
+    )
+
+
+def build_graph_patch_proposal_design(
+    workflow_id: str = GRAPH_PATCH_PROPOSAL_WORKFLOW_ID,
+) -> WorkflowDesignArtifact:
+    return build_graph_patch_design(
+        workflow_id,
+        label="Graph Patch Proposal",
+        summary="Validate and prepare graph-patch proposal jobs.",
+    )
+
+
+def build_graph_patch_apply_design(
+    workflow_id: str = GRAPH_PATCH_APPLY_WORKFLOW_ID,
+) -> WorkflowDesignArtifact:
+    return build_graph_patch_design(
+        workflow_id,
+        label="Graph Patch Apply",
+        summary="Apply validated graph-patch jobs.",
+    )
 
 
 def materialize_maintenance_designs(workflow_engine: any):
@@ -201,6 +280,8 @@ def materialize_maintenance_designs(workflow_engine: any):
     for design in (
         build_derived_knowledge_design(),
         build_execution_wisdom_design(),
+        build_graph_patch_proposal_design(),
+        build_graph_patch_apply_design(),
     ):
         for node in design.nodes:
             workflow_engine.write.add_node(node)

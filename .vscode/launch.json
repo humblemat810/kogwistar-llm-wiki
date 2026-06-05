@@ -19,6 +19,8 @@
         "My Document",
         "--source-format",
         "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
         "--parser-mode",
         "ollama",
         "--parser-lane",
@@ -59,6 +61,8 @@
         "My Document",
         "--source-format",
         "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
         "--parser-mode",
         "azure_openai",
         "--parser-lane",
@@ -97,6 +101,8 @@
         "My Document",
         "--source-format",
         "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
         "--parser-mode",
         "azure_openai",
         "--parser-lane",
@@ -135,6 +141,8 @@
         "My Document",
         "--source-format",
         "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
         "--parser-mode",
         "azure_openai",
         "--parser-lane",
@@ -577,6 +585,17 @@
     }
   ],
   "inputs": [
+    {
+      "id": "demoOperationMode",
+      "type": "pickString",
+      "description": "Demo ingest operation mode",
+      "default": "parse_first",
+      "options": [
+        "parse_first",
+        "maintenance_first",
+        "hybrid"
+      ]
+    },
     {
       "id": "demoParserLane",
       "type": "pickString",

@@ -8,6 +8,15 @@ from __future__ import annotations
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 
+from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch
+from kogwistar_llm_wiki.maintenance_patches import (
+    MaintenanceIntent,
+    MaintenanceOperationKind,
+    MaintenancePatch,
+    MaintenancePatchOperation,
+    MaintenanceProvenance,
+    MaintenanceScope,
+)
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
@@ -144,3 +153,72 @@ def test_review_query_helper_is_workspace_scoped(pipeline, ingest_request):
     assert [node.id for node in second_candidates] == [second_artifacts.promotion_candidate_id]
     assert first_candidates[0].metadata.get("workspace_id") == first.workspace_id
     assert second_candidates[0].metadata.get("workspace_id") == second.workspace_id
+
+
+def test_review_query_helper_returns_maintenance_patch_artifacts(pipeline, ingest_request):
+    request = _sync_request(
+        ingest_request,
+        workspace_id="review-helper-patch",
+        source_uri="file:///contracts/review-helper-patch.txt",
+    )
+    pipeline.run(request)
+    ns = WorkspaceNamespaces(request.workspace_id)
+    patch = MaintenancePatch(
+        patch_id="patch-review-query",
+        intent=MaintenanceIntent.REQUEST_REVIEW,
+        scope=MaintenanceScope(workspace_id=request.workspace_id),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-noop",
+                kind=MaintenanceOperationKind.NOOP,
+                reason="status artifact smoke",
+            )
+        ],
+    )
+
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
+        result = apply_maintenance_patch(pipeline.engines.kg, patch)
+
+    artifacts = pipeline.review_query_service.get_maintenance_patch_artifacts(
+        workspace_id=request.workspace_id,
+        patch_id=patch.patch_id,
+        status=result.status.value,
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].id == result.artifact_id
+    assert artifacts[0].metadata.get("patch_id") == patch.patch_id
+    assert artifacts[0].metadata.get("patch_status") == "applied"
+    assert artifacts[0].metadata.get("graph_status") == "stable"
+
+    rejected_patch = MaintenancePatch(
+        patch_id="patch-review-query-rejected",
+        intent=MaintenanceIntent.DERIVE_ENTITY,
+        scope=MaintenanceScope(workspace_id=request.workspace_id),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-invalid",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="outside:node:bad",
+                provenance=MaintenanceProvenance(
+                    source_document_id="doc-review",
+                    maintenance_run_id="run-review",
+                    confidence=0.8,
+                ),
+            )
+        ],
+    )
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
+        apply_maintenance_patch(
+            pipeline.engines.kg,
+            rejected_patch,
+            namespace_prefix="ws:review-helper-patch:",
+        )
+
+    report = pipeline.review_query_service.get_maintenance_patch_report(
+        workspace_id=request.workspace_id,
+    )
+    assert report.patch_count == 2
+    assert report.applied_operations == 0
+    assert report.rejected_operations == 1
+    assert report.skipped_operations == 1

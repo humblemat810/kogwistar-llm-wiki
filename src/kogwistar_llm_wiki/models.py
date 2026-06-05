@@ -18,6 +18,8 @@ class IngestPipelineArtifacts:
     candidate_link_id: str
     promotion_candidate_id: str
     promoted_entity_id: str | None
+    operation_mode: str = "parse_first"
+    graph_status: str = "expanding"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +57,7 @@ class IngestPipelineRequest(ModeSlicingMixin, BaseModel):
     title: DtoType[str]
     raw_text: DtoType[str]
     source_format: DtoType[str] = "text"
+    operation_mode: DtoType[str] = "parse_first"
     parser_mode: DtoType[str] = "heuristic"
     parser_lane: DtoType[str] = "page_index"
     promotion_mode: DtoType[str] = "pending"

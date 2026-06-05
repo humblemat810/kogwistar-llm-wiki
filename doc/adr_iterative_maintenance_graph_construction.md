@@ -83,26 +83,86 @@ LLMs may propose graph changes, but they must not directly mutate the graph.
 The maintenance worker should produce a typed `MaintenancePatch`, validate it,
 and only then apply it through `kogwistar` graph/runtime primitives.
 
-Patch operations should include:
+Maintenance has two levels of vocabulary:
+
+1. High-level maintenance intent.
+2. Low-level graph patch operations.
+
+High-level intent explains why the worker is acting. Examples:
+
+- seed a document
+- split a document or parse node
+- merge duplicate nodes
+- correct an incorrect parse or fact
+- add a cross-document link
+- retract an incorrect link
+- derive a summary, entity, topic, or cross-link candidate
+- refresh a summary or derived view
+- promote a candidate or conversation-scoped fact into a wider scope
+- retract a previous promotion
+- distill durable operational knowledge into the wisdom layer
+- route an ambiguous proposal for review
+
+Low-level graph patch operations must stay aligned with `kogwistar`
+semantics. `kogwistar` does not truly update or remove graph primitives.
+Corrections are represented as tombstone plus add, with provenance preserved.
+
+The low-level patch operation vocabulary should therefore be small:
 
 - `ADD_NODE`
-- `UPDATE_NODE`
-- `REMOVE_NODE`
 - `ADD_EDGE`
-- `REMOVE_EDGE`
-- `REPLACE_EDGE`
-- `ADD_PARSE_CHILD`
-- `RETRACT_PARSE_CHILD`
-- `ADD_CROSSLINK`
-- `REMOVE_CROSSLINK`
-- `MARK_AMBIGUOUS`
+- `TOMBSTONE_NODE`
+- `TOMBSTONE_EDGE`
 - `REQUEST_REVIEW`
+- `NOOP`
+
+Higher-level actions compile into these primitives:
+
+- `split node` compiles to `ADD_NODE` and `ADD_EDGE`
+- `merge nodes` compiles to `ADD_NODE`, `ADD_EDGE`, `TOMBSTONE_NODE`, and
+  `TOMBSTONE_EDGE`
+- `correct fact` compiles to tombstone the incorrect node or edge and add the
+  corrected replacement
+- `relink` compiles to `TOMBSTONE_EDGE` plus `ADD_EDGE`
+- `retract crosslink` compiles to `TOMBSTONE_EDGE`
+- `derive summary`, `derive entity`, or `derive topic` compiles to `ADD_NODE`
+  plus provenance edges back to the source nodes or spans
+- `derive crosslink candidate` compiles to `ADD_EDGE` or a candidate link node
+  plus provenance edges to both sides
+- `refresh summary` compiles to tombstone the stale summary node or edge and
+  add the replacement
+- `promote candidate` compiles to status/scope edges when status is modeled as
+  edges, or to tombstone plus replacement node when status is part of node
+  identity
+- `retract promotion` compiles to tombstone the status/scope edge or tombstone
+  the promoted replacement node, depending on how promotion was represented
+- `distill to wisdom` compiles to derived wisdom nodes and provenance edges in
+  the wisdom namespace
+
+Derivation and promotion are not low-level patch primitives. They are
+maintenance intents that must lower into the same add/tombstone vocabulary as
+every other graph change.
+
+Promotion is not synonymous with the wisdom layer. Promotion moves a candidate
+or scoped fact into a wider or more accepted graph scope. Wisdom extraction is
+the separate `distill_to_wisdom` / `execution_wisdom` path for durable
+operational lessons.
 
 ### Patch Application Is Transactional
 
 A patch should be applied as one unit when the backend supports it. If a patch
 cannot be applied atomically, the application must still be idempotent and
 replayable through stable operation ids.
+
+### Evidence Is Part Of Each Operation
+
+`kogwistar` is already provenance-heavy, with primitives grounded to source
+spans where applicable. Maintenance should not add a separate
+`ATTACH_EVIDENCE` operation. Evidence belongs inside each `ADD_*`,
+`TOMBSTONE_*`, or review operation payload.
+
+If the evidence for a graph fact changes, maintenance should tombstone the old
+fact or edge and add a replacement with the corrected provenance.
 
 ### Retraction Is First-Class
 
@@ -146,6 +206,10 @@ Initial job kinds:
 - `graph_patch_apply`
 
 Existing job kinds such as `distill` and `execution_wisdom` remain valid.
+
+These job kinds are scheduling and policy concepts. They do not imply new
+low-level graph mutations. Each job must produce validated low-level patch
+operations before anything is applied.
 
 ## Conversation Lane Scope
 
@@ -240,4 +304,3 @@ incremental audit trail that maintenance patches provide.
 - Conversation lanes can run scoped maintenance without polluting the workspace
   KG.
 - Existing parse-first behavior remains available.
-

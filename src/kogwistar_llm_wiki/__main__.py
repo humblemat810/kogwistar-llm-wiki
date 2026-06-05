@@ -96,6 +96,7 @@ def _read_request_from_source(args: argparse.Namespace):
         title=title,
         raw_text=raw_text,
         source_format=args.source_format,
+        operation_mode=getattr(args, "operation_mode", "parse_first"),
         parser_mode=args.parser_mode,
         parser_lane=args.parser_lane,
         promotion_mode=args.promotion_mode,
@@ -108,7 +109,6 @@ def _read_request_from_source(args: argparse.Namespace):
 def _cmd_demo(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
-    from kogwistar_llm_wiki.models import IngestPipelineArtifacts
     from kogwistar_llm_wiki.namespaces import GraphSpace
     from kogwistar_llm_wiki.worker import MaintenanceWorker
 
@@ -118,52 +118,8 @@ def _cmd_demo(args: argparse.Namespace) -> None:
 
     engines = _build_demo_engines(split_derived_knowledge=args.split_derived_knowledge)
     pipeline = IngestPipeline(engines)
-    ns = pipeline.namespaces_for(args.workspace)
-    source_document_id = pipeline._source_document_id(request)
-    pipeline.register_source(
-        request=request,
-        source_document_id=source_document_id,
-        namespace=ns.conv_fg,
-    )
-    parse_result = pipeline.parse_source(
-        request=request,
-        source_document_id=source_document_id,
-    )
-    graph_extraction = pipeline.translate_parse_result(
-        parse_result=parse_result,
-        source_document_id=source_document_id,
-    )
     materialize_maintenance_designs(engines.workflow)
-    pipeline.ingest_parse_result(
-        request=request,
-        source_document_id=source_document_id,
-        graph_extraction=graph_extraction,
-        namespace=ns.conv_fg,
-    )
-    maintenance_job_id = pipeline.create_maintenance_request(
-        request=request,
-        source_document_id=source_document_id,
-        namespace=ns.conv_bg,
-    )
-    candidate_link_id = pipeline.create_candidate_link(
-        request=request,
-        source_document_id=source_document_id,
-        parse_result=parse_result,
-        namespace=ns.conv_bg,
-    )
-    promotion_candidate_id = pipeline.create_promotion_candidate(
-        request=request,
-        source_document_id=source_document_id,
-        candidate_link_id=candidate_link_id,
-        namespace=ns.conv_bg,
-    )
-    artifacts = IngestPipelineArtifacts(
-        source_document_id=source_document_id,
-        maintenance_job_id=maintenance_job_id,
-        candidate_link_id=candidate_link_id,
-        promotion_candidate_id=promotion_candidate_id,
-        promoted_entity_id=None,
-    )
+    artifacts = pipeline.run(request)
     MaintenanceWorker(engines).process_pending_jobs(args.workspace)
     vault_result = pipeline.build_obsidian_vault(
         vault_root,
@@ -309,6 +265,12 @@ def main(argv: list[str] | None = None) -> int:
         help="How to interpret the source document",
     )
     demo_p.add_argument(
+        "--operation-mode",
+        choices=["parse_first", "maintenance_first", "hybrid"],
+        default="parse_first",
+        help="Ingest operation mode",
+    )
+    demo_p.add_argument(
         "--parser-mode",
         choices=["heuristic", "ollama", "gemini", "openai", "azure_openai"],
         default="heuristic",
@@ -347,6 +309,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=["text", "markdown"],
         default="text",
         help="How to interpret the source document",
+    )
+    ingest_p.add_argument(
+        "--operation-mode",
+        choices=["parse_first", "maintenance_first", "hybrid"],
+        default="parse_first",
+        help="Ingest operation mode",
     )
     ingest_p.add_argument(
         "--parser-mode",

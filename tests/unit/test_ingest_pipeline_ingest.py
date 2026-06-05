@@ -1,4 +1,5 @@
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+from kogwistar_llm_wiki.models import IngestPipelineRequest
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
@@ -68,3 +69,71 @@ def test_run_invokes_kogwistar_ingest(pipeline, ingest_request, monkeypatch):
     assert compat_nodes
     assert all(node.metadata.get("graph_space") == "source" for node in source_nodes)
     assert all(node.metadata.get("source_document_id") == artifacts.source_document_id for node in source_nodes)
+    assert artifacts.operation_mode == "parse_first"
+    assert artifacts.graph_status == "stable"
+
+
+def test_run_maintenance_first_seeds_source_map_without_parsing(pipeline, ingest_request, monkeypatch):
+    parser_called = False
+
+    def fail_parser(**_kwargs):
+        nonlocal parser_called
+        parser_called = True
+        raise AssertionError("maintenance_first should not parse during ingest")
+
+    monkeypatch.setattr(pipeline, "parser", fail_parser)
+    request = IngestPipelineRequest.model_validate(
+        {
+            **ingest_request.model_dump(),
+            "operation_mode": "maintenance_first",
+        }
+    )
+
+    artifacts = pipeline.run(request)
+
+    assert parser_called is False
+    assert artifacts.operation_mode == "maintenance_first"
+    assert artifacts.graph_status == "seeded"
+    assert artifacts.candidate_link_id == ""
+    assert artifacts.promotion_candidate_id == ""
+
+    ns = WorkspaceNamespaces(request.workspace_id)
+    with _temporary_namespace(pipeline.engines.kg, ns.source_space):
+        seeds = pipeline.engines.kg.read.get_nodes(
+            where={"artifact_kind": "source_map_seed", "source_document_id": artifacts.source_document_id}
+        )
+    assert seeds
+    assert seeds[0].metadata["graph_status"] == "seeded"
+    assert seeds[0].metadata["operation_mode"] == "maintenance_first"
+    assert seeds[0].metadata["source_map_digest"]
+
+    jobs = pipeline.engines.conversation.jobs.list(namespace=ns.maintenance_jobs, limit=10)
+    assert len(jobs) == 1
+    assert jobs[0].payload["maintenance_kind"] == "document_seed_graph"
+
+
+def test_run_hybrid_keeps_parse_but_queues_graph_patch_expansion(pipeline, ingest_request, monkeypatch):
+    parse_calls = 0
+
+    def parser(**kwargs):
+        nonlocal parse_calls
+        parse_calls += 1
+        return parse_page_index_document(**kwargs)
+
+    monkeypatch.setattr(pipeline, "parser", parser)
+    request = IngestPipelineRequest.model_validate(
+        {
+            **ingest_request.model_dump(),
+            "operation_mode": "hybrid",
+        }
+    )
+
+    artifacts = pipeline.run(request)
+
+    assert parse_calls == 1
+    assert artifacts.operation_mode == "hybrid"
+    assert artifacts.graph_status == "expanding"
+    ns = WorkspaceNamespaces(request.workspace_id)
+    jobs = pipeline.engines.conversation.jobs.list(namespace=ns.maintenance_jobs, limit=10)
+    assert len(jobs) == 1
+    assert jobs[0].payload["maintenance_kind"] == "document_expand_parse_children"

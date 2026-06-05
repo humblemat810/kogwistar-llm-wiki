@@ -27,6 +27,19 @@ class ReviewChainResult:
     promotion_evidence_pack: Any | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class MaintenancePatchReport:
+    """Aggregated status counts for maintenance patch artifacts."""
+
+    patch_count: int
+    proposed_operations: int = 0
+    applied_operations: int = 0
+    rejected_operations: int = 0
+    retracted_operations: int = 0
+    skipped_operations: int = 0
+    failed_operations: int = 0
+
+
 class ReviewQueryService:
     """Tiny app-level helper for review artifacts stored in background conversation."""
 
@@ -110,6 +123,67 @@ class ReviewQueryService:
             where=query_where,
         )
 
+    def get_maintenance_patch_artifacts(
+        self,
+        *,
+        workspace_id: str,
+        patch_id: str | None = None,
+        status: str | None = None,
+        where: Mapping[str, Any] | None = None,
+    ) -> list[Node]:
+        """Return patch-applied/failed artifacts from the curated KG namespace."""
+        ns = WorkspaceNamespaces(workspace_id)
+        query_where = dict(where or {})
+        query_where["workspace_id"] = workspace_id
+        query_where["artifact_kind"] = "maintenance_patch_artifact"
+        if patch_id is not None:
+            query_where["patch_id"] = patch_id
+        if status is not None:
+            query_where["patch_status"] = status
+
+        with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
+            return self.engines.kg.read.get_nodes(
+                where=query_where,
+                limit=10_000,
+                resolve_mode="include_tombstones",
+            )
+
+    def get_maintenance_patch_report(
+        self,
+        *,
+        workspace_id: str,
+        where: Mapping[str, Any] | None = None,
+    ) -> MaintenancePatchReport:
+        """Aggregate patch artifact metadata into operator-facing counts."""
+        artifacts = self.get_maintenance_patch_artifacts(
+            workspace_id=workspace_id,
+            where=where,
+        )
+        proposed = applied = rejected = retracted = skipped = failed = 0
+        for artifact in artifacts:
+            metadata = dict(getattr(artifact, "metadata", None) or {})
+            status = str(metadata.get("patch_status") or "")
+            operation_count = _int_metadata(metadata.get("operation_count"))
+            if status in {"proposed", "validated", "partially_accepted"}:
+                proposed += operation_count
+            elif status == "applied":
+                applied += _int_metadata(metadata.get("applied_count"), operation_count)
+            elif status in {"rejected", "needs_review"}:
+                rejected += operation_count
+            elif status == "retracted":
+                retracted += operation_count
+            skipped += _int_metadata(metadata.get("skipped_count"))
+            failed += _int_metadata(metadata.get("failed_count"))
+        return MaintenancePatchReport(
+            patch_count=len(artifacts),
+            proposed_operations=proposed,
+            applied_operations=applied,
+            rejected_operations=rejected,
+            retracted_operations=retracted,
+            skipped_operations=skipped,
+            failed_operations=failed,
+        )
+
     def get_review_chain_for_promoted_node(
         self,
         *,
@@ -168,4 +242,11 @@ class ReviewQueryService:
         )
 
 
-__all__ = ["ReviewChainResult", "ReviewQueryService"]
+def _int_metadata(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+__all__ = ["MaintenancePatchReport", "ReviewChainResult", "ReviewQueryService"]

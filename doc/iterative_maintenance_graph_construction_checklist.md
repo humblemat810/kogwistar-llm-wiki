@@ -11,163 +11,179 @@ runtime/job primitives and `kg-doc-parser` source-map/parser capabilities.
 
 ## Goals
 
-- [ ] Add visible operation modes: `parse_first`, `maintenance_first`, `hybrid`.
-- [ ] Keep source maps authoritative.
-- [ ] Seed documents before graph-building maintenance.
-- [ ] Propose graph changes as typed patches.
-- [ ] Validate patches before applying them.
-- [ ] Apply patches transactionally when supported.
-- [ ] Preserve retractions and supersessions as audit records.
-- [ ] Support conversation-scoped maintenance lanes.
+- [x] Add visible operation modes: `parse_first`, `maintenance_first`, `hybrid`.
+- [x] Keep source maps authoritative.
+- [x] Seed documents before graph-building maintenance.
+- [x] Propose graph changes as typed patches.
+- [x] Separate high-level maintenance intent from low-level graph operations.
+- [x] Validate patches before applying them.
+- [x] Apply patches transactionally when supported.
+- [x] Preserve retractions and supersessions as audit records.
+- [x] Support conversation-scoped maintenance lanes.
 
 ## Non-Goals
 
-- [ ] Do not move maintenance policy into `kogwistar`.
-- [ ] Do not move parser internals into `kogwistar-llm-wiki`.
-- [ ] Do not allow LLM output to directly mutate the graph.
-- [ ] Do not require a full initial parse in `maintenance_first` mode.
+- [x] Do not move maintenance policy into `kogwistar`.
+- [x] Do not move parser internals into `kogwistar-llm-wiki`.
+- [x] Do not allow LLM output to directly mutate the graph.
+- [x] Do not require a full initial parse in `maintenance_first` mode.
 
 ## Slice 1: Operation Mode Surface
 
 **Goal:** make the ingest behavior explicit.
 
-- [ ] Add `operation_mode` or `ingest_mode` to ingest request models.
-- [ ] Support `parse_first`, `maintenance_first`, and `hybrid`.
-- [ ] Store selected mode in source document metadata.
-- [ ] Include selected mode in ingest result/reporting.
-- [ ] Add CLI and VS Code launch selection only after model/API tests pass.
-- [ ] Add tests proving existing parse-first behavior remains unchanged.
+- [x] Add `operation_mode` or `ingest_mode` to ingest request models.
+- [x] Support `parse_first`, `maintenance_first`, and `hybrid`.
+- [x] Store selected mode in source document metadata.
+- [x] Include selected mode in ingest result/reporting.
+- [x] Add CLI and VS Code launch selection only after model/API tests pass.
+- [x] Add tests proving existing parse-first behavior remains unchanged.
 
 ## Slice 2: Source Map Seed
 
 **Goal:** make minimal ingest useful without a full parse.
 
-- [ ] Ensure source registration can create a source map without writing a full
+- [x] Ensure source registration can create a source map without writing a full
   parse tree.
-- [ ] Write a minimal document node with source identity and source-map pointer.
-- [ ] Mark initial document graph status as `seeded`.
-- [ ] Persist source-map digest for idempotency.
-- [ ] Add tests for maintenance-first source seed creation.
+- [x] Write a minimal document node with source identity and source-map pointer.
+- [x] Mark initial document graph status as `seeded`.
+- [x] Persist source-map digest for idempotency.
+- [x] Add tests for maintenance-first source seed creation.
 
 ## Slice 3: Maintenance Patch Models
 
 **Goal:** create the typed contract between proposal, validation, and apply.
 
-- [ ] Add `MaintenancePatch`.
-- [ ] Add `MaintenancePatchOperation`.
-- [ ] Add operation kinds:
-  `ADD_NODE`, `UPDATE_NODE`, `REMOVE_NODE`, `ADD_EDGE`, `REMOVE_EDGE`,
-  `REPLACE_EDGE`, `ADD_PARSE_CHILD`, `RETRACT_PARSE_CHILD`, `ADD_CROSSLINK`,
-  `REMOVE_CROSSLINK`, `MARK_AMBIGUOUS`, `REQUEST_REVIEW`.
-- [ ] Add stable `patch_id` and `operation_id`.
-- [ ] Add evidence fields:
-  `source_document_id`, `source_span_ids`, `maintenance_run_id`, `confidence`.
-- [ ] Add patch status:
+- [x] Add `MaintenancePatch`.
+- [x] Add `MaintenancePatchOperation`.
+- [x] Add high-level maintenance intent kinds such as:
+  `seed_document`, `split_node`, `merge_nodes`, `correct_fact`,
+  `derive_summary`, `derive_entity`, `derive_crosslink_candidate`,
+  `add_crosslink`, `retract_crosslink`, `refresh_summary`,
+  `promote_candidate`, `retract_promotion`, `distill_to_wisdom`,
+  `request_review`.
+- [x] Add low-level operation kinds:
+  `ADD_NODE`, `ADD_EDGE`, `TOMBSTONE_NODE`, `TOMBSTONE_EDGE`,
+  `REQUEST_REVIEW`, `NOOP`.
+- [x] Document the intent-to-operation lowering rules:
+  split adds nodes/edges; merge adds replacement nodes/edges and tombstones
+  superseded ones; correction tombstones wrong primitives and adds corrected
+  replacements; relink tombstones an old edge and adds a new edge; derivation
+  adds derived nodes/edges with provenance; promotion adds or tombstones
+  status/scope edges, or tombstones/adds replacement nodes when status is part
+  of node identity.
+- [x] Add stable `patch_id` and `operation_id`.
+- [x] Require provenance fields on each graph-changing operation:
+  `source_document_id`, `source_span_ids` or equivalent span pointers,
+  `maintenance_run_id`, `confidence`.
+- [x] Add patch status:
   `proposed`, `validated`, `partially_accepted`, `applied`, `rejected`,
   `needs_review`, `retracted`.
-- [ ] Keep LLM-facing patch proposal schemas strict and JSON-safe.
+- [x] Keep LLM-facing patch proposal schemas strict and JSON-safe.
 
 ## Slice 4: Patch Validation
 
 **Goal:** keep graph writes deterministic and accountable.
 
-- [ ] Validate source grounding for every node/edge operation.
-- [ ] Validate namespace scope.
-- [ ] Validate operation idempotency.
-- [ ] Validate edge endpoint existence or same-patch creation.
-- [ ] Validate remove/retract operations target existing active facts.
-- [ ] Validate replacement/supersession lineage.
-- [ ] Reject operations with missing evidence unless explicitly marked
+- [x] Validate source grounding for every node/edge operation.
+- [x] Validate namespace scope.
+- [x] Validate operation idempotency.
+- [x] Validate edge endpoint existence or same-patch creation.
+- [x] Validate tombstone operations target existing active facts.
+- [x] Validate replacement/supersession lineage.
+- [x] Reject graph-changing operations with missing provenance unless explicitly marked
   `REQUEST_REVIEW`.
-- [ ] Add tests for invalid grounding, missing endpoints, duplicate operations,
+- [x] Add tests for invalid grounding, missing endpoints, duplicate operations,
   and cross-namespace writes.
 
 ## Slice 5: Patch Application
 
 **Goal:** apply accepted operations as a coherent graph update.
 
-- [ ] Reuse `kogwistar` transaction/runtime primitives where possible.
-- [ ] Apply a patch as one unit when backend transaction mode supports it.
-- [ ] Make patch application idempotent for retry.
-- [ ] Emit patch-applied artifacts.
-- [ ] Emit patch-failed artifacts with validation details.
-- [ ] Preserve operation-level status for partial acceptance.
-- [ ] Add tests for retrying the same patch without duplicate graph objects.
+- [x] Reuse `kogwistar` transaction/runtime primitives where possible.
+- [x] Apply a patch as one unit when backend transaction mode supports it.
+- [x] Make patch application idempotent for retry.
+- [x] Emit patch-applied artifacts.
+- [x] Emit patch-failed artifacts with validation details.
+- [x] Preserve operation-level status for partial acceptance.
+- [x] Add tests for retrying the same patch without duplicate graph objects.
 
 ## Slice 6: Maintenance Job Taxonomy
 
 **Goal:** expand beyond current `distill` and `execution_wisdom` jobs.
 
-- [ ] Add `document_seed_graph`.
-- [ ] Add `document_expand_parse_children`.
-- [ ] Add `document_correct_parse_children`.
-- [ ] Add `document_summarize_units`.
-- [ ] Add `document_extract_entities`.
-- [ ] Add `document_propose_crosslinks`.
-- [ ] Add `document_validate_crosslinks`.
-- [ ] Add `document_retract_crosslinks`.
-- [ ] Add `document_detect_conflicts`.
-- [ ] Add `conversation_promote_to_kg`.
-- [ ] Add `graph_patch_review`.
-- [ ] Add `graph_patch_apply`.
-- [ ] Route job kinds to workflow ids in `maintenance_policy.py`.
+- [x] Add `document_seed_graph`.
+- [x] Add `document_expand_parse_children`.
+- [x] Add `document_correct_parse_children`.
+- [x] Add `document_summarize_units`.
+- [x] Add `document_extract_entities`.
+- [x] Add `document_propose_crosslinks`.
+- [x] Add `document_validate_crosslinks`.
+- [x] Add `document_retract_crosslinks`.
+- [x] Add `document_detect_conflicts`.
+- [x] Add `conversation_promote_to_kg`.
+- [x] Add `graph_patch_review`.
+- [x] Add `graph_patch_apply`.
+- [x] Route job kinds to workflow ids in `maintenance_policy.py`.
+- [x] Ensure job kinds compile into the low-level add/tombstone patch
+  vocabulary before application.
 
 ## Slice 7: Worker Strategy Layer
 
 **Goal:** avoid turning `MaintenanceWorker` into one large switch.
 
-- [ ] Add a maintenance strategy registry.
-- [ ] Register current derived-knowledge and execution-wisdom strategies.
-- [ ] Add graph-patch proposal strategy.
-- [ ] Add graph-patch apply strategy.
-- [ ] Keep `MaintenanceDaemon` unchanged except for configuration metadata.
-- [ ] Add tests for strategy selection by maintenance kind.
+- [x] Add a maintenance strategy registry.
+- [x] Register current derived-knowledge and execution-wisdom strategies.
+- [x] Add graph-patch proposal strategy.
+- [x] Add graph-patch apply strategy.
+- [x] Keep `MaintenanceDaemon` unchanged except for configuration metadata.
+- [x] Add tests for strategy selection by maintenance kind.
 
 ## Slice 8: Cross-Link Maintenance
 
 **Goal:** make links between documents candidate-first and retractable.
 
-- [ ] Add cross-link candidate patch operation.
-- [ ] Validate candidate links against source evidence from both sides.
-- [ ] Separate candidate cross-links from accepted cross-links.
-- [ ] Add retraction operation for stale or incorrect links.
-- [ ] Add confidence/review thresholds.
-- [ ] Add tests for add, reject, and retract cross-link flows.
+- [x] Add cross-link candidate patch operation.
+- [x] Validate candidate links against source evidence from both sides.
+- [x] Separate candidate cross-links from accepted cross-links.
+- [x] Tombstone stale or incorrect cross-link edges instead of removing them.
+- [x] Add confidence/review thresholds.
+- [x] Add tests for add, reject, and retract cross-link flows.
 
 ## Slice 9: Conversation-Scoped Maintenance
 
 **Goal:** support temporary thread-level graph construction.
 
-- [ ] Add conversation/thread maintenance scope.
-- [ ] Keep conversation-scoped facts out of workspace KG until promoted.
-- [ ] Add candidate promotion patches from conversation scope to workspace KG.
-- [ ] Preserve provenance back to conversation messages and source spans.
-- [ ] Add tests proving conversation scope does not leak into workspace KG
+- [x] Add conversation/thread maintenance scope.
+- [x] Keep conversation-scoped facts out of workspace KG until promoted.
+- [x] Add candidate promotion patches from conversation scope to workspace KG.
+- [x] Preserve provenance back to conversation messages and source spans.
+- [x] Add tests proving conversation scope does not leak into workspace KG
   before promotion.
 
 ## Slice 10: Status And Reporting
 
 **Goal:** make eventual construction visible.
 
-- [ ] Track document graph status:
+- [x] Track document graph status:
   `seeded`, `expanding`, `needs_review`, `stable`, `stale`, `superseded`.
-- [ ] Include graph status in ingest result.
-- [ ] Include patch counts in maintenance replies.
-- [ ] Add report fields for proposed/applied/rejected/retracted operations.
-- [ ] Add cost summaries by maintenance kind and model.
-- [ ] Add review query support for patch artifacts.
+- [x] Include graph status in ingest result.
+- [x] Include patch counts in maintenance replies.
+- [x] Add report fields for proposed/applied/rejected/retracted operations.
+- [x] Add cost summaries by maintenance kind and model.
+- [x] Add review query support for patch artifacts.
 
 ## Slice 11: Migration
 
 **Goal:** introduce the mode without breaking parse-first workflows.
 
-- [ ] Keep `parse_first` as default.
-- [ ] Add `maintenance_first` behind explicit flag/config.
-- [ ] Add `hybrid` after source seed and patch application tests are stable.
-- [ ] Run the same document through all modes and compare:
+- [x] Keep `parse_first` as default.
+- [x] Add `maintenance_first` behind explicit flag/config.
+- [x] Add `hybrid` after source seed and patch application tests are stable.
+- [x] Run the same document through all modes and compare:
   initial latency, accepted patch count, fallback rate, graph quality, and
   total model cost.
-- [ ] Promote `hybrid` only if it improves local-model reliability.
+- [x] Promote `hybrid` only if it improves local-model reliability.
 
 ## Focused Test Commands
 
@@ -192,4 +208,7 @@ runtime/job primitives and `kg-doc-parser` source-map/parser capabilities.
 - Make every LLM-proposed operation pass deterministic validation before graph
   mutation.
 - Treat retraction as a normal maintenance outcome, not an exceptional cleanup.
-
+- Keep low-level graph persistence append-only: corrections are tombstone plus
+  add, never in-place update or true removal.
+- Do not add standalone evidence attachment operations; provenance belongs in
+  each graph-changing operation.

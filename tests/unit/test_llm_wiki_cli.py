@@ -30,6 +30,7 @@ class _FakePipeline:
         self.last_build_obsidian_vault_kwargs: dict[str, object] | None = None
 
     def run(self, request):
+        self._record("run")
         self.requests.append(request)
         return _FakeArtifacts()
 
@@ -152,22 +153,15 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
     assert payload["workspace_id"] == "demo"
     assert payload["vault"] == str(vault.resolve())
     assert payload["mode"] == "demo-memory-single-process"
-    assert payload["artifacts"]["promoted_entity_id"] is None
+    assert payload["artifacts"]["promoted_entity_id"] == "kg-1"
     assert payload["vault_result"]["notes"] == 7
     pipeline = captured["pipeline"]
+    assert pipeline.requests[0].operation_mode == "parse_first"
     assert pipeline.last_build_obsidian_vault_kwargs is not None
     assert pipeline.last_build_obsidian_vault_kwargs["graph_spaces"] == [GraphSpace.BASE_KG]
     assert pipeline.last_build_obsidian_vault_kwargs["projection_filter"] == "demo"
     assert pipeline.calls == [
-        "namespaces_for",
-        "_source_document_id",
-        "register_source",
-        "parse_source",
-        "translate_parse_result",
-        "ingest_parse_result",
-        "create_maintenance_request",
-        "create_candidate_link",
-        "create_promotion_candidate",
+        "run",
         "build_obsidian_vault",
     ]
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import hashlib
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -254,12 +255,34 @@ class IngestPipeline:
     def run(self, request: IngestPipelineRequest) -> IngestPipelineArtifacts:
         ns = self.namespaces_for(request.workspace_id)
         source_document_id = self._source_document_id(request)
+        operation_mode = self._operation_mode(request)
 
         self.register_source(
             request=request,
             source_document_id=source_document_id,
             namespace=ns.conv_fg,
         )
+        if operation_mode == "maintenance_first":
+            self.seed_source_map(
+                request=request,
+                source_document_id=source_document_id,
+                namespace=ns.conv_bg,
+            )
+            maintenance_job_id = self.create_maintenance_request(
+                request=request,
+                source_document_id=source_document_id,
+                namespace=ns.conv_bg,
+                maintenance_kind="document_seed_graph",
+            )
+            return IngestPipelineArtifacts(
+                source_document_id=source_document_id,
+                maintenance_job_id=maintenance_job_id,
+                candidate_link_id="",
+                promotion_candidate_id="",
+                promoted_entity_id=None,
+                operation_mode=operation_mode,
+                graph_status="seeded",
+            )
         parse_result = self.parse_source(
             request=request,
             source_document_id=source_document_id,
@@ -284,6 +307,7 @@ class IngestPipeline:
             request=request,
             source_document_id=source_document_id,
             namespace=ns.conv_bg,
+            maintenance_kind=self._maintenance_kind_for_operation_mode(operation_mode),
         )
         candidate_link_id = self.create_candidate_link(
             request=request,
@@ -338,6 +362,8 @@ class IngestPipeline:
             candidate_link_id=candidate_link_id,
             promotion_candidate_id=promotion_candidate_id,
             promoted_entity_id=promoted_entity_id,
+            operation_mode=operation_mode,
+            graph_status="expanding" if operation_mode == "hybrid" else "stable",
         )
 
     def build_obsidian_vault(
@@ -389,6 +415,21 @@ class IngestPipeline:
             )
         )
 
+    @staticmethod
+    def _operation_mode(request: IngestPipelineRequest) -> str:
+        operation_mode = str(getattr(request, "operation_mode", "parse_first") or "parse_first").strip().lower()
+        if operation_mode not in {"parse_first", "maintenance_first", "hybrid"}:
+            raise ValueError("operation_mode must be one of: parse_first, maintenance_first, hybrid")
+        return operation_mode
+
+    @staticmethod
+    def _maintenance_kind_for_operation_mode(operation_mode: str) -> str:
+        if operation_mode == "maintenance_first":
+            return "document_seed_graph"
+        if operation_mode == "hybrid":
+            return "document_expand_parse_children"
+        return "distill"
+
     def register_source(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> None:
         source_namespace = self.namespaces_for(request.workspace_id).source_space
         source_metadata = {
@@ -397,6 +438,7 @@ class IngestPipeline:
             "source_uri": request.source_uri,
             "title": request.title,
             "source_format": request.source_format,
+            "operation_mode": self._operation_mode(request),
             "parser_mode": request.parser_mode,
         }
         source_document = Document(
@@ -418,6 +460,57 @@ class IngestPipeline:
             self.engines.kg.write.add_document(source_document)
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_document(compatibility_document)
+
+    def seed_source_map(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
+        source_namespace = self.namespaces_for(request.workspace_id).source_space
+        source_map_digest = hashlib.sha256((request.raw_text or "").encode("utf-8")).hexdigest()
+        node_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.source_map_seed",
+                request.workspace_id,
+                source_document_id,
+                source_map_digest,
+            )
+        )
+        seed_metadata = {
+            "graph_space": "source",
+            "operation_mode": self._operation_mode(request),
+            "graph_status": "seeded",
+            "source_map_digest": source_map_digest,
+            "source_map_kind": "single_text_span",
+            "source_span_count": 1 if request.raw_text else 0,
+        }
+        source_seed = self._artifact_node(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=source_namespace,
+            node_id=node_id,
+            artifact_kind="source_map_seed",
+            lane="background",
+            visibility="internal",
+            label=f"Source Map Seed: {request.title}",
+            summary=f"Seed source map for {request.title}",
+            extra_metadata=seed_metadata,
+        )
+        compatibility_seed = self._artifact_node(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            node_id=node_id,
+            artifact_kind="source_map_seed",
+            lane="background",
+            visibility="internal",
+            label=f"Source Map Seed: {request.title}",
+            summary=f"Seed source map for {request.title}",
+            extra_metadata={**seed_metadata, "legacy_namespace": namespace},
+        )
+        with _temporary_namespace(self.engines.kg, source_namespace):
+            if not self.engines.kg.read.node_exists(ids=[node_id]):
+                self.engines.kg.write.add_node(source_seed)
+        with _temporary_namespace(self.engines.conversation, namespace):
+            if not self.engines.conversation.read.node_exists(ids=[node_id]):
+                self.engines.conversation.write.add_node(compatibility_seed)
+        return node_id
 
     def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> Any:
         if request.parser_lane == "workflow_layered":
@@ -585,12 +678,21 @@ class IngestPipeline:
             graph_extraction=source_parsed,
         )
 
-    def create_maintenance_request(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
+    def create_maintenance_request(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        namespace: str,
+        maintenance_kind: str | None = None,
+    ) -> str:
+        maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
         node_id = str(
             stable_id(
                 "kogwistar_llm_wiki.maintenance_request",
                 request.workspace_id,
                 source_document_id,
+                maintenance_kind,
             )
         )
         if not self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
@@ -605,9 +707,11 @@ class IngestPipeline:
                 label="Maintenance Job Request",
                 summary=f"Maintenance requested for {request.title}",
                 extra_metadata={
-                    "job_type": "distillation",
+                    "job_type": "maintenance",
                     "trigger_type": "ingest",
                     "status": "pending",
+                    "operation_mode": self._operation_mode(request),
+                    "maintenance_kind": maintenance_kind,
                 },
             )
             with _temporary_namespace(self.engines.conversation, namespace):
@@ -620,7 +724,7 @@ class IngestPipeline:
                 "kogwistar_llm_wiki.maintenance_request_lane",
                 request.workspace_id,
                 source_document_id,
-                "distill",
+                maintenance_kind,
             )
         )
         with _temporary_namespace(self.engines.conversation, namespace):
@@ -645,7 +749,7 @@ class IngestPipeline:
                     "workspace_id": request.workspace_id,
                     "request_node_id": request_node_id,
                     "source_document_id": source_document_id,
-                    "maintenance_kind": "distill",
+                    "maintenance_kind": maintenance_kind,
                 },
                 idempotency_key=lane_idempotency_key,
             )
@@ -662,6 +766,7 @@ class IngestPipeline:
                 source_document_id=source_document_id,
                 namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
                 lane_message_id=lane_message_id,
+                maintenance_kind=maintenance_kind,
             )
         return request_node_id
 
@@ -998,12 +1103,13 @@ class IngestPipeline:
         source_document_id: str,
         namespace: str,
         lane_message_id: str | None = None,
+        maintenance_kind: str = "distill",
     ) -> str:
         payload = {
             "workspace_id": request.workspace_id,
             "request_node_id": request_node_id,
             "source_document_id": source_document_id,
-            "maintenance_kind": "distill",
+            "maintenance_kind": maintenance_kind,
             "lane_message_id": lane_message_id,
         }
         job_id = request_node_id
