@@ -35,6 +35,7 @@
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
         "KOGWISTAR_PARSER_PROVIDER": "ollama",
         "KOGWISTAR_PARSER_MODEL": "gemma4:e2b",
         "KOGWISTAR_PARSER_BASE_URL": "http://localhost:11434",
@@ -77,6 +78,7 @@
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "gpt-5-mini",
         "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
@@ -117,6 +119,7 @@
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "gpt-5-nano",
         "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
@@ -157,6 +160,7 @@
       "console": "integratedTerminal",
       "justMyCode": false,
       "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:demoAzureModel}",
         "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
@@ -604,6 +608,16 @@
       "options": [
         "page_index",
         "workflow_layered"
+      ]
+    },
+    {
+      "id": "demoProposalMode",
+      "type": "pickString",
+      "description": "Workflow-layered proposal mode",
+      "default": "children",
+      "options": [
+        "children",
+        "boundaries"
       ]
     },
     {
