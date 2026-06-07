@@ -6,8 +6,8 @@ Please update it when a failure mode repeats.
 ## Pytest Cache On Windows
 
 If a pytest command reaches `100% passed` and then hangs until the command
-timeout, check the pytest cache directory before investigating application
-logic.
+timeout, or if collection fails on `pytest-cache-files-*` directories, check the
+pytest cache directory before investigating application logic.
 
 Treat that pattern as a cache-shutdown problem first, not as a product
 regression. On this Windows workspace, the test process has repeatedly reached
@@ -16,6 +16,8 @@ regression. On this Windows workspace, the test process has repeatedly reached
 Observed local failure mode:
 
 - `kogwistar/.pytest_cache` existed but was not writable by the test process.
+- Top-level generated `kogwistar/pytest-cache-files-*` directories were picked
+  up by collection and failed with `WinError 5 Access is denied`.
 - `-o cache_dir=C:\tmp\...` also hung because this process could not create
   directories under `C:\tmp`.
 - Disabling the cache with `-p no:cacheprovider` made tests exit cleanly, but
@@ -24,11 +26,16 @@ Observed local failure mode:
 Current mitigation:
 
 - Vendored `kogwistar/pytest.ini` sets `cache_dir = .pytest-local-cache`.
+- Vendored `kogwistar/pytest.ini` excludes `pytest-cache-files-*` from
+  recursive collection.
 - `.pytest-local-cache` is ignored by the vendored repo's `.gitignore`.
 
 Recommended commands:
 
 ```powershell
+# Default PR CI slice; includes tests auto-marked as `ci`.
+.\.venv\Scripts\python.exe -m pytest tests -q -m ci
+
 # Normal run; uses the repo-local cache configured by pytest.ini.
 .\.venv\Scripts\python.exe -m pytest kogwistar/tests/core/test_job_queue_subsystem.py -q
 

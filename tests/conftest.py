@@ -21,6 +21,8 @@ for key in ("TMPDIR", "TEMP", "TMP"):
 
 import pytest
 
+from tests._helpers.pytest_markers import mark_default_ci_items
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,10 @@ def pytest_addoption(parser):
         choices=sorted(_LONGRUN_PROBE_ENVS),
         help="Materialize a long-run probe environment from pytest args when VS Code drops launch env.",
     )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    mark_default_ci_items(items)
 
 
 def pytest_configure(config):
