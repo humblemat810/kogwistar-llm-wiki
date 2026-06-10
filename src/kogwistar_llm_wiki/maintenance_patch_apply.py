@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from kogwistar.engine_core.models import Edge, Grounding, MentionVerification, Node, Span
+from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.id_provider import stable_id
+from kogwistar.typing_interfaces import WriteLike
 from pydantic import BaseModel, ConfigDict, Field
 
 from .maintenance_patches import (
@@ -16,10 +18,38 @@ from .maintenance_patches import (
 )
 from .maintenance_status import graph_status_for_patch
 from .namespaces import WorkspaceNamespaces
+from .models import NamespaceEngines
 from .utils import _temporary_namespace
 
 
 JsonScalar = str | int | float | bool | None
+
+
+@runtime_checkable
+class _MaintenanceReadLike(Protocol):
+    def get_nodes(
+        self,
+        ids: list[str] | None = None,
+        where: dict[str, Any] | None = None,
+        resolve_mode: str | None = None,
+    ) -> list[Any]: ...
+
+    def get_edges(
+        self,
+        ids: list[str] | None = None,
+        where: dict[str, Any] | None = None,
+        resolve_mode: str | None = None,
+    ) -> list[Any]: ...
+
+
+class _MaintenanceEngineLike(Protocol):
+    read: _MaintenanceReadLike
+    write: WriteLike
+
+    def uow(self): ...
+
+    def tombstone_node(self, node_id: str, **kw: Any) -> bool: ...
+    def tombstone_edge(self, edge_id: str, **kw: Any) -> bool: ...
 
 
 class MaintenancePatchOperationApplyResult(BaseModel):
@@ -55,7 +85,7 @@ class MaintenancePatchApplyResult(BaseModel):
 
 
 def apply_maintenance_patch(
-    engine: Any,
+    engine: GraphKnowledgeEngine,
     patch: MaintenancePatch,
     *,
     active_node_ids: set[str] | None = None,
@@ -118,7 +148,7 @@ def apply_maintenance_patch(
 
 
 def apply_maintenance_patch_for_scope(
-    engines: Any,
+    engines: NamespaceEngines,
     patch: MaintenancePatch,
     *,
     namespace_prefix: str | None = None,
@@ -145,14 +175,14 @@ def apply_maintenance_patch_for_scope(
         )
 
 
-def _engine_uow(engine: Any):
+def _engine_uow(engine: _MaintenanceEngineLike):
     uow = getattr(engine, "uow", None)
     if callable(uow):
         return uow()
     return nullcontext()
 
 
-def _read_active_ids(engine: Any, kind: str) -> set[str]:
+def _read_active_ids(engine: _MaintenanceEngineLike, kind: str) -> set[str]:
     read = getattr(engine, "read", engine)
     if kind == "node":
         getter = getattr(read, "get_nodes", None)
@@ -167,7 +197,7 @@ def _read_active_ids(engine: Any, kind: str) -> set[str]:
     return {str(getattr(item, "id")) for item in items if getattr(item, "id", None)}
 
 
-def _exists(engine: Any, kind: str, entity_id: str, *, include_tombstones: bool = False) -> bool:
+def _exists(engine: _MaintenanceEngineLike, kind: str, entity_id: str, *, include_tombstones: bool = False) -> bool:
     read = getattr(engine, "read", engine)
     getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
     if not callable(getter):
@@ -179,7 +209,7 @@ def _exists(engine: Any, kind: str, entity_id: str, *, include_tombstones: bool 
     return any(str(getattr(item, "id", "")) == entity_id for item in items)
 
 
-def _is_tombstoned(engine: Any, kind: str, entity_id: str) -> bool:
+def _is_tombstoned(engine: _MaintenanceEngineLike, kind: str, entity_id: str) -> bool:
     read = getattr(engine, "read", engine)
     getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
     if not callable(getter):
@@ -194,7 +224,11 @@ def _is_tombstoned(engine: Any, kind: str, entity_id: str) -> bool:
     return False
 
 
-def _apply_operation(engine: Any, patch: MaintenancePatch, operation: Any) -> MaintenancePatchOperationApplyResult:
+def _apply_operation(
+    engine: _MaintenanceEngineLike,
+    patch: MaintenancePatch,
+    operation: "MaintenancePatchOperation",
+) -> MaintenancePatchOperationApplyResult:
     if operation.kind == MaintenanceOperationKind.NOOP:
         return MaintenancePatchOperationApplyResult(operation_id=operation.operation_id, kind=operation.kind, status="skipped")
     if operation.kind == MaintenanceOperationKind.REQUEST_REVIEW:
@@ -231,11 +265,11 @@ def _apply_operation(engine: Any, patch: MaintenancePatch, operation: Any) -> Ma
     return MaintenancePatchOperationApplyResult(operation_id=operation.operation_id, kind=operation.kind, status="failed", message="unsupported operation kind")
 
 
-def _write(engine: Any) -> Any:
+def _write(engine: _MaintenanceEngineLike) -> WriteLike:
     return getattr(engine, "write", engine)
 
 
-def _node_from_operation(patch: MaintenancePatch, operation: Any) -> Node:
+def _node_from_operation(patch: MaintenancePatch, operation: "MaintenancePatchOperation") -> Node:
     metadata = _operation_metadata(patch, operation)
     return Node(
         id=operation.node_id,
@@ -249,7 +283,7 @@ def _node_from_operation(patch: MaintenancePatch, operation: Any) -> Node:
     )
 
 
-def _edge_from_operation(patch: MaintenancePatch, operation: Any) -> Edge:
+def _edge_from_operation(patch: MaintenancePatch, operation: "MaintenancePatchOperation") -> Edge:
     metadata = _operation_metadata(patch, operation)
     return Edge(
         id=operation.edge_id,
@@ -268,7 +302,7 @@ def _edge_from_operation(patch: MaintenancePatch, operation: Any) -> Edge:
     )
 
 
-def _operation_metadata(patch: MaintenancePatch, operation: Any) -> dict[str, JsonScalar]:
+def _operation_metadata(patch: MaintenancePatch, operation: "MaintenancePatchOperation") -> dict[str, JsonScalar]:
     provenance = operation.provenance
     metadata: dict[str, JsonScalar] = {
         "artifact_kind": "maintenance_patch_operation",
@@ -300,14 +334,14 @@ def _operation_metadata(patch: MaintenancePatch, operation: Any) -> dict[str, Js
     return {key: value for key, value in metadata.items() if value not in (None, "")}
 
 
-def _source_document_id(operation: Any) -> str:
+def _source_document_id(operation: "MaintenancePatchOperation") -> str:
     provenance = operation.provenance
     if provenance and provenance.source_document_id:
         return provenance.source_document_id
     return "maintenance"
 
 
-def _span_from_operation(operation: Any) -> Span:
+def _span_from_operation(operation: "MaintenancePatchOperation") -> Span:
     provenance = operation.provenance
     pointer: dict[str, str | int | float | bool | None] = {}
     if provenance and provenance.source_pointers:
@@ -332,7 +366,7 @@ def _span_from_operation(operation: Any) -> Span:
 
 
 def _emit_patch_artifact(
-    engine: Any,
+    engine: _MaintenanceEngineLike,
     patch: MaintenancePatch,
     validation: MaintenancePatchValidationReport,
     operation_results: list[MaintenancePatchOperationApplyResult],

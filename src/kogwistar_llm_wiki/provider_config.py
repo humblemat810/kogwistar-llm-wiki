@@ -220,6 +220,7 @@ def build_provider_endpoint_config(
 
 def build_workflow_provider_settings(
     *,
+    proposal_mode: str | None = None,
     parser: ProviderEndpointConfig | None = None,
     ocr: ProviderEndpointConfig | None = None,
     embedding: Any | None = None,
@@ -229,11 +230,15 @@ def build_workflow_provider_settings(
     parser_spec = parser or build_provider_endpoint_config("parser")
     ocr_spec = ocr or ProviderEndpointConfig()
     embedding_spec = embedding or EmbeddingProviderConfig()
-    return WorkflowProviderSettings(parser=parser_spec, ocr=ocr_spec, embedding=embedding_spec)
+    settings_kwargs: dict[str, Any] = {"parser": parser_spec, "ocr": ocr_spec, "embedding": embedding_spec}
+    if proposal_mode is not None:
+        settings_kwargs["proposal_mode"] = proposal_mode
+    return WorkflowProviderSettings(**settings_kwargs)
 
 
 def resolve_parser_provider_settings(
     *,
+    proposal_mode: str | None = None,
     provider: str | None = None,
     model: str | None = None,
     temperature: float | None = None,
@@ -244,7 +249,13 @@ def resolve_parser_provider_settings(
     location: str | None = None,
     max_retries: int | None = None,
 ) -> WorkflowProviderSettings:
+    resolved_proposal_mode = proposal_mode or _first_env(
+        "KOGWISTAR_PARSER_PROPOSAL_MODE",
+        "KG_DOC_PARSER_PROPOSAL_MODE",
+        default="children",
+    )
     return build_workflow_provider_settings(
+        proposal_mode=str(resolved_proposal_mode or "children"),
         parser=build_provider_endpoint_config(
             "parser",
             provider=provider,
@@ -290,7 +301,9 @@ def resolve_maintenance_provider_settings(
 
 def provider_config_summary(settings: WorkflowProviderSettings | ProviderEndpointConfig) -> dict[str, Any]:
     parser = settings.parser if hasattr(settings, "parser") else settings
+    proposal_mode = getattr(settings, "proposal_mode", None)
     return {
+        "proposal_mode": proposal_mode,
         "provider": getattr(parser, "provider", None),
         "model": getattr(parser, "model", None),
         "temperature": getattr(parser, "temperature", None),

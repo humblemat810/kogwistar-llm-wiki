@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime.models import WorkflowDesignArtifact, WorkflowEdge, WorkflowNode
@@ -275,7 +276,7 @@ def build_graph_patch_apply_design(
     )
 
 
-def materialize_maintenance_designs(workflow_engine: any):
+def materialize_maintenance_designs(workflow_engine: GraphKnowledgeEngine) -> None:
     """Saves all authoritative maintenance designs to the workflow engine."""
     for design in (
         build_derived_knowledge_design(),

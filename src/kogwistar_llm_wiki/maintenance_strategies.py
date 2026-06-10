@@ -23,13 +23,21 @@ class MaintenanceJobExecutionContext:
     maintenance_kind: str
 
 
+class MaintenanceWorkerLike(Protocol):
+    def _handle_execution_wisdom_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
+    def _handle_graph_patch_apply_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
+    def _handle_runtime_workflow_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
+
 class MaintenanceStrategy(Protocol):
     name: str
 
     def can_handle(self, maintenance_kind: str) -> bool:
         ...
 
-    def handle(self, worker: Any, ctx: MaintenanceJobExecutionContext) -> None:
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
         ...
 
 
@@ -55,7 +63,7 @@ class ExecutionWisdomMaintenanceStrategy:
     def can_handle(self, maintenance_kind: str) -> bool:
         return is_execution_wisdom_kind(maintenance_kind)
 
-    def handle(self, worker: Any, ctx: MaintenanceJobExecutionContext) -> None:
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
         worker._handle_execution_wisdom_strategy(ctx)
 
 
@@ -65,7 +73,7 @@ class GraphPatchApplyMaintenanceStrategy:
     def can_handle(self, maintenance_kind: str) -> bool:
         return normalize_maintenance_kind(maintenance_kind) in GRAPH_PATCH_APPLY_KINDS
 
-    def handle(self, worker: Any, ctx: MaintenanceJobExecutionContext) -> None:
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
         worker._handle_graph_patch_apply_strategy(ctx)
 
 
@@ -75,7 +83,7 @@ class GraphPatchProposalMaintenanceStrategy:
     def can_handle(self, maintenance_kind: str) -> bool:
         return normalize_maintenance_kind(maintenance_kind) in GRAPH_PATCH_PROPOSAL_KINDS
 
-    def handle(self, worker: Any, ctx: MaintenanceJobExecutionContext) -> None:
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
         worker._handle_runtime_workflow_strategy(ctx)
 
 
@@ -85,7 +93,7 @@ class RuntimeWorkflowMaintenanceStrategy:
     def can_handle(self, maintenance_kind: str) -> bool:
         return True
 
-    def handle(self, worker: Any, ctx: MaintenanceJobExecutionContext) -> None:
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
         worker._handle_runtime_workflow_strategy(ctx)
 
 

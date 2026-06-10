@@ -51,10 +51,24 @@ def test_resolve_parser_provider_settings_returns_summary(monkeypatch) -> None:
     monkeypatch.setenv("KOGWISTAR_PARSER_PROVIDER", "ollama")
     monkeypatch.setenv("KOGWISTAR_PARSER_MODEL", "gemma4:e2b")
     monkeypatch.setenv("KOGWISTAR_PARSER_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("KOGWISTAR_PARSER_PROPOSAL_MODE", "boundaries")
 
     settings = resolve_parser_provider_settings()
     summary = provider_config_summary(settings)
 
+    assert settings.proposal_mode == "boundaries"
+    assert summary["proposal_mode"] == "boundaries"
     assert summary["provider"] == "ollama"
     assert summary["model"] == "gemma4:e2b"
     assert summary["base_url"] == "http://localhost:11434"
+
+
+def test_resolve_parser_provider_settings_prefers_kogwistar_proposal_mode_over_legacy(monkeypatch) -> None:
+    monkeypatch.setenv("KG_DOC_PARSER_PROPOSAL_MODE", "boundaries")
+    monkeypatch.setenv("KOGWISTAR_PARSER_PROPOSAL_MODE", "children")
+    monkeypatch.setenv("KOGWISTAR_PARSER_PROVIDER", "ollama")
+    monkeypatch.setenv("KOGWISTAR_PARSER_MODEL", "gemma4:e2b")
+
+    settings = resolve_parser_provider_settings()
+
+    assert settings.proposal_mode == "children"

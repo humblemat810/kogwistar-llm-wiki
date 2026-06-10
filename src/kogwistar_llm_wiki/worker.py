@@ -3,16 +3,20 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any
 
+from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
+from kogwistar.engine_core.models import Grounding, Node
 from kogwistar.id_provider import stable_id
+from kogwistar.maintenance.models import MaintenanceTemplateResult
+from kogwistar.runtime import RunResult
 from kogwistar.runtime.models import RunSuccess, StepRunResult
 from kogwistar.runtime.resolvers import MappingStepResolver
 from kogwistar.runtime.runtime import StepContext, WorkflowRuntime
 from kogwistar.maintenance.template import run_grouped_maintenance_template
 from kogwistar.wisdom.template import write_execution_wisdom_artifacts
 
-from .models import NamespaceEngines, MaintenanceJobResult
+from .models import NamespaceEngines
 from .policies import LlmWikiPolicies, build_default_policies
 from .maintenance_policy import (
     workflow_id_for_maintenance_kind,
@@ -22,6 +26,7 @@ from .maintenance_patch_apply import apply_maintenance_patch_for_scope
 from .maintenance_patches import MaintenancePatch
 from .maintenance_strategies import (
     MaintenanceJobExecutionContext,
+    MaintenanceStrategy,
     build_default_maintenance_strategy_registry,
 )
 from .namespaces import WorkspaceNamespaces
@@ -72,7 +77,7 @@ class MaintenanceWorker(BaseWorker):
         eager_mode: bool = False,
         *,
         policies: LlmWikiPolicies | None = None,
-        provider_settings=None,
+        provider_settings: WorkflowProviderSettings | None = None,
     ):
         """
         Initialize the MaintenanceWorker.
@@ -84,7 +89,7 @@ class MaintenanceWorker(BaseWorker):
         super().__init__(engines)
         self.eager_mode = eager_mode
         self.policies = policies or build_default_policies()
-        self.provider_settings = provider_settings or resolve_maintenance_provider_settings()
+        self.provider_settings: WorkflowProviderSettings = provider_settings or resolve_maintenance_provider_settings()
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
@@ -155,13 +160,13 @@ class MaintenanceWorker(BaseWorker):
             lane_message_id=lane_message_id,
             maintenance_kind=maintenance_kind,
         )
-        strategy = self.strategy_registry.resolve(maintenance_kind)
+        strategy: MaintenanceStrategy = self.strategy_registry.resolve(maintenance_kind)
         strategy.handle(self, ctx)
 
     def _handle_execution_wisdom_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
-        workflow_id = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
+        workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         try:
-            emitted = self._emit_execution_wisdom_from_history(ctx.workspace_id, self.engines)
+            emitted: list[str] = self._emit_execution_wisdom_from_history(ctx.workspace_id, self.engines)
             logger.info(
                 "Maintenance job %s execution finished: finished (%s emitted=%s)",
                 ctx.request_node_id,
@@ -203,7 +208,7 @@ class MaintenanceWorker(BaseWorker):
             self._handle_runtime_workflow_strategy(ctx)
             return
         try:
-            patch = MaintenancePatch.model_validate(patch_payload)
+            patch: MaintenancePatch = MaintenancePatch.model_validate(patch_payload)
             result = apply_maintenance_patch_for_scope(
                 self.engines,
                 patch,
@@ -248,14 +253,14 @@ class MaintenanceWorker(BaseWorker):
 
     def _handle_runtime_workflow_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
         ns = WorkspaceNamespaces(ctx.workspace_id)
-        workflow_id = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
+        workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         import warnings
-        budget_state = {
+        budget_state: dict[str, str | int] = {
             "token_budget": 10_000_000,
             "budget_scope": "run",
             "budget_kind": "token",
         }
-        budget_ledger = StateBackedBudgetLedger(budget_state)
+        budget_ledger: StateBackedBudgetLedger = StateBackedBudgetLedger(budget_state)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
             self.engines.workflow, ns.workflow_maintenance
         ):
@@ -279,7 +284,7 @@ class MaintenanceWorker(BaseWorker):
                     message="Using advanced underscore state key '_deps'",
                 )
                 try:
-                    result = self.runtime.run(
+                    result: RunResult = self.runtime.run(
                         workflow_id=workflow_id,
                         initial_state={
                             "workspace_id": ctx.workspace_id,
@@ -294,7 +299,7 @@ class MaintenanceWorker(BaseWorker):
                         conversation_id=ns.conv_bg,
                         turn_node_id=ctx.request_node_id,
                     )
-                    status = result.status if hasattr(result, "status") else "finished"
+                    status: str = result.status if hasattr(result, "status") else "finished"
                     logger.info(
                         "Maintenance job %s execution finished: %s (%s)",
                         ctx.request_node_id,
@@ -415,7 +420,7 @@ class MaintenanceWorker(BaseWorker):
     def _load_request_node(self, workspace_id: str, req_node_id: str) -> Any | None:
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
-            nodes = self.engines.conversation.read.get_nodes(
+            nodes: list[Node] = self.engines.conversation.read.get_nodes(
                 where={
                     "$and": [
                         {"workspace_id": workspace_id},
@@ -435,7 +440,7 @@ class MaintenanceWorker(BaseWorker):
         workspace_id = ctx.state_view.get("workspace_id")
         _deps_raw = ctx.state_view.get("_deps")
         if isinstance(_deps_raw, dict):
-            engines = _deps_raw.get("engines")
+            engines: NamespaceEngines | None = _deps_raw.get("engines")
         else:
             engines = _deps_raw
         if not workspace_id or not engines:
@@ -444,7 +449,7 @@ class MaintenanceWorker(BaseWorker):
 
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(engines.kg, ns.curated_kg_space):
-            promoted_nodes = engines.kg.read.get_nodes(
+            promoted_nodes: list[Node] = engines.kg.read.get_nodes(
                 where=_and_where(
                     {"artifact_kind": "promoted_knowledge"},
                     {"workspace_id": workspace_id},
@@ -458,7 +463,7 @@ class MaintenanceWorker(BaseWorker):
         from kogwistar.id_provider import stable_id
 
         derived_engine = engines.derived_knowledge_engine()
-        template_result = run_grouped_maintenance_template(
+        template_result: MaintenanceTemplateResult = run_grouped_maintenance_template(
             engines.kg,
             target_engine=derived_engine,
             source_namespace=ns.curated_kg_space,
@@ -513,7 +518,7 @@ class MaintenanceWorker(BaseWorker):
         """Resolver step that cleanly finalizes derived-knowledge maintenance."""
         workspace_id = ctx.state_view.get("workspace_id")
         _deps_raw = ctx.state_view.get("_deps")
-        engines = _deps_raw.get("engines") if isinstance(_deps_raw, dict) else _deps_raw
+        engines: NamespaceEngines | None = _deps_raw.get("engines") if isinstance(_deps_raw, dict) else _deps_raw
         if not workspace_id or not engines:
             logger.error("Missing workspace_id or engines in maintenance completion step context")
             return RunSuccess(state_update=[("u", {"error": "Missing context"})])
@@ -529,22 +534,22 @@ class MaintenanceWorker(BaseWorker):
         *,
         workspace_id: str,
         label: str,
-        nodes: list[Any],
-        existing: list[Any],
+        nodes: list[Node],
+        existing: list[Node],
         created_at_ms: int,
         policies: LlmWikiPolicies,
         fallback_span_factory,
-    ):
-        from kogwistar.engine_core.models import Grounding, Node
+    ) -> Node:
+        from kogwistar.engine_core.models import Grounding
         from kogwistar.id_provider import stable_id
 
-        raw_mentions = []
+        raw_mentions: list[Grounding] = []
         for node in nodes:
             if hasattr(node, "mentions") and node.mentions:
                 raw_mentions.extend(node.mentions)
 
-        merged_mentions = []
-        seen_mentions = set()
+        merged_mentions: list[Grounding] = []
+        seen_mentions: set[str] = set()
         for mention in raw_mentions:
             try:
                 mention_key = mention.model_dump_json()
