@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Mapping
 
+from kogwistar.engine_core.models import Node
 from kogwistar.policy import (
     DefaultArtifactVisibilityPolicy,
     DefaultDerivedKnowledgePolicy,
@@ -32,7 +33,7 @@ class LlmWikiArtifactTaxonomy:
 class LlmWikiPromotionPolicy:
     default_accept_threshold: float = 0.95
 
-    def decide(self, *, promotion_mode: str, auto_accept_threshold: float, metadata: Mapping[str, Any] | None = None) -> PromotionDecision:
+    def decide(self, *, promotion_mode: str, auto_accept_threshold: float, metadata: Mapping[str, object] | None = None) -> PromotionDecision:
         core = DefaultPromotionPolicy(default_accept_threshold=self.default_accept_threshold)
         return core.decide(
             PromotionContext(
@@ -51,7 +52,7 @@ class LlmWikiVisibilityPolicy:
     taxonomy: LlmWikiArtifactTaxonomy = field(default_factory=LlmWikiArtifactTaxonomy)
     _core: DefaultArtifactVisibilityPolicy = field(default_factory=DefaultArtifactVisibilityPolicy)
 
-    def visibility_for(self, metadata: Mapping[str, Any]) -> str:
+    def visibility_for(self, metadata: Mapping[str, object]) -> str:
         meta = dict(metadata or {})
         artifact_kind = str(meta.get("artifact_kind") or "").strip()
         if artifact_kind == self.taxonomy.promoted_knowledge:
@@ -72,7 +73,7 @@ class LlmWikiVisibilityPolicy:
             return "internal" if artifact_kind == self.taxonomy.maintenance_job_request else "wisdom"
         return self._core.visibility_for(meta)
 
-    def is_projection_eligible(self, metadata: Mapping[str, Any]) -> bool:
+    def is_projection_eligible(self, metadata: Mapping[str, object]) -> bool:
         return DefaultProjectionEligibilityPolicy(
             visibility_policy=self,
         ).is_projection_eligible(dict(metadata or {}))
@@ -83,7 +84,7 @@ class LlmWikiDerivedKnowledgePolicy:
     taxonomy: LlmWikiArtifactTaxonomy = field(default_factory=LlmWikiArtifactTaxonomy)
     _core: DefaultDerivedKnowledgePolicy = field(default_factory=DefaultDerivedKnowledgePolicy)
 
-    def group_key(self, node: Any) -> str:
+    def group_key(self, node: Node) -> str:
         return self._core.group_key(node)
 
     def source_query(self, *, workspace_id: str) -> SourceQueryDecision:
@@ -95,10 +96,10 @@ class LlmWikiDerivedKnowledgePolicy:
             }
         )
 
-    def source_where(self, *, workspace_id: str) -> dict[str, Any]:
+    def source_where(self, *, workspace_id: str) -> dict[str, object]:
         return self.source_query(workspace_id=workspace_id).where
 
-    def match_where(self, *, workspace_id: str, label: str) -> dict[str, Any]:
+    def match_where(self, *, workspace_id: str, label: str) -> dict[str, object]:
         return {
             **self._core.match_where(workspace_id=workspace_id, label=label),
             "artifact_kind": self.taxonomy.derived_knowledge,
@@ -113,7 +114,7 @@ class LlmWikiDerivedKnowledgePolicy:
         replaces_ids: list[str],
         created_at_ms: int,
         artifact_kind: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return self._core.build_metadata(
             workspace_id=workspace_id,
             label=label,
@@ -141,10 +142,10 @@ class LlmWikiWisdomPolicy:
             }
         )
 
-    def source_where(self, *, workspace_id: str) -> dict[str, Any]:
+    def source_where(self, *, workspace_id: str) -> dict[str, object]:
         return self.source_query(workspace_id=workspace_id).where
 
-    def match_where(self, *, workspace_id: str, step_op: str) -> dict[str, Any]:
+    def match_where(self, *, workspace_id: str, step_op: str) -> dict[str, object]:
         return {
             **self._core.match_where(workspace_id=workspace_id, step_op=step_op),
             "artifact_kind": self.taxonomy.execution_wisdom,
@@ -160,7 +161,7 @@ class LlmWikiWisdomPolicy:
         replaces_ids: list[str],
         created_at_ms: int,
         artifact_kind: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return self._core.build_metadata(
             workspace_id=workspace_id,
             step_op=step_op,
@@ -183,7 +184,7 @@ class LlmWikiLifecyclePolicy:
             self.taxonomy.execution_wisdom,
         }
 
-    def replacement_ids(self, existing: list[Any]) -> list[str]:
+    def replacement_ids(self, existing: list[Node | str]) -> list[str]:
         out: list[str] = []
         for item in existing:
             item_id = getattr(item, "id", item)
@@ -198,7 +199,7 @@ class LlmWikiProjectionPolicy:
     """Projection eligibility stays policy-owned instead of namespace-owned."""
     visibility: LlmWikiVisibilityPolicy = field(default_factory=LlmWikiVisibilityPolicy)
 
-    def is_projection_eligible(self, metadata: Mapping[str, Any]) -> bool:
+    def is_projection_eligible(self, metadata: Mapping[str, object]) -> bool:
         return self.visibility.is_projection_eligible(metadata)
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
-from typing import Any, Protocol, runtime_checkable
+from contextlib import AbstractContextManager, nullcontext
+from typing import Callable, Protocol, cast, runtime_checkable
 
 from kogwistar.engine_core.models import Edge, Grounding, MentionVerification, Node, Span
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .maintenance_patches import (
     MaintenanceOperationKind,
     MaintenancePatch,
+    MaintenancePatchOperation,
     MaintenancePatchStatus,
     MaintenancePatchValidationReport,
     validate_maintenance_patch,
@@ -23,6 +24,8 @@ from .utils import _temporary_namespace
 
 
 JsonScalar = str | int | float | bool | None
+EngineUnitOfWork = AbstractContextManager[object | None]
+MaintenanceEntity = Node | Edge
 
 
 @runtime_checkable
@@ -30,26 +33,26 @@ class _MaintenanceReadLike(Protocol):
     def get_nodes(
         self,
         ids: list[str] | None = None,
-        where: dict[str, Any] | None = None,
+        where: dict[str, object] | None = None,
         resolve_mode: str | None = None,
-    ) -> list[Any]: ...
+    ) -> list[Node]: ...
 
     def get_edges(
         self,
         ids: list[str] | None = None,
-        where: dict[str, Any] | None = None,
+        where: dict[str, object] | None = None,
         resolve_mode: str | None = None,
-    ) -> list[Any]: ...
+    ) -> list[Edge]: ...
 
 
 class _MaintenanceEngineLike(Protocol):
     read: _MaintenanceReadLike
     write: WriteLike
 
-    def uow(self): ...
+    def uow(self) -> EngineUnitOfWork: ...
 
-    def tombstone_node(self, node_id: str, **kw: Any) -> bool: ...
-    def tombstone_edge(self, edge_id: str, **kw: Any) -> bool: ...
+    def tombstone_node(self, node_id: str, **kw: object) -> bool: ...
+    def tombstone_edge(self, edge_id: str, **kw: object) -> bool: ...
 
 
 class MaintenancePatchOperationApplyResult(BaseModel):
@@ -175,10 +178,10 @@ def apply_maintenance_patch_for_scope(
         )
 
 
-def _engine_uow(engine: _MaintenanceEngineLike):
+def _engine_uow(engine: _MaintenanceEngineLike) -> EngineUnitOfWork:
     uow = getattr(engine, "uow", None)
     if callable(uow):
-        return uow()
+        return cast(Callable[[], EngineUnitOfWork], uow)()
     return nullcontext()
 
 
@@ -190,6 +193,7 @@ def _read_active_ids(engine: _MaintenanceEngineLike, kind: str) -> set[str]:
         getter = getattr(read, "get_edges", None)
     if not callable(getter):
         return set()
+    items: list[MaintenanceEntity]
     try:
         items = getter(resolve_mode="active_only")
     except TypeError:
@@ -202,6 +206,7 @@ def _exists(engine: _MaintenanceEngineLike, kind: str, entity_id: str, *, includ
     getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
     if not callable(getter):
         return False
+    items: list[MaintenanceEntity]
     try:
         items = getter(ids=[entity_id], resolve_mode="include_tombstones" if include_tombstones else "active_only")
     except TypeError:
@@ -214,6 +219,7 @@ def _is_tombstoned(engine: _MaintenanceEngineLike, kind: str, entity_id: str) ->
     getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
     if not callable(getter):
         return False
+    items: list[MaintenanceEntity]
     try:
         items = getter(ids=[entity_id], resolve_mode="include_tombstones")
     except TypeError:

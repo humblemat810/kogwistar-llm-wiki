@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
+
+from kogwistar.engine_core.jobs import JobQueueItem
+from kogwistar.engine_core.models import Node
 
 from .maintenance_policy import (
     GRAPH_PATCH_APPLY_KINDS,
@@ -14,10 +17,10 @@ from .maintenance_policy import (
 @dataclass(frozen=True)
 class MaintenanceJobExecutionContext:
     workspace_id: str
-    job: Any
+    job: JobQueueItem
     job_id: str
-    payload: dict[str, Any]
-    request_node: Any | None
+    payload: dict[str, object]
+    request_node: Node | None
     request_node_id: str
     lane_message_id: str
     maintenance_kind: str

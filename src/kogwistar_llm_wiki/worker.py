@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import Any
 
+from kogwistar.engine_core.jobs import JobQueueItem
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
-from kogwistar.engine_core.models import Grounding, Node
+from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.maintenance.models import MaintenanceTemplateResult
 from kogwistar.runtime import RunResult
@@ -38,7 +38,7 @@ from kogwistar.runtime.budget import StateBackedBudgetLedger
 logger = logging.getLogger(__name__)
 
 
-def _and_where(*clauses: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
     """Compose a Chroma-compatible conjunction filter from simple metadata clauses."""
     return {"$and": [dict(clause) for clause in clauses]}
 
@@ -46,10 +46,10 @@ def _and_where(*clauses: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
 class BaseWorker(ABC):
     """Base class for background workers polling the Kogwistar artifact stream."""
 
-    def __init__(self, engines: NamespaceEngines):
+    def __init__(self, engines: NamespaceEngines) -> None:
         self.engines = engines
 
-    def run_forever(self, workspace_id: str, interval: float = 5.0):
+    def run_forever(self, workspace_id: str, interval: float = 5.0) -> None:
         """Main daemon loop."""
         logger.info(f"Starting worker loop for workspace {workspace_id}")
         while True:
@@ -60,7 +60,7 @@ class BaseWorker(ABC):
             time.sleep(interval)
 
     @abstractmethod
-    def process_pending_jobs(self, workspace_id: str):
+    def process_pending_jobs(self, workspace_id: str) -> None:
         """Subclasses implement specific polling/processing logic."""
         pass
 
@@ -78,7 +78,7 @@ class MaintenanceWorker(BaseWorker):
         *,
         policies: LlmWikiPolicies | None = None,
         provider_settings: WorkflowProviderSettings | None = None,
-    ):
+    ) -> None:
         """
         Initialize the MaintenanceWorker.
 
@@ -105,7 +105,7 @@ class MaintenanceWorker(BaseWorker):
             predicate_registry={},
         )
 
-    def process_pending_jobs(self, workspace_id: str):
+    def process_pending_jobs(self, workspace_id: str) -> None:
         """
         Finds and processes maintenance jobs for a given workspace.
         The durable index job table is authoritative; graph nodes are retained only
@@ -131,12 +131,10 @@ class MaintenanceWorker(BaseWorker):
                         exc,
                         exc_info=True,
                     )
-                    coerced_job = self.engines.conversation.jobs.coerce(job)
-                    self.engines.conversation.jobs.retry_or_fail(coerced_job, exc)
+                    self.engines.conversation.jobs.retry_or_fail(job, exc)
                     raise
 
-    def _handle_job(self, workspace_id: str, job: Any):
-        job = self.engines.conversation.jobs.coerce(job)
+    def _handle_job(self, workspace_id: str, job: JobQueueItem) -> None:
         job_id = str(job.job_id)
         payload = dict(job.payload)
         req_node_id = str(payload.get("request_node_id") or job_id)
@@ -345,7 +343,7 @@ class MaintenanceWorker(BaseWorker):
         request_node_id: str,
         reply_to_message_id: str | None,
         status: str,
-        payload: dict[str, Any],
+        payload: dict[str, object],
     ) -> None:
         if not reply_to_message_id:
             return
@@ -417,7 +415,7 @@ class MaintenanceWorker(BaseWorker):
                 completed=True,
             )
 
-    def _load_request_node(self, workspace_id: str, req_node_id: str) -> Any | None:
+    def _load_request_node(self, workspace_id: str, req_node_id: str) -> Node | None:
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
             nodes: list[Node] = self.engines.conversation.read.get_nodes(
@@ -458,9 +456,6 @@ class MaintenanceWorker(BaseWorker):
 
         if not promoted_nodes:
             return RunSuccess(state_update=[("u", {"distillation_complete": True})])
-
-        from kogwistar.engine_core.models import Grounding, Node, Span
-        from kogwistar.id_provider import stable_id
 
         derived_engine = engines.derived_knowledge_engine()
         template_result: MaintenanceTemplateResult = run_grouped_maintenance_template(
@@ -540,9 +535,6 @@ class MaintenanceWorker(BaseWorker):
         policies: LlmWikiPolicies,
         fallback_span_factory,
     ) -> Node:
-        from kogwistar.engine_core.models import Grounding
-        from kogwistar.id_provider import stable_id
-
         raw_mentions: list[Grounding] = []
         for node in nodes:
             if hasattr(node, "mentions") and node.mentions:
@@ -586,9 +578,6 @@ class MaintenanceWorker(BaseWorker):
             return []
 
         ns = WorkspaceNamespaces(workspace_id)
-        from kogwistar.engine_core.models import Grounding, Node, Span
-        from kogwistar.id_provider import stable_id
-
         result_items = write_execution_wisdom_artifacts(
             engines.conversation,
             target_engine=engines.wisdom,

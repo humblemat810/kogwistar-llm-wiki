@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
-from pydantic import BaseModel, Field
+from typing import Literal, Optional
+from pydantic import BaseModel
 from pydantic_extension.model_slicing import ModeSlicingMixin, DtoType, BackendType
 
 
 class MessageEnvelope(ModeSlicingMixin, BaseModel):
     target: DtoType[Literal["foreground", "background"]] | DtoType[str]
-    payload: DtoType[Any]
+    payload: DtoType[object]
     intent: DtoType[Literal["request", "notification", "alert"]] = "notification"
     provenance_id: DtoType[Optional[str]] = None
     
@@ -23,11 +23,11 @@ class MessageChannel:
     
     @staticmethod
     def wrap_message(
-        payload: Any,
+        payload: object,
         target: Literal["foreground", "background"] | str,
         intent: Literal["request", "notification", "alert"] = "notification",
         provenance_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, object]:
         """
         Wraps a payload into a MessageEnvelope and returns its DTO view.
         """

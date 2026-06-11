@@ -35,6 +35,10 @@ import signal
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kogwistar_llm_wiki.models import IngestPipelineRequest, NamespaceEngines
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("kogwistar_llm_wiki")
@@ -47,7 +51,7 @@ def _build_engines(
     dsn: str | None,
     *,
     split_derived_knowledge: bool = False,
-):
+) -> "NamespaceEngines":
     """Construct a NamespaceEngines bundle from the selected backend."""
     from kogwistar_llm_wiki.ingest_pipeline import (
         build_persistent_namespace_engines,
@@ -75,13 +79,13 @@ def _build_engines(
     raise ValueError(f"Unsupported backend: {backend!r}")
 
 
-def _build_demo_engines(*, split_derived_knowledge: bool = False):
+def _build_demo_engines(*, split_derived_knowledge: bool = False) -> "NamespaceEngines":
     from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 
     return build_in_memory_namespace_engines(split_derived_knowledge=split_derived_knowledge)
 
 
-def _read_request_from_source(args: argparse.Namespace):
+def _read_request_from_source(args: argparse.Namespace) -> tuple[Path, "IngestPipelineRequest"]:
     from kogwistar_llm_wiki.models import IngestPipelineRequest
 
     source_path = Path(args.source).expanduser().resolve()
@@ -191,7 +195,7 @@ def _cmd_daemon_projection(args: argparse.Namespace) -> None:
         poll_interval=args.interval,
     )
 
-    def _stop(sig, frame):  # noqa: ANN001
+    def _stop(sig, frame) -> None:  # noqa: ANN001
         logger.info("Received signal %s — graceful stop requested for ProjectionDaemon", sig)
         daemon.stop()
 
@@ -216,7 +220,7 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
         poll_interval=args.interval,
     )
 
-    def _stop(sig, frame):  # noqa: ANN001
+    def _stop(sig, frame) -> None:  # noqa: ANN001
         logger.info("Received signal %s — graceful stop requested for MaintenanceDaemon", sig)
         daemon.stop()
 

@@ -7,8 +7,9 @@ do not need to reach into engine namespaces directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Mapping
 
+from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Node
 from kogwistar.logical_refs import logical_ref_from_entity
 
@@ -19,10 +20,10 @@ from .utils import _temporary_namespace
 
 @dataclass(frozen=True, slots=True)
 class GraphSpaceQueryResult:
-    node: Any
+    node: Node
     graph_space: str
     namespace: str
-    reference_node: Any | None = None
+    reference_node: Node | None = None
 
 
 def workspace_graph_spaces(*, include_wisdom: bool = False) -> list[GraphSpace]:
@@ -41,7 +42,7 @@ class GraphSpaceQueryService:
         *,
         workspace_id: str,
         graph_spaces: list[GraphSpace | str],
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
         resolve_mode: str = "pointer_only",
     ) -> list[GraphSpaceQueryResult]:
         requested_spaces = [self._normalize_graph_space(space) for space in graph_spaces]
@@ -91,7 +92,7 @@ class GraphSpaceQueryService:
         text = str(graph_space or "").strip().lower()
         return GraphSpace(text)
 
-    def _engine_for_graph_space(self, graph_space: GraphSpace):
+    def _engine_for_graph_space(self, graph_space: GraphSpace) -> GraphKnowledgeEngine:
         if graph_space in {GraphSpace.SOURCE, GraphSpace.BASE_KG, GraphSpace.CURATED_KG}:
             return self.engines.kg
         return self.engines.kg
@@ -105,14 +106,13 @@ class GraphSpaceQueryService:
             return [(ns.curated_kg_space, GraphSpace.CURATED_KG.value)]
         return []
 
-    def _read_nodes(self, *, engine: Any, namespace: str, where: Mapping[str, Any]) -> list[Node]:
+    def _read_nodes(self, *, engine: GraphKnowledgeEngine, namespace: str, where: Mapping[str, object]) -> list[Node]:
         with _temporary_namespace(engine, namespace):
             return list(engine.read.get_nodes(where=dict(where), limit=10_000))
 
     def _node_matches_graph_space(self, node: Node, graph_space: GraphSpace) -> bool:
         metadata = dict(getattr(node, "metadata", None) or {})
         resolved_graph_space = str(metadata.get("graph_space") or "").strip().lower()
-        artifact_kind = str(metadata.get("artifact_kind") or "").strip().lower()
 
         if graph_space == GraphSpace.SOURCE:
             return resolved_graph_space == GraphSpace.SOURCE.value

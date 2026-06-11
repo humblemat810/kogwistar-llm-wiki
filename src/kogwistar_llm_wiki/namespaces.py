@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Mapping
 
 
 class GraphSpace(str, Enum):
@@ -139,7 +139,7 @@ class WorkspaceNamespaces:
         return f"ws:{self.workspace_id}:projection_manifest"
 
 
-def namespace_matches_graph_space_metadata(namespace: str, metadata: Mapping[str, Any]) -> bool:
+def namespace_matches_graph_space_metadata(namespace: str, metadata: Mapping[str, object]) -> bool:
     parts = str(namespace or "").split(":")
     if len(parts) < 4 or parts[0] != "ws" or parts[2] != "g":
         return False

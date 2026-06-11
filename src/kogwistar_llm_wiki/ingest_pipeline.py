@@ -13,7 +13,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping
+from typing import Callable, Mapping, Protocol
 
 from .utils import _temporary_namespace
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -29,8 +29,8 @@ from kogwistar.logical_refs import (
 from kogwistar.policy import PromotionDecision
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+from kogwistar.typing_interfaces import EmbeddingFunctionLike
 from .provider_config import resolve_parser_provider_settings
 from .longrun_parser_worker import run_workflow_layered_parse
 from .models import (
@@ -47,7 +47,7 @@ from .projection import ProjectionManager
 from .review_query import ReviewQueryService
 
 
-def _metadata_digest_value(digest: dict[str, Any] | None) -> str | None:
+def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
     if digest is None:
         return None
     return json.dumps(digest, sort_keys=True, separators=(",", ":"))
@@ -77,7 +77,15 @@ class _TinyEmbeddingFunction:
 
 
 
-ParserFn = Callable[..., Any]
+class SemanticTreeLike(Protocol):
+    title: str
+
+
+class ParseSourceResult(Protocol):
+    semantic_tree: SemanticTreeLike
+
+
+ParserFn = Callable[..., ParseSourceResult]
 
 
 def build_in_memory_namespace_engines(
@@ -179,7 +187,7 @@ def _build_engine(
     persist_directory: Path,
     *,
     kg_graph_type: str,
-    embedding_function: Any,
+    embedding_function: EmbeddingFunctionLike,
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
     return GraphKnowledgeEngine(
@@ -195,7 +203,7 @@ def _build_persistent_engine(
     persist_directory: Path,
     *,
     kg_graph_type: str,
-    embedding_function: Any,
+    embedding_function: EmbeddingFunctionLike,
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
     return GraphKnowledgeEngine(
@@ -210,7 +218,7 @@ def _build_postgres_engine(
     persist_directory: Path,
     *,
     kg_graph_type: str,
-    embedding_function: Any,
+    embedding_function: EmbeddingFunctionLike,
     dsn: str,
     embedding_dim: int,
     schema: str,
@@ -512,7 +520,7 @@ class IngestPipeline:
                 self.engines.conversation.write.add_node(compatibility_seed)
         return node_id
 
-    def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> Any:
+    def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> ParseSourceResult:
         if request.parser_lane == "workflow_layered":
             return self._parse_workflow_layered_source(
                 request=request,
@@ -526,7 +534,7 @@ class IngestPipeline:
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
-    ) -> Any:
+    ) -> SimpleNamespace:
         provider = request.llm_provider or self._provider_from_mode(request.parser_mode)
         model = request.llm_model or self._model_from_env(provider)
         if provider is None:
@@ -554,8 +562,8 @@ class IngestPipeline:
             parse_session=getattr(result, "parse_session", None),
         )
 
-    def _build_parser_kwargs(self, *, request: IngestPipelineRequest, source_document_id: str) -> dict[str, Any]:
-        parser_kwargs: dict[str, Any] = {
+    def _build_parser_kwargs(self, *, request: IngestPipelineRequest, source_document_id: str) -> dict[str, object]:
+        parser_kwargs: dict[str, object] = {
             "document_id": source_document_id,
             "title": request.title,
             "raw_text": request.raw_text,
@@ -627,7 +635,7 @@ class IngestPipeline:
     def translate_parse_result(
         self,
         *,
-        parse_result: Any,
+        parse_result: ParseSourceResult,
         source_document_id: str,
     ) -> GraphExtractionWithIDs:
         graph_payload = getattr(parse_result, "graph_payload", None)
@@ -775,7 +783,7 @@ class IngestPipeline:
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
-        parse_result: Any,
+        parse_result: ParseSourceResult,
         namespace: str,
     ) -> str | None:
         """Persist compact parse retry history into the background conversation graph."""
@@ -894,7 +902,7 @@ class IngestPipeline:
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
-        parse_result: Any,
+        parse_result: ParseSourceResult,
         namespace: str,
     ) -> str:
         node_id = str(
@@ -928,7 +936,7 @@ class IngestPipeline:
         source_document_id: str,
         candidate_link_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, Any] | None = None,
+        promotion_evidence_pack_digest: dict[str, object] | None = None,
         lineage_node_ids: list[str] | None = None,
         lineage_edge_ids: list[str] | None = None,
         namespace: str,
@@ -980,7 +988,7 @@ class IngestPipeline:
         candidate_link_id: str,
         graph_extraction: GraphExtractionWithIDs,
         namespace: str,
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, object]]:
         node_ids = sorted(
             str(node.id) for node in (graph_extraction.nodes or []) if str(getattr(node, "id", "") or "")
         )
@@ -1037,7 +1045,7 @@ class IngestPipeline:
         source_document_id: str,
         promotion_candidate_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, Any] | None = None,
+        promotion_evidence_pack_digest: dict[str, object] | None = None,
         promotion_decision: PromotionDecision | None = None,
         namespace: str,
     ) -> str:
@@ -1174,7 +1182,7 @@ class IngestPipeline:
         *,
         workspace_id: str,
         graph_spaces: list[GraphSpace | str],
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
         resolve_mode: str = "pointer_only",
     ) -> list[GraphSpaceQueryResult]:
         return self.query_service.get_nodes(
@@ -1196,7 +1204,7 @@ class IngestPipeline:
         visibility: str,
         label: str,
         summary: str,
-        extra_metadata: dict[str, Any] | None = None,
+        extra_metadata: dict[str, object] | None = None,
     ) -> Node:
         span = self._leading_span(source_document_id, request.raw_text, insertion_method=artifact_kind)
         extra_meta = dict(extra_metadata or {})
@@ -1235,7 +1243,7 @@ class IngestPipeline:
             metadata=metadata,
         )
 
-    def _node_exists(self, engine: Any, *, namespace: str, node_id: str) -> bool:
+    def _node_exists(self, engine: GraphKnowledgeEngine, *, namespace: str, node_id: str) -> bool:
         with _temporary_namespace(engine, namespace):
             return bool(engine.read.node_exists(ids=[str(node_id)]))
 

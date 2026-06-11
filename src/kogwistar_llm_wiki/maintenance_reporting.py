@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Iterable
+from typing import Iterable
 
 from kogwistar.runtime.budget import BudgetEvent
 from kogwistar.runtime.budget_adapters import summarize_budget_events
@@ -12,7 +12,7 @@ def summarize_maintenance_costs(
     *,
     default_maintenance_kind: str = "unknown",
     default_model: str = "unknown",
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, dict[str, object]]:
     """Group runtime budget events by maintenance kind and model.
 
     The token/cost arithmetic stays in ``kogwistar.runtime``; this helper only
@@ -30,7 +30,7 @@ def summarize_maintenance_costs(
         model = str(meta.get("model") or meta.get("llm_model") or default_model)
         grouped[f"{maintenance_kind}|{model}"].append(event)
 
-    summaries: dict[str, dict[str, Any]] = {}
+    summaries: dict[str, dict[str, object]] = {}
     for key, grouped_events in grouped.items():
         maintenance_kind, model = key.split("|", 1)
         summaries[key] = {

@@ -31,3 +31,16 @@
   shutdown problem, not a product regression. Confirm the cache path before
   chasing app logic.
 - See `doc/testing_guide.md` before inventing a new pytest cache workaround.
+
+## Typing And Hinting
+
+- Prefer concrete type hints over placeholder `Any` when the runtime contract is
+  already known.
+- Add explicit return annotations to production functions and methods when they
+  have a stable return shape.
+- For structured LLM outputs, queue jobs, provider builders, context-manager
+  factories, and callback surfaces, prefer domain models, `Literal`, unions,
+  `Protocol`, `TypedDict`, or named type aliases before falling back to `Any`.
+- Keep `Any` only at true external boundaries such as raw third-party payloads,
+  opaque SDK objects, or short-lived compatibility shims that cannot yet be
+  narrowed safely.

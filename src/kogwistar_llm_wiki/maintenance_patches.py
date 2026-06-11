@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -375,6 +375,6 @@ def validate_maintenance_patch(
     return MaintenancePatchValidationReport(valid=not issues, issues=issues)
 
 
-def validate_maintenance_patch_payload(payload: dict[str, Any], **kwargs: Any) -> MaintenancePatchValidationReport:
+def validate_maintenance_patch_payload(payload: dict[str, object], **kwargs: object) -> MaintenancePatchValidationReport:
     patch = MaintenancePatch.model_validate(payload)
     return validate_maintenance_patch(patch, **kwargs)

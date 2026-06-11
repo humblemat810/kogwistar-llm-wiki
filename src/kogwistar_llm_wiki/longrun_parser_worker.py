@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Callable
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.layerwise_llm import build_layerwise_llm_callbacks
+from kg_doc_parser.workflow_ingest.layerwise_llm import LayerwiseCallback, build_layerwise_llm_callbacks
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.budget import StateBackedBudgetLedger
@@ -23,7 +22,7 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _write_json_file(path: Path, payload: Any) -> None:
+def _write_json_file(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -34,7 +33,7 @@ def _append_trace_line(path: Path, message: str) -> None:
         handle.write(f"{_now_ms()} | {message}\n")
 
 
-def _dump_model(value: Any) -> Any:
+def _dump_model(value: object) -> object:
     if hasattr(value, "model_dump"):
         try:
             return value.model_dump(field_mode="backend", dump_format="json")
@@ -47,7 +46,7 @@ def _dump_model(value: Any) -> Any:
     return value
 
 
-def _summarize_budget_events(events: list[Any], *, provider_settings: WorkflowProviderSettings) -> dict[str, Any]:
+def _summarize_budget_events(events: list[object], *, provider_settings: WorkflowProviderSettings) -> dict[str, object]:
     provider_summary = provider_config_summary(provider_settings)
     return {
         "provider": provider_summary.get("provider"),
@@ -61,12 +60,12 @@ def _summarize_budget_events(events: list[Any], *, provider_settings: WorkflowPr
     } | summarize_budget_events(events)
 
 
-def _proposal_mode_summary(final_state: dict[str, Any]) -> dict[str, Any]:
+def _proposal_mode_summary(final_state: dict[str, object]) -> dict[str, object]:
     current_layer_result = dict(final_state.get("current_layer_result") or {})
     metadata = dict(current_layer_result.get("metadata") or {})
     if not metadata:
         return {}
-    summary: dict[str, Any] = {
+    summary: dict[str, object] = {
         "proposal_mode": metadata.get("proposal_mode"),
         "proposal_source": metadata.get("proposal_source"),
         "proposal_failure_reason": metadata.get("proposal_failure_reason"),
@@ -83,8 +82,8 @@ def _proposal_mode_summary(final_state: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in summary.items() if value is not None}
 
 
-def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, Any], diagnostics: dict[str, Any]) -> dict[str, Any]:
-    def _normalize_excerpt(text: Any) -> str:
+def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], diagnostics: dict[str, object]) -> dict[str, object]:
+    def _normalize_excerpt(text: object) -> str:
         return " ".join(str(text or "").split()).strip()
 
     nodes = list(graph_payload.get("nodes") or [])
@@ -173,7 +172,11 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, Any], diagn
     }
 
 
-def _build_provider_layer_callbacks(provider_settings: WorkflowProviderSettings, *, layer_event: Any | None = None) -> dict[str, Any]:
+def _build_provider_layer_callbacks(
+    provider_settings: WorkflowProviderSettings,
+    *,
+    layer_event: Callable[..., None] | None = None,
+) -> dict[str, LayerwiseCallback | int | bool]:
     return build_layerwise_llm_callbacks(provider_settings, event_sink=layer_event)
 
 
@@ -185,15 +188,15 @@ def run_workflow_layered_parse(
     provider_settings: WorkflowProviderSettings,
     engine_dir: Path,
     budget_ledger: StateBackedBudgetLedger | None = None,
-    trace: Any | None = None,
-    heartbeat: Any | None = None,
+    trace: Callable[[str], None] | None = None,
+    heartbeat: Callable[[str], None] | None = None,
 ) -> SimpleNamespace:
     from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput, WorkflowExportBundle
     from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
 
-    layer_log: list[dict[str, Any]] = []
+    layer_log: list[dict[str, object]] = []
 
-    def _layer_event(stage: str, **extra: Any) -> None:
+    def _layer_event(stage: str, **extra: object) -> None:
         entry = {
             "stage": stage,
             "timestamp_ms": _now_ms(),
@@ -302,13 +305,13 @@ def run_workflow_layered_parse(
     )
 
 
-def run_longrun_parser_child(payload: dict[str, Any]) -> None:
+def run_longrun_parser_child(payload: dict[str, object]) -> None:
     heartbeat_path = Path(payload["heartbeat_path"])
     result_path = Path(payload["result_path"])
     failure_path = Path(payload["failure_path"])
     trace_path = Path(payload["trace_path"])
 
-    def _heartbeat(phase: str, **extra: Any) -> None:
+    def _heartbeat(phase: str, **extra: object) -> None:
         _write_json_file(
             heartbeat_path,
             {

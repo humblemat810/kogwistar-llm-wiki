@@ -11,8 +11,8 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, List, Set
 
+from kogwistar.engine_core.models import Edge, Node
 from kogwistar_obsidian_sink.core.models import ProjectionEntity, SemanticRelationship
 from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuckProvider
 from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
@@ -32,7 +32,7 @@ class ProjectionManager:
     Acts as the composition layer between Kogwistar and the Obsidian Sink.
     """
 
-    def __init__(self, engines: NamespaceEngines, *, policies: LlmWikiPolicies | None = None):
+    def __init__(self, engines: NamespaceEngines, *, policies: LlmWikiPolicies | None = None) -> None:
         self.engines = engines
         self.policies = policies or build_default_policies()
 
@@ -84,7 +84,7 @@ class ProjectionManager:
                 continue
 
             relation_type = str(getattr(edge, "relation", None) or getattr(edge, "label", None) or "related")
-            properties: dict[str, Any] = {}
+            properties: dict[str, object] = {}
             edge_metadata = dict(getattr(edge, "metadata", None) or {})
             edge_workspace_id = str(edge_metadata.get("workspace_id") or "").strip()
             if edge_workspace_id and edge_workspace_id != workspace_id:
@@ -162,18 +162,18 @@ class ProjectionManager:
             return ns.curated_kg_space
         raise ValueError(f"Projection does not support graph space {graph_space.value!r}")
 
-    def _node_graph_space(self, node: Any) -> str:
+    def _node_graph_space(self, node: Node) -> str:
         metadata = dict(getattr(node, "metadata", None) or {})
         return str(metadata.get("graph_space") or "").strip().lower()
 
     def _select_visible_nodes(
         self,
         *,
-        all_nodes: list[Any],
+        all_nodes: list[Node],
         requested_spaces: list[GraphSpace],
         manifest_ids: set[str] | None,
-    ) -> list[Any]:
-        selected: list[Any] = []
+    ) -> list[Node]:
+        selected: list[Node] = []
         seen_ids: set[str] = set()
         requested_space_values = {space.value for space in requested_spaces}
         for node in all_nodes:
@@ -193,8 +193,8 @@ class ProjectionManager:
             seen_ids.add(node_id)
         return selected
 
-    def _apply_demo_projection_filter(self, *, visible_nodes: list[Any], adjacency: dict[str, set[str]]) -> list[Any]:
-        filtered: list[Any] = []
+    def _apply_demo_projection_filter(self, *, visible_nodes: list[Node], adjacency: dict[str, set[str]]) -> list[Node]:
+        filtered: list[Node] = []
         for node in visible_nodes:
             node_id = str(getattr(node, "id", "") or "")
             title = str(getattr(node, "label", "") or getattr(node, "summary", "") or "")
@@ -205,7 +205,7 @@ class ProjectionManager:
             filtered.append(node)
         return filtered
 
-    def _build_adjacency(self, edges: list[Any]) -> dict[str, set[str]]:
+    def _build_adjacency(self, edges: list[Edge]) -> dict[str, set[str]]:
         adjacency: dict[str, set[str]] = defaultdict(set)
         for edge in edges:
             edge_sources = [str(item) for item in (getattr(edge, "source_ids", None) or []) if str(item)]
@@ -227,8 +227,8 @@ class ProjectionManager:
             return True
         return bool(re.search(r"\s{3,}", text))
 
-    def _read_workspace_nodes(self, *, workspace_id: str, namespaces: list[str]) -> list[Any]:
-        node_by_id: dict[str, Any] = {}
+    def _read_workspace_nodes(self, *, workspace_id: str, namespaces: list[str]) -> list[Node]:
+        node_by_id: dict[str, Node] = {}
         for namespace in namespaces:
             for node in self._read_nodes(namespace=namespace, where={"workspace_id": workspace_id}):
                 node_id = str(getattr(node, "id", "") or "")
@@ -237,8 +237,8 @@ class ProjectionManager:
                 node_by_id[node_id] = node
         return list(node_by_id.values())
 
-    def _read_workspace_edges(self, *, workspace_id: str, namespaces: list[str]) -> list[Any]:
-        edge_by_id: dict[str, Any] = {}
+    def _read_workspace_edges(self, *, workspace_id: str, namespaces: list[str]) -> list[Edge]:
+        edge_by_id: dict[str, Edge] = {}
         for namespace in namespaces:
             for edge in self._read_edges(namespace=namespace, where={"workspace_id": workspace_id}):
                 edge_id = str(getattr(edge, "id", "") or "")
@@ -247,11 +247,11 @@ class ProjectionManager:
                 edge_by_id[edge_id] = edge
         return list(edge_by_id.values())
 
-    def _read_nodes(self, *, namespace: str, where: dict[str, Any]) -> list[Any]:
+    def _read_nodes(self, *, namespace: str, where: dict[str, object]) -> list[Node]:
         with _temporary_namespace(self.engines.kg, namespace):
             return list(self.engines.kg.read.get_nodes(where=dict(where), limit=10_000))
 
-    def _read_edges(self, *, namespace: str, where: dict[str, Any]) -> list[Any]:
+    def _read_edges(self, *, namespace: str, where: dict[str, object]) -> list[Edge]:
         with _temporary_namespace(self.engines.kg, namespace):
             return list(self.engines.kg.read.get_edges(where=dict(where), limit=10_000))
 
@@ -313,9 +313,9 @@ class ProjectionManager:
         vault_root: str | Path,
         *,
         workspace_id: str,
-        changed_ids: Set[str] | None = None,
-        deleted_ids: Set[str] | None = None,
-        affected_titles: Set[str] | None = None,
+        changed_ids: set[str] | None = None,
+        deleted_ids: set[str] | None = None,
+        affected_titles: set[str] | None = None,
         version: int | None = None,
         event_seq: int | None = None,
     ) -> ObsidianBuildResult:

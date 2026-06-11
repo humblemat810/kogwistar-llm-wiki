@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from kogwistar.engine_core.jobs import JobQueueItem
+
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
 from .projection import ProjectionManager
@@ -17,11 +18,11 @@ class ProjectionWorker:
     only keeps audit/status nodes for traceability.
     """
 
-    def __init__(self, engines: NamespaceEngines):
+    def __init__(self, engines: NamespaceEngines) -> None:
         self.engines = engines
         self.manager = ProjectionManager(engines)
 
-    def process_pending_projections(self, workspace_id: str, vault_root: str):
+    def process_pending_projections(self, workspace_id: str, vault_root: str) -> None:
         """Drains the projection job queue in durable claim order."""
         ns = WorkspaceNamespaces(workspace_id)
         self.engines.conversation.jobs.require_available(claim=True)
@@ -37,8 +38,7 @@ class ProjectionWorker:
             for job in jobs:
                 self._handle_projection_job(workspace_id, job, vault_root)
 
-    def _handle_projection_job(self, workspace_id: str, job: Any, vault_root: str):
-        job = self.engines.conversation.jobs.coerce(job)
+    def _handle_projection_job(self, workspace_id: str, job: JobQueueItem, vault_root: str) -> None:
         job_id = str(job.job_id)
         entity_id = str(job.entity_id)
         payload = dict(job.payload)
@@ -184,7 +184,7 @@ class ProjectionWorker:
             chunk_id=None,
             source_cluster_id=None,
         )
-        metadata: dict = {
+        metadata: dict[str, str] = {
             "workspace_id": workspace_id,
             "artifact_kind": "projection_status_event",
             "projection_request_id": req_node_id,

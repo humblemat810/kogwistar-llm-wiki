@@ -8,7 +8,7 @@ surface for the existing review artifact chain.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from kogwistar.engine_core.models import Node
 
@@ -21,10 +21,10 @@ from .utils import _temporary_namespace
 class ReviewChainResult:
     """Resolved review chain for a promoted node."""
 
-    promoted_node: Any
-    candidate_link: Any | None = None
-    promotion_candidate: Any | None = None
-    promotion_evidence_pack: Any | None = None
+    promoted_node: Node
+    candidate_link: Node | None = None
+    promotion_candidate: Node | None = None
+    promotion_evidence_pack: Node | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +51,7 @@ class ReviewQueryService:
         *,
         workspace_id: str,
         artifact_kinds: Sequence[str] | None = None,
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
     ) -> list[Node]:
         """Return review artifacts from the background conversation namespace."""
         ns = WorkspaceNamespaces(workspace_id)
@@ -80,7 +80,7 @@ class ReviewQueryService:
         self,
         *,
         workspace_id: str,
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
     ) -> list[Node]:
         """Return candidate-link artifacts for a workspace."""
         return self.get_review_nodes(
@@ -94,7 +94,7 @@ class ReviewQueryService:
         *,
         workspace_id: str,
         candidate_link_id: str | None = None,
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
     ) -> list[Node]:
         """Return promotion-candidate artifacts, optionally scoped to a link."""
         query_where = dict(where or {})
@@ -111,7 +111,7 @@ class ReviewQueryService:
         *,
         workspace_id: str,
         candidate_link_id: str | None = None,
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
     ) -> list[Node]:
         """Return promotion-evidence-pack artifacts, optionally scoped to a link."""
         query_where = dict(where or {})
@@ -129,7 +129,7 @@ class ReviewQueryService:
         workspace_id: str,
         patch_id: str | None = None,
         status: str | None = None,
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
     ) -> list[Node]:
         """Return patch-applied/failed artifacts from the curated KG namespace."""
         ns = WorkspaceNamespaces(workspace_id)
@@ -152,7 +152,7 @@ class ReviewQueryService:
         self,
         *,
         workspace_id: str,
-        where: Mapping[str, Any] | None = None,
+        where: Mapping[str, object] | None = None,
     ) -> MaintenancePatchReport:
         """Aggregate patch artifact metadata into operator-facing counts."""
         artifacts = self.get_maintenance_patch_artifacts(
@@ -242,7 +242,7 @@ class ReviewQueryService:
         )
 
 
-def _int_metadata(value: Any, default: int = 0) -> int:
+def _int_metadata(value: object, default: int = 0) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):

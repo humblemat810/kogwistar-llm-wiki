@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from kg_doc_parser.workflow_ingest.providers import (
+    EmbeddingProviderConfig,
     ProviderEndpointConfig,
     WorkflowProviderSettings,
 )
@@ -223,14 +223,12 @@ def build_workflow_provider_settings(
     proposal_mode: str | None = None,
     parser: ProviderEndpointConfig | None = None,
     ocr: ProviderEndpointConfig | None = None,
-    embedding: Any | None = None,
+    embedding: EmbeddingProviderConfig | None = None,
 ) -> WorkflowProviderSettings:
-    from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
-
     parser_spec = parser or build_provider_endpoint_config("parser")
     ocr_spec = ocr or ProviderEndpointConfig()
     embedding_spec = embedding or EmbeddingProviderConfig()
-    settings_kwargs: dict[str, Any] = {"parser": parser_spec, "ocr": ocr_spec, "embedding": embedding_spec}
+    settings_kwargs: dict[str, object] = {"parser": parser_spec, "ocr": ocr_spec, "embedding": embedding_spec}
     if proposal_mode is not None:
         settings_kwargs["proposal_mode"] = proposal_mode
     return WorkflowProviderSettings(**settings_kwargs)
@@ -299,7 +297,7 @@ def resolve_maintenance_provider_settings(
     )
 
 
-def provider_config_summary(settings: WorkflowProviderSettings | ProviderEndpointConfig) -> dict[str, Any]:
+def provider_config_summary(settings: WorkflowProviderSettings | ProviderEndpointConfig) -> dict[str, object]:
     parser = settings.parser if hasattr(settings, "parser") else settings
     proposal_mode = getattr(settings, "proposal_mode", None)
     return {
