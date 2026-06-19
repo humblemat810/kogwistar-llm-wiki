@@ -766,7 +766,8 @@ class IngestPipeline:
             namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
             entity_kind="maintenance_job",
             entity_id=source_document_id,
-            job_kind="maintenance_job",
+            job_kind=f"maintenance_job:{maintenance_kind}",
+            payload_matches={"maintenance_kind": maintenance_kind},
         ):
             self._enqueue_maintenance_job(
                 request=request,
@@ -1127,7 +1128,7 @@ class IngestPipeline:
             namespace=namespace,
             entity_kind="maintenance_job",
             entity_id=source_document_id,
-            job_kind="maintenance_job",
+            job_kind=f"maintenance_job:{maintenance_kind}",
             op="UPSERT",
             payload=payload,
         )
@@ -1254,6 +1255,7 @@ class IngestPipeline:
         entity_kind: str,
         entity_id: str,
         job_kind: str,
+        payload_matches: Mapping[str, object] | None = None,
     ) -> bool:
         jobs = self.engines.conversation.jobs.list(namespace=namespace, limit=10_000)
         for job in jobs:
@@ -1262,6 +1264,10 @@ class IngestPipeline:
                 and str(job.entity_id) == str(entity_id)
                 and str(job.job_kind) == str(job_kind)
             ):
+                if payload_matches:
+                    payload = dict(job.payload)
+                    if any(payload.get(key) != expected for key, expected in payload_matches.items()):
+                        continue
                 return True
         return False
 

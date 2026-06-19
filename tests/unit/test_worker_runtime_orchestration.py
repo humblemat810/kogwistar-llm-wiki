@@ -28,6 +28,13 @@ def _job_payload(job) -> dict:
     return {}
 
 
+def _lane_payload(node) -> dict:
+    payload = node.metadata.get("payload_json")
+    if isinstance(payload, str) and payload:
+        return json.loads(payload)
+    return {}
+
+
 def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, ingest_request: IngestPipelineRequest):
     # 1. Setup - Materialize design
     materialize_maintenance_designs(pipeline.engines.workflow)
@@ -165,6 +172,48 @@ def test_maintenance_worker_uses_probe_reads_for_workflow_design_presence(
     worker.process_pending_jobs(sync_request.workspace_id)
 
     assert calls == ["materialize"]
+
+
+def test_maintenance_worker_preserves_suspended_runtime_status(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+    monkeypatch.setattr(worker.runtime, "run", lambda **kwargs: SimpleNamespace(status="suspended"))
+
+    worker.process_pending_jobs(sync_request.workspace_id)
+
+    done_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        status="DONE",
+        limit=10,
+    )
+    assert done_jobs == []
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        limit=10,
+    )
+    assert len(jobs) == 1
+    assert _job_field(jobs[0], "status") == "DOING"
+    assert int(_job_field(jobs[0], "retry_count") or 0) == 0
+    assert _job_field(jobs[0], "lease_until") is not None
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "reply.maintenance.suspended",
+            },
+            limit=10,
+        )
+    assert len(replies) == 1
+    assert replies[0].metadata.get("status") == "suspended"
+    payload = _lane_payload(replies[0])
+    assert payload["runtime_status"] == "suspended"
 
 
 def test_maintenance_worker_propagates_unrelated_workflow_lookup_error(

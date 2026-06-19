@@ -304,20 +304,27 @@ class MaintenanceWorker(BaseWorker):
                         status,
                         workflow_id,
                     )
+                    terminal_success = status in {"succeeded", "completed", "success", "finished"}
+                    reply_status = "completed" if terminal_success else status
                     self._emit_lane_reply(
                         workspace_id=ctx.workspace_id,
                         source_document_id=str(ctx.payload.get("source_document_id") or ""),
                         request_node_id=ctx.request_node_id,
                         reply_to_message_id=ctx.lane_message_id or None,
-                        status="completed",
+                        status=reply_status,
                         payload={
                             "maintenance_kind": ctx.maintenance_kind,
                             "workflow_id": workflow_id,
                             "runtime_status": status,
                         },
                     )
-                    if ctx.job_id:
+                    if terminal_success and ctx.job_id:
                         self.engines.conversation.jobs.mark_done(ctx.job_id)
+                    elif status != "suspended" and ctx.job_id:
+                        self.engines.conversation.jobs.retry_or_fail(
+                            ctx.job,
+                            RuntimeError(f"maintenance workflow ended with status={status!r}"),
+                        )
                 except Exception as e:
                     logger.error(f"Maintenance job {ctx.request_node_id} encountered runtime error: {e}", exc_info=True)
                     self._emit_lane_reply(
@@ -360,6 +367,9 @@ class MaintenanceWorker(BaseWorker):
             )
         )
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            lane_status = status if status in {"completed", "failed", "cancelled", "suspended"} else "failed"
+            lane_error = payload if lane_status in {"failed", "cancelled"} else None
+            lane_completed = lane_status in {"completed", "failed", "cancelled"}
             reply_message_id: str | None = None
             existing_reply = self.engines.conversation.read.get_nodes(
                 where={
@@ -404,15 +414,15 @@ class MaintenanceWorker(BaseWorker):
             if reply_message_id:
                 self.engines.conversation.update_lane_message_status(
                     message_id=reply_message_id,
-                    status="completed" if status == "completed" else "failed",
-                    error=(payload if status != "completed" else None),
-                    completed=True,
+                    status=lane_status,
+                    error=lane_error,
+                    completed=lane_completed,
                 )
             self.engines.conversation.update_lane_message_status(
                 message_id=reply_to_message_id,
-                status="completed" if status == "completed" else "failed",
-                error=(payload if status != "completed" else None),
-                completed=True,
+                status=lane_status,
+                error=lane_error,
+                completed=lane_completed,
             )
 
     def _load_request_node(self, workspace_id: str, req_node_id: str) -> Node | None:

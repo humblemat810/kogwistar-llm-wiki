@@ -112,6 +112,43 @@ def test_run_maintenance_first_seeds_source_map_without_parsing(pipeline, ingest
     assert jobs[0].payload["maintenance_kind"] == "document_seed_graph"
 
 
+def test_maintenance_requests_for_same_source_keep_distinct_job_kinds(pipeline, ingest_request):
+    source_document_id = pipeline._source_document_id(ingest_request)
+    ns = WorkspaceNamespaces(ingest_request.workspace_id)
+
+    seed_request_id = pipeline.create_maintenance_request(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        namespace=ns.conv_bg,
+        maintenance_kind="document_seed_graph",
+    )
+    duplicate_seed_request_id = pipeline.create_maintenance_request(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        namespace=ns.conv_bg,
+        maintenance_kind="document_seed_graph",
+    )
+    expand_request_id = pipeline.create_maintenance_request(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        namespace=ns.conv_bg,
+        maintenance_kind="document_expand_parse_children",
+    )
+
+    jobs = pipeline.engines.conversation.jobs.list(namespace=ns.maintenance_jobs, limit=10)
+    assert seed_request_id != expand_request_id
+    assert duplicate_seed_request_id == seed_request_id
+    assert len(jobs) == 2
+    assert {job.payload["maintenance_kind"] for job in jobs} == {
+        "document_seed_graph",
+        "document_expand_parse_children",
+    }
+    assert {job.job_kind for job in jobs} == {
+        "maintenance_job:document_seed_graph",
+        "maintenance_job:document_expand_parse_children",
+    }
+
+
 def test_run_hybrid_keeps_parse_but_queues_graph_patch_expansion(pipeline, ingest_request, monkeypatch):
     parse_calls = 0
 
