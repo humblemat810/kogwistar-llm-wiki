@@ -1,0 +1,374 @@
+"""CLI entry point: ``python -m kogwistar_llm_wiki``
+
+Sub-commands
+------------
+demo --workspace <id> --source <path> --vault <path> [--title <text>]
+    Run the ephemeral end-to-end demo in one process. Uses the in-memory
+    engine bundle, writes the same source and base-knowledge graph spaces as
+    normal ingest, then renders the Obsidian vault from explicit graph-space
+    reads before exiting.
+
+ingest --workspace <id> --source <path> [--title <text>] [--promotion-mode <mode>]
+    Read a source document and populate the workspace state.
+
+daemon projection --workspace <id> --vault <path> [--interval <s>]
+    Run the Obsidian projection daemon (blocking).
+
+daemon maintenance --workspace <id> [--interval <s>]
+    Run the maintenance distillation daemon (blocking).
+
+``demo`` is intentionally single-process and ephemeral so it does not depend on
+any process-shared local backend.
+
+The persistent commands expect ``--data-dir`` or ``KOGWISTAR_DATA_DIR`` to
+point at a directory containing the local backend state. ``--data-dir`` wins
+when both are provided. Use ``--backend postgres`` and ``--dsn`` to switch to a
+PostgreSQL-backed store.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import signal
+import sys
+from dataclasses import asdict
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kogwistar_llm_wiki.models import IngestPipelineRequest, NamespaceEngines
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("kogwistar_llm_wiki")
+
+
+def _build_engines(
+    workspace_id: str,
+    data_dir: str | None,
+    backend: str,
+    dsn: str | None,
+    *,
+    split_derived_knowledge: bool = False,
+) -> "NamespaceEngines":
+    """Construct a NamespaceEngines bundle from the selected backend."""
+    from kogwistar_llm_wiki.ingest_pipeline import (
+        build_persistent_namespace_engines,
+        build_postgres_namespace_engines,
+    )
+
+    effective_data_dir = data_dir or os.environ.get("KOGWISTAR_DATA_DIR")
+    if not effective_data_dir:
+        raise ValueError(
+            "persistent commands require --data-dir or KOGWISTAR_DATA_DIR"
+        )
+    if backend == "chroma":
+        return build_persistent_namespace_engines(
+            base_dir=effective_data_dir,
+            split_derived_knowledge=split_derived_knowledge,
+        )
+    if backend == "postgres":
+        if not dsn:
+            raise ValueError("--dsn is required when --backend postgres is selected")
+        return build_postgres_namespace_engines(
+            base_dir=effective_data_dir,
+            dsn=dsn,
+            split_derived_knowledge=split_derived_knowledge,
+        )
+    raise ValueError(f"Unsupported backend: {backend!r}")
+
+
+def _build_demo_engines(*, split_derived_knowledge: bool = False) -> "NamespaceEngines":
+    from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
+
+    return build_in_memory_namespace_engines(split_derived_knowledge=split_derived_knowledge)
+
+
+def _read_request_from_source(args: argparse.Namespace) -> tuple[Path, "IngestPipelineRequest"]:
+    from kogwistar_llm_wiki.models import IngestPipelineRequest
+
+    source_path = Path(args.source).expanduser().resolve()
+    if not source_path.exists():
+        raise FileNotFoundError(f"source file not found: {source_path}")
+
+    raw_text = source_path.read_text(encoding="utf-8")
+    title = args.title or source_path.stem
+    request = IngestPipelineRequest(
+        workspace_id=args.workspace,
+        source_uri=source_path.as_uri(),
+        title=title,
+        raw_text=raw_text,
+        source_format=args.source_format,
+        operation_mode=getattr(args, "operation_mode", "parse_first"),
+        parser_mode=args.parser_mode,
+        parser_lane=args.parser_lane,
+        promotion_mode=args.promotion_mode,
+        llm_provider=args.llm_provider,
+        llm_model=args.llm_model,
+    )
+    return source_path, request
+
+
+def _cmd_demo(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+    from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
+    from kogwistar_llm_wiki.namespaces import GraphSpace
+    from kogwistar_llm_wiki.worker import MaintenanceWorker
+
+    source_path, request = _read_request_from_source(args)
+    vault_root = Path(args.vault).expanduser().resolve()
+    vault_root.mkdir(parents=True, exist_ok=True)
+
+    engines = _build_demo_engines(split_derived_knowledge=args.split_derived_knowledge)
+    pipeline = IngestPipeline(engines)
+    materialize_maintenance_designs(engines.workflow)
+    artifacts = pipeline.run(request)
+    MaintenanceWorker(engines).process_pending_jobs(args.workspace)
+    vault_result = pipeline.build_obsidian_vault(
+        vault_root,
+        workspace_id=args.workspace,
+        graph_spaces=[GraphSpace.BASE_KG],
+        projection_filter="demo",
+    )
+
+    print(
+        json.dumps(
+            {
+                "workspace_id": args.workspace,
+                "source": str(source_path),
+                "vault": str(vault_root),
+                "mode": "demo-memory-single-process",
+                "artifacts": asdict(artifacts),
+                "vault_result": {
+                    **asdict(vault_result),
+                    "vault_root": str(vault_result.vault_root),
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
+def _cmd_ingest(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+
+    source_path, request = _read_request_from_source(args)
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    pipeline = IngestPipeline(engines)
+    artifacts = pipeline.run(request)
+    print(
+        json.dumps(
+            {
+                "workspace_id": args.workspace,
+                "source": str(source_path),
+                "artifacts": asdict(artifacts),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
+def _cmd_daemon_projection(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.daemon import ProjectionDaemon
+
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    Path(args.vault).expanduser().resolve().mkdir(parents=True, exist_ok=True)
+    daemon = ProjectionDaemon(
+        engines=engines,
+        workspace_id=args.workspace,
+        vault_root=args.vault,
+        poll_interval=args.interval,
+    )
+
+    def _stop(sig, frame) -> None:  # noqa: ANN001
+        logger.info("Received signal %s — graceful stop requested for ProjectionDaemon", sig)
+        daemon.stop()
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+    daemon.run()
+
+
+def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.daemon import MaintenanceDaemon
+
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    daemon = MaintenanceDaemon(
+        engines=engines,
+        workspace_id=args.workspace,
+        poll_interval=args.interval,
+    )
+
+    def _stop(sig, frame) -> None:  # noqa: ANN001
+        logger.info("Received signal %s — graceful stop requested for MaintenanceDaemon", sig)
+        daemon.stop()
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+    daemon.run()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m kogwistar_llm_wiki",
+        description="LLM-Wiki CLI",
+    )
+    parser.add_argument("--data-dir", default=None, help="Path to persistent data directory")
+    parser.add_argument(
+        "--backend",
+        choices=["chroma", "postgres"],
+        default="chroma",
+        help="Backend to use under --data-dir (default: chroma)",
+    )
+    parser.add_argument(
+        "--dsn",
+        default=None,
+        help="PostgreSQL DSN for --backend postgres",
+    )
+    parser.add_argument(
+        "--split-derived-knowledge",
+        action="store_true",
+        help="Host derived knowledge on a dedicated engine instead of reusing raw KG",
+    )
+
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    demo_p = sub.add_parser(
+        "demo",
+        help="Run the one-process in-memory demo and write the vault before exiting",
+    )
+    demo_p.add_argument("--workspace", required=True, help="Workspace ID")
+    demo_p.add_argument("--source", required=True, help="Path to the source document")
+    demo_p.add_argument("--vault", required=True, help="Obsidian vault root path")
+    demo_p.add_argument("--title", default=None, help="Optional document title")
+    demo_p.add_argument(
+        "--source-format",
+        choices=["text", "markdown"],
+        default="text",
+        help="How to interpret the source document",
+    )
+    demo_p.add_argument(
+        "--operation-mode",
+        choices=["parse_first", "maintenance_first", "hybrid"],
+        default="parse_first",
+        help="Ingest operation mode",
+    )
+    demo_p.add_argument(
+        "--parser-mode",
+        choices=["heuristic", "ollama", "gemini", "openai", "azure_openai"],
+        default="heuristic",
+        help="Parser mode to use for the document",
+    )
+    demo_p.add_argument(
+        "--parser-lane",
+        choices=["page_index", "workflow_layered"],
+        default="page_index",
+        help="Parser lane to use for the document",
+    )
+    demo_p.add_argument(
+        "--llm-provider",
+        default=None,
+        help="Explicit parser provider override (for example ollama, gemini, openai, or azure_openai)",
+    )
+    demo_p.add_argument(
+        "--llm-model",
+        default=None,
+        help="Explicit parser model or deployment name override",
+    )
+    demo_p.add_argument(
+        "--promotion-mode",
+        choices=["pending", "sync"],
+        default="sync",
+        help="Whether to auto-promote the extracted knowledge",
+    )
+    demo_p.set_defaults(func=_cmd_demo)
+
+    ingest_p = sub.add_parser("ingest", help="Read a source document into the workspace")
+    ingest_p.add_argument("--workspace", required=True, help="Workspace ID")
+    ingest_p.add_argument("--source", required=True, help="Path to the source document")
+    ingest_p.add_argument("--title", default=None, help="Optional document title")
+    ingest_p.add_argument(
+        "--source-format",
+        choices=["text", "markdown"],
+        default="text",
+        help="How to interpret the source document",
+    )
+    ingest_p.add_argument(
+        "--operation-mode",
+        choices=["parse_first", "maintenance_first", "hybrid"],
+        default="parse_first",
+        help="Ingest operation mode",
+    )
+    ingest_p.add_argument(
+        "--parser-mode",
+        choices=["heuristic", "ollama", "gemini", "openai", "azure_openai"],
+        default="heuristic",
+        help="Parser mode to use for the document",
+    )
+    ingest_p.add_argument(
+        "--parser-lane",
+        choices=["page_index", "workflow_layered"],
+        default="page_index",
+        help="Parser lane to use for the document",
+    )
+    ingest_p.add_argument(
+        "--llm-provider",
+        default=None,
+        help="Explicit parser provider override (for example ollama, gemini, openai, or azure_openai)",
+    )
+    ingest_p.add_argument(
+        "--llm-model",
+        default=None,
+        help="Explicit parser model or deployment name override",
+    )
+    ingest_p.add_argument(
+        "--promotion-mode",
+        choices=["pending", "sync"],
+        default="sync",
+        help="Whether to auto-promote the extracted knowledge",
+    )
+    ingest_p.set_defaults(func=_cmd_ingest)
+
+    # daemon sub-command
+    daemon_p = sub.add_parser("daemon", help="Run a background daemon")
+    daemon_sub = daemon_p.add_subparsers(dest="daemon_type", required=True)
+
+    proj_p = daemon_sub.add_parser("projection", help="Obsidian projection daemon")
+    proj_p.add_argument("--workspace", required=True, help="Workspace ID")
+    proj_p.add_argument("--vault", required=True, help="Obsidian vault root path")
+    proj_p.add_argument("--interval", type=float, default=5.0, help="Poll interval (seconds)")
+    proj_p.set_defaults(func=_cmd_daemon_projection)
+
+    maint_p = daemon_sub.add_parser("maintenance", help="Maintenance distillation daemon")
+    maint_p.add_argument("--workspace", required=True, help="Workspace ID")
+    maint_p.add_argument("--interval", type=float, default=10.0, help="Poll interval (seconds)")
+    maint_p.set_defaults(func=_cmd_daemon_maintenance)
+
+    args = parser.parse_args(argv)
+    args.func(args)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

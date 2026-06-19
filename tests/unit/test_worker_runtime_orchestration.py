@@ -1,0 +1,521 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+from pathlib import Path
+from types import SimpleNamespace
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
+import kogwistar_llm_wiki.worker as worker_module
+from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.worker import MaintenanceWorker
+from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
+from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar.engine_core.jobs import DurableQueueUnavailableError
+
+
+def _job_field(job, name: str):
+    if isinstance(job, dict):
+        return job.get(name)
+    return getattr(job, name, None)
+
+
+def _job_payload(job) -> dict:
+    payload = _job_field(job, "payload_json")
+    if isinstance(payload, str) and payload:
+        return json.loads(payload)
+    return {}
+
+
+def _lane_payload(node) -> dict:
+    payload = node.metadata.get("payload_json")
+    if isinstance(payload, str) and payload:
+        return json.loads(payload)
+    return {}
+
+
+def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, ingest_request: IngestPipelineRequest):
+    # 1. Setup - Materialize design
+    materialize_maintenance_designs(pipeline.engines.workflow)
+    
+    # 2. Trigger Ingest - Creates maintenance request in conversation engine (conv_bg)
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    artifacts = pipeline.run(sync_request)
+    
+    workspace_id = sync_request.workspace_id
+    ns = WorkspaceNamespaces(workspace_id)
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        limit=10,
+    )
+    assert len(jobs) == 1
+    assert _job_field(jobs[0], "entity_kind") == "maintenance_job"
+    assert _job_field(jobs[0], "entity_id") == artifacts.source_document_id
+    assert _job_payload(jobs[0])["request_node_id"] == artifacts.maintenance_job_id
+    
+    # Verify request existence in conversation engine
+    requests = pipeline.engines.conversation.read.get_nodes(
+        where={
+            "workspace_id": workspace_id,
+            "artifact_kind": "maintenance_job_request",
+            "namespace": ns.conv_bg,
+        }
+    )
+    assert len(requests) == 1
+    req_node = requests[0]
+    assert req_node.metadata.get("status") == "pending"
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        lane_requests = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "request.maintenance",
+            }
+        )
+    assert len(lane_requests) == 1
+    request_message_id = str(lane_requests[0].id)
+
+    # 3. Run Worker
+    worker = MaintenanceWorker(pipeline.engines)
+    worker.process_pending_jobs(workspace_id)
+
+    done_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        status="DONE",
+        limit=10,
+    )
+    assert len(done_jobs) == 1
+    
+    # 4. Verify Final State - WorkflowRunNode Trace
+    # We no longer perform CRUD updates on the request node itself.
+    # The authoritative state is in the append-only traces.
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        runs = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "turn_node_id": str(req_node.id),
+                "entity_type": "workflow_run",
+            }
+        )
+        assert len(runs) == 1, f"No workflow_run found for request {req_node.id}"
+        run_id = runs[0].metadata.get("run_id")
+        assert run_id is not None
+        
+        # Verify authoritative completion event existence
+        completes = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+                "entity_type": "workflow_completed"
+            }
+        )
+        assert len(completes) == 1, f"No workflow_completed found for run {run_id}"
+
+    # 5. Verify Graph-Native Trace Details
+    # The runtime creates WorkflowRunNode and WorkflowStepExecNode
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        traces = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "run_id": run_id,
+            }
+        )
+    # Should find at least the Run node and the Step exec nodes
+    kinds = [t.metadata.get("entity_type") for t in traces]
+    assert "workflow_run" in kinds
+    assert "workflow_step_exec" in kinds
+    
+    # Verify the workflow runs the explicit derived-knowledge workflow.
+    node_ops = [t.metadata.get("op") for t in traces if t.metadata.get("entity_type") == "workflow_step_exec"]
+    assert "distill" in node_ops
+    assert "check_done" in node_ops
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "reply.maintenance.completed",
+            }
+        )
+        request_after = pipeline.engines.conversation.read.get_nodes(
+            where={"artifact_kind": "lane_message"},
+        )
+    assert len(replies) == 1
+    assert replies[0].metadata.get("reply_to_message_id") == request_message_id
+    assert replies[0].metadata.get("status") == "completed"
+    matching_request = [node for node in request_after if str(node.id) == request_message_id]
+    assert len(matching_request) == 1
+    assert matching_request[0].metadata.get("status") == "completed"
+
+
+def test_maintenance_worker_uses_probe_reads_for_workflow_design_presence(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    calls: list[str] = []
+
+    def fake_materialize(_workflow_engine):
+        calls.append("materialize")
+
+    monkeypatch.setattr(worker_module, "materialize_maintenance_designs", fake_materialize)
+    monkeypatch.setattr(
+        pipeline.engines.workflow.read,
+        "get_nodes",
+        lambda *args, **kwargs: pytest.fail("workflow probe should not hydrate nodes"),
+    )
+    monkeypatch.setattr(pipeline.engines.workflow.read, "node_exists", lambda *args, **kwargs: False)
+    monkeypatch.setattr(worker.runtime, "run", lambda **kwargs: SimpleNamespace(status="finished"))
+
+    worker.process_pending_jobs(sync_request.workspace_id)
+
+    assert calls == ["materialize"]
+
+
+def test_maintenance_worker_preserves_suspended_runtime_status(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+    monkeypatch.setattr(worker.runtime, "run", lambda **kwargs: SimpleNamespace(status="suspended"))
+
+    worker.process_pending_jobs(sync_request.workspace_id)
+
+    done_jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        status="DONE",
+        limit=10,
+    )
+    assert done_jobs == []
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=ns.maintenance_jobs,
+        limit=10,
+    )
+    assert len(jobs) == 1
+    assert _job_field(jobs[0], "status") == "DOING"
+    assert int(_job_field(jobs[0], "retry_count") or 0) == 0
+    assert _job_field(jobs[0], "lease_until") is not None
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "reply.maintenance.suspended",
+            },
+            limit=10,
+        )
+    assert len(replies) == 1
+    assert replies[0].metadata.get("status") == "suspended"
+    payload = _lane_payload(replies[0])
+    assert payload["runtime_status"] == "suspended"
+
+
+def test_maintenance_worker_propagates_unrelated_workflow_lookup_error(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("workflow read exploded")
+
+    monkeypatch.setattr(pipeline.engines.workflow.read, "node_exists", boom)
+    monkeypatch.setattr(
+        worker_module,
+        "materialize_maintenance_designs",
+        lambda _workflow_engine: (_ for _ in ()).throw(AssertionError("should not rematerialize")),
+    )
+
+    with pytest.raises(RuntimeError, match="workflow read exploded"):
+        worker.process_pending_jobs(sync_request.workspace_id)
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=WorkspaceNamespaces(sync_request.workspace_id).maintenance_jobs,
+        limit=10,
+    )
+    assert jobs
+    assert _job_field(jobs[0], "status") != "DOING"
+    assert int(_job_field(jobs[0], "retry_count") or 0) == 1
+
+
+def test_maintenance_worker_accounts_early_job_processing_failure(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("request node exploded")
+
+    monkeypatch.setattr(worker, "_load_request_node", boom)
+
+    with pytest.raises(RuntimeError, match="request node exploded"):
+        worker.process_pending_jobs(sync_request.workspace_id)
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=WorkspaceNamespaces(sync_request.workspace_id).maintenance_jobs,
+        limit=10,
+    )
+    assert jobs
+    assert _job_field(jobs[0], "status") != "DOING"
+    assert int(_job_field(jobs[0], "retry_count") or 0) == 1
+
+
+def test_maintenance_worker_reply_emission_is_idempotent(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        requests = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "request.maintenance",
+            }
+        )
+    assert len(requests) == 1
+    request_message_id = str(requests[0].id)
+
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="completed",
+        payload={"maintenance_kind": "distill"},
+    )
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="completed",
+        payload={"maintenance_kind": "distill"},
+    )
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "artifact_kind": "lane_message",
+                "msg_type": "reply.maintenance.completed",
+            }
+        )
+    assert len(replies) == 1
+    assert replies[0].metadata.get("status") == "completed"
+
+
+def test_maintenance_worker_reply_lookup_converges_after_pre_ack_redelivery(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        request_message = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "request.maintenance"},
+                ],
+            },
+            limit=1,
+        )[0]
+    request_message_id = str(request_message.id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        pipeline.engines.conversation.send_lane_message(
+            conversation_id=f"maintenance:{sync_request.source_uri}",
+            inbox_id="inbox:foreground",
+            sender_id="lane:worker:maintenance",
+            recipient_id="lane:foreground",
+            msg_type="reply.maintenance.completed",
+            payload={
+                "workspace_id": sync_request.workspace_id,
+                "request_node_id": "req-1",
+                "maintenance_kind": "distill",
+            },
+            reply_to=request_message_id,
+            correlation_id=request_message_id,
+            idempotency_key="legacy-or-pre-ack-reply",
+        )
+
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="completed",
+        payload={"maintenance_kind": "distill"},
+    )
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "reply.maintenance.completed"},
+                    {"reply_to_message_id": request_message_id},
+                    {"correlation_id": request_message_id},
+                ],
+            },
+            limit=10,
+        )
+    assert len(replies) == 1
+
+
+def test_maintenance_worker_failed_reply_emission_is_idempotent(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+):
+    sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(sync_request)
+    worker = MaintenanceWorker(pipeline.engines)
+    ns = WorkspaceNamespaces(sync_request.workspace_id)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        request_message = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "request.maintenance"},
+                ],
+            },
+            limit=1,
+        )[0]
+    request_message_id = str(request_message.id)
+
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="failed",
+        payload={"maintenance_kind": "distill", "error": "boom"},
+    )
+    worker._emit_lane_reply(
+        workspace_id=sync_request.workspace_id,
+        source_document_id=str(sync_request.source_uri),
+        request_node_id="req-1",
+        reply_to_message_id=request_message_id,
+        status="failed",
+        payload={"maintenance_kind": "distill", "error": "boom"},
+    )
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        replies = pipeline.engines.conversation.read.get_nodes(
+            where={
+                "$and": [
+                    {"artifact_kind": "lane_message"},
+                    {"msg_type": "reply.maintenance.failed"},
+                    {"reply_to_message_id": request_message_id},
+                    {"correlation_id": request_message_id},
+                ],
+            },
+            limit=10,
+        )
+    assert len(replies) == 1
+
+
+def test_maintenance_enqueue_requires_durable_queue_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "enqueue_index_job",
+        None,
+        raising=False,
+    )
+
+    with pytest.raises(DurableQueueUnavailableError, match="enqueue_index_job"):
+        pipeline._enqueue_maintenance_job(
+            request=request,
+            request_node_id="req-queue-missing",
+            source_document_id="doc-queue-missing",
+            namespace=WorkspaceNamespaces(request.workspace_id).maintenance_jobs,
+            lane_message_id="lane:queue-missing",
+        )
+
+
+def test_projection_enqueue_requires_durable_queue_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "enqueue_index_job",
+        None,
+        raising=False,
+    )
+
+    with pytest.raises(DurableQueueUnavailableError, match="enqueue_index_job"):
+        pipeline._enqueue_projection_job(
+            request=request,
+            promoted_id="promoted:queue-missing",
+            namespace=WorkspaceNamespaces(request.workspace_id).projection_jobs,
+        )
+
+
+def test_maintenance_worker_requires_durable_queue_claim_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(request)
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "claim_index_jobs",
+        None,
+        raising=False,
+    )
+
+    with pytest.raises(DurableQueueUnavailableError, match="claim_index_jobs"):
+        MaintenanceWorker(pipeline.engines).process_pending_jobs(request.workspace_id)
+
+
+def test_projection_worker_requires_durable_queue_claim_support(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+    tmp_path: Path,
+):
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    pipeline.run(request)
+    monkeypatch.setattr(
+        pipeline.engines.conversation.meta_sqlite,
+        "claim_index_jobs",
+        None,
+        raising=False,
+    )
+    vault_root = tmp_path / "projection-queue-missing"
+    vault_root.mkdir()
+
+    with pytest.raises(DurableQueueUnavailableError, match="claim_index_jobs"):
+        ProjectionWorker(pipeline.engines).process_pending_projections(
+            request.workspace_id,
+            str(vault_root),
+        )

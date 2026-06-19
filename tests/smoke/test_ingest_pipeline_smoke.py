@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from workflow_ingest.page_index import parse_page_index_document
-from workflow_ingest.providers import EmbeddingProviderConfig, ProviderEndpointConfig, WorkflowProviderSettings
+from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig, ProviderEndpointConfig, WorkflowProviderSettings
 
 
 SMOKE_PARSER_CASES = [
@@ -42,22 +42,23 @@ def test_ingest_pipeline_smoke(pipeline, ingest_request, parser_provider, parser
             parser=ProviderEndpointConfig(provider="ollama", model=parser_model, base_url=base_url),
             embedding=EmbeddingProviderConfig(provider="fake", model="smoke-embed", dimension=2),
         )
-        request = replace(ingest_request, parser_mode="ollama")
+        request = replace(
+            ingest_request,
+            parser_mode="ollama",
+            llm_provider="ollama",
+            llm_model=parser_model,
+        )
     else:
         provider_settings = WorkflowProviderSettings(
             parser=ProviderEndpointConfig(provider="fake", model=parser_model),
             embedding=EmbeddingProviderConfig(provider="fake", model="smoke-embed", dimension=2),
         )
 
-    def _parser(*, document_id, title, raw_text, source_format, mode):
-        return parse_page_index_document(
-            document_id=document_id,
-            title=title,
-            raw_text=raw_text,
-            source_format=source_format,
-            mode=mode,
-            provider_settings=provider_settings,
-        )
+    def _parser(**kwargs):
+        kwargs.pop("llm_provider", None)
+        kwargs.pop("model", None)
+        kwargs.pop("provider_settings", None)
+        return parse_page_index_document(provider_settings=provider_settings, **kwargs)
 
     pipeline.parser = _parser
 
@@ -66,4 +67,4 @@ def test_ingest_pipeline_smoke(pipeline, ingest_request, parser_provider, parser
     assert artifacts.maintenance_job_id
     assert artifacts.candidate_link_id
     assert artifacts.promotion_candidate_id
-    assert artifacts.promoted_entity_id
+    assert artifacts.promoted_entity_id is None

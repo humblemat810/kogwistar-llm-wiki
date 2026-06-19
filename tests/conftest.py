@@ -1,13 +1,90 @@
 from __future__ import annotations
 
+import logging
+import os
+import shutil
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 KOGWISTAR_ROOT = ROOT / "kogwistar"
 KG_DOC_PARSER_SRC = ROOT / "kg-doc-parser" / "src"
 OBSIDIAN_SINK_ROOT = ROOT / "kogwistar-obsidian-sink"
+TEST_TMP = ROOT / "tests" / "_tmp"
+
+TEST_TMP.mkdir(parents=True, exist_ok=True)
+for key in ("TMPDIR", "TEMP", "TMP"):
+    os.environ[key] = str(TEST_TMP)
+
+
+import pytest
+
+from tests._helpers.pytest_markers import mark_default_ci_items
+
+
+logger = logging.getLogger(__name__)
+
+
+_LONGRUN_PROBE_ENVS: dict[str, dict[str, str]] = {
+    "pgvector-testcontainer": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
+        "KOGWISTAR_LONGRUN_PARSER": "page_index",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "small",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": str(ROOT / "tests" / "_tmp" / "longrun-vscode-pgvector-probe"),
+    },
+}
+
+
+def _apply_longrun_probe_env(probe: str | None) -> None:
+    if not probe:
+        return
+    try:
+        values = _LONGRUN_PROBE_ENVS[probe]
+    except KeyError as exc:
+        supported = ", ".join(sorted(_LONGRUN_PROBE_ENVS))
+        raise ValueError(f"Unsupported --kogwistar-longrun-probe={probe!r}; expected one of: {supported}") from exc
+    os.environ.update(values)
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--kogwistar-longrun-probe",
+        action="store",
+        default=None,
+        choices=sorted(_LONGRUN_PROBE_ENVS),
+        help="Materialize a long-run probe environment from pytest args when VS Code drops launch env.",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    mark_default_ci_items(items)
+
+
+def pytest_configure(config):
+    TEST_TMP.mkdir(parents=True, exist_ok=True)
+    for key in ("TMPDIR", "TEMP", "TMP"):
+        os.environ[key] = str(TEST_TMP)
+    _apply_longrun_probe_env(config.getoption("kogwistar_longrun_probe", default=None))
+
+
+@pytest.fixture()
+def tmp_path():
+    TEST_TMP.mkdir(parents=True, exist_ok=True)
+    path = TEST_TMP / f"kogwistar-llm-wiki-{uuid4().hex}"
+    path.mkdir(parents=True, exist_ok=False)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 # Keep the local src tree first, but do not let vendored repos shadow the repo's own tests.
 if str(SRC) not in sys.path:
@@ -15,8 +92,6 @@ if str(SRC) not in sys.path:
 for path in [KG_DOC_PARSER_SRC, KOGWISTAR_ROOT, OBSIDIAN_SINK_ROOT]:
     if str(path) not in sys.path:
         sys.path.append(str(path))
-
-import pytest
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
@@ -74,3 +149,73 @@ def ingest_request():
         title="Acme Contract",
         raw_text="Acme shall pay within 30 days. Either party may terminate with notice.",
     )
+
+
+def _normalize_pg_dsn(connection_url: str) -> str:
+    try:
+        from sqlalchemy.engine import make_url
+    except Exception:
+        return connection_url
+    url = make_url(connection_url)
+    return url.set(drivername="postgresql+psycopg").render_as_string(hide_password=False)
+
+
+def _start_longrun_pgvector_container(container_cls, image: str):
+    container = None
+    try:
+        container = container_cls(image)
+        container.start()
+        return container
+    except Exception:
+        if container is not None:
+            try:
+                container.stop()
+            except Exception:
+                logger.exception(
+                    "Failed to stop partially started longrun pgvector test container image=%s",
+                    image,
+                )
+        raise
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _longrun_pgvector_testcontainer():
+    backend = os.getenv("KOGWISTAR_LONGRUN_BACKEND", "").strip().lower()
+    if backend != "pgvector":
+        yield
+        return
+
+    pg_source = os.getenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer").strip().lower() or "testcontainer"
+    if pg_source not in {"testcontainer", "custom"}:
+        raise ValueError(
+            "KOGWISTAR_LONGRUN_PG_SOURCE must be one of {'testcontainer', 'custom'}; "
+            f"got {pg_source!r}"
+        )
+
+    if pg_source == "custom":
+        yield
+        return
+
+    try:
+        from testcontainers.postgres import PostgresContainer
+    except Exception as exc:  # pragma: no cover - optional dependency
+        pytest.skip(f"pgvector long-run probe requires testcontainers[postgresql]: {exc}")
+
+    image = os.getenv("KOGWISTAR_LONGRUN_PG_IMAGE", "pgvector/pgvector:pg17")
+    logger.info("Starting longrun pgvector test container image=%s", image)
+    try:
+        container = _start_longrun_pgvector_container(PostgresContainer, image)
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"Failed to start longrun pgvector test container image={image}: {exc}")
+
+    dsn = _normalize_pg_dsn(container.get_connection_url())
+    os.environ["KOGWISTAR_LONGRUN_DSN"] = dsn
+    os.environ["KOGWISTAR_LLM_WIKI_TEST_PG_DSN"] = dsn
+    try:
+        yield
+    finally:
+        logger.info("Stopping longrun pgvector test container image=%s", image)
+        try:
+            container.stop()
+        except Exception:
+            logger.exception("Failed to stop longrun pgvector test container image=%s", image)

@@ -4,19 +4,19 @@
 
 This document defines the architecture for **LLM-Wiki**, a knowledge system built on **Kogwistar** as the authoritative substrate.
 
-### Core Princi- **Graph-authoritative**: All state lives in Kogwistar (events → projections)
+### Core Principles
 
+- **Graph-authoritative**: All state lives in Kogwistar (events → projections)
 - **Projection-based UI**: Obsidian and app UI are views, not sources of truth
-
 - **Deterministic ingestion**: Stable identities for all inputs and derivations
-
 - **Separation of concerns**:
   - Conversation Graph = working memory
-  - Knowledge Graph = promoted, durable knowledge
+  - `CURATED_KG` = promoted, durable knowledge
   - **Maintenance Domain = system maintenance semantics across graph kinds (NOT a core graph kind)**
 
-- **Wisdom is not a graph**:
+- **Wisdom is a graph**:
   - Wisdom = reusable, execution-derived knowledge (artifact type)
+  - Represented as nodes and edges in the `wisdom` namespace
 
 - **Continuous compilation**:
   - raw → structured → linked → consolidated → projected
@@ -34,7 +34,7 @@ flowchart LR
     C --> D[conv:bg<br/>candidate links]
     C --> E[wf:maintenance<br/>job request]
     D --> F[review<br/>promotion candidate view]
-    F --> G[kg<br/>promoted knowledge]
+    F --> G[curated_kg<br/>promoted knowledge]
     G --> H[wisdom<br/>execution-derived reuse]
     G --> I[Obsidian sink<br/>projection]
 ```
@@ -68,6 +68,9 @@ Responsibilities:
 - Parse documents (PDF, OCR, markdown, etc.)
 - Extract structure (sections, entities, tables)
 - Emit grounded artifacts into conversation-oriented state
+- Regular sync ingest does not imply the same immediate curated_kg shape as the demo
+  shortcut; it reaches richer curated_kg state through maintenance, promotion, and
+  projection.
 
 Future:
 
@@ -75,7 +78,16 @@ Future:
 
 ---
 
-### 2.3 Background Agent System
+### 2.3 Background Maintenance And Worker System
+
+Wording note:
+
+- Workflow is what runs.
+- Runtime is how it runs.
+- Service health is which long-running operational process is alive.
+- In this document, "agent" should only be used when genuinely agentic behavior
+  is meant, not as a blanket label for maintenance daemons, workers, or runtime
+  infrastructure.
 
 #### Hot Path (Ingestion Loop)
 
@@ -91,6 +103,28 @@ Responsibilities:
 - Generate candidate links
 - Populate conversation-oriented artifacts
 - Trigger follow-up maintenance
+- Reuse stable ids and idempotency keys so repeated ingest converges instead of
+  producing duplicate review, maintenance, or projection work
+- Regular ingest keeps the production contract focused on source and working
+  artifacts first; it does not directly mirror the demo's richer semantic-tree
+  curated_kg shape.
+
+Convergent promotion path:
+
+- `source_document_id` is stable by `workspace_id + source_uri`
+- `candidate_link`, `promotion_candidate`, and `promoted_knowledge` are stable
+  artifacts derived from that source identity
+- maintenance request lane messages and maintenance replies use idempotency keys
+  so graph truth stays authoritative and projected serving rows can be rebuilt if
+  lost
+
+Demo shortcut:
+
+- The `demo` command uses the same source parsing pipeline as normal ingest but
+  renders its vault from explicit `BASE_KG` reads instead of mirroring parsed
+  semantic-tree structure into curated_kg.
+- Demo legibility is handled at projection time, so the stored source/base graph
+  path stays aligned with the normal ingest contract.
 
 ---
 
@@ -156,14 +190,14 @@ Contains:
 
 Notes:
 
-- Foreground vs background should be expressed by namespace and metadata, not by introducing new core graph kinds
+- Foreground vs background should be expressed by namespace and metadata, sharing a single conversation engine instance
 - Example namespaces:
   - `ws:{workspace_id}:conv:fg`
   - `ws:{workspace_id}:conv:bg`
 
 ---
 
-### 3.1.2 Knowledge Graph (KG)
+### 3.1.2 `CURATED_KG`
 
 Purpose:
 
@@ -273,11 +307,7 @@ wisdom artifact
 
 ### 4.5 Representation
 
-
-Wisdom is:
-a collection / namespace / projection of nodes + edges
-with specific semantics
-derived from execution and outcomes
+Wisdom is a collection / namespace / projection of **nodes + edges** with specific semantics, derived from execution and outcomes. It lives in the `wisdom` engine namespace and is the only graph space whose nodes are written by the distillation worker rather than by ingestion.
 
 ---
 
@@ -321,7 +351,7 @@ pin- (ref) from source, and edge from it, edge in source can also be pin as edge
 
 ### 8.1 Criteria
 
-Promotion (Conversation / Maintenance artifacts → KG) requires:
+Promotion (Conversation / Maintenance artifacts -> curated_kg) requires:
 
 - Evidence support (source or multi-signal)
 - No unresolved contradictions at the required confidence threshold
@@ -336,7 +366,7 @@ Promotion (Conversation / Maintenance artifacts → KG) requires:
 2. Maintenance domain generates candidates
 3. Evaluation
 4. Promotion decision
-5. KG update event
+5. curated_kg update event
 6. Projection update
 
 ---
@@ -428,7 +458,7 @@ Important:
 
 Include:
 
-- Accepted KG nodes
+- Accepted curated_kg nodes
 - Selected synthesis artifacts
 
 Exclude by default (but need to be able to opt-in):
@@ -461,17 +491,17 @@ kg_id → deterministic file path
 - Add (ingestion)
 - Parse (structure)
 - Organize (curation)
-- Knowledge (KG)
+- Knowledge (curated_kg)
 - Maintenance (system maintenance semantics)
 - Obsidian (projection)
-- Agent (jobs + control)
+- Maintenance workers and daemon control
 
 ---
 
 ### 12.2 UX Requirements
 
 - Clear distinction:
-  - source vs user vs agent
+  - source vs user vs maintenance/system output
 - Provenance visibility
 - Promotion control
 - Inspectability ("why link exists")
@@ -506,8 +536,8 @@ Cross-lane communication should preferably be modeled as:
 - Deterministic IDs everywhere
 - **Maintenance ≠ Wisdom**
 - Maintenance is a semantic domain, not currently a core graph kind
-- Wisdom derived only from execution
-- No silent promotion of agent output
+- **Wisdom is a graph** derived from execution
+- No silent promotion of maintenance or worker output
 - Provenance always preserved
 - Update preserves lineage
 - Delete preserves history
@@ -531,84 +561,6 @@ It is:
 - knowledge = stabilized truth
 - wisdom = reusable experience
 - obsidian = human-facing projection
-s are rebuildable
-* Deterministic IDs everywhere
-* **Maintenance ≠ Wisdom**
-* Wisdom derived only from execution
-* No silent promotion of agent output
-* Provenance always preserved
-
----
-
-## 14. Summary
-
-This system is:
-
-* Not a chatbot
-* Not a note app
-* Not a RAG wrapper
-
-It is:
-
-**A continuously learning knowledge system where:**
-
-* conversation = working memory
-* maintenance = system reasoning
-* knowledge = stabilized truth
-* wisdom = reusable experience
-* obsidian = human-facing projection
-rebuildable
-* Deterministic IDs everywhere
-* **Maintenance ≠ Wisdom**
-* Wisdom derived only from execution
-* No silent promotion of agent output
-* Provenance always preserved
-
----
-
-## 14. Summary
-
-This system is:
-
-* Not a chatbot
-* Not a note app
-* Not a RAG wrapper
-
-It is:
-
-**A continuously learning knowledge system where:**
-
-* conversation = working memory
-* maintenance = system reasoning
-* knowledge = stabilized truth
-* wisdom = reusable experience
-* obsidian = human-facing projection
-e rebuildable
-* Deterministic IDs everywhere
-* **Maintenance ≠ Wisdom**
-* Wisdom derived only from execution
-* No silent promotion of agent output
-* Provenance always preserved
-
----
-
-## 14. Summary
-
-This system is:
-
-* Not a chatbot
-* Not a note app
-* Not a RAG wrapper
-
-It is:
-
-**A continuously learning knowledge system where:**
-
-* conversation = working memory
-* maintenance = system reasoning
-* knowledge = stabilized truth
-* wisdom = reusable experience
-* obsidian = human-facing projection
 
 ---
 

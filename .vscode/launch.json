@@ -1,0 +1,689 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Demo: Ollama (gemma4:e2b)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "kogwistar_llm_wiki",
+      "envFile": "${workspaceFolder}\\.env",
+      "args": [
+        "demo",
+        "--workspace",
+        "demo",
+        "--source",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\my_document.md",
+        "--vault",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\vault",
+        "--title",
+        "My Document",
+        "--source-format",
+        "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
+        "--parser-mode",
+        "ollama",
+        "--parser-lane",
+        "${input:demoParserLane}",
+        "--llm-provider",
+        "ollama",
+        "--llm-model",
+        "gemma4:e2b",
+        "--promotion-mode",
+        "sync"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
+        "KOGWISTAR_PARSER_PROVIDER": "ollama",
+        "KOGWISTAR_PARSER_MODEL": "gemma4:e2b",
+        "KOGWISTAR_PARSER_BASE_URL": "http://localhost:11434",
+        "KOGWISTAR_MAINTENANCE_PROVIDER": "ollama",
+        "KOGWISTAR_MAINTENANCE_MODEL": "gemma4:e2b",
+        "KOGWISTAR_MAINTENANCE_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Demo: Azure OpenAI (GPT-5 mini)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "kogwistar_llm_wiki",
+      "envFile": "${workspaceFolder}\\.env",
+      "args": [
+        "demo",
+        "--workspace",
+        "demo",
+        "--source",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\my_document.md",
+        "--vault",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\vault",
+        "--title",
+        "My Document",
+        "--source-format",
+        "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
+        "--parser-mode",
+        "azure_openai",
+        "--parser-lane",
+        "${input:demoParserLane}",
+        "--llm-provider",
+        "azure_openai",
+        "--llm-model",
+        "gpt-5-mini",
+        "--promotion-mode",
+        "sync"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
+        "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_PARSER_MODEL": "gpt-5-mini",
+        "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
+        "KOGWISTAR_MAINTENANCE_MODEL": "gpt-5-mini"
+      }
+    },
+    {
+      "name": "Demo: Azure OpenAI (GPT-5 nano)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "kogwistar_llm_wiki",
+      "envFile": "${workspaceFolder}\\.env",
+      "args": [
+        "demo",
+        "--workspace",
+        "demo",
+        "--source",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\my_document.md",
+        "--vault",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\vault",
+        "--title",
+        "My Document",
+        "--source-format",
+        "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
+        "--parser-mode",
+        "azure_openai",
+        "--parser-lane",
+        "${input:demoParserLane}",
+        "--llm-provider",
+        "azure_openai",
+        "--llm-model",
+        "gpt-5-nano",
+        "--promotion-mode",
+        "sync"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
+        "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_PARSER_MODEL": "gpt-5-nano",
+        "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
+        "KOGWISTAR_MAINTENANCE_MODEL": "gpt-5-nano"
+      }
+    },
+    {
+      "name": "Demo: Azure OpenAI (pick model)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "kogwistar_llm_wiki",
+      "envFile": "${workspaceFolder}\\.env",
+      "args": [
+        "demo",
+        "--workspace",
+        "demo",
+        "--source",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\my_document.md",
+        "--vault",
+        "${workspaceFolder}\\logs\\llm_wiki_demo\\vault",
+        "--title",
+        "My Document",
+        "--source-format",
+        "markdown",
+        "--operation-mode",
+        "${input:demoOperationMode}",
+        "--parser-mode",
+        "azure_openai",
+        "--parser-lane",
+        "${input:demoParserLane}",
+        "--llm-provider",
+        "azure_openai",
+        "--llm-model",
+        "${input:demoAzureModel}",
+        "--promotion-mode",
+        "sync"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "${input:demoProposalMode}",
+        "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_PARSER_MODEL": "${input:demoAzureModel}",
+        "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
+        "KOGWISTAR_MAINTENANCE_MODEL": "${input:demoAzureModel}"
+      }
+    },
+    {
+      "name": "kg-doc-parser: Boundary First Smoke",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "kg-doc-parser\\tests\\test_workflow_ingest_layerwise_parser.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-k",
+        "boundary_mode_runs_end_to_end"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KG_DOC_PARSER_PROPOSAL_MODE": "boundaries"
+      }
+    },
+    {
+      "name": "Longrun: Chroma Fresh (20 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "chroma",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Chroma Continue (20 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "chroma",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Chroma Fresh (3 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "chroma",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-medium",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Chroma Continue (3 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "chroma",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-medium",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Chroma Fresh (1 doc)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "chroma",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-small",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Chroma Continue (1 doc)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "chroma",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-small",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Probe: Chroma Fresh (1 doc, size selectable)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        // "-q",
+        "-p", 
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "chroma",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-probe",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Probe: PgVector Fresh (1 doc, size selectable)",
+      "type": "debugpy",
+      "request": "launch",
+      "purpose": ["debug-test"],
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun-probe=pgvector-testcontainer",
+        "-p", 
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-probe",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Probe: PgVector Custom DSN (1 doc, size selectable)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "custom",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgCustomDsn}",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-custom-probe",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Postgres Fresh (20 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "postgres",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Postgres Continue (20 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "postgres",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Postgres Fresh (3 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "postgres",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Postgres Continue (3 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "postgres",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Postgres Fresh (1 doc)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "postgres",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: Postgres Continue (1 doc)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "postgres",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "demoOperationMode",
+      "type": "pickString",
+      "description": "Demo ingest operation mode",
+      "default": "parse_first",
+      "options": [
+        "parse_first",
+        "maintenance_first",
+        "hybrid"
+      ]
+    },
+    {
+      "id": "demoParserLane",
+      "type": "pickString",
+      "description": "Demo parser lane",
+      "default": "page_index",
+      "options": [
+        "page_index",
+        "workflow_layered"
+      ]
+    },
+    {
+      "id": "demoProposalMode",
+      "type": "pickString",
+      "description": "Workflow-layered proposal mode",
+      "default": "children",
+      "options": [
+        "children",
+        "boundaries"
+      ]
+    },
+    {
+      "id": "demoAzureModel",
+      "type": "pickString",
+      "description": "Azure demo model",
+      "default": "gpt-4.1",
+      "options": [
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4.1-nano",
+        "gpt-5-chat",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-5.2-chat",
+        "gpt-5.3-chat"
+      ]
+    },
+    {
+      "id": "longrunParser",
+      "type": "pickString",
+      "description": "Long-run parser lane",
+      "default": "workflow_layered",
+      "options": [
+        "workflow_layered",
+        "page_index"
+      ]
+    },
+    {
+      "id": "longrunProbeParser",
+      "type": "pickString",
+      "description": "One-doc probe parser lane",
+      "default": "page_index",
+      "options": [
+        "page_index",
+        "workflow_layered"
+      ]
+    },
+    {
+      "id": "longrunProbeDocProfile",
+      "type": "pickString",
+      "description": "One-doc probe document size",
+      "default": "small",
+      "options": [
+        "tiny",
+        "small",
+        "medium"
+      ]
+    },
+    {
+      "id": "longrunOllamaModel",
+      "type": "pickString",
+      "description": "Long-run Ollama parser model",
+      "default": "qwen3:4b-instruct-2507-q8_0",
+      "options": [
+        "qwen3:4b-instruct-2507-q8_0",
+        "qwen3:4b",
+        "gemma3:4b-it-qat",
+        "gemma4:e2b"
+      ]
+    },
+    {
+      "id": "longrunPgCustomDsn",
+      "type": "promptString",
+      "description": "Custom PgVector DSN (used when PgVector probe DSN source is custom)",
+      "default": "postgresql+psycopg://user:pass@localhost:5432/dbname"
+    }
+  ]
+}

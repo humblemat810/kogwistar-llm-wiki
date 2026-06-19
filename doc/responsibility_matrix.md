@@ -4,10 +4,10 @@
 
 This document defines the **architectural decomposition and responsibility boundaries** across the four-repository system:
 
-* `kogwistar` (substrate / engine)
+* `kogwistar` (substrate / engine / authoritative seam)
 * `kg-doc-parser` (ingestion / parsing)
 * `kogwistar-obsidian-sink` (projection)
-* `kogwistar-llm-wiki` (product / orchestration)
+* `kogwistar-llm-wiki` (product / orchestration / composition)
 
 The goal is to:
 
@@ -88,6 +88,7 @@ This avoids conflating:
 * collections / namespaces
 * artifact base types
 * lifecycle states
+* **The structural seam for all components**
 
 #### Execution
 
@@ -270,6 +271,7 @@ This avoids conflating:
 * workspace lifecycle
 * source registration
 * ingestion coordination
+* **Composition of libraries (parser, sink, engine)**
 
 #### User Experience
 
