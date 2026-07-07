@@ -74,6 +74,8 @@ def _openai_env_suffix_for_model(model: str | None) -> str | None:
         return "GPT5_MINI"
     if normalized in {"gpt-5-nano", "gpt5-nano"}:
         return "GPT5_NANO"
+    if normalized in {"gpt-5-chat", "gpt5-chat"}:
+        return "GPT5_CHAT"
     if normalized in {"gpt-5.2-chat", "gpt5.2-chat"}:
         return "GPT5_2_CHAT"
     if normalized in {"gpt-5.3-chat", "gpt5.3-chat"}:

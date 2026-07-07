@@ -108,8 +108,9 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
         captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
-    def _fake_pipeline_ctor(engines):
+    def _fake_pipeline_ctor(engines, **kwargs):
         assert engines is fake_engines
+        captured["pipeline_ctor_kwargs"] = kwargs
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline
         return pipeline
@@ -137,6 +138,8 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
             str(vault),
             "--title",
             "Demo Doc",
+            "--debug-run-dir",
+            str(tmp_path / "debug-run"),
             "--promotion-mode",
             "sync",
         ]
@@ -148,6 +151,7 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
     assert captured["split_derived_knowledge"] is False
     assert captured["maintenance_workspace"] == "demo"
     assert captured["maintenance_designs_seeded"] is True
+    assert Path(captured["pipeline_ctor_kwargs"]["debug_run_dir"]) == tmp_path / "debug-run"
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["workspace_id"] == "demo"
@@ -178,8 +182,9 @@ def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch,
         captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
-    def _fake_pipeline_ctor(engines):
+    def _fake_pipeline_ctor(engines, **kwargs):
         assert engines is fake_engines
+        captured["pipeline_ctor_kwargs"] = kwargs
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline
         pipeline._captured = captured
@@ -209,6 +214,8 @@ def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch,
             str(vault),
             "--title",
             "Demo Doc",
+            "--debug-run-dir",
+            str(tmp_path / "debug-run"),
             "--promotion-mode",
             "sync",
         ]
@@ -218,6 +225,7 @@ def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch,
     assert vault.exists()
     assert captured["split_derived_knowledge"] is True
     assert captured["maintenance_workspace"] == "demo"
+    assert Path(captured["pipeline_ctor_kwargs"]["debug_run_dir"]) == tmp_path / "debug-run"
 
 
 def test_cli_help_exits_cleanly(capsys):
@@ -253,7 +261,7 @@ def test_ingest_cli_populates_workspace_from_source_file(tmp_path, monkeypatch, 
         captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
-    def _fake_pipeline_ctor(engines):
+    def _fake_pipeline_ctor(engines, **kwargs):
         assert engines is fake_engines
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline
@@ -312,7 +320,7 @@ def test_ingest_cli_uses_kogwistar_data_dir_when_explicit_dir_is_omitted(tmp_pat
         captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
-    def _fake_pipeline_ctor(engines):
+    def _fake_pipeline_ctor(engines, **kwargs):
         assert engines is fake_engines
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline
@@ -493,7 +501,7 @@ def test_ingest_cli_accepts_postgres_backend_switch(tmp_path, monkeypatch, capsy
         captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
-    def _fake_pipeline_ctor(engines):
+    def _fake_pipeline_ctor(engines, **kwargs):
         assert engines is fake_engines
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline
@@ -551,7 +559,7 @@ def test_persistent_cli_explicit_data_dir_wins_over_env(tmp_path, monkeypatch, c
         captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
-    def _fake_pipeline_ctor(engines):
+    def _fake_pipeline_ctor(engines, **kwargs):
         assert engines is fake_engines
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline
@@ -636,7 +644,7 @@ def test_ingest_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatc
         captured["split_derived_knowledge"] = split_derived_knowledge
         return fake_engines
 
-    def _fake_pipeline_ctor(engines):
+    def _fake_pipeline_ctor(engines, **kwargs):
         assert engines is fake_engines
         pipeline = _FakePipeline(engines)
         captured["pipeline"] = pipeline

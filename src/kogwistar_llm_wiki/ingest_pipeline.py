@@ -10,6 +10,7 @@ import inspect
 import json
 import os
 import hashlib
+import time
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -31,7 +32,14 @@ from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
-from .provider_config import resolve_parser_provider_settings
+from .provider_config import normalize_provider_name, resolve_parser_provider_settings
+from .debug_run import (
+    ParseStatisticsStore,
+    append_jsonl,
+    build_parse_statistics_record,
+    configure_debug_logging,
+    now_ms,
+)
 from .longrun_parser_worker import run_workflow_layered_parse
 from .models import (
     IngestPipelineArtifacts,
@@ -249,6 +257,7 @@ class IngestPipeline:
         *,
         parser: ParserFn = parse_page_index_document,
         policies: LlmWikiPolicies | None = None,
+        debug_run_dir: str | Path | None = None,
     ) -> None:
         self.engines = engines
         self.parser = parser
@@ -256,6 +265,13 @@ class IngestPipeline:
         self.projection = ProjectionManager(engines, policies=self.policies)
         self.query_service = GraphSpaceQueryService(engines)
         self.review_query_service = ReviewQueryService(engines)
+        self.debug_run_dir = configure_debug_logging(debug_run_dir)
+        self.debug_trace_path = self.debug_run_dir / "run_trace.jsonl" if self.debug_run_dir else None
+        self.stats_store = (
+            ParseStatisticsStore(self.debug_run_dir / "llm_wiki_stats.sqlite3")
+            if self.debug_run_dir is not None
+            else None
+        )
 
     def namespaces_for(self, workspace_id: str) -> WorkspaceNamespaces:
         return WorkspaceNamespaces(workspace_id)
@@ -264,6 +280,15 @@ class IngestPipeline:
         ns = self.namespaces_for(request.workspace_id)
         source_document_id = self._source_document_id(request)
         operation_mode = self._operation_mode(request)
+        self._trace_event(
+            "ingest_run_start",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            source_uri=request.source_uri,
+            parser_lane=request.parser_lane,
+            parser_mode=request.parser_mode,
+            operation_mode=operation_mode,
+        )
 
         self.register_source(
             request=request,
@@ -282,6 +307,13 @@ class IngestPipeline:
                 namespace=ns.conv_bg,
                 maintenance_kind="document_seed_graph",
             )
+            self._trace_event(
+                "ingest_run_complete",
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                operation_mode=operation_mode,
+                graph_status="seeded",
+            )
             return IngestPipelineArtifacts(
                 source_document_id=source_document_id,
                 maintenance_job_id=maintenance_job_id,
@@ -291,10 +323,12 @@ class IngestPipeline:
                 operation_mode=operation_mode,
                 graph_status="seeded",
             )
+        parse_started_at = time.perf_counter()
         parse_result = self.parse_source(
             request=request,
             source_document_id=source_document_id,
         )
+        parse_runtime_ms = max(0, int((time.perf_counter() - parse_started_at) * 1000))
         self.create_parse_retry_history(
             request=request,
             source_document_id=source_document_id,
@@ -310,6 +344,14 @@ class IngestPipeline:
             source_document_id=source_document_id,
             graph_extraction=graph_extraction,
             namespace=ns.conv_fg,
+        )
+        self._record_parse_statistics(
+            request=request,
+            source_document_id=source_document_id,
+            parse_result=parse_result,
+            graph_extraction=graph_extraction,
+            parse_runtime_ms=parse_runtime_ms,
+            status="ok",
         )
         maintenance_job_id = self.create_maintenance_request(
             request=request,
@@ -364,6 +406,15 @@ class IngestPipeline:
                 namespace=ns.curated_kg_space,
             )
 
+        self._trace_event(
+            "ingest_run_complete",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            operation_mode=operation_mode,
+            graph_status="expanding" if operation_mode == "hybrid" else "stable",
+            parse_runtime_ms=parse_runtime_ms,
+            promoted_entity_id=promoted_entity_id,
+        )
         return IngestPipelineArtifacts(
             source_document_id=source_document_id,
             maintenance_job_id=maintenance_job_id,
@@ -521,13 +572,50 @@ class IngestPipeline:
         return node_id
 
     def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> ParseSourceResult:
+        self._trace_event(
+            "parse_source_start",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            parser_lane=request.parser_lane,
+            parser_mode=request.parser_mode,
+        )
         if request.parser_lane == "workflow_layered":
-            return self._parse_workflow_layered_source(
+            result = self._parse_workflow_layered_source(
                 request=request,
                 source_document_id=source_document_id,
             )
-        parser_kwargs = self._build_parser_kwargs(request=request, source_document_id=source_document_id)
-        return self.parser(**parser_kwargs)
+            self._trace_event(
+                "parse_source_complete",
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                parser_lane=request.parser_lane,
+                parser_mode=request.parser_mode,
+                parse_backend="workflow_layered",
+            )
+            return result
+        parser_kwargs = self._build_parser_kwargs(
+            request=request,
+            source_document_id=source_document_id,
+            trace_log=self._trace_text if self.debug_trace_path is not None else None,
+        )
+        self._trace_event(
+            "parse_source_dispatch",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            parser_lane=request.parser_lane,
+            parser_mode=request.parser_mode,
+            parse_backend="direct",
+        )
+        result = self.parser(**parser_kwargs)
+        self._trace_event(
+            "parse_source_complete",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            parser_lane=request.parser_lane,
+            parser_mode=request.parser_mode,
+            parse_backend="direct",
+        )
+        return result
 
     def _parse_workflow_layered_source(
         self,
@@ -545,12 +633,30 @@ class IngestPipeline:
             model=model,
         )
         engine_dir = Path(tempfile.mkdtemp(prefix="kogwistar-workflow-layered-"))
+        self._trace_event(
+            "workflow_layered_parse_start",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            provider=provider,
+            model=model,
+            engine_dir=str(engine_dir),
+        )
         result = run_workflow_layered_parse(
             source_document_id=source_document_id,
             title=request.title,
             raw_text=request.raw_text,
             provider_settings=provider_settings,
             engine_dir=engine_dir,
+            trace=self._trace_text if self.debug_trace_path is not None else None,
+        )
+        self._trace_event(
+            "workflow_layered_parse_complete",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            provider=provider,
+            model=model,
+            proposal_mode=getattr(provider_settings, "proposal_mode", None),
+            parse_session_mode=getattr(result, "parse_session", {}).get("mode") if getattr(result, "parse_session", None) else None,
         )
         return SimpleNamespace(
             semantic_tree=result.semantic_tree,
@@ -562,7 +668,13 @@ class IngestPipeline:
             parse_session=getattr(result, "parse_session", None),
         )
 
-    def _build_parser_kwargs(self, *, request: IngestPipelineRequest, source_document_id: str) -> dict[str, object]:
+    def _build_parser_kwargs(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        trace_log: Callable[[str], None] | None = None,
+    ) -> dict[str, object]:
         parser_kwargs: dict[str, object] = {
             "document_id": source_document_id,
             "title": request.title,
@@ -591,6 +703,8 @@ class IngestPipeline:
                 provider=provider,
                 model=model,
             )
+        if trace_log is not None and ("trace_log" in params or supports_kwargs):
+            parser_kwargs["trace_log"] = trace_log
 
         if not supports_kwargs and not any(
             key in parser_kwargs for key in ("llm_provider", "model", "provider_settings")
@@ -601,6 +715,81 @@ class IngestPipeline:
             )
 
         return parser_kwargs
+
+    def _trace_text(self, message: str) -> None:
+        self._trace_event("trace", message=message)
+
+    def _trace_event(self, stage: str, **fields: object) -> None:
+        if self.debug_trace_path is None:
+            return
+        append_jsonl(
+            self.debug_trace_path,
+            {
+                "timestamp_ms": now_ms(),
+                "stage": stage,
+                **fields,
+            },
+        )
+
+    def _record_parse_statistics(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        parse_result: ParseSourceResult,
+        graph_extraction: GraphExtractionWithIDs,
+        parse_runtime_ms: int,
+        status: str,
+    ) -> None:
+        if self.stats_store is None:
+            return
+        diagnostics = dict(getattr(parse_result, "diagnostics", {}) or {})
+        evaluation = dict(getattr(parse_result, "evaluation", {}) or {})
+        usage_summary = dict(getattr(parse_result, "usage_summary", {}) or {})
+        proposal_summary = dict(diagnostics.get("proposal_summary") or {})
+        graph_payload = graph_extraction.model_dump(dump_format="python")
+        provider = normalize_provider_name(request.llm_provider or self._provider_from_mode(request.parser_mode))
+        record = build_parse_statistics_record(
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            source_uri=request.source_uri,
+            title=request.title,
+            raw_text=request.raw_text,
+            parser_lane=request.parser_lane,
+            parser_mode=request.parser_mode,
+            proposal_mode=str(proposal_summary.get("proposal_mode")) if proposal_summary.get("proposal_mode") is not None else None,
+            provider=provider,
+            model=request.llm_model or self._model_from_env(provider),
+            parse_runtime_ms=parse_runtime_ms,
+            semantic_tree=getattr(parse_result, "semantic_tree", request.title),
+            graph_payload=graph_payload,
+            diagnostics={
+                **diagnostics,
+                "usage_summary": usage_summary,
+                "proposal_summary": proposal_summary,
+            },
+            evaluation=evaluation,
+            status=status,
+        )
+        self.stats_store.record_parse_run(record)
+        self._trace_event(
+            "parse_statistics_recorded",
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            status=status,
+            parse_runtime_ms=parse_runtime_ms,
+            node_count=record.node_count,
+            edge_count=record.edge_count,
+            tree_depth=record.tree_depth,
+        )
+
+    def _trace_step(self, stage: str, *, request: IngestPipelineRequest, source_document_id: str, **fields: object) -> None:
+        self._trace_event(
+            stage,
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            **fields,
+        )
 
     @staticmethod
     def _provider_from_mode(mode: str) -> str | None:
@@ -638,13 +827,26 @@ class IngestPipeline:
         parse_result: ParseSourceResult,
         source_document_id: str,
     ) -> GraphExtractionWithIDs:
+        self._trace_event(
+            "translate_parse_result_start",
+            source_document_id=source_document_id,
+            semantic_title=getattr(parse_result.semantic_tree, "title", None),
+        )
         graph_payload = getattr(parse_result, "graph_payload", None)
         if graph_payload is not None:
             payload = dict(graph_payload)
             payload["doc_id"] = source_document_id
-            return GraphExtractionWithIDs.model_validate(payload)
-        payload = semantic_tree_to_kge_payload(parse_result.semantic_tree, doc_id=source_document_id)
-        return GraphExtractionWithIDs.model_validate(payload)
+            result = GraphExtractionWithIDs.model_validate(payload)
+        else:
+            payload = semantic_tree_to_kge_payload(parse_result.semantic_tree, doc_id=source_document_id)
+            result = GraphExtractionWithIDs.model_validate(payload)
+        self._trace_event(
+            "translate_parse_result_complete",
+            source_document_id=source_document_id,
+            node_count=len(getattr(result, "nodes", []) or []),
+            edge_count=len(getattr(result, "edges", []) or []),
+        )
+        return result
 
     def ingest_parse_result(
         self,
@@ -655,6 +857,14 @@ class IngestPipeline:
         namespace: str,
     ) -> None:
         source_namespace = self.namespaces_for(request.workspace_id).source_space
+        self._trace_step(
+            "ingest_parse_result_start",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            node_count=len(getattr(graph_extraction, "nodes", []) or []),
+            edge_count=len(getattr(graph_extraction, "edges", []) or []),
+        )
         source_parsed = self._source_graph_extraction(
             request=request,
             source_document_id=source_document_id,
@@ -673,17 +883,35 @@ class IngestPipeline:
                 parsed=source_parsed,
                 mode="append",
             )
+        self._trace_step(
+            "ingest_parse_result_persisted_source",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=str(source_namespace),
+        )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.persist_document_graph_extraction(
                 doc_id=source_document_id,
                 parsed=compatibility_parsed,
                 mode="append",
             )
+        self._trace_step(
+            "ingest_parse_result_persisted_compatibility",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+        )
         self._project_base_kg_references(
             request=request,
             source_document_id=source_document_id,
             source_namespace=source_namespace,
             graph_extraction=source_parsed,
+        )
+        self._trace_step(
+            "ingest_parse_result_complete",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
         )
 
     def create_maintenance_request(
@@ -695,6 +923,13 @@ class IngestPipeline:
         maintenance_kind: str | None = None,
     ) -> str:
         maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
+        self._trace_step(
+            "create_maintenance_request_start",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            maintenance_kind=maintenance_kind,
+        )
         node_id = str(
             stable_id(
                 "kogwistar_llm_wiki.maintenance_request",
@@ -777,6 +1012,15 @@ class IngestPipeline:
                 lane_message_id=lane_message_id,
                 maintenance_kind=maintenance_kind,
             )
+        self._trace_step(
+            "create_maintenance_request_complete",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            maintenance_kind=maintenance_kind,
+            request_node_id=request_node_id,
+            lane_message_id=lane_message_id,
+        )
         return request_node_id
 
     def create_parse_retry_history(
@@ -805,6 +1049,16 @@ class IngestPipeline:
         retry_used = bool(page_index_diag.get("retry_used") or diagnostics.get("retry_used"))
         retry_succeeded = bool(page_index_diag.get("retry_succeeded") or diagnostics.get("retry_succeeded"))
         fallback_reason = str(page_index_diag.get("fallback_reason") or diagnostics.get("fallback_reason") or "")
+        self._trace_step(
+            "create_parse_retry_history_check",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            parser_lane=parser_lane,
+            assignment_mode=assignment_mode,
+            retry_used=retry_used,
+            fallback_reason=fallback_reason or None,
+        )
         if not (retry_used or fallback_reason or assignment_attempt_count > 1):
             return None
 
@@ -896,6 +1150,16 @@ class IngestPipeline:
         )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
+        self._trace_step(
+            "create_parse_retry_history_complete",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            parser_lane=parser_lane,
+            assignment_mode=assignment_mode,
+            retry_used=retry_used,
+            retry_succeeded=retry_succeeded,
+        )
         return str(node.id)
 
     def create_candidate_link(
@@ -913,7 +1177,22 @@ class IngestPipeline:
                 source_document_id,
             )
         )
+        self._trace_step(
+            "create_candidate_link_start",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            semantic_title=getattr(parse_result.semantic_tree, "title", None),
+        )
         if self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
+            self._trace_step(
+                "create_candidate_link_complete",
+                request=request,
+                source_document_id=source_document_id,
+                namespace=namespace,
+                candidate_link_id=node_id,
+                existing=True,
+            )
             return node_id
         node = self._artifact_node(
             request=request,
@@ -928,6 +1207,14 @@ class IngestPipeline:
         )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
+        self._trace_step(
+            "create_candidate_link_complete",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            candidate_link_id=str(node.id),
+            existing=False,
+        )
         return str(node.id)
 
     def create_promotion_candidate(
@@ -949,7 +1236,22 @@ class IngestPipeline:
                 source_document_id,
             )
         )
+        self._trace_step(
+            "create_promotion_candidate_start",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            candidate_link_id=candidate_link_id,
+        )
         if self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
+            self._trace_step(
+                "create_promotion_candidate_complete",
+                request=request,
+                source_document_id=source_document_id,
+                namespace=namespace,
+                promotion_candidate_id=node_id,
+                existing=True,
+            )
             return node_id
         node = self._artifact_node(
             request=request,
@@ -979,6 +1281,14 @@ class IngestPipeline:
         )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
+        self._trace_step(
+            "create_promotion_candidate_complete",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            promotion_candidate_id=str(node.id),
+            existing=False,
+        )
         return str(node.id)
 
     def create_promotion_evidence_pack(
@@ -1013,7 +1323,24 @@ class IngestPipeline:
                 *edge_ids,
             )
         )
+        self._trace_step(
+            "create_promotion_evidence_pack_start",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            candidate_link_id=candidate_link_id,
+            node_count=len(node_ids),
+            edge_count=len(edge_ids),
+        )
         if self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
+            self._trace_step(
+                "create_promotion_evidence_pack_complete",
+                request=request,
+                source_document_id=source_document_id,
+                namespace=namespace,
+                promotion_evidence_pack_id=node_id,
+                existing=True,
+            )
             return node_id, digest.model_dump(mode="python")
         node = self._artifact_node(
             request=request,
@@ -1037,6 +1364,14 @@ class IngestPipeline:
         )
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
+        self._trace_step(
+            "create_promotion_evidence_pack_complete",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            promotion_evidence_pack_id=str(node.id),
+            existing=False,
+        )
         return str(node.id), digest.model_dump(mode="python")
 
     def promote_to_knowledge(
@@ -1057,6 +1392,14 @@ class IngestPipeline:
                 request.workspace_id,
                 source_document_id,
             )
+        )
+        self._trace_step(
+            "promote_to_knowledge_start",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            promotion_candidate_id=promotion_candidate_id,
+            promotion_mode=request.promotion_mode,
         )
         curated_exists = self._node_exists(self.engines.kg, namespace=curated_namespace, node_id=node_id)
 
@@ -1090,6 +1433,13 @@ class IngestPipeline:
             )
             with _temporary_namespace(self.engines.kg, curated_namespace):
                 self.engines.kg.write.add_node(node)
+            self._trace_step(
+                "promote_to_knowledge_node_written",
+                request=request,
+                source_document_id=source_document_id,
+                namespace=curated_namespace,
+                promoted_entity_id=node_id,
+            )
 
         if not self._job_exists(
             namespace=projection_namespace,
@@ -1102,6 +1452,14 @@ class IngestPipeline:
                 promoted_id=node_id,
                 namespace=projection_namespace,
             )
+        self._trace_step(
+            "promote_to_knowledge_complete",
+            request=request,
+            source_document_id=source_document_id,
+            namespace=namespace,
+            promoted_entity_id=node_id,
+            curated_exists=curated_exists,
+        )
         return node_id
 
     def _enqueue_maintenance_job(

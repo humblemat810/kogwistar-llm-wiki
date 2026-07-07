@@ -43,6 +43,48 @@ Recommended commands:
 .\.venv\Scripts\python.exe -m pytest <test-target> -q -p no:cacheprovider
 ```
 
+## Debug Run Mode
+
+The llm-wiki CLI can write a debug log, JSONL trace, and sqlite statistics file
+for a single ingest run. Point `--debug-run-dir` at an empty directory:
+
+```powershell
+.\.venv\Scripts\python.exe -m kogwistar_llm_wiki demo `
+  --workspace demo `
+  --source .\docs\sample.md `
+  --vault .\tests\_tmp\vault `
+  --debug-run-dir .\tests\_tmp\llm-wiki-debug
+```
+
+The directory will receive:
+
+- `llm_wiki.log`
+- `run_trace.jsonl`
+- `llm_wiki_stats.sqlite3`
+
+## Manual Azure Smoke
+
+The real-model smoke test is opt-in. Set the explicit smoke gate plus the Azure
+OpenAI env vars for the desired model, then run the manual-marked test file:
+
+```powershell
+$env:KOGWISTAR_LLM_WIKI_REAL_SMOKE='1'
+$env:KOGWISTAR_PARSER_PROVIDER='azure_openai'
+$env:KOGWISTAR_PARSER_MODEL='gpt-5-mini'
+$env:KOGWISTAR_PARSER_BASE_URL='https://<your-resource>.openai.azure.com/'
+$env:OPENAI_API_KEY_GPT5_MINI='<key>'
+.\.venv\Scripts\python.exe -m pytest tests\smoke\test_llm_wiki_real_azure_smoke.py -m manual -q -p no:cacheprovider
+```
+
+The test will skip if the expected Azure env values are missing or the smoke
+gate is not enabled.
+
+You can also point `KOGWISTAR_PARSER_MODEL` at `gpt-5-chat` or `gpt-5-nano`
+and provide the matching `OPENAI_API_KEY_GPT5_CHAT` or
+`OPENAI_API_KEY_GPT5_NANO` env var. The smoke test will resolve the matching
+Azure endpoint and API version from the model-specific env suffixes when
+available.
+
 Avoid using `C:\tmp` as a pytest cache workaround unless you first verify this
 process can write there:
 

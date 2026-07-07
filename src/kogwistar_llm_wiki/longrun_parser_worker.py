@@ -251,6 +251,17 @@ def run_workflow_layered_parse(
     final_state = dict(getattr(run_result, "final_state", {}) or {})
     parse_session = final_state.get("parse_session") or {}
     proposal_summary = _proposal_mode_summary(final_state)
+    _layer_event(
+        "workflow_layered_parse_summary_ready",
+        parse_session_mode=parse_session.get("mode"),
+        proposal_mode=proposal_summary.get("proposal_mode"),
+        boundary_proposed_count=proposal_summary.get("boundary_proposed_count"),
+        boundary_accepted_count=proposal_summary.get("boundary_accepted_count"),
+        boundary_shifted_count=proposal_summary.get("boundary_shifted_count"),
+        boundary_rejected_count=proposal_summary.get("boundary_rejected_count"),
+        unresolved_interval_count=proposal_summary.get("unresolved_interval_count"),
+        provider_child_count=proposal_summary.get("provider_child_count"),
+    )
     if not bundle and final_state.get("export_bundle"):
         bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
     if not bundle:
@@ -265,6 +276,16 @@ def run_workflow_layered_parse(
             "workflow_run_id": getattr(run_result, "run_id", None),
         },
     )
+    _layer_event(
+        "workflow_layered_evaluation_ready",
+        basic_sense_score=evaluation.get("basic_sense_score"),
+        basic_sense_verdict=evaluation.get("basic_sense_verdict"),
+        coverage_ratio=evaluation.get("coverage_ratio"),
+        node_count=evaluation.get("node_count"),
+        node_type_diversity=evaluation.get("node_type_diversity"),
+        duplicate_excerpt_hits=evaluation.get("duplicate_excerpt_hits"),
+        fallback_used=evaluation.get("fallback_used"),
+    )
     usage_summary = _summarize_budget_events(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
@@ -273,6 +294,14 @@ def run_workflow_layered_parse(
         usage_summary["proposal_summary"] = proposal_summary
         if proposal_summary.get("proposal_mode") is not None:
             usage_summary["proposal_mode"] = proposal_summary["proposal_mode"]
+    _layer_event(
+        "workflow_layered_usage_summary_ready",
+        total_cost=usage_summary.get("total_cost"),
+        total_tokens=usage_summary.get("total_tokens"),
+        prompt_tokens=usage_summary.get("prompt_tokens"),
+        completion_tokens=usage_summary.get("completion_tokens"),
+        proposal_mode=usage_summary.get("proposal_mode"),
+    )
     diagnostics = {
         "parser_lane": "workflow_layered",
         "parse_session_mode": parse_session.get("mode"),
@@ -291,6 +320,7 @@ def run_workflow_layered_parse(
         node_count=len(graph_payload.get("nodes", [])),
         edge_count=len(graph_payload.get("edges", [])),
         total_cost=usage_summary["total_cost"],
+        parse_session_mode=parse_session.get("mode"),
     )
     return SimpleNamespace(
         semantic_tree=SimpleNamespace(title=str(title)),

@@ -121,7 +121,7 @@ def _cmd_demo(args: argparse.Namespace) -> None:
     vault_root.mkdir(parents=True, exist_ok=True)
 
     engines = _build_demo_engines(split_derived_knowledge=args.split_derived_knowledge)
-    pipeline = IngestPipeline(engines)
+    pipeline = IngestPipeline(engines, debug_run_dir=args.debug_run_dir)
     materialize_maintenance_designs(engines.workflow)
     artifacts = pipeline.run(request)
     MaintenanceWorker(engines).process_pending_jobs(args.workspace)
@@ -162,7 +162,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
         args.dsn,
         split_derived_knowledge=args.split_derived_knowledge,
     )
-    pipeline = IngestPipeline(engines)
+    pipeline = IngestPipeline(engines, debug_run_dir=args.debug_run_dir)
     artifacts = pipeline.run(request)
     print(
         json.dumps(
@@ -251,7 +251,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Host derived knowledge on a dedicated engine instead of reusing raw KG",
     )
-
     sub = parser.add_subparsers(dest="command", required=True)
 
     demo_p = sub.add_parser(
@@ -302,6 +301,11 @@ def main(argv: list[str] | None = None) -> int:
         default="sync",
         help="Whether to auto-promote the extracted knowledge",
     )
+    demo_p.add_argument(
+        "--debug-run-dir",
+        default=os.environ.get("KOGWISTAR_DEBUG_RUN_DIR"),
+        help="Write debug traces, logs, and sqlite statistics to this directory",
+    )
     demo_p.set_defaults(func=_cmd_demo)
 
     ingest_p = sub.add_parser("ingest", help="Read a source document into the workspace")
@@ -347,6 +351,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=["pending", "sync"],
         default="sync",
         help="Whether to auto-promote the extracted knowledge",
+    )
+    ingest_p.add_argument(
+        "--debug-run-dir",
+        default=os.environ.get("KOGWISTAR_DEBUG_RUN_DIR"),
+        help="Write debug traces, logs, and sqlite statistics to this directory",
     )
     ingest_p.set_defaults(func=_cmd_ingest)
 

@@ -87,6 +87,10 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
     assert callable(captured["event_sink"])
     assert captured["workflow_deps"]["propose_layer_fn"] is not None
     assert any(entry["stage"] == "wiring_test" for entry in result.layer_log)
+    assert any(entry["stage"] == "workflow_layered_parse_summary_ready" for entry in result.layer_log)
+    assert any(entry["stage"] == "workflow_layered_evaluation_ready" for entry in result.layer_log)
+    assert any(entry["stage"] == "workflow_layered_usage_summary_ready" for entry in result.layer_log)
+    assert any(entry["stage"] == "workflow_layered_parse_complete" for entry in result.layer_log)
     assert result.diagnostics["parse_session_mode"] == "workflow_layered"
     assert result.usage_summary["proposal_mode"] == "boundaries"
     assert result.diagnostics["proposal_summary"]["boundary_proposed_count"] == 2

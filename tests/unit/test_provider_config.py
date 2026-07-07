@@ -47,6 +47,22 @@ def test_build_provider_endpoint_config_uses_model_specific_api_version(monkeypa
     assert config.api_version == "2024-12-01-preview"
 
 
+def test_build_provider_endpoint_config_supports_gpt5_chat_suffix(monkeypatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_PARSER_PROVIDER", "azure_openai")
+    monkeypatch.setenv("KOGWISTAR_PARSER_MODEL", "gpt-5-chat")
+    monkeypatch.setenv("OPENAI_DEPLOYMENT_ENDPOINT_GPT5_CHAT", "https://chat.example.openai.azure.com/")
+    monkeypatch.setenv("OPENAI_API_KEY_GPT5_CHAT", "chat-key")
+    monkeypatch.setenv("OPENAI_DEPLOYMENT_VERSION_GPT5_CHAT", "2025-01-01-preview")
+
+    config = build_provider_endpoint_config("parser")
+
+    assert config.provider == "azure"
+    assert config.model == "gpt-5-chat"
+    assert config.base_url == "https://chat.example.openai.azure.com/"
+    assert config.api_key_env == "OPENAI_API_KEY_GPT5_CHAT"
+    assert config.api_version == "2025-01-01-preview"
+
+
 def test_resolve_parser_provider_settings_returns_summary(monkeypatch) -> None:
     monkeypatch.setenv("KOGWISTAR_PARSER_PROVIDER", "ollama")
     monkeypatch.setenv("KOGWISTAR_PARSER_MODEL", "gemma4:e2b")

@@ -75,6 +75,42 @@ def test_parse_source_supports_kwargs_only_parser(namespace_engines):
     assert captured["provider_settings"].parser.provider == "ollama"
     assert captured["provider_settings"].parser.model == "gemma3:4b"
 
+
+def test_parse_source_passes_trace_log_when_debug_run_dir_is_enabled(namespace_engines, tmp_path):
+    captured = {}
+
+    def fake_parser(**kwargs):
+        captured.update(kwargs)
+        trace_log = kwargs["trace_log"]
+        trace_log("page_index_trace_line")
+
+        class _SemanticTree:
+            title = "Acme Contract"
+
+        class _Result:
+            semantic_tree = _SemanticTree()
+
+        return _Result()
+
+    pipeline = IngestPipeline(namespace_engines, parser=fake_parser, debug_run_dir=tmp_path / "debug")
+    request = IngestPipelineRequest(
+        workspace_id="demo",
+        source_uri="file:///contracts/acme.txt",
+        title="Acme Contract",
+        raw_text="Acme shall pay within 30 days.",
+        parser_mode="ollama",
+        llm_provider="ollama",
+        llm_model="gemma3:4b",
+    )
+
+    result = pipeline.parse_source(request=request, source_document_id="doc-1")
+
+    assert result.semantic_tree.title == "Acme Contract"
+    assert callable(captured["trace_log"])
+    trace_path = tmp_path / "debug" / "run_trace.jsonl"
+    assert trace_path.exists()
+    assert "page_index_trace_line" in trace_path.read_text(encoding="utf-8")
+
 def test_parse_source_prefers_explicit_llm_provider_and_model(namespace_engines):
     captured = {}
 
