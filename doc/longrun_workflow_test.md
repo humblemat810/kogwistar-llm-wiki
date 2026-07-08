@@ -75,11 +75,15 @@ Defaults:
 - `KOGWISTAR_LONGRUN_DSN` is only needed when `KOGWISTAR_LONGRUN_BACKEND=postgres|pgvector` and no testcontainer-provided DSN is present
 - `KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS=3`
 - `KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS=100`
+- `KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS=1200` bounds the overall run wall-clock
+  time for bounded continue probes.
+- `KOGWISTAR_LONGRUN_MAX_LLM_CALLS=100` adds an explicit call budget that is
+  recorded in the dump and stops the run once exceeded.
 - `KOGWISTAR_LONGRUN_RUN_DIR` can point the harness at a stable run directory
   for crash-continuation probes and repeated manual reruns.
 - `KOGWISTAR_LONGRUN_MODE=fresh|continue|auto` selects whether the harness
-  wipes the run directory first, reuses an existing checkpoint, or tries to
-  reuse a matching checkpoint and otherwise falls back to fresh.
+  wipes the run directory first, resumes an existing checkpoint only, or tries
+  to reuse a matching checkpoint and otherwise falls back to fresh.
 - `KOGWISTAR_LONGRUN_DOC_COUNT=1|3|20` is supported for the VSCode launch
   buttons. Smaller corpora require `KOGWISTAR_LONGRUN_ALLOW_SMALL=1`.
 
@@ -115,9 +119,16 @@ The harness runs like a single bounded daemon:
 If `KOGWISTAR_LONGRUN_RUN_DIR` is set, the harness reuses that run directory
 and loads the latest manifest checkpoint from `dump/manifest.jsonl` before it
 starts. That lets a repeated invocation compare progress against the previous
-run instead of treating every rerun as a fresh corpus. Continue and auto reruns
-also reload `status_transitions.jsonl` and `failure_records.jsonl` so the dump
-keeps earlier transition and failure history.
+run instead of treating every rerun as a fresh corpus. `continue` resumes only
+when a checkpoint is already present, while `auto` reuses a matching checkpoint
+and otherwise starts from scratch. Continue and auto reruns also reload
+`status_transitions.jsonl` and `failure_records.jsonl` so the dump keeps earlier
+transition and failure history.
+
+The dump records a `corpus_fingerprint` derived from the selected corpus mode,
+parser lane, backend, and profile settings. Checkpoint reuse only happens when
+the fingerprint matches, which keeps distinct corpus modes from crossing over
+into each other.
 
 When `KOGWISTAR_LONGRUN_RESUME_PROBE=1`, the document workflow deliberately
 suspends after parsed graph persistence and before background maintenance. The
@@ -200,7 +211,8 @@ The dump includes:
 - `projection_summary.json`
 - `maintenance_summary.json` with maintenance job ids, source document ids,
   and maintenance-specific step counts
-- `llm_calls_summary.json`
+- `llm_calls_summary.json` with parser/provider metadata, `call_count`, and
+  the configured call/runtime budgets
 - `parser_layer_log.json` with parser-layer trace entries for workflow-layered
   runs
 - `sampled_prompts_and_responses.jsonl`

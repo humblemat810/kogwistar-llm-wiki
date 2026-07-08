@@ -23,6 +23,11 @@ GRAPH_PATCH_PROPOSAL_KINDS = {
     "document_validate_crosslinks",
     "document_retract_crosslinks",
     "document_detect_conflicts",
+    "entity_merge_candidate",
+    "entity_disambiguation_scan",
+    "entity_disambiguation_reconcile",
+    "entity_disambiguation_review",
+    "entity_disambiguation_patch_proposal",
     "conversation_promote_to_kg",
     "graph_patch_review",
 }

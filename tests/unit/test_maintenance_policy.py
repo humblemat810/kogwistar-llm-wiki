@@ -35,6 +35,11 @@ def test_workflow_id_for_maintenance_kind_routes_graph_patch_jobs():
     assert workflow_id_for_maintenance_kind("document_seed_graph") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
     assert workflow_id_for_maintenance_kind("document_propose_crosslinks") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
     assert workflow_id_for_maintenance_kind("conversation_promote_to_kg") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
+    assert workflow_id_for_maintenance_kind("entity_merge_candidate") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
+    assert workflow_id_for_maintenance_kind("entity_disambiguation_scan") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
+    assert workflow_id_for_maintenance_kind("entity_disambiguation_reconcile") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
+    assert workflow_id_for_maintenance_kind("entity_disambiguation_review") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
+    assert workflow_id_for_maintenance_kind("entity_disambiguation_patch_proposal") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
     assert workflow_id_for_maintenance_kind("graph_patch_apply") == GRAPH_PATCH_APPLY_WORKFLOW_ID
     assert is_graph_patch_kind("document_correct_parse_children") is True
     assert is_graph_patch_kind("distill") is False

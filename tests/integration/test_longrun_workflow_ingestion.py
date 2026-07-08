@@ -135,19 +135,48 @@ class LongRunConfig:
     ollama_base_url: str = "http://localhost:11434"
     max_repeated_systemic_errors: int = 3
     max_post_doc_maintenance_steps: int = 100
+    max_llm_calls: int = 100
     backend: str = "chroma"
     parser_lane: str = "workflow_layered"
     parse_timeout_seconds: int = 1200
+    max_runtime_seconds: int = 3600
     dsn: str | None = None
     resume_probe_enabled: bool = False
     max_idle_loops: int = 25
-    max_runtime_seconds: int = 3600
     token_min: int = 500
     token_max: int = 2000
     workspace_id: str = "longrun"
     checkpoint_run_dir: str | None = None
     doc_profile: str = "medium"
     skip_maintenance_invariant: bool = False
+    corpus_fingerprint: str = ""
+
+    def __post_init__(self) -> None:
+        if self.max_llm_calls <= 0:
+            raise ValueError("max_llm_calls must be positive")
+        if self.max_runtime_seconds <= 0:
+            raise ValueError("max_runtime_seconds must be positive")
+        if not self.corpus_fingerprint:
+            object.__setattr__(self, "corpus_fingerprint", str(self._compute_corpus_fingerprint()))
+
+    def _compute_corpus_fingerprint(self) -> str:
+        return str(
+            stable_id(
+            "llm_wiki.longrun.corpus",
+            self.workspace_id,
+            self.backend,
+            self.mode,
+            self.doc_count,
+            self.doc_profile,
+            self.parser_lane,
+            self.parser_provider,
+            self.parser_model,
+            self.token_min,
+            self.token_max,
+            self.resume_probe_enabled,
+            self.skip_maintenance_invariant,
+        )
+        )
 
     @classmethod
     def from_env(cls) -> "LongRunConfig":
@@ -186,6 +215,12 @@ class LongRunConfig:
         parse_timeout_seconds = int(os.getenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "1200"))
         if parse_timeout_seconds <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS must be positive")
+        max_runtime_seconds = int(os.getenv("KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS", "3600"))
+        if max_runtime_seconds <= 0:
+            raise ValueError("KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS must be positive")
+        max_llm_calls = int(os.getenv("KOGWISTAR_LONGRUN_MAX_LLM_CALLS", "100"))
+        if max_llm_calls <= 0:
+            raise ValueError("KOGWISTAR_LONGRUN_MAX_LLM_CALLS must be positive")
         pg_source = os.getenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer").strip().lower() or "testcontainer"
         if pg_source not in {"testcontainer", "custom"}:
             raise ValueError(
@@ -243,6 +278,8 @@ class LongRunConfig:
             backend=backend,
             parser_lane=parser_lane,
             parse_timeout_seconds=parse_timeout_seconds,
+            max_runtime_seconds=max_runtime_seconds,
+            max_llm_calls=max_llm_calls,
             dsn=dsn,
             ollama_model=parser_model,
             ollama_base_url=parser_base_url,
@@ -272,6 +309,8 @@ class LongRunConfig:
             "backend": self.backend,
             "parser_lane": self.parser_lane,
             "parse_timeout_seconds": self.parse_timeout_seconds,
+            "max_runtime_seconds": self.max_runtime_seconds,
+            "max_llm_calls": self.max_llm_calls,
             "dsn_present": self.dsn is not None,
             "resume_probe_enabled": self.resume_probe_enabled,
             "ollama_model": self.ollama_model,
@@ -285,6 +324,7 @@ class LongRunConfig:
             "tokenizer_method": TOKENIZER_METHOD,
             "workspace_id": self.workspace_id,
             "checkpoint_run_dir": self.checkpoint_run_dir,
+            "corpus_fingerprint": self.corpus_fingerprint,
             "skip_maintenance_invariant": self.skip_maintenance_invariant,
         }
 
@@ -507,6 +547,13 @@ class DiagnosticDumper:
                 "",
                 f"```json\n{json.dumps(_jsonable(progress), indent=2, sort_keys=True)}\n```",
                 "",
+                "## LLM Call Budget",
+                "",
+                f"- Corpus fingerprint: `{self.harness.config.corpus_fingerprint}`",
+                f"- Call count: `{self.harness.llm_call_count}`",
+                f"- Call budget: `{self.harness.config.max_llm_calls}`",
+                f"- Runtime budget seconds: `{self.harness.config.max_runtime_seconds}`",
+                "",
                 "## Parser Evaluation",
                 "",
                 f"- Parser provider: `{self.harness.config.parser_provider}`",
@@ -539,7 +586,7 @@ class LongRunHarness:
     def __init__(self, *, run_dir: Path, config: LongRunConfig) -> None:
         self.run_dir = run_dir
         self.config = config
-        self.run_id = f"longrun-{stable_id('llm_wiki.longrun', str(run_dir), config.doc_count)}"
+        self.run_id = f"longrun-{stable_id('llm_wiki.longrun', str(run_dir), config.corpus_fingerprint)}"
         self.records: list[DocumentRecord] = []
         self.contexts: dict[str, DocumentRecord] = {}
         self.status_transitions: list[dict[str, Any]] = []
@@ -547,6 +594,7 @@ class LongRunHarness:
         self.circuit_breaker = ErrorCircuitBreaker(config.max_repeated_systemic_errors)
         self.maintenance_poll_count = 0
         self.projection_poll_count = 0
+        self.llm_call_count = 0
         self.aborted = False
         self.abort_reason: str | None = None
         self._engines: Any | None = None
@@ -689,6 +737,12 @@ class LongRunHarness:
                     break
             else:
                 idle_loops = 0
+            if self.llm_call_count >= self.config.max_llm_calls:
+                self._abort(
+                    "runtime_worker_stuck: llm call budget exceeded "
+                    f"({self.llm_call_count}/{self.config.max_llm_calls})"
+                )
+                break
             if time.monotonic() - started > self.config.max_runtime_seconds:
                 self._abort("runtime_worker_stuck: max runtime exceeded")
                 break
@@ -713,6 +767,7 @@ class LongRunHarness:
             elapsed_ms = max(0, int(end_ms - record.started_at_ms))
         return {
             "run_id": record.run_id or self.run_id,
+            "corpus_fingerprint": self.config.corpus_fingerprint,
             "doc_id": record.doc_id,
             "title": record.title,
             "source_uri": record.source_uri,
@@ -817,6 +872,7 @@ class LongRunHarness:
             "backend": self.config.backend,
             "parser_lane": self.config.parser_lane,
             "doc_profile": self.config.doc_profile,
+            "corpus_fingerprint": self.config.corpus_fingerprint,
             "resume_probe_enabled": self.config.resume_probe_enabled,
             "skip_maintenance_invariant": self.config.skip_maintenance_invariant,
             "doc_count": len(self.records),
@@ -841,6 +897,8 @@ class LongRunHarness:
             ),
             "parser_heartbeat": self.parser_heartbeat,
             "parser_eval": self.parser_eval_summary(),
+            "llm_call_count": self.llm_call_count,
+            "llm_call_budget": self.config.max_llm_calls,
         }
 
     def maintenance_summary(self) -> dict[str, Any]:
@@ -934,6 +992,10 @@ class LongRunHarness:
             "parser_mode": self.config.parser_provider,
             "parser_lane": self.config.parser_lane,
             "parse_timeout_seconds": self.config.parse_timeout_seconds,
+            "max_runtime_seconds": self.config.max_runtime_seconds,
+            "max_llm_calls": self.config.max_llm_calls,
+            "corpus_fingerprint": self.config.corpus_fingerprint,
+            "call_count": self.llm_call_count,
             "sampled_prompts_available": False,
             "quality_failures": [
                 {"doc_id": record.doc_id, "failures": record.llm_quality_failures}
@@ -1098,6 +1160,19 @@ class LongRunHarness:
                 rows.append(json.loads(line))
         return rows
 
+    def _restore_llm_usage_from_dump(self) -> None:
+        summary_path = self.dumper.dump_dir / "llm_calls_summary.json"
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                summary = {}
+            call_count = summary.get("call_count")
+            if isinstance(call_count, int) and call_count >= 0:
+                self.llm_call_count = call_count
+                return
+        self.llm_call_count = sum(1 for record in self.records if record.status != "PENDING")
+
     def _load_checkpoint_state(self, *, strict: bool) -> bool:
         manifest = self.dumper.dump_dir / "manifest.jsonl"
         if not manifest.exists():
@@ -1152,10 +1227,24 @@ class LongRunHarness:
                     f"mode={self.config.mode!r}, manifest={manifest})"
                 )
             return False
+        manifest_fingerprints = {
+            str(row.get("corpus_fingerprint") or "").strip()
+            for row in self._load_jsonl_rows(manifest)
+            if str(row.get("corpus_fingerprint") or "").strip()
+        }
+        if manifest_fingerprints and manifest_fingerprints != {self.config.corpus_fingerprint}:
+            if strict:
+                raise AssertionError(
+                    "checkpoint manifest corpus fingerprint does not match the configured long-run corpus fingerprint "
+                    f"(checkpoint={sorted(manifest_fingerprints)!r}, configured={self.config.corpus_fingerprint!r}, "
+                    f"mode={self.config.mode!r}, manifest={manifest})"
+                )
+            return False
         self.records = records
         self.contexts = {record.doc_id: record for record in records}
         self.checkpoint_loaded = True
         self.checkpoint_manifest_path = manifest
+        self._restore_llm_usage_from_dump()
         self.resume_gate_consumed = any(
             record.resumed_from_checkpoint or record.resume_suspended_token_id is not None
             for record in records
@@ -1357,6 +1446,7 @@ class LongRunHarness:
                     request=request,
                     source_document_id=source_document_id,
                 )
+                self.llm_call_count += 1
             except LongRunDocumentError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -2846,11 +2936,15 @@ def test_longrun_config_from_env_accepts_parser_selection(monkeypatch: pytest.Mo
     monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER", "page_index")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "7")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS", "42")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAX_LLM_CALLS", "9")
 
     config = LongRunConfig.from_env()
 
     assert config.parser_lane == "page_index"
     assert config.parse_timeout_seconds == 7
+    assert config.max_runtime_seconds == 42
+    assert config.max_llm_calls == 9
 
 
 def test_longrun_config_from_env_accepts_parser_provider_and_model(monkeypatch: pytest.MonkeyPatch):
@@ -2902,6 +2996,70 @@ def test_longrun_config_from_env_supports_one_doc_no_resume_probe(monkeypatch: p
     assert config.doc_profile == "tiny"
     assert (config.token_min, config.token_max) == _longrun_doc_profile_token_bounds("tiny")
     assert config.skip_maintenance_invariant is True
+    assert config.corpus_fingerprint
+
+
+def test_longrun_harness_reports_call_budget_and_corpus_fingerprint(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        max_llm_calls=5,
+        max_runtime_seconds=123,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "budget", config=config)
+    harness.llm_call_count = 3
+
+    llm_summary = harness.llm_summary()
+    progress = harness.progress_summary()
+    manifest_row = harness.manifest_row(
+        DocumentRecord(
+            doc_id="doc-001",
+            title="Doc 1",
+            source_uri="file:///doc-001.md",
+            input_path=tmp_path / "budget" / "input" / "doc-001.md",
+            current_path=tmp_path / "budget" / "input" / "doc-001.md",
+        )
+    )
+
+    assert llm_summary["max_runtime_seconds"] == 123
+    assert llm_summary["max_llm_calls"] == 5
+    assert llm_summary["call_count"] == 3
+    assert llm_summary["corpus_fingerprint"] == config.corpus_fingerprint
+    assert progress["llm_call_count"] == 3
+    assert progress["llm_call_budget"] == 5
+    assert progress["corpus_fingerprint"] == config.corpus_fingerprint
+    assert manifest_row["corpus_fingerprint"] == config.corpus_fingerprint
+
+
+def test_longrun_run_aborts_when_llm_call_budget_is_exceeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        max_llm_calls=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "budget-abort", config=config)
+    harness.prepare()
+    harness.llm_call_count = 1
+    monkeypatch.setattr(harness, "_run_document_workflow", lambda record: "succeeded")
+    monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
+
+    with pytest.raises(AssertionError, match="llm call budget exceeded"):
+        harness.run()
+
+    assert harness.aborted is True
+    assert harness.abort_reason and "llm call budget exceeded" in harness.abort_reason
 
 
 def test_longrun_config_from_env_auto_enables_pgvector_testcontainer_probe(monkeypatch: pytest.MonkeyPatch):
@@ -3462,6 +3620,53 @@ def test_longrun_auto_checkpoint_mismatch_falls_back_to_fresh(tmp_path: Path):
     assert len(harness.records) == 2
     assert {record.doc_id for record in harness.records} == {"doc-001", "doc-002"}
     assert all(record.status == "PENDING" for record in harness.records)
+
+
+def test_longrun_auto_checkpoint_corpus_fingerprint_mismatch_falls_back_to_fresh(tmp_path: Path):
+    run_dir = tmp_path / "checkpoint-corpus-mismatch"
+    dump_dir = run_dir / "dump"
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    stale_manifest = {
+        "run_id": "stale",
+        "corpus_fingerprint": "stale-fingerprint",
+        "doc_id": "doc-001",
+        "title": "Stale checkpoint document",
+        "source_uri": "file:///doc-001.md",
+        "current_path": str(run_dir / "input" / "doc-001.md"),
+        "status": "COMPLETED",
+        "started_at_ms": _now_ms(),
+        "ended_at_ms": _now_ms(),
+        "elapsed_ms": 1,
+        "token_count": 512,
+        "tokenizer_method": TOKENIZER_METHOD,
+        "source_document_id": "stale-source",
+        "maintenance_job_id": None,
+        "promoted_entity_id": None,
+        "last_step_name": "move_completed",
+        "last_step_at_ms": _now_ms(),
+        "llm_quality_failures": [],
+    }
+    (dump_dir / "manifest.jsonl").write_text(json.dumps(stale_manifest) + "\n", encoding="utf-8")
+
+    config = LongRunConfig(
+        enabled=False,
+        mode="auto",
+        doc_count=1,
+        doc_profile="small",
+        token_min=150,
+        token_max=800,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness.prepare()
+
+    assert harness.checkpoint_loaded is False
+    assert len(harness.records) == 1
+    assert harness.records[0].doc_id == "doc-001"
+    assert harness.records[0].status == "PENDING"
 
 
 def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

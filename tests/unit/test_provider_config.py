@@ -63,6 +63,24 @@ def test_build_provider_endpoint_config_supports_gpt5_chat_suffix(monkeypatch) -
     assert config.api_version == "2025-01-01-preview"
 
 
+def test_build_provider_endpoint_config_does_not_assign_deprecated_gpt5_chat_suffix(monkeypatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_PARSER_PROVIDER", "azure_openai")
+    monkeypatch.setenv("KOGWISTAR_PARSER_MODEL", "gpt-5.2-chat")
+    monkeypatch.setenv("OPENAI_DEPLOYMENT_ENDPOINT", "https://generic.example.openai.azure.com/")
+    monkeypatch.setenv("OPENAI_API_KEY", "generic-key")
+    monkeypatch.setenv("OPENAI_API_VERSION", "2025-01-01-preview")
+    monkeypatch.setenv("OPENAI_DEPLOYMENT_ENDPOINT_GPT5_2_CHAT", "https://deprecated.example.openai.azure.com/")
+    monkeypatch.setenv("OPENAI_API_KEY_GPT5_2_CHAT", "deprecated-key")
+
+    config = build_provider_endpoint_config("parser")
+
+    assert config.provider == "azure"
+    assert config.model == "gpt-5.2-chat"
+    assert config.base_url == "https://generic.example.openai.azure.com/"
+    assert config.api_key_env == "OPENAI_API_KEY"
+    assert config.api_version == "2025-01-01-preview"
+
+
 def test_resolve_parser_provider_settings_returns_summary(monkeypatch) -> None:
     monkeypatch.setenv("KOGWISTAR_PARSER_PROVIDER", "ollama")
     monkeypatch.setenv("KOGWISTAR_PARSER_MODEL", "gemma4:e2b")

@@ -78,6 +78,7 @@ So maintenance should not be reduced to conversation alone.
 | Maintenance run record | workflow | `ws:{id}:wf:maintenance` | `maintenance_run` | `processes` | auditable execution |
 | Cross-link candidate | conversation | `ws:{id}:conv:bg` | `candidate_link` | `proposes_link` | reviewable inference |
 | Merge candidate | conversation | `ws:{id}:conv:bg` | `merge_candidate` | `suggests_merge` | usually reviewed |
+| Entity disambiguation candidate | conversation or workflow | `ws:{id}:conv:bg` or `ws:{id}:wf:maintenance` | `entity_disambiguation_candidate` | `proposes_disambiguation_of` | provisional until reconciled |
 | Credibility critique | conversation | `ws:{id}:conv:bg` | `credibility_critique` | `maintenance_critiques` | reasoning-shaped artifact |
 | Reliability assessment | conversation | `ws:{id}:conv:bg` | `reliability_assessment` | `maintenance_assesses_reliability_of` | may remain background-only |
 | Promotion candidate | conversation or workflow | `ws:{id}:review` or `ws:{id}:wf:maintenance` | `promotion_candidate` | `proposes_promotion_of` | app policy decides location |

@@ -125,7 +125,35 @@ Identify likely duplicate or alias entities.
 **Human review**  
 Usually required before destructive merge.
 
-## 4.5 `topic_assignment`
+## 4.5 `entity_disambiguation`
+
+**Purpose**  
+Resolve, weaken, or invalidate pending ambiguity about whether records refer to
+the same entity or to distinct entities.
+
+**Typical trigger**
+- new source document arrives
+- new entity or alias evidence is injected
+- background dream-mode sweep
+
+**Inputs**
+- candidate entity set
+- mention grounding bundle
+- source spans and excerpts
+- current graph neighborhood
+- prior disambiguation decisions or review requests
+
+**Outputs**
+- pending review requests
+- resolved equivalence or distinction decisions
+- stale or superseded question records
+- alias or disambiguation repair proposals
+
+**Human review**  
+Required only when the evidence is still ambiguous or the question is not
+concrete enough to answer safely.
+
+## 4.6 `topic_assignment`
 
 **Purpose**  
 Assign entities, documents, or conversation artifacts to topic clusters or topic pages.

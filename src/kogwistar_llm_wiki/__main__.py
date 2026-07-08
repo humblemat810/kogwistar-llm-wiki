@@ -11,6 +11,12 @@ demo --workspace <id> --source <path> --vault <path> [--title <text>]
 ingest --workspace <id> --source <path> [--title <text>] [--promotion-mode <mode>]
     Read a source document and populate the workspace state.
 
+report --workspace <id> --data-dir <path> [--backend <name>] [--dsn <dsn>]
+    Inspect the persisted wiki graph, summarize quality signals, and emit a
+    small node/edge sample sink for review.
+    Use --report-scope to choose llm-wiki, maintenance, thinking, or all.
+    Use --dump-mode raw or both when you want raw Kogwistar payloads too.
+
 daemon projection --workspace <id> --vault <path> [--interval <s>]
     Run the Obsidian projection daemon (blocking).
 
@@ -110,20 +116,71 @@ def _read_request_from_source(args: argparse.Namespace) -> tuple[Path, "IngestPi
     return source_path, request
 
 
+def _read_demo_requests_from_source(args: argparse.Namespace) -> list[tuple[Path, "IngestPipelineRequest"]]:
+    from kogwistar_llm_wiki.models import IngestPipelineRequest
+
+    source_path = Path(args.source).expanduser().resolve()
+    if source_path.is_file():
+        _, request = _read_request_from_source(args)
+        return [(source_path, request)]
+
+    if not source_path.is_dir():
+        raise FileNotFoundError(f"source path not found: {source_path}")
+
+    corpus_paths = sorted(
+        path
+        for path in source_path.glob("*.md")
+        if path.is_file() and path.name != "index.md" and path.name != "manifest.md"
+    )
+    if not corpus_paths:
+        raise FileNotFoundError(f"no markdown corpus files found in: {source_path}")
+
+    requests: list[tuple[Path, IngestPipelineRequest]] = []
+    for corpus_path in corpus_paths:
+        raw_text = corpus_path.read_text(encoding="utf-8")
+        title = corpus_path.stem.replace("-", " ").replace("_", " ").strip() or corpus_path.stem
+        request = IngestPipelineRequest(
+            workspace_id=args.workspace,
+            source_uri=corpus_path.as_uri(),
+            title=title,
+            raw_text=raw_text,
+            source_format=args.source_format,
+            operation_mode=getattr(args, "operation_mode", "parse_first"),
+            parser_mode=args.parser_mode,
+            parser_lane=args.parser_lane,
+            promotion_mode=args.promotion_mode,
+            llm_provider=args.llm_provider,
+            llm_model=args.llm_model,
+        )
+        requests.append((corpus_path, request))
+    return requests
+
+
 def _cmd_demo(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
     from kogwistar_llm_wiki.namespaces import GraphSpace
     from kogwistar_llm_wiki.worker import MaintenanceWorker
 
-    source_path, request = _read_request_from_source(args)
+    request_items = _read_demo_requests_from_source(args)
     vault_root = Path(args.vault).expanduser().resolve()
     vault_root.mkdir(parents=True, exist_ok=True)
 
     engines = _build_demo_engines(split_derived_knowledge=args.split_derived_knowledge)
     pipeline = IngestPipeline(engines, debug_run_dir=args.debug_run_dir)
     materialize_maintenance_designs(engines.workflow)
-    artifacts = pipeline.run(request)
+    artifacts_by_source: list[dict[str, object]] = []
+    last_source_path: Path | None = None
+    last_artifacts = None
+    for source_path, request in request_items:
+        last_source_path = source_path
+        last_artifacts = pipeline.run(request)
+        artifacts_by_source.append(
+            {
+                "source": str(source_path),
+                "artifacts": asdict(last_artifacts),
+            }
+        )
     MaintenanceWorker(engines).process_pending_jobs(args.workspace)
     vault_result = pipeline.build_obsidian_vault(
         vault_root,
@@ -136,10 +193,13 @@ def _cmd_demo(args: argparse.Namespace) -> None:
         json.dumps(
             {
                 "workspace_id": args.workspace,
-                "source": str(source_path),
+                "source": str(last_source_path) if last_source_path is not None else str(args.source),
                 "vault": str(vault_root),
                 "mode": "demo-memory-single-process",
-                "artifacts": asdict(artifacts),
+                "corpus_mode": "directory" if len(request_items) > 1 else "single-file",
+                "corpus_count": len(request_items),
+                "artifacts": asdict(last_artifacts) if last_artifacts is not None else None,
+                "artifacts_by_source": artifacts_by_source,
                 "vault_result": {
                     **asdict(vault_result),
                     "vault_root": str(vault_result.vault_root),
@@ -170,6 +230,63 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
                 "workspace_id": args.workspace,
                 "source": str(source_path),
                 "artifacts": asdict(artifacts),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
+def _cmd_report(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.inspection import (
+        build_workspace_graph_artifact_dump,
+        build_workspace_quality_report,
+    )
+
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    report = build_workspace_quality_report(
+        engines,
+        workspace_id=args.workspace,
+        report_scope=args.report_scope,
+    )
+    artifact_dump = None
+    if args.dump_mode in {"raw", "both"}:
+        artifact_dump = build_workspace_graph_artifact_dump(
+            engines,
+            workspace_id=args.workspace,
+            report_scope=args.report_scope,
+            raw_limit_per_space=args.dump_limit_per_space,
+        )
+    print(
+        json.dumps(
+            {
+                "workspace_id": report.workspace_id,
+                "report_scope": report.report_scope,
+                "dump_mode": args.dump_mode,
+                "graph_quality": report.graph_quality,
+                "graph_health_score": report.graph_health_score,
+                "graph_spaces": [asdict(item) for item in report.graph_spaces],
+                "review_artifact_counts": report.review_artifact_counts,
+                "maintenance_patch_report": asdict(report.maintenance_patch_report),
+                "sample_nodes": [asdict(item) for item in report.sample_nodes],
+                "sample_edges": [asdict(item) for item in report.sample_edges],
+                "notes": list(report.notes),
+                **(
+                    {
+                        "raw_node_count": artifact_dump.node_count,
+                        "raw_edge_count": artifact_dump.edge_count,
+                        "raw_nodes": [asdict(item) for item in artifact_dump.raw_nodes],
+                        "raw_edges": [asdict(item) for item in artifact_dump.raw_edges],
+                    }
+                    if artifact_dump is not None
+                    else {}
+                ),
             },
             indent=2,
             sort_keys=True,
@@ -358,6 +475,48 @@ def main(argv: list[str] | None = None) -> int:
         help="Write debug traces, logs, and sqlite statistics to this directory",
     )
     ingest_p.set_defaults(func=_cmd_ingest)
+
+    report_p = sub.add_parser(
+        "report",
+        help="Inspect the persisted wiki graph and summarize quality signals",
+    )
+    report_p.add_argument("--workspace", required=True, help="Workspace ID")
+    report_p.add_argument("--data-dir", required=True, help="Path to persistent data directory")
+    report_p.add_argument(
+        "--backend",
+        choices=["chroma", "postgres"],
+        default="chroma",
+        help="Backend to use under --data-dir (default: chroma)",
+    )
+    report_p.add_argument(
+        "--dsn",
+        default=None,
+        help="PostgreSQL DSN for --backend postgres",
+    )
+    report_p.add_argument(
+        "--report-scope",
+        choices=["llm_wiki", "maintenance", "thinking", "all"],
+        default="all",
+        help="Select which graph lanes to include in the report dump.",
+    )
+    report_p.add_argument(
+        "--dump-mode",
+        choices=["summary", "raw", "both"],
+        default="summary",
+        help="Choose whether to emit only the summary sink, raw payloads, or both.",
+    )
+    report_p.add_argument(
+        "--dump-limit-per-space",
+        type=int,
+        default=20,
+        help="Maximum raw artifacts to include per graph space when dump-mode is raw or both.",
+    )
+    report_p.add_argument(
+        "--split-derived-knowledge",
+        action="store_true",
+        help="Host derived knowledge on a dedicated engine instead of reusing raw KG",
+    )
+    report_p.set_defaults(func=_cmd_report)
 
     # daemon sub-command
     daemon_p = sub.add_parser("daemon", help="Run a background daemon")
