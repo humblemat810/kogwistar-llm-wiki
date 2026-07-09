@@ -28,6 +28,8 @@ Backend selection is explicit too:
 - `KOGWISTAR_LONGRUN_BACKEND=pgvector` is the explicit alias for the same Postgres + pgvector path. The probe launch now has two entries: one that self-provisions a disposable `testcontainers` Postgres+pgvector container, and one that asks for a custom DSN.
 - `in_memory` is not supported for the long-run soak because crash-continuation needs durable state.
 
+For `pgvector`, the experiment launch configs now share one container per test session and create a fingerprinted database name for each semantic experiment. That means increasing only the runtime or LLM call budget keeps the same experiment database identity, while changing the corpus, parser, or operation mode yields a different database name. Fresh, continue, and auto reruns stay on the same experiment database so continuation does not look like a new run.
+
 If you prefer a VSCode button, use the launch configurations in
 `.vscode/launch.json`:
 
@@ -37,13 +39,23 @@ If you prefer a VSCode button, use the launch configurations in
 - `Longrun: Chroma Continue (3 docs)`
 - `Longrun: Chroma Fresh (1 doc)`
 - `Longrun: Chroma Continue (1 doc)`
+- `Longrun: Azure OpenAI Fresh (20 docs)`
+- `Longrun: Azure OpenAI Continue (20 docs)`
+- `Longrun: Azure OpenAI Auto Resume or Fresh (20 docs)`
 - `Longrun: Postgres Fresh (20 docs)`
 - `Longrun: Postgres Continue (20 docs)`
 - `Longrun: Postgres Fresh (3 docs)`
 - `Longrun: Postgres Continue (3 docs)`
 - `Longrun: Postgres Fresh (1 doc)`
 - `Longrun: Postgres Continue (1 doc)`
-- `Probe: PgVector Fresh (1 doc, size selectable)`
+- `Probe: PgVector Fresh (1 doc, fingerprint DB)`
+- `Probe: PgVector Custom DSN (1 doc, custom DSN)`
+- `Longrun: PgVector Fresh (20 docs, fingerprint DB)`
+- `Longrun: PgVector Continue (20 docs, fingerprint DB)`
+- `Longrun: PgVector Auto Resume or Fresh (20 docs, fingerprint DB)`
+- `Longrun: PgVector Azure OpenAI Fresh (20 docs, fingerprint DB)`
+- `Longrun: PgVector Azure OpenAI Continue (20 docs, fingerprint DB)`
+- `Longrun: PgVector Azure OpenAI Auto Resume or Fresh (20 docs, fingerprint DB)`
 
 The fresh configurations clear the run directory first via harness mode, and
 the continue configurations reuse the same stable run directory. Use separate
@@ -51,10 +63,10 @@ run directories per backend so chroma and postgres runs do not share checkpoint
 state.
 
 The pgvector probe self-provisions a disposable `testcontainers` database in
-the `Probe: PgVector Fresh (1 doc, size selectable)` launch entry. The
-`Probe: PgVector Custom DSN (1 doc, size selectable)` launch entry uses the DSN
-you type into the prompt, which is useful when you want to point at a
-particular external database.
+the `Probe: PgVector Fresh (1 doc, fingerprint DB)` launch entry. The
+`Probe: PgVector Custom DSN (1 doc, custom DSN)` launch entry uses the DSN you
+type into the prompt, which is useful when you want to point at a particular
+external database.
 
 Operator guidance:
 
@@ -72,6 +84,8 @@ Defaults:
 - `KOGWISTAR_OLLAMA_BASE_URL=http://localhost:11434`
 - `KOGWISTAR_LONGRUN_DOC_COUNT=20`
 - `KOGWISTAR_LONGRUN_BACKEND=chroma|postgres|pgvector`
+- `KOGWISTAR_LONGRUN_PARSER_PROVIDER=ollama|azure_openai|openai|gemini`
+- `KOGWISTAR_LONGRUN_PARSER_MODEL` selects the model for real LLM parsing.
 - `KOGWISTAR_LONGRUN_DSN` is only needed when `KOGWISTAR_LONGRUN_BACKEND=postgres|pgvector` and no testcontainer-provided DSN is present
 - `KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS=3`
 - `KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS=100`
@@ -79,6 +93,13 @@ Defaults:
   time for bounded continue probes.
 - `KOGWISTAR_LONGRUN_MAX_LLM_CALLS=100` adds an explicit call budget that is
   recorded in the dump and stops the run once exceeded.
+- `KOGWISTAR_LONGRUN_OPERATION_MODE=parse_first|maintenance_first|hybrid`
+  controls whether the long-run ingest request uses the normal parse-first
+  path, the maintenance-first seed-only path, or the hybrid path.
+- `KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE=children|boundaries` controls the
+  workflow-layered proposal strategy. It is part of the parser experiment
+  fingerprint because it can change tree shape, fallback rate, and graph
+  quality.
 - `KOGWISTAR_LONGRUN_RUN_DIR` can point the harness at a stable run directory
   for crash-continuation probes and repeated manual reruns.
 - `KOGWISTAR_LONGRUN_MODE=fresh|continue|auto` selects whether the harness
@@ -126,9 +147,9 @@ and otherwise starts from scratch. Continue and auto reruns also reload
 transition and failure history.
 
 The dump records a `corpus_fingerprint` derived from the selected corpus mode,
-parser lane, backend, and profile settings. Checkpoint reuse only happens when
-the fingerprint matches, which keeps distinct corpus modes from crossing over
-into each other.
+operation mode, parser lane, backend, and profile settings. Checkpoint reuse
+only happens when the fingerprint matches, which keeps distinct corpus and
+operation modes from crossing over into each other.
 
 When `KOGWISTAR_LONGRUN_RESUME_PROBE=1`, the document workflow deliberately
 suspends after parsed graph persistence and before background maintenance. The

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 import sys
@@ -21,6 +22,7 @@ for key in ("TMPDIR", "TEMP", "TMP"):
 
 import pytest
 
+from kogwistar.id_provider import stable_id
 from tests._helpers.pytest_markers import mark_default_ci_items
 
 
@@ -33,6 +35,7 @@ _LONGRUN_PROBE_ENVS: dict[str, dict[str, str]] = {
         "KOGWISTAR_LONGRUN_MODE": "fresh",
         "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
         "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
         "KOGWISTAR_LONGRUN_PARSER": "page_index",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
@@ -160,6 +163,78 @@ def _normalize_pg_dsn(connection_url: str) -> str:
     return url.set(drivername="postgresql+psycopg").render_as_string(hide_password=False)
 
 
+def _normalize_pg_identifier(identifier: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9_]+", "_", identifier.strip().lower()).strip("_")
+    if not cleaned:
+        raise ValueError("pgvector database name must not be empty")
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", cleaned):
+        raise ValueError(
+            "pgvector database name must start with a letter or underscore and contain only "
+            "letters, digits, and underscores"
+        )
+    return cleaned
+
+
+def _longrun_pgvector_database_mode() -> str:
+    mode = os.getenv("KOGWISTAR_LONGRUN_PG_DATABASE_MODE", "fingerprint").strip().lower() or "fingerprint"
+    if mode not in {"fingerprint", "shared"}:
+        raise ValueError(
+            "KOGWISTAR_LONGRUN_PG_DATABASE_MODE must be one of {'fingerprint', 'shared'}; "
+            f"got {mode!r}"
+        )
+    return mode
+
+
+def _longrun_pgvector_database_name() -> str:
+    mode = _longrun_pgvector_database_mode()
+    if mode == "shared":
+        return _normalize_pg_identifier(
+            os.getenv("KOGWISTAR_LONGRUN_PG_DATABASE_NAME", "kogwistar_longrun_shared")
+        )
+    fingerprint = stable_id(
+        "llm_wiki.longrun.pgvector.database",
+        os.getenv("KOGWISTAR_LONGRUN_WORKSPACE_ID", "longrun"),
+        os.getenv("KOGWISTAR_LONGRUN_BACKEND", "pgvector"),
+        os.getenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "parse_first"),
+        os.getenv("KOGWISTAR_LONGRUN_PARSER", "workflow_layered"),
+        os.getenv("KOGWISTAR_LONGRUN_DOC_COUNT", "20"),
+        os.getenv("KOGWISTAR_LONGRUN_DOC_PROFILE", "medium"),
+        os.getenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER", os.getenv("KOGWISTAR_PARSER_PROVIDER", "ollama")),
+        os.getenv("KOGWISTAR_LONGRUN_PARSER_MODEL", os.getenv("KOGWISTAR_PARSER_MODEL", "gemma4:e2b")),
+    )
+    return f"kogwistar_lr_{fingerprint.hex[:16]}"
+
+
+def _ensure_pgvector_database(dsn: str, database_name: str) -> str:
+    try:
+        import sqlalchemy as sa
+    except Exception:
+        return dsn
+
+    url = sa.engine.make_url(dsn)
+    database_name = _normalize_pg_identifier(database_name)
+    admin_url = url.set(drivername="postgresql+psycopg", database="postgres")
+    engine = sa.create_engine(
+        admin_url.render_as_string(hide_password=False),
+        future=True,
+        isolation_level="AUTOCOMMIT",
+    )
+    try:
+        with engine.connect() as conn:
+            exists = conn.execute(
+                sa.text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                {"name": database_name},
+            ).scalar_one_or_none()
+            if exists is None:
+                conn.execute(sa.text(f'CREATE DATABASE "{database_name}"'))
+    finally:
+        try:
+            engine.dispose()
+        except Exception:
+            logger.exception("Failed to dispose pgvector admin engine while creating database %s", database_name)
+    return url.set(drivername="postgresql+psycopg", database=database_name).render_as_string(hide_password=False)
+
+
 def _start_longrun_pgvector_container(container_cls, image: str):
     container = None
     try:
@@ -209,8 +284,16 @@ def _longrun_pgvector_testcontainer():
         pytest.skip(f"Failed to start longrun pgvector test container image={image}: {exc}")
 
     dsn = _normalize_pg_dsn(container.get_connection_url())
+    database_name = _longrun_pgvector_database_name()
+    dsn = _ensure_pgvector_database(dsn, database_name)
+    logger.info(
+        "Using longrun pgvector experiment database name=%s mode=%s",
+        database_name,
+        _longrun_pgvector_database_mode(),
+    )
     os.environ["KOGWISTAR_LONGRUN_DSN"] = dsn
     os.environ["KOGWISTAR_LLM_WIKI_TEST_PG_DSN"] = dsn
+    os.environ["KOGWISTAR_LONGRUN_PG_DATABASE_NAME"] = database_name
     try:
         yield
     finally:

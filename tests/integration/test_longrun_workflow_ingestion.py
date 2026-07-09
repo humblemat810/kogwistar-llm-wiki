@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import multiprocessing
 import os
 import re
@@ -44,7 +45,7 @@ from kogwistar_llm_wiki.longrun_parser_worker import (
     _basic_sense_eval_from_graph_payload,
     run_longrun_parser_child,
 )
-from kogwistar_llm_wiki.provider_config import normalize_provider_name
+from kogwistar_llm_wiki.provider_config import normalize_provider_name, resolve_parser_provider_settings
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.maintenance_policy import DERIVED_KNOWLEDGE_WORKFLOW_ID
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
@@ -59,6 +60,7 @@ STATUSES = {
     "TOKEN_CHECKED",
     "PARSED",
     "PERSISTED",
+    "SOURCE_SEEDED",
     "SUSPENDED",
     "MAINTENANCE_ENQUEUED",
     "MAINTENANCE_OBSERVED",
@@ -75,6 +77,15 @@ WORKFLOW_STEPS = [
     "parse_document",
     "persist_document",
     "await_resume",
+    "enqueue_background_maintenance",
+    "observe_background_maintenance",
+    "verify_document_artifacts",
+    "move_completed",
+]
+MAINTENANCE_FIRST_WORKFLOW_STEPS = [
+    "claim_document",
+    "token_check",
+    "seed_source_map",
     "enqueue_background_maintenance",
     "observe_background_maintenance",
     "verify_document_artifacts",
@@ -104,6 +115,9 @@ SYSTEMIC_FAILURES = {
 }
 
 
+logger = logging.getLogger(__name__)
+
+
 class LongRunDocumentError(RuntimeError):
     """Document-scoped failure raised from a workflow step."""
 
@@ -127,10 +141,16 @@ class LongRunConfig:
     enabled: bool
     mode: str
     doc_count: int
+    operation_mode: str = "parse_first"
+    pg_database_mode: str = "fingerprint"
     parser_provider: str = "ollama"
     parser_model: str = "gemma4:e2b"
+    parser_proposal_mode: str = "children"
+    parser_temperature: float = 0.1
     parser_base_url: str = "http://localhost:11434"
     parser_api_key_env: str | None = None
+    parser_api_version: str | None = None
+    parser_max_retries: int = 2
     ollama_model: str = "gemma4:e2b"
     ollama_base_url: str = "http://localhost:11434"
     max_repeated_systemic_errors: int = 3
@@ -156,6 +176,12 @@ class LongRunConfig:
             raise ValueError("max_llm_calls must be positive")
         if self.max_runtime_seconds <= 0:
             raise ValueError("max_runtime_seconds must be positive")
+        if self.operation_mode not in {"parse_first", "maintenance_first", "hybrid"}:
+            raise ValueError("operation_mode must be one of: parse_first, maintenance_first, hybrid")
+        if self.pg_database_mode not in {"fingerprint", "shared"}:
+            raise ValueError("pg_database_mode must be one of: fingerprint, shared")
+        if self.parser_proposal_mode not in {"children", "boundaries"}:
+            raise ValueError("parser_proposal_mode must be one of: children, boundaries")
         if not self.corpus_fingerprint:
             object.__setattr__(self, "corpus_fingerprint", str(self._compute_corpus_fingerprint()))
 
@@ -165,12 +191,14 @@ class LongRunConfig:
             "llm_wiki.longrun.corpus",
             self.workspace_id,
             self.backend,
-            self.mode,
+            self.operation_mode,
+            self.pg_database_mode,
             self.doc_count,
             self.doc_profile,
             self.parser_lane,
             self.parser_provider,
             self.parser_model,
+            self.parser_proposal_mode,
             self.token_min,
             self.token_max,
             self.resume_probe_enabled,
@@ -215,12 +243,20 @@ class LongRunConfig:
         parse_timeout_seconds = int(os.getenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "1200"))
         if parse_timeout_seconds <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS must be positive")
+        operation_mode = os.getenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "parse_first").strip().lower() or "parse_first"
+        if operation_mode not in {"parse_first", "maintenance_first", "hybrid"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_OPERATION_MODE must be one of: parse_first, maintenance_first, hybrid"
+            )
         max_runtime_seconds = int(os.getenv("KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS", "3600"))
         if max_runtime_seconds <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS must be positive")
         max_llm_calls = int(os.getenv("KOGWISTAR_LONGRUN_MAX_LLM_CALLS", "100"))
         if max_llm_calls <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_MAX_LLM_CALLS must be positive")
+        pg_database_mode = os.getenv("KOGWISTAR_LONGRUN_PG_DATABASE_MODE", "fingerprint").strip().lower() or "fingerprint"
+        if pg_database_mode not in {"fingerprint", "shared"}:
+            raise ValueError("KOGWISTAR_LONGRUN_PG_DATABASE_MODE must be one of: fingerprint, shared")
         pg_source = os.getenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer").strip().lower() or "testcontainer"
         if pg_source not in {"testcontainer", "custom"}:
             raise ValueError(
@@ -251,18 +287,47 @@ class LongRunConfig:
             or os.getenv("KG_DOC_PARSER_MODEL")
             or "gemma4:e2b"
         )
-        parser_base_url = (
+        parser_base_url_env = (
             os.getenv("KOGWISTAR_LONGRUN_PARSER_BASE_URL")
             or os.getenv("KOGWISTAR_PARSER_BASE_URL")
             or os.getenv("KOGWISTAR_OLLAMA_BASE_URL")
             or os.getenv("KG_DOC_PARSER_BASE_URL")
-            or "http://localhost:11434"
         )
         parser_api_key_env = (
             os.getenv("KOGWISTAR_LONGRUN_PARSER_API_KEY_ENV")
             or os.getenv("KOGWISTAR_PARSER_API_KEY_ENV")
             or os.getenv("KG_DOC_PARSER_API_KEY_ENV")
         )
+        parser_api_version = (
+            os.getenv("KOGWISTAR_LONGRUN_PARSER_API_VERSION")
+            or os.getenv("KOGWISTAR_PARSER_API_VERSION")
+            or os.getenv("KG_DOC_PARSER_API_VERSION")
+        )
+        parser_temperature_env = (
+            os.getenv("KOGWISTAR_LONGRUN_PARSER_TEMPERATURE")
+            or os.getenv("KOGWISTAR_PARSER_TEMPERATURE")
+            or os.getenv("KG_DOC_PARSER_TEMPERATURE")
+        )
+        parser_max_retries_env = (
+            os.getenv("KOGWISTAR_LONGRUN_PARSER_MAX_RETRIES")
+            or os.getenv("KOGWISTAR_PARSER_MAX_RETRIES")
+            or os.getenv("KG_DOC_PARSER_MAX_RETRIES")
+        )
+        resolved_parser_settings = resolve_parser_provider_settings(
+            proposal_mode=(
+                os.getenv("KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE")
+                or os.getenv("KOGWISTAR_PARSER_PROPOSAL_MODE")
+                or os.getenv("KG_DOC_PARSER_PROPOSAL_MODE")
+            ),
+            provider=parser_provider,
+            model=parser_model,
+            temperature=float(parser_temperature_env) if parser_temperature_env else None,
+            base_url=parser_base_url_env,
+            api_key_env=parser_api_key_env,
+            api_version=parser_api_version,
+            max_retries=int(parser_max_retries_env) if parser_max_retries_env else None,
+        )
+        parser_spec = resolved_parser_settings.parser
         return cls(
             enabled=(
                 os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1"
@@ -271,18 +336,24 @@ class LongRunConfig:
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
             doc_profile=doc_profile,
-            parser_provider=parser_provider,
-            parser_model=parser_model,
-            parser_base_url=parser_base_url,
-            parser_api_key_env=parser_api_key_env,
+            parser_provider=parser_spec.provider,
+            parser_model=parser_spec.model,
+            parser_proposal_mode=resolved_parser_settings.proposal_mode,
+            parser_temperature=parser_spec.temperature,
+            parser_base_url=parser_spec.base_url or "http://localhost:11434",
+            parser_api_key_env=parser_spec.api_key_env,
+            parser_api_version=parser_spec.api_version,
+            parser_max_retries=parser_spec.max_retries,
             backend=backend,
             parser_lane=parser_lane,
             parse_timeout_seconds=parse_timeout_seconds,
+            operation_mode=operation_mode,
+            pg_database_mode=pg_database_mode,
             max_runtime_seconds=max_runtime_seconds,
             max_llm_calls=max_llm_calls,
             dsn=dsn,
-            ollama_model=parser_model,
-            ollama_base_url=parser_base_url,
+            ollama_model=parser_spec.model,
+            ollama_base_url=parser_spec.base_url or "http://localhost:11434",
             max_repeated_systemic_errors=int(
                 os.getenv("KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS", "3")
             ),
@@ -304,10 +375,16 @@ class LongRunConfig:
             "doc_profile": self.doc_profile,
             "parser_provider": self.parser_provider,
             "parser_model": self.parser_model,
+            "parser_proposal_mode": self.parser_proposal_mode,
+            "parser_temperature": self.parser_temperature,
             "parser_base_url": self.parser_base_url,
             "parser_api_key_env": self.parser_api_key_env,
+            "parser_api_version": self.parser_api_version,
+            "parser_max_retries": self.parser_max_retries,
             "backend": self.backend,
             "parser_lane": self.parser_lane,
+            "operation_mode": self.operation_mode,
+            "pg_database_mode": self.pg_database_mode,
             "parse_timeout_seconds": self.parse_timeout_seconds,
             "max_runtime_seconds": self.max_runtime_seconds,
             "max_llm_calls": self.max_llm_calls,
@@ -709,6 +786,7 @@ class LongRunHarness:
         started = time.monotonic()
         idle_loops = 0
         self.dumper.dump(reason="run_started")
+        self._log_heartbeat(phase="run_started", started=started)
         for record in self.records:
             if record.status in TERMINAL_STATES:
                 continue
@@ -747,6 +825,7 @@ class LongRunHarness:
                 self._abort("runtime_worker_stuck: max runtime exceeded")
                 break
             self._mark_document_progress(record, step_name="document_complete")
+            self._log_heartbeat(phase=f"checkpoint_{record.doc_id}", started=started)
             self.dumper.dump(reason=f"checkpoint_{record.doc_id}")
 
         if self.aborted:
@@ -826,7 +905,7 @@ class LongRunHarness:
             ),
             "workflow_events": self._export_engine(
                 self.engines.conversation,
-                where={"workflow_id": WORKFLOW_ID},
+                where={"workflow_id": self._workflow_id()},
                 namespace=ns.conv_bg,
             ),
         }
@@ -987,8 +1066,12 @@ class LongRunHarness:
         return {
             "provider": self.config.parser_provider,
             "model": self.config.parser_model,
+            "proposal_mode": self.config.parser_proposal_mode,
+            "temperature": self.config.parser_temperature,
             "base_url": self.config.parser_base_url,
             "api_key_env": self.config.parser_api_key_env,
+            "api_version": self.config.parser_api_version,
+            "max_retries": self.config.parser_max_retries,
             "parser_mode": self.config.parser_provider,
             "parser_lane": self.config.parser_lane,
             "parse_timeout_seconds": self.config.parse_timeout_seconds,
@@ -1082,7 +1165,7 @@ class LongRunHarness:
         run_id = f"{self.run_id}:{record.doc_id}"
         record.run_id = run_id
         result = runtime.run(
-            workflow_id=WORKFLOW_ID,
+            workflow_id=self._workflow_id(),
             conversation_id=f"longrun:{self.config.workspace_id}",
             turn_node_id=record.doc_id,
             initial_state={
@@ -1096,7 +1179,7 @@ class LongRunHarness:
             resume_checkpoint_step_seq = 10_000_000 + len(self.status_transitions)
             runtime._persist_checkpoint(
                 conversation_id=f"longrun:{self.config.workspace_id}",
-                workflow_id=WORKFLOW_ID,
+                workflow_id=self._workflow_id(),
                 run_id=run_id,
                 step_seq=resume_checkpoint_step_seq,
                 state=dict(result.final_state),
@@ -1171,7 +1254,13 @@ class LongRunHarness:
             if isinstance(call_count, int) and call_count >= 0:
                 self.llm_call_count = call_count
                 return
-        self.llm_call_count = sum(1 for record in self.records if record.status != "PENDING")
+        transition_rows = self._load_jsonl_rows(self.dumper.dump_dir / "status_transitions.jsonl")
+        parsed_transition_count = sum(
+            1
+            for row in transition_rows
+            if row.get("phase") == "parse_document" and row.get("status") == "PARSED"
+        )
+        self.llm_call_count = parsed_transition_count
 
     def _load_checkpoint_state(self, *, strict: bool) -> bool:
         manifest = self.dumper.dump_dir / "manifest.jsonl"
@@ -1349,7 +1438,7 @@ class LongRunHarness:
             client_result=RunSuccess(
                 state_update=[("u", {"resumed_from_checkpoint": True})]
             ),
-            workflow_id=WORKFLOW_ID,
+            workflow_id=self._workflow_id(),
             conversation_id=f"longrun:{self.config.workspace_id}",
             turn_node_id=record.doc_id,
         )
@@ -1519,6 +1608,34 @@ class LongRunHarness:
                 ]
             )
 
+        @resolver.register("seed_source_map")
+        def _seed_source_map(ctx):
+            record = self.contexts[str(ctx.state_view["doc_id"])]
+            self._mark_document_progress(record, step_name="seed_source_map")
+            request = self._request_for(record)
+            source_document_id = self.pipeline._source_document_id(request)
+            ns = self.pipeline.namespaces_for(request.workspace_id)
+            try:
+                self.pipeline.register_source(
+                    request=request,
+                    source_document_id=source_document_id,
+                    namespace=ns.conv_fg,
+                )
+                self.pipeline.seed_source_map(
+                    request=request,
+                    source_document_id=source_document_id,
+                    namespace=ns.conv_bg,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise LongRunDocumentError(
+                    "document_persist_failed_after_retries",
+                    str(exc),
+                    phase="seed_source_map",
+                ) from exc
+            record.source_document_id = source_document_id
+            self._transition(record, "SOURCE_SEEDED", phase="seed_source_map")
+            return RunSuccess(state_update=[("u", {"source_document_id": source_document_id})])
+
         @resolver.register("await_resume")
         def _await_resume(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
@@ -1549,6 +1666,17 @@ class LongRunHarness:
             request = self._request_for(record)
             ns = self.pipeline.namespaces_for(request.workspace_id)
             source_document_id = str(record.source_document_id)
+            if self.config.operation_mode == "maintenance_first":
+                maintenance_job_id = self.pipeline.create_maintenance_request(
+                    request=request,
+                    source_document_id=source_document_id,
+                    namespace=ns.conv_bg,
+                    maintenance_kind="document_seed_graph",
+                )
+                record.maintenance_job_id = maintenance_job_id
+                self._transition(record, "MAINTENANCE_ENQUEUED", phase="enqueue_background_maintenance")
+                return RunSuccess(state_update=[("u", {"maintenance_job_id": maintenance_job_id})])
+
             maintenance_job_id = self.pipeline.create_maintenance_request(
                 request=request,
                 source_document_id=source_document_id,
@@ -1642,7 +1770,10 @@ class LongRunHarness:
         def _verify(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
             self._mark_document_progress(record, step_name="verify_document_artifacts")
-            self._verify_document(record)
+            if self.config.operation_mode == "maintenance_first":
+                self._verify_seeded_source_map(record)
+            else:
+                self._verify_document(record)
             return RunSuccess(state_update=[("u", {"verified": True})])
 
         @resolver.register("move_completed")
@@ -1666,10 +1797,11 @@ class LongRunHarness:
             title=record.title,
             raw_text=record.current_path.read_text(encoding="utf-8"),
             source_format="markdown",
-            parser_mode="ollama",
+            operation_mode=self.config.operation_mode,
+            parser_mode=self.config.parser_provider,
             promotion_mode="sync",
-            llm_provider="ollama",
-            llm_model=self.config.ollama_model,
+            llm_provider=self.config.parser_provider,
+            llm_model=self.config.parser_model,
         )
 
     def _transition(self, record: DocumentRecord, status: str, *, phase: str, **extra: Any) -> None:
@@ -1745,6 +1877,30 @@ class LongRunHarness:
     def _abort(self, reason: str) -> None:
         self.aborted = True
         self.abort_reason = reason
+        self._log_heartbeat(phase="abort", started=None)
+
+    def _log_heartbeat(self, *, phase: str, started: float | None) -> None:
+        summary = self.progress_summary()
+        elapsed_s = None if started is None else max(0.0, time.monotonic() - started)
+        logger.info(
+            (
+                "Longrun heartbeat phase=%s run_id=%s doc=%s step=%s "
+                "completed=%s failed=%s quarantined=%s suspended=%s "
+                "llm_calls=%s/%s elapsed_s=%s checkpoint_loaded=%s"
+            ),
+            phase,
+            summary["run_id"],
+            summary["current_document_id"],
+            summary["current_step"],
+            summary["completed_count"],
+            summary["failed_count"],
+            summary["quarantined_count"],
+            summary["suspended_count"],
+            summary["llm_call_count"],
+            summary["llm_call_budget"],
+            None if elapsed_s is None else round(elapsed_s, 2),
+            summary["manifest_checkpoint_loaded"],
+        )
 
     def _quarantine_processing_docs(self) -> None:
         for record in self.records:
@@ -1775,6 +1931,14 @@ class LongRunHarness:
         self.projection_poll_count += 1
         vault_root = self.run_dir / "projection_vault"
         self.projection_worker.process_pending_projections(self.config.workspace_id, str(vault_root))
+
+    def _workflow_id(self) -> str:
+        return f"{WORKFLOW_ID}.{self.config.operation_mode}"
+
+    def _workflow_steps(self) -> list[str]:
+        if self.config.operation_mode == "maintenance_first":
+            return list(MAINTENANCE_FIRST_WORKFLOW_STEPS)
+        return list(WORKFLOW_STEPS)
 
     @staticmethod
     def _node_rows_with_metadata(engine: Any, *, where: dict[str, Any], limit: int = 10_000) -> list[dict[str, Any]]:
@@ -1878,6 +2042,45 @@ class LongRunHarness:
         if record.promoted_entity_id:
             self._verify_promotion_provenance(record)
 
+    def _verify_seeded_source_map(self, record: DocumentRecord) -> None:
+        if not record.source_document_id:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                "missing source_document_id",
+                phase="verify_document_artifacts",
+            )
+        stored_document = self.engines.conversation.backend.document_get(
+            ids=[record.source_document_id],
+            include=["documents", "metadatas"],
+        )
+        if stored_document["ids"] != [record.source_document_id]:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"source document {record.source_document_id} was not persisted",
+                phase="verify_document_artifacts",
+            )
+        ns = WorkspaceNamespaces(self.config.workspace_id)
+        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            seed_nodes = self.engines.conversation.read.get_nodes(
+                where=_and_where(
+                    {"artifact_kind": "source_map_seed"},
+                    {"source_document_id": record.source_document_id},
+                ),
+                limit=10_000,
+            )
+        if not seed_nodes:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"no source map seed for source document {record.source_document_id}",
+                phase="verify_document_artifacts",
+            )
+        if not record.maintenance_job_id:
+            raise LongRunSystemicError(
+                "graph_invariant_violation",
+                f"no maintenance job for source document {record.source_document_id}",
+                phase="verify_document_artifacts",
+            )
+
     def _verify_promotion_provenance(self, record: DocumentRecord) -> dict[str, Any]:
         if not record.promoted_entity_id:
             raise LongRunSystemicError(
@@ -1949,7 +2152,10 @@ class LongRunHarness:
             raise AssertionError("no document may remain in processing")
         for record in self.records:
             if record.status == "COMPLETED":
-                self._verify_document(record)
+                if self.config.operation_mode == "maintenance_first":
+                    self._verify_seeded_source_map(record)
+                else:
+                    self._verify_document(record)
             if record.status in {"FAILED", "QUARANTINED"} and not any(
                 failure.doc_id == record.doc_id for failure in self.failure_records
             ):
@@ -2008,7 +2214,7 @@ class LongRunHarness:
             WorkspaceNamespaces(self.config.workspace_id).conv_bg,
         ):
             events = self.engines.conversation.read.get_nodes(
-                where={"workflow_id": WORKFLOW_ID},
+                where={"workflow_id": self._workflow_id()},
                 limit=10_000,
             )
         missing = [
@@ -2048,11 +2254,15 @@ class LongRunHarness:
 
     def _provider_settings(self) -> WorkflowProviderSettings:
         return WorkflowProviderSettings(
+            proposal_mode=self.config.parser_proposal_mode,
             parser=ProviderEndpointConfig(
                 provider=self.config.parser_provider,
                 model=self.config.parser_model,
+                temperature=self.config.parser_temperature,
                 base_url=self.config.parser_base_url,
                 api_key_env=self.config.parser_api_key_env,
+                api_version=self.config.parser_api_version,
+                max_retries=self.config.parser_max_retries,
             ),
             embedding=EmbeddingProviderConfig(provider="fake", model="longrun-embed", dimension=2),
         )
@@ -2269,10 +2479,12 @@ class LongRunHarness:
             self._transition(record, "PENDING", phase="discover_pending", token_count=token_count)
 
     def _materialize_workflow_design(self) -> None:
-        grounding = [Grounding(spans=[Span.from_dummy_for_workflow(WORKFLOW_ID)])]
+        workflow_id = self._workflow_id()
+        grounding = [Grounding(spans=[Span.from_dummy_for_workflow(workflow_id)])]
         node_ids: dict[str, str] = {}
-        for step in WORKFLOW_STEPS:
-            node_id = str(stable_id("wf_node", WORKFLOW_ID, step))
+        workflow_steps = self._workflow_steps()
+        for step in workflow_steps:
+            node_id = str(stable_id("wf_node", workflow_id, step))
             node_ids[step] = node_id
             self.engines.workflow.write.add_node(
                 WorkflowNode(
@@ -2283,13 +2495,13 @@ class LongRunHarness:
                     mentions=grounding,
                     metadata={
                         "entity_type": "workflow_node",
-                        "workflow_id": WORKFLOW_ID,
+                        "workflow_id": workflow_id,
                         "wf_op": step,
-                        "wf_start": step == WORKFLOW_STEPS[0],
+                        "wf_start": step == workflow_steps[0],
                     },
                 )
             )
-        terminal_id = str(stable_id("wf_node", WORKFLOW_ID, "done"))
+        terminal_id = str(stable_id("wf_node", workflow_id, "done"))
         self.engines.workflow.write.add_node(
             WorkflowNode(
                 id=terminal_id,
@@ -2299,16 +2511,16 @@ class LongRunHarness:
                 mentions=grounding,
                 metadata={
                     "entity_type": "workflow_node",
-                    "workflow_id": WORKFLOW_ID,
+                    "workflow_id": workflow_id,
                     "wf_terminal": True,
                 },
             )
         )
-        targets = WORKFLOW_STEPS[1:] + ["done"]
-        for source, target in zip(WORKFLOW_STEPS, targets):
+        targets = workflow_steps[1:] + ["done"]
+        for source, target in zip(workflow_steps, targets):
             self.engines.workflow.write.add_edge(
                 WorkflowEdge(
-                    id=str(stable_id("wf_edge", WORKFLOW_ID, source, target)),
+                    id=str(stable_id("wf_edge", workflow_id, source, target)),
                     source_ids=[node_ids[source]],
                     target_ids=[terminal_id if target == "done" else node_ids[target]],
                     relation="workflow_transition",
@@ -2320,7 +2532,7 @@ class LongRunHarness:
                     target_edge_ids=[],
                     metadata={
                         "entity_type": "workflow_edge",
-                        "workflow_id": WORKFLOW_ID,
+                        "workflow_id": workflow_id,
                         "wf_predicate": None,
                         "wf_is_default": True,
                         "wf_priority": 100,
@@ -2519,6 +2731,19 @@ def _check_ollama_available(config: LongRunConfig) -> tuple[bool, str | None]:
     if not response.ok:
         return False, f"local Ollama is not healthy at {config.ollama_base_url}: {response.status_code}"
     return True, None
+
+
+def _longrun_requires_ollama(config: LongRunConfig) -> bool:
+    return normalize_provider_name(config.parser_provider) == "ollama"
+
+
+def test_longrun_ollama_healthcheck_gate_is_provider_specific() -> None:
+    assert _longrun_requires_ollama(
+        LongRunConfig(enabled=False, mode="fresh", doc_count=1, parser_provider="ollama")
+    )
+    assert not _longrun_requires_ollama(
+        LongRunConfig(enabled=False, mode="fresh", doc_count=1, parser_provider="azure")
+    )
 
 
 def _count_tokens(text: str) -> int:
@@ -2733,7 +2958,7 @@ def test_longrun_maintenance_summary_counts_only_maintenance_steps(tmp_path: Pat
         "ids": ["ingest-step", "maintenance-step-1", "maintenance-step-2"],
         "documents": ["{}", "{}", "{}"],
         "metadatas": [
-            {"entity_type": "workflow_step_exec", "workflow_id": WORKFLOW_ID},
+            {"entity_type": "workflow_step_exec", "workflow_id": harness._workflow_id()},
             {"entity_type": "workflow_step_exec", "workflow_id": DERIVED_KNOWLEDGE_WORKFLOW_ID},
             {"entity_type": "workflow_step_exec", "workflow_id": "maintenance.execution_wisdom.v1"},
         ],
@@ -2935,6 +3160,8 @@ def test_longrun_config_from_env_accepts_parser_selection(monkeypatch: pytest.Mo
     monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER", "page_index")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "maintenance_first")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE", "boundaries")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS", "42")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MAX_LLM_CALLS", "9")
@@ -2942,6 +3169,8 @@ def test_longrun_config_from_env_accepts_parser_selection(monkeypatch: pytest.Mo
     config = LongRunConfig.from_env()
 
     assert config.parser_lane == "page_index"
+    assert config.operation_mode == "maintenance_first"
+    assert config.parser_proposal_mode == "boundaries"
     assert config.parse_timeout_seconds == 7
     assert config.max_runtime_seconds == 42
     assert config.max_llm_calls == 9
@@ -2959,10 +3188,36 @@ def test_longrun_config_from_env_accepts_parser_provider_and_model(monkeypatch: 
 
     config = LongRunConfig.from_env()
 
-    assert config.parser_provider == "openai"
+    assert config.parser_provider == "azure"
     assert config.parser_model == "gpt4o"
     assert config.parser_base_url == "https://example.openai.azure.com/"
     assert config.parser_api_key_env == "OPENAI_API_KEY_GPT4O"
+
+
+def test_longrun_config_from_env_uses_model_specific_azure_endpoint(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER", "azure_openai")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_MODEL", "gpt-5-mini")
+    monkeypatch.delenv("KOGWISTAR_LONGRUN_PARSER_BASE_URL", raising=False)
+    monkeypatch.delenv("KOGWISTAR_PARSER_BASE_URL", raising=False)
+    monkeypatch.setenv(
+        "OPENAI_DEPLOYMENT_ENDPOINT_GPT5_MINI",
+        "https://gpt5-mini.example.openai.azure.com/",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY_GPT5_MINI", "test-key")
+    monkeypatch.setenv("OPENAI_DEPLOYMENT_VERSION_GPT5_MINI", "2025-01-01-preview")
+
+    config = LongRunConfig.from_env()
+
+    assert config.parser_provider == "azure"
+    assert config.parser_model == "gpt-5-mini"
+    assert config.parser_base_url == "https://gpt5-mini.example.openai.azure.com/"
+    assert config.parser_api_key_env == "OPENAI_API_KEY_GPT5_MINI"
+    assert config.parser_api_version == "2025-01-01-preview"
+    assert config.parser_max_retries == 2
 
 
 def test_longrun_config_from_env_defaults_to_workflow_layered(monkeypatch: pytest.MonkeyPatch):
@@ -2997,6 +3252,60 @@ def test_longrun_config_from_env_supports_one_doc_no_resume_probe(monkeypatch: p
     assert (config.token_min, config.token_max) == _longrun_doc_profile_token_bounds("tiny")
     assert config.skip_maintenance_invariant is True
     assert config.corpus_fingerprint
+
+
+def test_longrun_corpus_fingerprint_changes_across_operation_modes() -> None:
+    base = dict(
+        enabled=False,
+        mode="auto",
+        doc_count=20,
+        parser_lane="workflow_layered",
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    parse_first = LongRunConfig(operation_mode="parse_first", **base)
+    maintenance_first = LongRunConfig(operation_mode="maintenance_first", **base)
+    hybrid = LongRunConfig(operation_mode="hybrid", **base)
+
+    assert len({parse_first.corpus_fingerprint, maintenance_first.corpus_fingerprint, hybrid.corpus_fingerprint}) == 3
+
+
+def test_longrun_corpus_fingerprint_changes_across_proposal_modes() -> None:
+    base = dict(
+        enabled=False,
+        mode="auto",
+        doc_count=20,
+        operation_mode="parse_first",
+        parser_lane="workflow_layered",
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    children = LongRunConfig(parser_proposal_mode="children", **base)
+    boundaries = LongRunConfig(parser_proposal_mode="boundaries", **base)
+
+    assert children.corpus_fingerprint != boundaries.corpus_fingerprint
+
+
+def test_longrun_corpus_fingerprint_ignores_run_mode_and_budgets() -> None:
+    base = dict(
+        enabled=False,
+        doc_count=20,
+        operation_mode="parse_first",
+        parser_lane="workflow_layered",
+        parser_provider="azure",
+        parser_model="gpt-5-mini",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    fresh = LongRunConfig(mode="fresh", max_llm_calls=100, max_runtime_seconds=1200, **base)
+    continue_run = LongRunConfig(mode="continue", max_llm_calls=250, max_runtime_seconds=2400, **base)
+    auto = LongRunConfig(mode="auto", max_llm_calls=500, max_runtime_seconds=3600, **base)
+
+    assert fresh.corpus_fingerprint == continue_run.corpus_fingerprint == auto.corpus_fingerprint
 
 
 def test_longrun_harness_reports_call_budget_and_corpus_fingerprint(tmp_path: Path):
@@ -3036,6 +3345,195 @@ def test_longrun_harness_reports_call_budget_and_corpus_fingerprint(tmp_path: Pa
     assert manifest_row["corpus_fingerprint"] == config.corpus_fingerprint
 
 
+def test_longrun_request_uses_configured_operation_mode(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="maintenance_first",
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "operation-mode", config=config)
+    harness.prepare()
+    record = harness.records[0]
+
+    request = harness._request_for(record)
+
+    assert request.operation_mode == "maintenance_first"
+
+
+def test_longrun_request_uses_configured_parser_provider_and_model(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        parser_provider="azure",
+        parser_model="gpt-5-mini",
+        parser_base_url="https://example.openai.azure.com/",
+        parser_api_key_env="OPENAI_API_KEY_GPT5_MINI",
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parser-provider", config=config)
+    harness.prepare()
+    record = harness.records[0]
+
+    request = harness._request_for(record)
+
+    assert request.parser_mode == "azure"
+    assert request.llm_provider == "azure"
+    assert request.llm_model == "gpt-5-mini"
+    assert harness._provider_settings().parser.provider == "azure"
+    assert harness._provider_settings().parser.model == "gpt-5-mini"
+
+
+def test_longrun_provider_settings_preserve_proposal_mode(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        parser_proposal_mode="boundaries",
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "proposal-mode", config=config)
+
+    settings = harness._provider_settings()
+
+    assert settings.proposal_mode == "boundaries"
+    assert harness.llm_summary()["proposal_mode"] == "boundaries"
+
+
+def test_longrun_workflow_steps_are_operation_mode_specific(tmp_path: Path):
+    parse_first = LongRunHarness(
+        run_dir=tmp_path / "parse-first-steps",
+        config=LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            doc_count=1,
+            operation_mode="parse_first",
+            max_repeated_systemic_errors=3,
+            max_post_doc_maintenance_steps=1,
+        ),
+    )
+    maintenance_first = LongRunHarness(
+        run_dir=tmp_path / "maintenance-first-steps",
+        config=LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            doc_count=1,
+            operation_mode="maintenance_first",
+            max_repeated_systemic_errors=3,
+            max_post_doc_maintenance_steps=1,
+        ),
+    )
+
+    assert "parse_document" in parse_first._workflow_steps()
+    assert "persist_document" in parse_first._workflow_steps()
+    assert "parse_document" not in maintenance_first._workflow_steps()
+    assert "persist_document" not in maintenance_first._workflow_steps()
+    assert "seed_source_map" in maintenance_first._workflow_steps()
+    assert parse_first._workflow_id() != maintenance_first._workflow_id()
+
+
+def test_longrun_maintenance_first_skips_parser_and_seeds_source_map(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="maintenance_first",
+        skip_maintenance_invariant=True,
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "maintenance-first-run", config=config)
+    harness.prepare()
+    monkeypatch.setattr(
+        harness,
+        "_run_parse_with_subprocess",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("maintenance_first must not parse")),
+    )
+    monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
+    monkeypatch.setattr(harness, "_drain_maintenance_after_documents", lambda: None)
+    monkeypatch.setattr(harness, "_poll_projection_once", lambda: None)
+
+    harness.run()
+
+    record = harness.records[0]
+    phases = [row["phase"] for row in harness.status_transitions if row["doc_id"] == record.doc_id]
+    assert record.status == "COMPLETED"
+    assert record.source_document_id
+    assert record.maintenance_job_id
+    assert "seed_source_map" in phases
+    assert "parse_document" not in phases
+    assert "persist_document" not in phases
+
+
+def test_longrun_restore_llm_usage_counts_parse_transitions_not_seeded_records(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="maintenance_first",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "restore-llm-usage", config=config)
+    harness.prepare()
+    record = harness.records[0]
+    harness._transition(record, "SOURCE_SEEDED", phase="seed_source_map")
+    harness._transition(record, "MAINTENANCE_ENQUEUED", phase="enqueue_background_maintenance")
+    harness.dumper.dump(reason="checkpoint_without_llm_summary")
+    (harness.dumper.dump_dir / "llm_calls_summary.json").unlink()
+
+    restored = LongRunHarness(run_dir=harness.run_dir, config=config)
+    restored.records = list(harness.records)
+    restored._restore_llm_usage_from_dump()
+
+    assert restored.llm_call_count == 0
+
+
+def test_longrun_run_emits_console_heartbeat(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        max_llm_calls=5,
+        max_runtime_seconds=120,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "heartbeat", config=config)
+    harness.prepare()
+    caplog.set_level(logging.INFO)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(harness, "_run_document_workflow", lambda record: "succeeded")
+    monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
+    monkeypatch.setattr(harness, "_drain_maintenance_after_documents", lambda: None)
+    monkeypatch.setattr(harness, "_poll_projection_once", lambda: None)
+    monkeypatch.setattr(harness, "_verify_run_invariants", lambda: None)
+
+    try:
+        harness.run()
+    finally:
+        monkeypatch.undo()
+
+    assert "Longrun heartbeat phase=run_started" in caplog.text
+    assert "Longrun heartbeat phase=checkpoint_doc-001" in caplog.text
+
+
 def test_longrun_run_aborts_when_llm_call_budget_is_exceeded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -3060,6 +3558,36 @@ def test_longrun_run_aborts_when_llm_call_budget_is_exceeded(
 
     assert harness.aborted is True
     assert harness.abort_reason and "llm call budget exceeded" in harness.abort_reason
+
+
+def test_longrun_run_aborts_when_runtime_budget_is_exceeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        max_runtime_seconds=1,
+        max_llm_calls=10,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "runtime-abort", config=config)
+    harness.prepare()
+    monkeypatch.setattr(
+        harness,
+        "_run_document_workflow",
+        lambda record: (time.sleep(1.2) or "succeeded"),
+    )
+    monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
+
+    with pytest.raises(AssertionError, match="max runtime exceeded"):
+        harness.run()
+
+    assert harness.aborted is True
+    assert harness.abort_reason and "max runtime exceeded" in harness.abort_reason
 
 
 def test_longrun_config_from_env_auto_enables_pgvector_testcontainer_probe(monkeypatch: pytest.MonkeyPatch):
@@ -3908,7 +4436,6 @@ def test_longrun_promoted_node_without_promotion_pack_fails_invariant(tmp_path: 
 
 @pytest.mark.integration
 @pytest.mark.longrun
-@pytest.mark.requires_ollama
 def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
     config = LongRunConfig.from_env()
     if not config.enabled and config.backend != "pgvector":
@@ -3918,31 +4445,32 @@ def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
     harness = LongRunHarness(run_dir=run_dir, config=config)
     harness.prepare()
 
-    try:
-        __import__("langchain_ollama")
-    except Exception as exc:  # noqa: BLE001
-        failure = harness._failure_record(
-            doc_id=None,
-            phase="ollama_dependency_check",
-            code="ollama_unavailable_repeatedly",
-            scope="systemic",
-            message=f"langchain_ollama import failed: {exc}",
-        )
-        harness._record_failure(failure)
-        harness.dumper.dump(reason="ollama_dependency_unavailable", final=True)
-        pytest.fail(f"langchain_ollama is required; diagnostic dump written to {harness.dumper.dump_dir}")
+    if _longrun_requires_ollama(config):
+        try:
+            __import__("langchain_ollama")
+        except Exception as exc:  # noqa: BLE001
+            failure = harness._failure_record(
+                doc_id=None,
+                phase="ollama_dependency_check",
+                code="ollama_unavailable_repeatedly",
+                scope="systemic",
+                message=f"langchain_ollama import failed: {exc}",
+            )
+            harness._record_failure(failure)
+            harness.dumper.dump(reason="ollama_dependency_unavailable", final=True)
+            pytest.fail(f"langchain_ollama is required; diagnostic dump written to {harness.dumper.dump_dir}")
 
-    ok, reason = _check_ollama_available(config)
-    if not ok:
-        failure = harness._failure_record(
-            doc_id=None,
-            phase="ollama_healthcheck",
-            code="ollama_unavailable_repeatedly",
-            scope="systemic",
-            message=reason or "Ollama unavailable",
-        )
-        harness._record_failure(failure)
-        harness.dumper.dump(reason="ollama_unavailable", final=True)
-        pytest.fail(f"{reason}; diagnostic dump written to {harness.dumper.dump_dir}")
+        ok, reason = _check_ollama_available(config)
+        if not ok:
+            failure = harness._failure_record(
+                doc_id=None,
+                phase="ollama_healthcheck",
+                code="ollama_unavailable_repeatedly",
+                scope="systemic",
+                message=reason or "Ollama unavailable",
+            )
+            harness._record_failure(failure)
+            harness.dumper.dump(reason="ollama_unavailable", final=True)
+            pytest.fail(f"{reason}; diagnostic dump written to {harness.dumper.dump_dir}")
 
     harness.run()
