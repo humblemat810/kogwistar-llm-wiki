@@ -34,10 +34,12 @@ from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
 from .provider_config import normalize_provider_name, resolve_parser_provider_settings
 from .debug_run import (
+    LiveTracePrinter,
     ParseStatisticsStore,
     append_jsonl,
     build_parse_statistics_record,
     configure_debug_logging,
+    env_flag_enabled,
     now_ms,
 )
 from .longrun_parser_worker import run_workflow_layered_parse
@@ -258,6 +260,7 @@ class IngestPipeline:
         parser: ParserFn = parse_page_index_document,
         policies: LlmWikiPolicies | None = None,
         debug_run_dir: str | Path | None = None,
+        live_trace: bool | None = None,
     ) -> None:
         self.engines = engines
         self.parser = parser
@@ -267,6 +270,12 @@ class IngestPipeline:
         self.review_query_service = ReviewQueryService(engines)
         self.debug_run_dir = configure_debug_logging(debug_run_dir)
         self.debug_trace_path = self.debug_run_dir / "run_trace.jsonl" if self.debug_run_dir else None
+        self.live_trace = (
+            env_flag_enabled("KOGWISTAR_LLM_WIKI_LIVE_TRACE", "KOGWISTAR_LIVE_TRACE")
+            if live_trace is None
+            else bool(live_trace)
+        )
+        self.live_trace_printer = LiveTracePrinter(prefix="llm-wiki.ingest") if self.live_trace else None
         self.stats_store = (
             ParseStatisticsStore(self.debug_run_dir / "llm_wiki_stats.sqlite3")
             if self.debug_run_dir is not None
@@ -720,16 +729,15 @@ class IngestPipeline:
         self._trace_event("trace", message=message)
 
     def _trace_event(self, stage: str, **fields: object) -> None:
-        if self.debug_trace_path is None:
-            return
-        append_jsonl(
-            self.debug_trace_path,
-            {
-                "timestamp_ms": now_ms(),
-                "stage": stage,
-                **fields,
-            },
-        )
+        payload = {
+            "timestamp_ms": now_ms(),
+            "stage": stage,
+            **fields,
+        }
+        if self.debug_trace_path is not None:
+            append_jsonl(self.debug_trace_path, payload)
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(payload)
 
     def _record_parse_statistics(
         self,

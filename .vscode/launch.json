@@ -236,7 +236,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -265,7 +267,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -294,7 +298,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -323,7 +329,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -357,7 +365,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -391,7 +401,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -425,7 +437,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -455,7 +469,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -485,7 +501,8 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
-        
+        "--kogwistar-longrun",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -515,7 +532,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -545,7 +564,8 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
-        // "-q",
+        "--kogwistar-longrun",
+        "-s",
         "-p", 
         "no:cacheprovider"
       ],
@@ -578,7 +598,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "--kogwistar-longrun-probe=pgvector-testcontainer",
+        "-s",
         "-p", 
         "no:cacheprovider"
       ],
@@ -612,6 +634,8 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -639,13 +663,52 @@
       }
     },
     {
+      "name": "Probe: PgVector Persistent Dev Container (1 doc, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-probe",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
       "name": "Longrun: PgVector Fresh (20 docs, fingerprint DB)",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -670,13 +733,50 @@
       }
     },
     {
+      "name": "Longrun: PgVector Persistent Fresh (20 docs, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
       "name": "Longrun: PgVector Continue (20 docs, fingerprint DB)",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -701,13 +801,50 @@
       }
     },
     {
+      "name": "Longrun: PgVector Persistent Continue (20 docs, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
       "name": "Longrun: PgVector Auto Resume or Fresh (20 docs, fingerprint DB)",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -732,13 +869,50 @@
       }
     },
     {
+      "name": "Longrun: PgVector Persistent Auto Resume or Fresh (20 docs, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "auto",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
       "name": "Longrun: PgVector Azure OpenAI Fresh (20 docs, fingerprint DB)",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -774,7 +948,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -810,7 +986,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -846,7 +1024,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -876,7 +1056,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -906,7 +1088,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -937,7 +1121,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -968,7 +1154,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -999,7 +1187,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -1169,6 +1359,18 @@
       "type": "promptString",
       "description": "Custom PgVector DSN (used when PgVector probe DSN source is custom)",
       "default": "postgresql+psycopg://user:pass@localhost:5432/dbname"
+    },
+    {
+      "id": "longrunPersistentPgContainerName",
+      "type": "promptString",
+      "description": "Persistent PgVector dev container name",
+      "default": "kogwistar-llm-wiki-pgvector-dev"
+    },
+    {
+      "id": "longrunPersistentPgPort",
+      "type": "promptString",
+      "description": "Persistent PgVector dev host port",
+      "default": "35432"
     },
     {
       "id": "longrunPgDsn",

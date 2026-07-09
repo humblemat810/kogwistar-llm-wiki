@@ -8,10 +8,13 @@ from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from kogwistar_llm_wiki.debug_run import (
+    LiveTracePrinter,
     ParseStatisticsStore,
     append_jsonl,
     build_parse_statistics_record,
     configure_debug_logging,
+    env_flag_enabled,
+    format_live_trace,
 )
 
 
@@ -86,6 +89,60 @@ def test_append_jsonl_writes_machine_readable_lines(tmp_path):
     assert [line["stage"] for line in lines] == ["demo", "next"]
     assert all("timestamp_ms" in line for line in lines)
     assert all(line["workspace_id"] == "ws-1" for line in lines)
+
+
+def test_live_trace_printer_emits_compact_console_line(capsys):
+    LiveTracePrinter(prefix="demo.trace").emit(
+        {
+            "stage": "parse_source_start",
+            "workspace_id": "demo",
+            "source_document_id": "doc-1",
+            "parser_lane": "workflow_layered",
+        }
+    )
+
+    captured = capsys.readouterr()
+    assert "[demo.trace] parse_source_start" in captured.err
+    assert "workspace_id=demo" in captured.err
+    assert "source_document_id=doc-1" in captured.err
+    assert "parser_lane=workflow_layered" in captured.err
+
+
+def test_format_live_trace_includes_runtime_node_and_payload_json_fields():
+    line = format_live_trace(
+        "longrun.runtime",
+        {
+            "type": "step_attempt_completed",
+            "run_id": "run-1",
+            "node_id": "parse-node",
+            "step_seq": 3,
+            "attempt": 2,
+            "payload_json": json.dumps(
+                {
+                    "workflow_id": "llm_wiki.longrun_ingestion.v1.parse_first",
+                    "status": "ok",
+                    "duration_ms": 42,
+                    "next_nodes": ["maintenance-node"],
+                }
+            ),
+        },
+    )
+
+    assert line.startswith("[longrun.runtime] step_attempt_completed")
+    assert "run_id=run-1" in line
+    assert "node_id=parse-node" in line
+    assert "step_seq=3" in line
+    assert "attempt=2" in line
+    assert "workflow_id=llm_wiki.longrun_ingestion.v1.parse_first" in line
+    assert "status=ok" in line
+    assert "duration_ms=42" in line
+    assert 'next_nodes=["maintenance-node"]' in line
+
+
+def test_env_flag_enabled_parses_live_trace_flags(monkeypatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LIVE_TRACE", "true")
+
+    assert env_flag_enabled("KOGWISTAR_LLM_WIKI_LIVE_TRACE")
 
 
 def test_parse_statistics_store_latest_rows_returns_newest_first(tmp_path):
@@ -163,6 +220,38 @@ def test_debug_run_traces_capture_ingest_progress(namespace_engines, tmp_path):
     assert "create_promotion_candidate_complete" in stages
     assert "parse_statistics_recorded" in stages
     assert "ingest_run_complete" in stages
+
+
+def test_debug_run_live_trace_mirrors_ingest_progress(namespace_engines, tmp_path, capsys):
+    def fake_parser(**kwargs):
+        kwargs.pop("mode", None)
+        kwargs.pop("llm_provider", None)
+        kwargs.pop("model", None)
+        kwargs.pop("provider_settings", None)
+        return parse_page_index_document(mode="heuristic", **kwargs)
+
+    pipeline = IngestPipeline(
+        namespace_engines,
+        parser=fake_parser,
+        debug_run_dir=tmp_path / "debug-live",
+        live_trace=True,
+    )
+    request = IngestPipelineRequest(
+        workspace_id="demo",
+        source_uri="file:///demo.md",
+        title="Demo",
+        raw_text="# Demo\n\nBody text for tracing.",
+        parser_mode="heuristic",
+        parser_lane="page_index",
+        promotion_mode="pending",
+    )
+
+    pipeline.run(request)
+    captured = capsys.readouterr()
+
+    assert "[llm-wiki.ingest] ingest_run_start" in captured.err
+    assert "workspace_id=demo" in captured.err
+    assert "[llm-wiki.ingest] ingest_run_complete" in captured.err
 
 
 def test_debug_run_trace_payloads_include_context_fields(namespace_engines, tmp_path):

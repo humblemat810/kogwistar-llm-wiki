@@ -26,6 +26,7 @@ Backend selection is explicit too:
 - `KOGWISTAR_LONGRUN_BACKEND=chroma` uses the local persistent Chroma-backed namespace engines.
 - `KOGWISTAR_LONGRUN_BACKEND=postgres` uses the repo's Postgres + pgvector path and requires `KOGWISTAR_LONGRUN_DSN` or `KOGWISTAR_LLM_WIKI_TEST_PG_DSN`.
 - `KOGWISTAR_LONGRUN_BACKEND=pgvector` is the explicit alias for the same Postgres + pgvector path. The probe launch now has two entries: one that self-provisions a disposable `testcontainers` Postgres+pgvector container, and one that asks for a custom DSN.
+- `KOGWISTAR_LONGRUN_BACKEND=pgvector` also supports `KOGWISTAR_LONGRUN_PG_SOURCE=persistent`, which reuses one named dev container across runs and isolates experiments by database name inside that shared container.
 - `in_memory` is not supported for the long-run soak because crash-continuation needs durable state.
 
 For `pgvector`, the experiment launch configs now share one container per test session and create a fingerprinted database name for each semantic experiment. That means increasing only the runtime or LLM call budget keeps the same experiment database identity, while changing the corpus, parser, or operation mode yields a different database name. Fresh, continue, and auto reruns stay on the same experiment database so continuation does not look like a new run.
@@ -50,9 +51,13 @@ If you prefer a VSCode button, use the launch configurations in
 - `Longrun: Postgres Continue (1 doc)`
 - `Probe: PgVector Fresh (1 doc, fingerprint DB)`
 - `Probe: PgVector Custom DSN (1 doc, custom DSN)`
+- `Probe: PgVector Persistent Dev Container (1 doc, fingerprint DB)`
 - `Longrun: PgVector Fresh (20 docs, fingerprint DB)`
 - `Longrun: PgVector Continue (20 docs, fingerprint DB)`
 - `Longrun: PgVector Auto Resume or Fresh (20 docs, fingerprint DB)`
+- `Longrun: PgVector Persistent Fresh (20 docs, fingerprint DB)`
+- `Longrun: PgVector Persistent Continue (20 docs, fingerprint DB)`
+- `Longrun: PgVector Persistent Auto Resume or Fresh (20 docs, fingerprint DB)`
 - `Longrun: PgVector Azure OpenAI Fresh (20 docs, fingerprint DB)`
 - `Longrun: PgVector Azure OpenAI Continue (20 docs, fingerprint DB)`
 - `Longrun: PgVector Azure OpenAI Auto Resume or Fresh (20 docs, fingerprint DB)`
@@ -67,6 +72,19 @@ the `Probe: PgVector Fresh (1 doc, fingerprint DB)` launch entry. The
 `Probe: PgVector Custom DSN (1 doc, custom DSN)` launch entry uses the DSN you
 type into the prompt, which is useful when you want to point at a particular
 external database.
+
+The persistent dev-container launch entries use a named local Docker container
+and leave it running after the test exits. That is the intended mode when you
+want to inspect data later or compare multiple fingerprinted experiments in the
+same container with different database names. The defaults are:
+
+- container name: `kogwistar-llm-wiki-pgvector-dev`
+- host port: `35432`
+- internal Postgres port: `5432`
+
+Continuation still happens by stable run directory plus stable fingerprinted
+database name. The persistent container only makes the backing service durable;
+the harness still isolates experiments by database name rather than by schema.
 
 Operator guidance:
 
@@ -87,6 +105,9 @@ Defaults:
 - `KOGWISTAR_LONGRUN_PARSER_PROVIDER=ollama|azure_openai|openai|gemini`
 - `KOGWISTAR_LONGRUN_PARSER_MODEL` selects the model for real LLM parsing.
 - `KOGWISTAR_LONGRUN_DSN` is only needed when `KOGWISTAR_LONGRUN_BACKEND=postgres|pgvector` and no testcontainer-provided DSN is present
+- `KOGWISTAR_LONGRUN_PG_SOURCE=testcontainer|custom|persistent` selects whether pgvector uses a disposable testcontainer, an explicit DSN, or a reusable named dev container
+- `KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME` defaults to `kogwistar-llm-wiki-pgvector-dev`
+- `KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT` defaults to `35432`
 - `KOGWISTAR_LONGRUN_MAX_REPEATED_SYSTEMIC_ERRORS=3`
 - `KOGWISTAR_LONGRUN_MAX_POST_DOC_MAINTENANCE_STEPS=100`
 - `KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS=1200` bounds the overall run wall-clock

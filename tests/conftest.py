@@ -4,8 +4,10 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 import sys
+import time
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +29,7 @@ from tests._helpers.pytest_markers import mark_default_ci_items
 
 
 logger = logging.getLogger(__name__)
+LONGRUN_SKIP_LOG_PATH = TEST_TMP / "longrun-skip.log"
 
 
 _LONGRUN_PROBE_ENVS: dict[str, dict[str, str]] = {
@@ -44,6 +47,20 @@ _LONGRUN_PROBE_ENVS: dict[str, dict[str, str]] = {
         "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
         "KOGWISTAR_LONGRUN_RUN_DIR": str(ROOT / "tests" / "_tmp" / "longrun-vscode-pgvector-probe"),
     },
+    "pgvector-persistent": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "page_index",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "small",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_RUN_DIR": str(ROOT / "tests" / "_tmp" / "longrun-vscode-pgvector-persistent-probe"),
+    },
 }
 
 
@@ -58,7 +75,181 @@ def _apply_longrun_probe_env(probe: str | None) -> None:
     os.environ.update(values)
 
 
+def _append_longrun_skip_notice(reason: str) -> None:
+    notice = f"[longrun.skip] {reason}"
+    print(notice, file=sys.stderr, flush=True)
+    LONGRUN_SKIP_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LONGRUN_SKIP_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(f"{notice}\n")
+
+
+def _env_truthy(name: str) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configure_longrun_testcontainers_ryuk_env() -> bool:
+    """Return whether Ryuk is effectively disabled for long-run pgvector containers."""
+    if _env_truthy("GKE_TEST_PG_DISABLE_RYUK"):
+        os.environ["TESTCONTAINERS_RYUK_DISABLED"] = "true"
+        return True
+    return _env_truthy("TESTCONTAINERS_RYUK_DISABLED")
+
+
+def _purge_testcontainers_modules() -> None:
+    for name in list(sys.modules):
+        if name == "testcontainers" or name.startswith("testcontainers."):
+            sys.modules.pop(name, None)
+
+
+def _is_ryuk_port_mapping_failure(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "port mapping" in text and "8080" in text and "not available" in text
+
+
+def _load_longrun_postgres_container_cls():
+    _configure_longrun_testcontainers_ryuk_env()
+    from testcontainers.postgres import PostgresContainer
+
+    return PostgresContainer
+
+
+def _longrun_persistent_pgvector_container_name() -> str:
+    return os.getenv("KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME", "kogwistar-llm-wiki-pgvector-dev").strip()
+
+
+def _longrun_persistent_pgvector_host() -> str:
+    return os.getenv("KOGWISTAR_LONGRUN_PERSISTENT_PG_HOST", "127.0.0.1").strip() or "127.0.0.1"
+
+
+def _longrun_persistent_pgvector_port() -> int:
+    raw = os.getenv("KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT", "35432").strip() or "35432"
+    port = int(raw)
+    if port <= 0 or port > 65535:
+        raise ValueError("KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT must be between 1 and 65535")
+    return port
+
+
+def _longrun_persistent_pgvector_user() -> str:
+    return os.getenv("KOGWISTAR_LONGRUN_PERSISTENT_PG_USER", "postgres").strip() or "postgres"
+
+
+def _longrun_persistent_pgvector_password() -> str:
+    return os.getenv("KOGWISTAR_LONGRUN_PERSISTENT_PG_PASSWORD", "postgres").strip() or "postgres"
+
+
+def _run_longrun_docker_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["docker", *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _ensure_longrun_persistent_pgvector_container(image: str) -> str:
+    name = _longrun_persistent_pgvector_container_name()
+    host = _longrun_persistent_pgvector_host()
+    port = _longrun_persistent_pgvector_port()
+    user = _longrun_persistent_pgvector_user()
+    password = _longrun_persistent_pgvector_password()
+
+    inspect = _run_longrun_docker_command(
+        ["container", "inspect", name, "--format", "{{.State.Status}}"]
+    )
+    if inspect.returncode == 0:
+        status = inspect.stdout.strip().lower()
+        if status == "paused":
+            resumed = _run_longrun_docker_command(["unpause", name])
+            if resumed.returncode != 0:
+                raise RuntimeError(
+                    f"failed to unpause persistent pgvector container {name}: {resumed.stderr.strip() or resumed.stdout.strip()}"
+                )
+        elif status != "running":
+            started = _run_longrun_docker_command(["start", name])
+            if started.returncode != 0:
+                raise RuntimeError(
+                    f"failed to start persistent pgvector container {name}: {started.stderr.strip() or started.stdout.strip()}"
+                )
+        return (
+            f"postgresql+psycopg://{user}:{password}@{host}:{port}/postgres"
+        )
+
+    launched = _run_longrun_docker_command(
+        [
+            "run",
+            "-d",
+            "--name",
+            name,
+            "-e",
+            f"POSTGRES_USER={user}",
+            "-e",
+            f"POSTGRES_PASSWORD={password}",
+            "-e",
+            "POSTGRES_DB=postgres",
+            "-p",
+            f"{port}:5432",
+            image,
+        ]
+    )
+    if launched.returncode != 0:
+        raise RuntimeError(
+            f"failed to create persistent pgvector container {name}: {launched.stderr.strip() or launched.stdout.strip()}"
+        )
+    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/postgres"
+
+
+def _ensure_pgvector_database_with_retry(
+    dsn: str,
+    database_name: str,
+    *,
+    ready_timeout_seconds: float = 45.0,
+    retry_interval_seconds: float = 1.0,
+) -> str:
+    deadline = time.monotonic() + ready_timeout_seconds
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            return _ensure_pgvector_database(dsn, database_name)
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            last_error = exc
+            time.sleep(retry_interval_seconds)
+    if last_error is not None:
+        raise last_error
+    return _ensure_pgvector_database(dsn, database_name)
+
+
+def _longrun_requested(config: pytest.Config) -> bool:
+    return bool(
+        config.getoption("kogwistar_longrun", default=False)
+        or config.getoption("kogwistar_longrun_probe", default=None)
+        or os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1"
+    )
+
+
+def _mark_disabled_longrun_items(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if _longrun_requested(config):
+        return
+    reason = "pass --kogwistar-longrun, --kogwistar-longrun-probe, or set KOGWISTAR_LLM_WIKI_LONGRUN=1"
+    skip_longrun = pytest.mark.skip(reason=reason)
+    emitted = False
+    for item in items:
+        if "longrun" in item.keywords:
+            if not emitted:
+                _append_longrun_skip_notice(reason)
+                emitted = True
+            item.add_marker(skip_longrun)
+
+
 def pytest_addoption(parser):
+    parser.addoption(
+        "--kogwistar-longrun",
+        action="store_true",
+        default=False,
+        help="Enable opt-in Kogwistar llm-wiki long-run workflow tests.",
+    )
     parser.addoption(
         "--kogwistar-longrun-probe",
         action="store",
@@ -70,12 +261,15 @@ def pytest_addoption(parser):
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     mark_default_ci_items(items)
+    _mark_disabled_longrun_items(config, items)
 
 
 def pytest_configure(config):
     TEST_TMP.mkdir(parents=True, exist_ok=True)
     for key in ("TMPDIR", "TEMP", "TMP"):
         os.environ[key] = str(TEST_TMP)
+    if config.getoption("kogwistar_longrun", default=False):
+        os.environ["KOGWISTAR_LLM_WIKI_LONGRUN"] = "1"
     _apply_longrun_probe_env(config.getoption("kogwistar_longrun_probe", default=None))
 
 
@@ -254,16 +448,20 @@ def _start_longrun_pgvector_container(container_cls, image: str):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _longrun_pgvector_testcontainer():
+def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
+    if not _longrun_requested(pytestconfig):
+        yield
+        return
+
     backend = os.getenv("KOGWISTAR_LONGRUN_BACKEND", "").strip().lower()
     if backend != "pgvector":
         yield
         return
 
     pg_source = os.getenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer").strip().lower() or "testcontainer"
-    if pg_source not in {"testcontainer", "custom"}:
+    if pg_source not in {"testcontainer", "custom", "persistent"}:
         raise ValueError(
-            "KOGWISTAR_LONGRUN_PG_SOURCE must be one of {'testcontainer', 'custom'}; "
+            "KOGWISTAR_LONGRUN_PG_SOURCE must be one of {'testcontainer', 'custom', 'persistent'}; "
             f"got {pg_source!r}"
         )
 
@@ -271,21 +469,70 @@ def _longrun_pgvector_testcontainer():
         yield
         return
 
+    if pg_source == "persistent":
+        image = os.getenv("KOGWISTAR_LONGRUN_PG_IMAGE", "pgvector/pgvector:pg17")
+        try:
+            dsn = _ensure_longrun_persistent_pgvector_container(image)
+            dsn = _normalize_pg_dsn(dsn)
+            database_name = _longrun_pgvector_database_name()
+            dsn = _ensure_pgvector_database_with_retry(dsn, database_name)
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            reason = f"Failed to prepare persistent longrun pgvector container: {exc}"
+            _append_longrun_skip_notice(reason)
+            pytest.skip(reason)
+        logger.info(
+            "Using persistent longrun pgvector container name=%s host=%s port=%s database=%s mode=%s",
+            _longrun_persistent_pgvector_container_name(),
+            _longrun_persistent_pgvector_host(),
+            _longrun_persistent_pgvector_port(),
+            database_name,
+            _longrun_pgvector_database_mode(),
+        )
+        os.environ["KOGWISTAR_LONGRUN_DSN"] = dsn
+        os.environ["KOGWISTAR_LLM_WIKI_TEST_PG_DSN"] = dsn
+        os.environ["KOGWISTAR_LONGRUN_PG_DATABASE_NAME"] = database_name
+        yield
+        return
+
     try:
-        from testcontainers.postgres import PostgresContainer
+        PostgresContainer = _load_longrun_postgres_container_cls()
     except Exception as exc:  # pragma: no cover - optional dependency
-        pytest.skip(f"pgvector long-run probe requires testcontainers[postgresql]: {exc}")
+        reason = f"pgvector long-run probe requires testcontainers[postgresql]: {exc}"
+        _append_longrun_skip_notice(reason)
+        pytest.skip(reason)
 
     image = os.getenv("KOGWISTAR_LONGRUN_PG_IMAGE", "pgvector/pgvector:pg17")
     logger.info("Starting longrun pgvector test container image=%s", image)
+    initial_ryuk_disabled = _configure_longrun_testcontainers_ryuk_env()
     try:
         container = _start_longrun_pgvector_container(PostgresContainer, image)
     except Exception as exc:  # pragma: no cover - environment-dependent
-        pytest.skip(f"Failed to start longrun pgvector test container image={image}: {exc}")
+        if (not initial_ryuk_disabled) and _is_ryuk_port_mapping_failure(exc):
+            logger.warning(
+                "Failed to start longrun pgvector test container with Ryuk enabled; retrying once without Ryuk. image=%s err=%s",
+                image,
+                exc,
+            )
+            os.environ["TESTCONTAINERS_RYUK_DISABLED"] = "true"
+            _purge_testcontainers_modules()
+            try:
+                PostgresContainer = _load_longrun_postgres_container_cls()
+                container = _start_longrun_pgvector_container(PostgresContainer, image)
+            except Exception as retry_exc:  # pragma: no cover - environment-dependent
+                reason = (
+                    f"Failed to start longrun pgvector test container image={image} "
+                    f"after retry without Ryuk: {retry_exc}"
+                )
+                _append_longrun_skip_notice(reason)
+                pytest.skip(reason)
+        else:
+            reason = f"Failed to start longrun pgvector test container image={image}: {exc}"
+            _append_longrun_skip_notice(reason)
+            pytest.skip(reason)
 
     dsn = _normalize_pg_dsn(container.get_connection_url())
     database_name = _longrun_pgvector_database_name()
-    dsn = _ensure_pgvector_database(dsn, database_name)
+    dsn = _ensure_pgvector_database_with_retry(dsn, database_name)
     logger.info(
         "Using longrun pgvector experiment database name=%s mode=%s",
         database_name,

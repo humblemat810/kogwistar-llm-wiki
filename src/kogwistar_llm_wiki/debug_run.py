@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
+import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -38,6 +40,98 @@ def append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(dump_json(dict(payload)))
         handle.write("\n")
+
+
+def env_flag_enabled(*names: str, default: bool = False) -> bool:
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+
+_LIVE_TRACE_FIELD_ORDER = (
+    "workspace_id",
+    "source_document_id",
+    "doc_id",
+    "run_id",
+    "token_id",
+    "turn_node_id",
+    "node_id",
+    "step_name",
+    "step_seq",
+    "attempt",
+    "step",
+    "current_step",
+    "workflow_id",
+    "parser_lane",
+    "parser_mode",
+    "proposal_mode",
+    "operation_mode",
+    "status",
+    "duration_ms",
+    "timeout_seconds",
+    "configured_parse_timeout_seconds",
+    "remaining_runtime_seconds",
+    "max_runtime_seconds",
+    "max_llm_calls",
+    "child_exitcode",
+    "predicate",
+    "value",
+    "edge_id",
+    "to_node_id",
+    "reason",
+    "next_nodes",
+    "trace_path",
+    "failure_path",
+    "error_type",
+    "error_message",
+    "message",
+)
+
+
+def _compact_live_trace_value(value: object) -> str:
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (int, float, bool)):
+        text = str(value)
+    else:
+        text = dump_json(value)
+    text = text.replace("\r", "\\r").replace("\n", "\\n")
+    if len(text) > 180:
+        return f"{text[:177]}..."
+    return text
+
+
+def _decode_payload_json(payload: Mapping[str, Any]) -> dict[str, Any]:
+    raw_payload = payload.get("payload_json")
+    if not isinstance(raw_payload, str) or not raw_payload.strip():
+        return {}
+    try:
+        decoded = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        return {"message": raw_payload}
+    return dict(decoded) if isinstance(decoded, Mapping) else {}
+
+
+def format_live_trace(prefix: str, payload: Mapping[str, Any]) -> str:
+    stage = payload.get("stage") or payload.get("type") or payload.get("phase") or "event"
+    parts = [f"[{prefix}] {stage}"]
+    decoded_payload = _decode_payload_json(payload)
+    for key in _LIVE_TRACE_FIELD_ORDER:
+        value = payload.get(key, decoded_payload.get(key))
+        if value is not None:
+            parts.append(f"{key}={_compact_live_trace_value(value)}")
+    return " ".join(parts)
+
+
+class LiveTracePrinter:
+    def __init__(self, *, prefix: str = "llm-wiki") -> None:
+        self.prefix = prefix
+
+    def emit(self, event: Mapping[str, Any]) -> None:
+        print(format_live_trace(self.prefix, event), file=sys.stderr, flush=True)
 
 
 def configure_debug_logging(debug_dir: str | Path | None) -> Path | None:

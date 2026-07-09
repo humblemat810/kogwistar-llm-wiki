@@ -15,6 +15,7 @@ from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 
+from .debug_run import LiveTracePrinter, env_flag_enabled
 from .provider_config import provider_config_summary
 
 
@@ -340,6 +341,13 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
     result_path = Path(payload["result_path"])
     failure_path = Path(payload["failure_path"])
     trace_path = Path(payload["trace_path"])
+    dump_trace_path = Path(str(payload["dump_trace_path"])) if payload.get("dump_trace_path") else None
+    live_trace = bool(payload.get("live_trace")) or env_flag_enabled(
+        "KOGWISTAR_LONGRUN_LIVE_TRACE",
+        "KOGWISTAR_LLM_WIKI_LIVE_TRACE",
+        default=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
+    )
+    live_trace_printer = LiveTracePrinter(prefix="longrun.parser") if live_trace else None
 
     def _heartbeat(phase: str, **extra: object) -> None:
         _write_json_file(
@@ -356,6 +364,17 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
 
     def _trace(message: str) -> None:
         _append_trace_line(trace_path, message)
+        if dump_trace_path is not None:
+            _append_trace_line(dump_trace_path, f"child::{message}")
+        if live_trace_printer is not None:
+            live_trace_printer.emit(
+                {
+                    "stage": "parser_trace",
+                    "message": f"child::{message}",
+                    "doc_id": payload.get("doc_id"),
+                    "parser_lane": payload.get("parser_lane"),
+                }
+            )
 
     try:
         _trace(f"child_boot doc={payload.get('doc_id')} pid={os.getpid()}")
@@ -426,6 +445,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
             engine_dir = Path(payload["parser_run_dir"]) / "workflow_engines"
             _trace(f"child_building_workflow_engines dir={engine_dir}")
             _trace("child_before_workflow_layered_parse")
+            _heartbeat("workflow_layered_parse_start")
             result = run_workflow_layered_parse(
                 source_document_id=source_document_id,
                 title=str(payload["title"]),
@@ -437,6 +457,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 heartbeat=_heartbeat,
             )
             _trace("child_workflow_layered_parse_call_returned")
+            _heartbeat("workflow_layered_parse_complete")
             title = str(payload["title"])
             graph_payload = result.graph_payload
             evaluation = result.evaluation
@@ -458,6 +479,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "layer_log": getattr(result, "layer_log", None) if parser_lane == "workflow_layered" else None,
             },
         )
+        _heartbeat("result_written", result_path=str(result_path))
         if parser_lane == "workflow_layered" and getattr(result, "layer_log", None):
             _write_json_file(result_path.with_name("parser_layer_log.json"), list(result.layer_log))
         _heartbeat(
