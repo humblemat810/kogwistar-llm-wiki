@@ -10,16 +10,53 @@ from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from kogwistar_llm_wiki.debug_run import (
     LiveTracePrinter,
     ParseStatisticsStore,
+    aggregate_stage_timings,
     append_jsonl,
     build_parse_statistics_record,
     configure_debug_logging,
     env_flag_enabled,
     format_live_trace,
+    summarize_stage_timings,
 )
 
 
 def _tree(*children):
     return SimpleNamespace(child_nodes=list(children))
+
+
+def test_summarize_stage_timings_identifies_dominant_nested_stage():
+    summary = summarize_stage_timings(
+        [
+            {"stage": "parse_start", "timestamp_ms": 100},
+            {"stage": "boundary_proposal_start", "timestamp_ms": 110},
+            {"stage": "boundary_proposal_completed", "timestamp_ms": 410},
+            {"stage": "parse_returned", "timestamp_ms": 500},
+        ]
+    )
+
+    assert summary["dominant_stage"] == "parse"
+    assert summary["dominant_operation_stage"] == "boundary_proposal"
+    assert summary["stages"]["boundary_proposal"]["total_ms"] == 300
+    assert summary["stages"]["parse"]["total_ms"] == 400
+    assert summary["stages"]["parse"]["open_count"] == 0
+
+
+def test_summarize_stage_timings_keeps_open_stage_visible():
+    summary = summarize_stage_timings([{"stage": "boundary_review_start", "timestamp_ms": 100}])
+
+    assert summary["stages"]["boundary_review"]["open_count"] == 1
+
+
+def test_aggregate_stage_timings_compares_parser_modes():
+    summary = aggregate_stage_timings(
+        [
+            {"stages": {"boundary_proposal": {"count": 2, "total_ms": 300, "open_count": 0}}},
+            {"stages": {"child_proposal": {"count": 1, "total_ms": 500, "open_count": 0}}},
+        ]
+    )
+
+    assert summary["dominant_stage"] == "child_proposal"
+    assert summary["stages"]["boundary_proposal"]["total_ms"] == 300
 
 
 def test_debug_run_helpers_write_jsonl_and_sqlite_round_trip(tmp_path):
@@ -123,6 +160,7 @@ def test_format_live_trace_includes_runtime_node_and_payload_json_fields():
                     "status": "ok",
                     "duration_ms": 42,
                     "next_nodes": ["maintenance-node"],
+                    "errors": ["captured workflow failure"],
                 }
             ),
         },
@@ -137,6 +175,7 @@ def test_format_live_trace_includes_runtime_node_and_payload_json_fields():
     assert "status=ok" in line
     assert "duration_ms=42" in line
     assert 'next_nodes=["maintenance-node"]' in line
+    assert 'errors=["captured workflow failure"]' in line
 
 
 def test_env_flag_enabled_parses_live_trace_flags(monkeypatch):

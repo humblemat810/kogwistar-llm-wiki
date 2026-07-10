@@ -15,7 +15,7 @@ from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
 
-from .debug_run import LiveTracePrinter, env_flag_enabled
+from .debug_run import LiveTracePrinter, env_flag_enabled, summarize_stage_timings
 from .provider_config import provider_config_summary
 
 
@@ -71,6 +71,7 @@ def _proposal_mode_summary(final_state: dict[str, object]) -> dict[str, object]:
         "proposal_source": metadata.get("proposal_source"),
         "proposal_failure_reason": metadata.get("proposal_failure_reason"),
         "boundary_proposed_count": metadata.get("boundary_proposed_count"),
+        "boundary_dropped_count": metadata.get("boundary_dropped_count"),
         "boundary_accepted_count": metadata.get("boundary_accepted_count"),
         "boundary_shifted_count": metadata.get("boundary_shifted_count"),
         "boundary_rejected_count": metadata.get("boundary_rejected_count"),
@@ -356,6 +357,8 @@ def run_workflow_layered_parse(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
     )
+    timing_summary = summarize_stage_timings(layer_log)
+    usage_summary["timing_summary"] = timing_summary
     if proposal_summary:
         usage_summary["proposal_summary"] = proposal_summary
         if proposal_summary.get("proposal_mode") is not None:
@@ -375,6 +378,7 @@ def run_workflow_layered_parse(
         "workflow_run_id": getattr(run_result, "run_id", None),
         "layer_log": layer_log,
         "proposal_summary": proposal_summary,
+        "timing_summary": timing_summary,
     }
     if diagnostics["parse_session_mode"] != "workflow_layered":
         raise RuntimeError(

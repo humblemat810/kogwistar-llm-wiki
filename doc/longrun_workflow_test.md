@@ -118,6 +118,9 @@ Defaults:
   time for bounded continue probes.
 - `KOGWISTAR_LONGRUN_MAX_LLM_CALLS=100` adds an explicit call budget that is
   recorded in the dump and stops the run once exceeded.
+- Budget stops still fail the active pytest invocation so an incomplete
+  acceptance run is visible, but untouched documents remain `PENDING` for a
+  later `continue` or `auto` run instead of being quarantined.
 - `KOGWISTAR_LONGRUN_OPERATION_MODE=parse_first|maintenance_first|hybrid`
   controls whether the long-run ingest request uses the normal parse-first
   path, the maintenance-first seed-only path, or the hybrid path.
@@ -263,8 +266,9 @@ The dump includes:
   and maintenance-specific step counts
 - `llm_calls_summary.json` with parser/provider metadata, `call_count`, and
   the configured call/runtime budgets
-- `parser_layer_log.json` with parser-layer trace entries for workflow-layered
-  runs
+- `parser_layer_logs/<doc-id>.json` with per-document parser-layer trace entries
+  for workflow-layered runs; `parser_layer_log.json` remains as the legacy
+  `doc-001` inspection artifact
 - `sampled_prompts_and_responses.jsonl`
 - `raw_documents/`
 - `final_report.md`

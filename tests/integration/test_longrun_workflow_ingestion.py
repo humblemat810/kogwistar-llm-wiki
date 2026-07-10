@@ -4,6 +4,7 @@ import json
 import logging
 import multiprocessing
 import os
+import queue
 import re
 import shutil
 import time
@@ -38,7 +39,7 @@ from kg_doc_parser.workflow_ingest.providers import (
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime import MappingStepResolver
 from kogwistar.runtime.models import RunSuccess, RunSuspended, WorkflowEdge, WorkflowNode
-from kogwistar.runtime.runtime import WorkflowRuntime
+from kogwistar.runtime.runtime import RunResult, WorkflowRuntime
 from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.engine_core import RecoverySurface
 
@@ -49,7 +50,7 @@ from kogwistar_llm_wiki.ingest_pipeline import (
     build_postgres_namespace_engines,
 )
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
-from kogwistar_llm_wiki.debug_run import LiveTracePrinter, env_flag_enabled
+from kogwistar_llm_wiki.debug_run import LiveTracePrinter, aggregate_stage_timings, env_flag_enabled
 from kogwistar_llm_wiki.longrun_parser_worker import (
     _basic_sense_eval_from_graph_payload,
     run_longrun_parser_child,
@@ -133,19 +134,35 @@ _PARSER_PARENT_POLL_LOG_INTERVAL_SECONDS = 30.0
 class LongRunDocumentError(RuntimeError):
     """Document-scoped failure raised from a workflow step."""
 
-    def __init__(self, code: str, message: str, *, phase: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        phase: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.phase = phase
+        self.details = dict(details or {})
 
 
 class LongRunSystemicError(RuntimeError):
     """Abort-class failure raised when infrastructure or invariants look broken."""
 
-    def __init__(self, code: str, message: str, *, phase: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        phase: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.phase = phase
+        self.details = dict(details or {})
 
 
 @dataclass(frozen=True)
@@ -482,6 +499,7 @@ class FailureRecord:
     message: str
     fingerprint: str
     timestamp_ms: int
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 def _resolve_longrun_dsn() -> str | None:
@@ -510,6 +528,36 @@ def _append_trace_line(path: Path, message: str) -> None:
         LiveTracePrinter(prefix="longrun.parser").emit({"stage": "parser_trace", "message": message})
 
 
+def _read_text_tail(path: Path | None, *, max_lines: int = 80, max_chars: int = 12_000) -> list[str]:
+    """Read a bounded diagnostic tail without making failure reporting fail."""
+    if path is None:
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError, UnicodeError):
+        return []
+    if max_lines > 0:
+        lines = lines[-max_lines:]
+    if max_chars <= 0:
+        return lines
+    remaining = max_chars
+    bounded: list[str] = []
+    for line in reversed(lines):
+        if remaining <= 0:
+            break
+        bounded.append(line[:remaining])
+        remaining -= len(line) + 1
+    return list(reversed(bounded))
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _emit_longrun_live(stage: str, **fields: object) -> None:
     if env_flag_enabled(
         "KOGWISTAR_LONGRUN_LIVE_TRACE",
@@ -525,7 +573,7 @@ def _write_json_file(path: Path, payload: Any) -> None:
 
 
 class ErrorCircuitBreaker:
-    """Tracks normalized systemic failures across unrelated documents."""
+    """Stops a run when infrastructure or one identical parser failure repeats."""
 
     def __init__(self, threshold: int) -> None:
         self.threshold = threshold
@@ -533,7 +581,11 @@ class ErrorCircuitBreaker:
         self._counts: Counter[str] = Counter()
 
     def record(self, failure: FailureRecord) -> bool:
-        if failure.scope != "systemic":
+        # A parser failure is normally document-local. The exact same normalized
+        # parser failure across unrelated documents is a configuration or provider
+        # problem, so it must not consume the whole corpus budget.
+        should_track = failure.scope == "systemic" or failure.code == "document_parse_failed"
+        if not should_track:
             return False
         self._counts[failure.fingerprint] += 1
         if failure.doc_id:
@@ -545,6 +597,7 @@ class ErrorCircuitBreaker:
         return {
             "threshold": self.threshold,
             "counts": dict(self._counts),
+            "tracked_failure_codes": ["document_parse_failed", *sorted(SYSTEMIC_FAILURES)],
             "documents_by_fingerprint": {
                 key: sorted(value) for key, value in self._docs_by_fingerprint.items()
             },
@@ -575,15 +628,20 @@ class DiagnosticDumper:
         self._write_json("projection_summary.json", self.harness.projection_summary())
         self._write_json("maintenance_summary.json", self.harness.maintenance_summary())
         self._write_json("llm_calls_summary.json", self.harness.llm_summary())
-        parser_trace = self.harness.run_dir / "parser_runs" / "doc-001" / "trace.log"
-        if parser_trace.exists():
+        parser_trace_tails: dict[str, list[str]] = {}
+        for parser_trace in sorted((self.harness.run_dir / "parser_runs").glob("*/trace.log")):
             try:
-                self._write_json(
-                    "parser_trace_tail.json",
-                    parser_trace.read_text(encoding="utf-8").splitlines()[-200:],
+                parser_trace_tails[parser_trace.parent.name] = (
+                    parser_trace.read_text(encoding="utf-8").splitlines()[-200:]
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                parser_trace_tails[parser_trace.parent.name] = [
+                    f"trace unavailable: {type(exc).__name__}: {exc}"
+                ]
+        self._write_json("parser_trace_tails.json", parser_trace_tails)
+        # Preserve the original single-document artifact for existing inspection tools.
+        if "doc-001" in parser_trace_tails:
+            self._write_json("parser_trace_tail.json", parser_trace_tails["doc-001"])
         self._write_jsonl("sampled_prompts_and_responses.jsonl", [])
         self._copy_raw_documents()
         self._write_report(reason=reason)
@@ -602,11 +660,30 @@ class DiagnosticDumper:
             encoding="utf-8",
         )
 
+    def write_parser_layer_log(self, *, doc_id: str, layer_log: list[object]) -> Path:
+        """Persist one parser layer log without letting documents overwrite each other."""
+        path = self.dump_dir / "parser_layer_logs" / f"{doc_id}.json"
+        _write_json_file(path, _jsonable(layer_log))
+        if doc_id == "doc-001":
+            self._write_json("parser_layer_log.json", layer_log)
+        return path
+
     def _write_jsonl(self, name: str, rows: list[dict[str, Any]]) -> None:
         path = self.dump_dir / name
         with path.open("w", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(_jsonable(row), sort_keys=True) + "\n")
+
+    def append_failure_event(self, failure: FailureRecord) -> None:
+        """Durably capture failures even when the run never reaches its final dump."""
+        row = {
+            "event_type": "longrun_failure_recorded",
+            "recorded_at_ms": _now_ms(),
+            **failure.__dict__,
+        }
+        path = self.dump_dir / "failure_events.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(_jsonable(row), sort_keys=True) + "\n")
 
     def _copy_raw_documents(self) -> None:
         target = self.dump_dir / "raw_documents"
@@ -691,6 +768,10 @@ class DiagnosticDumper:
                 f"- Total output tokens: `{parser_eval['usage_totals']['output_tokens']}`",
                 f"- Total tokens: `{parser_eval['usage_totals']['total_tokens']}`",
                 f"- Total cost: `{parser_eval['usage_totals']['total_cost']}`",
+                f"- Slowest parser stage: `{parser_eval['timing_summary']['dominant_stage'] or 'n/a'}`",
+                f"- Slowest stage total ms: `{parser_eval['timing_summary']['dominant_stage_total_ms']}`",
+                f"- Slowest operation stage: `{parser_eval['timing_summary']['dominant_operation_stage'] or 'n/a'}`",
+                f"- Slowest operation total ms: `{parser_eval['timing_summary']['dominant_operation_stage_total_ms']}`",
                 "",
                 f"```json\n{parser_eval_json}\n```",
                 "",
@@ -723,6 +804,7 @@ class LongRunHarness:
         self.llm_call_count = 0
         self.aborted = False
         self.abort_reason: str | None = None
+        self.abort_preserves_pending = False
         self._engines: Any | None = None
         self._pipeline: IngestPipeline | None = None
         self._maintenance_worker: MaintenanceWorker | None = None
@@ -907,6 +989,10 @@ class LongRunHarness:
                 continue
             if self.aborted:
                 break
+            budget_stop_reason = self._budget_stop_reason(started=started)
+            if budget_stop_reason is not None:
+                self._abort(budget_stop_reason, preserve_pending=True)
+                break
             previous_state = self._state_signature()
             outcome = "succeeded"
             try:
@@ -914,10 +1000,12 @@ class LongRunHarness:
             except Exception as exc:  # noqa: BLE001
                 failure = self._classify_exception(exc, doc_id=record.doc_id, phase="runtime")
                 self._record_failure(failure)
-                if failure.scope == "systemic" and self.circuit_breaker.record(failure):
+                self._move_failed_or_quarantine(record, failure)
+                self._log_heartbeat(phase=f"failed_{record.doc_id}", started=started)
+                self._safe_failure_dump(reason=f"failure_{record.doc_id}")
+                if self.circuit_breaker.record(failure):
                     self._abort(f"circuit breaker tripped: {failure.fingerprint}")
                     break
-                self._move_failed_or_quarantine(record, failure)
                 continue
             if outcome == "suspended":
                 self.dumper.dump(reason=f"suspended_{record.doc_id}", final=True)
@@ -930,14 +1018,9 @@ class LongRunHarness:
                     break
             else:
                 idle_loops = 0
-            if self.llm_call_count >= self.config.max_llm_calls:
-                self._abort(
-                    "runtime_worker_stuck: llm call budget exceeded "
-                    f"({self.llm_call_count}/{self.config.max_llm_calls})"
-                )
-                break
-            if time.monotonic() - started > self.config.max_runtime_seconds:
-                self._abort("runtime_worker_stuck: max runtime exceeded")
+            budget_stop_reason = self._budget_stop_reason(started=started)
+            if budget_stop_reason is not None:
+                self._abort(budget_stop_reason, preserve_pending=True)
                 break
             self._mark_document_progress(record, step_name="document_complete")
             self._log_heartbeat(phase=f"checkpoint_{record.doc_id}", started=started)
@@ -945,13 +1028,24 @@ class LongRunHarness:
 
         if self.aborted:
             self.dumper.dump(reason="abort_snapshot")
-            self._quarantine_processing_docs()
+            if not self.abort_preserves_pending:
+                self._quarantine_processing_docs()
             self.dumper.dump(reason="abort_finalized", final=True)
             raise AssertionError(self.abort_reason or "long-run workflow aborted")
 
-        self._drain_maintenance_after_documents()
-        self._poll_projection_once()
-        self._verify_run_invariants()
+        try:
+            self._drain_maintenance_after_documents()
+            self._poll_projection_once()
+            self._verify_run_invariants()
+        except Exception as exc:  # noqa: BLE001
+            self._emit_live_failure(
+                stage="run_invariant_failure",
+                message=f"{type(exc).__name__}: {exc}",
+                details={"failed_document_count": sum(record.status == "FAILED" for record in self.records)},
+            )
+            self._log_heartbeat(phase="invariant_failure", started=started)
+            self._safe_failure_dump(reason="invariant_failure", final=True)
+            raise
         self.dumper.dump(reason="success", final=True)
 
     def manifest_row(self, record: DocumentRecord) -> dict[str, Any]:
@@ -1207,6 +1301,7 @@ class LongRunHarness:
         verdict_counts: Counter[str] = Counter()
         scores: list[float] = []
         usage_documents: list[dict[str, Any]] = []
+        timing_summaries: list[dict[str, Any]] = []
         for record in self.records:
             parse_result = record.parse_result
             evaluation = getattr(parse_result, "evaluation", None) if parse_result is not None else None
@@ -1217,6 +1312,9 @@ class LongRunHarness:
             if isinstance(usage_summary, dict):
                 entry["usage_summary"] = usage_summary
                 usage_documents.append({"doc_id": record.doc_id, "title": record.title, **usage_summary})
+                timing_summary = usage_summary.get("timing_summary")
+                if isinstance(timing_summary, dict):
+                    timing_summaries.append(timing_summary)
             documents.append(entry)
             verdict = str(evaluation.get("basic_sense_verdict") or "").strip()
             if verdict:
@@ -1251,7 +1349,44 @@ class LongRunHarness:
             "documents": documents,
             "usage_documents": usage_documents,
             "usage_totals": usage_totals,
+            "timing_summary": aggregate_stage_timings(timing_summaries),
         }
+
+    def _workflow_failure_exception(
+        self,
+        *,
+        record: DocumentRecord,
+        result: RunResult,
+        run_id: str,
+    ) -> LongRunDocumentError | LongRunSystemicError:
+        workflow_errors = [str(error) for error in result.errors]
+        error_text = "\n".join(workflow_errors).strip()
+        failed_phase = record.last_step_name or "runtime"
+        failure_message = f"workflow returned {result.status}"
+        if error_text:
+            failure_message = f"{failure_message}: {error_text[:2_000]}"
+        failure_details = {
+            "workflow_run_id": run_id,
+            "workflow_status": result.status,
+            "failed_step": failed_phase,
+            "workflow_errors": [error[-4_000:] for error in workflow_errors],
+        }
+        failure_code = (
+            classify_exception(RuntimeError(error_text), phase=failed_phase)
+            if error_text
+            else "document_parse_failed"
+        )
+        error_type = (
+            LongRunSystemicError
+            if failure_code in SYSTEMIC_FAILURES
+            else LongRunDocumentError
+        )
+        return error_type(
+            failure_code,
+            failure_message,
+            phase=failed_phase,
+            details=failure_details,
+        )
 
     def _run_document_workflow(self, record: DocumentRecord) -> str:
         self._mark_document_progress(record, step_name="workflow_start")
@@ -1304,10 +1439,10 @@ class LongRunHarness:
             record.run_id = run_id
             return "suspended"
         if result.status != "succeeded":
-            raise LongRunDocumentError(
-                "document_parse_failed",
-                f"workflow returned {result.status}",
-                phase="runtime",
+            raise self._workflow_failure_exception(
+                record=record,
+                result=result,
+                run_id=run_id,
             )
         record.ended_at_ms = _now_ms()
         self._mark_document_progress(record, step_name="workflow_done")
@@ -1651,13 +1786,30 @@ class LongRunHarness:
                     source_document_id=source_document_id,
                 )
                 self.llm_call_count += 1
-            except LongRunDocumentError:
+            except (LongRunDocumentError, LongRunSystemicError):
                 raise
             except Exception as exc:  # noqa: BLE001
                 code = classify_exception(exc, phase="parse_document")
                 if code in RECOVERABLE_LLM_QUALITY_FAILURES:
                     code = "document_parse_failed"
-                raise LongRunDocumentError(code, str(exc), phase="parse_document") from exc
+                details = {
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:2_000],
+                    "traceback": traceback.format_exc()[-8_000:],
+                }
+                if code in SYSTEMIC_FAILURES:
+                    raise LongRunSystemicError(
+                        code,
+                        str(exc),
+                        phase="parse_document",
+                        details=details,
+                    ) from exc
+                raise LongRunDocumentError(
+                    code,
+                    str(exc),
+                    phase="parse_document",
+                    details=details,
+                ) from exc
             record.source_document_id = source_document_id
             self._transition(record, "PARSED", phase="parse_document")
             return RunSuccess(
@@ -1942,6 +2094,43 @@ class LongRunHarness:
 
     def _record_failure(self, failure: FailureRecord) -> None:
         self.failure_records.append(failure)
+        self.dumper.append_failure_event(failure)
+        self._emit_live_failure(
+            stage="document_failure_recorded",
+            message=failure.message,
+            details={
+                "code": failure.code,
+                "scope": failure.scope,
+                "fingerprint": failure.fingerprint,
+                **failure.details,
+            },
+            doc_id=failure.doc_id,
+            phase=failure.phase,
+        )
+        logger.error(
+            "Longrun failure recorded run_id=%s doc_id=%s phase=%s code=%s scope=%s "
+            "fingerprint=%s details=%s message=%s",
+            failure.run_id,
+            failure.doc_id,
+            failure.phase,
+            failure.code,
+            failure.scope,
+            failure.fingerprint,
+            _jsonable(failure.details),
+            failure.message,
+        )
+
+    def _safe_failure_dump(self, *, reason: str, final: bool = False) -> None:
+        """Best-effort snapshotting must not hide the already-recorded root failure."""
+        try:
+            self.dumper.dump(reason=reason, final=final)
+        except Exception as exc:  # noqa: BLE001
+            self._emit_live_failure(
+                stage="diagnostic_dump_failure",
+                message=f"{type(exc).__name__}: {exc}",
+                details={"reason": reason, "final": final},
+            )
+            logger.exception("Longrun diagnostic dump failed reason=%s final=%s", reason, final)
 
     def _failure_record(
         self,
@@ -1951,6 +2140,7 @@ class LongRunHarness:
         code: str,
         scope: str,
         message: str,
+        details: dict[str, Any] | None = None,
     ) -> FailureRecord:
         return FailureRecord(
             run_id=self.run_id,
@@ -1961,6 +2151,7 @@ class LongRunHarness:
             message=message,
             fingerprint=normalized_fingerprint(code=code, phase=phase, message=message),
             timestamp_ms=_now_ms(),
+            details=dict(details or {}),
         )
 
     def _classify_exception(self, exc: Exception, *, doc_id: str | None, phase: str) -> FailureRecord:
@@ -1978,7 +2169,28 @@ class LongRunHarness:
             code=str(code),
             scope=scope,
             message=f"{type(exc).__name__}: {exc}",
+            details=dict(getattr(exc, "details", {}) or {}),
         )
+
+    def _emit_live_failure(
+        self,
+        *,
+        stage: str,
+        message: str,
+        details: dict[str, Any],
+        doc_id: str | None = None,
+        phase: str | None = None,
+    ) -> None:
+        payload = {
+            "stage": stage,
+            "run_id": self.run_id,
+            "doc_id": doc_id,
+            "phase": phase,
+            "message": message[:1_000],
+            "details": _jsonable(details),
+        }
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(payload)
 
     def _move_failed_or_quarantine(self, record: DocumentRecord, failure: FailureRecord) -> None:
         target_dir = "quarantine" if failure.scope == "systemic" else "failed"
@@ -1989,9 +2201,20 @@ class LongRunHarness:
             record.current_path = target
         self._transition(record, status, phase="move_failed_or_quarantine", failure_code=failure.code)
 
-    def _abort(self, reason: str) -> None:
+    def _budget_stop_reason(self, *, started: float) -> str | None:
+        if self.llm_call_count >= self.config.max_llm_calls:
+            return (
+                "runtime_worker_stuck: llm call budget exceeded "
+                f"({self.llm_call_count}/{self.config.max_llm_calls})"
+            )
+        if time.monotonic() - started >= self.config.max_runtime_seconds:
+            return "runtime_worker_stuck: max runtime exceeded"
+        return None
+
+    def _abort(self, reason: str, *, preserve_pending: bool = False) -> None:
         self.aborted = True
         self.abort_reason = reason
+        self.abort_preserves_pending = preserve_pending
         self._log_heartbeat(phase="abort", started=None)
 
     def _log_heartbeat(self, *, phase: str, started: float | None) -> None:
@@ -2317,6 +2540,8 @@ class LongRunHarness:
                 failure.doc_id == record.doc_id for failure in self.failure_records
             ):
                 raise AssertionError(f"{record.doc_id} is terminal failure without failure record")
+        if not any(record.status == "COMPLETED" for record in self.records):
+            raise AssertionError(self._no_completed_documents_failure_message())
         provenance = self.promotion_provenance_summary()
         if provenance["missing_count"] > 0:
             raise AssertionError(
@@ -2339,6 +2564,31 @@ class LongRunHarness:
         progress = self.progress_summary()
         if progress["doc_count"] != len(self.records):
             raise AssertionError("progress summary doc count mismatch")
+
+    def _no_completed_documents_failure_message(self) -> str:
+        grouped: dict[str, dict[str, Any]] = {}
+        for failure in self.failure_records:
+            bucket = grouped.setdefault(
+                failure.fingerprint,
+                {
+                    "code": failure.code,
+                    "phase": failure.phase,
+                    "scope": failure.scope,
+                    "count": 0,
+                    "document_ids": [],
+                    "message": failure.message[:1_000],
+                    "details": failure.details,
+                },
+            )
+            bucket["count"] += 1
+            if failure.doc_id:
+                bucket["document_ids"].append(failure.doc_id)
+        root_failures = sorted(grouped.values(), key=lambda item: item["count"], reverse=True)
+        return (
+            "no documents completed; maintenance was not expected because parse/persist never "
+            "produced an eligible document; root_failures="
+            f"{json.dumps(root_failures, sort_keys=True)}"
+        )
 
     def _maintenance_invariant_failure_message(self, maintenance: dict[str, Any]) -> str:
         diagnostic = {
@@ -2579,6 +2829,19 @@ class LongRunHarness:
                         f"{effective_timeout_seconds:.2f}s for {record.doc_id}"
                     ),
                     phase="parse_document",
+                    details={
+                        "failure_kind": "parser_timeout",
+                        "parser_lane": self.config.parser_lane,
+                        "effective_timeout_seconds": effective_timeout_seconds,
+                        "configured_parse_timeout_seconds": self.config.parse_timeout_seconds,
+                        "remaining_runtime_seconds": remaining_runtime_seconds,
+                        "parser_trace_path": str(trace_path),
+                        "parser_failure_path": str(failure_path),
+                        "parser_failure_payload_path": str(failure_payload_path),
+                        "parser_heartbeat": dict(self.parser_heartbeat or {}),
+                        "parser_trace_tail": _read_text_tail(trace_path),
+                        "dump_trace_tail": _read_text_tail(dump_trace_path),
+                    },
                 )
             self._write_parser_heartbeat(
                 {
@@ -2621,7 +2884,14 @@ class LongRunHarness:
             payload = json.loads(result_path.read_text(encoding="utf-8"))
             layer_log = payload.get("layer_log")
             if isinstance(layer_log, list):
-                self._write_json("parser_layer_log.json", layer_log)
+                layer_log_dump_path = self.dumper.write_parser_layer_log(
+                    doc_id=record.doc_id,
+                    layer_log=layer_log,
+                )
+                _append_trace_line(
+                    dump_trace_path,
+                    f"parent_layer_log_persisted path={layer_log_dump_path}",
+                )
             self._write_parser_heartbeat(
                 {
                     "phase": "completed",
@@ -2638,7 +2908,9 @@ class LongRunHarness:
         failure: dict[str, Any] = {}
         if failure_path.exists():
             _append_trace_line(dump_trace_path, "parent_read_failure_json")
-            failure = json.loads(failure_path.read_text(encoding="utf-8"))
+            failure = _read_json_object(failure_path)
+        child_trace_tail = _read_text_tail(trace_path)
+        dump_trace_tail = _read_text_tail(dump_trace_path)
         self._write_parser_heartbeat(
             {
                 "phase": "failed",
@@ -2651,6 +2923,7 @@ class LongRunHarness:
                 "result_path": str(result_path),
                 "failure_path": str(failure_path),
                 "failure": failure,
+                "trace_tail": child_trace_tail,
             }
         )
         raise LongRunDocumentError(
@@ -2663,6 +2936,24 @@ class LongRunHarness:
                 failure_path=failure_path,
             ),
             phase="parse_document",
+            details={
+                "failure_kind": "parser_child_failure",
+                "parser_lane": self.config.parser_lane,
+                "child_exitcode": process.exitcode,
+                "parser_trace_path": str(trace_path),
+                "parser_failure_path": str(failure_path),
+                "parser_failure_payload_path": str(failure_payload_path),
+                "child_error_type": failure.get("error_type"),
+                "child_error_message": str(failure.get("message") or "")[:1_000],
+                "child_failure_payload_path": failure.get("payload_path"),
+                "child_failure": {
+                    "error_type": failure.get("error_type"),
+                    "message": str(failure.get("message") or "")[:1_000],
+                    "traceback": str(failure.get("traceback") or "")[-4_000:],
+                },
+                "parser_trace_tail": child_trace_tail,
+                "dump_trace_tail": dump_trace_tail,
+            },
         )
 
     def _terminate_parser_child(self, process: multiprocessing.Process) -> None:
@@ -2824,7 +3115,18 @@ def classify_exception(exc: Exception, *, phase: str) -> str:
     text = f"{type(exc).__name__}: {exc}".lower()
     if "ollama" in text and any(token in text for token in ("unavailable", "connection", "refused", "timeout")):
         return "ollama_unavailable_repeatedly"
-    if phase == "parse_document" and any(token in text for token in ("json", "structured", "validation")):
+    structured_output_failure = any(
+        token in text
+        for token in (
+            "invalid json",
+            "jsondecode",
+            "structured output",
+            "schema validation",
+            "validation error",
+            "validationerror",
+        )
+    )
+    if phase == "parse_document" and structured_output_failure:
         return "document_parse_failed"
     if any(token in text for token in ("invalid json", "jsondecode", "structured output")):
         return "llm_invalid_json"
@@ -2842,7 +3144,7 @@ def classify_exception(exc: Exception, *, phase: str) -> str:
         return "projection_repair_failure"
     if "invariant" in text or "orphan" in text:
         return "graph_invariant_violation"
-    if "stuck" in text or "timeout" in text:
+    if "stuck" in text or "timeout" in text or "runtime budget exhausted" in text:
         return "runtime_worker_stuck"
     if phase == "persist_document":
         return "document_persist_failed_after_retries"
@@ -3260,10 +3562,140 @@ def test_longrun_failure_classifier_and_circuit_breaker_are_bounded():
     assert breaker.record(systemic_records[0]) is False
     assert breaker.record(systemic_records[1]) is False
     assert breaker.record(systemic_records[2]) is True
+
+    repeated_parser_failures = [
+        FailureRecord(
+            run_id="run",
+            doc_id=f"doc-{index:03d}",
+            phase="parse_document",
+            code="document_parse_failed",
+            scope="document",
+            message="parser child exited without result exitcode=1",
+            fingerprint=normalized_fingerprint(
+                code="document_parse_failed",
+                phase="parse_document",
+                message="parser child exited without result exitcode=1",
+            ),
+            timestamp_ms=_now_ms(),
+        )
+        for index in range(1, 4)
+    ]
+    assert breaker.record(repeated_parser_failures[0]) is False
+    assert breaker.record(repeated_parser_failures[1]) is False
+    assert breaker.record(repeated_parser_failures[2]) is True
     assert classify_exception(ValueError("invalid json structured output"), phase="observe") == "llm_invalid_json"
     assert classify_exception(RuntimeError("sqlite database write failed"), phase="persist_document") == (
         "database_write_repeated_failure"
     )
+
+
+def test_workflow_failure_preserves_captured_harness_exception(tmp_path: Path):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "captured-harness-failure",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Captured failure",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+        last_step_name="parse_document",
+    )
+    result = RunResult(
+        run_id="run-doc-001",
+        final_state={},
+        mq=queue.Queue(),
+        status="failure",
+        errors=[
+            "'LongRunHarness' object has no attribute '_write_json'",
+            "Traceback: AttributeError: 'LongRunHarness' object has no attribute '_write_json'",
+        ],
+    )
+
+    error = harness._workflow_failure_exception(
+        record=record,
+        result=result,
+        run_id=result.run_id,
+    )
+    failure = harness._classify_exception(error, doc_id=record.doc_id, phase="runtime")
+
+    assert isinstance(error, LongRunSystemicError)
+    assert "_write_json" in str(error)
+    assert error.details["failed_step"] == "parse_document"
+    assert error.details["workflow_errors"] == result.errors
+    assert failure.scope == "systemic"
+    assert failure.details["workflow_run_id"] == result.run_id
+    assert "_write_json" in failure.fingerprint
+
+
+def test_longrun_failure_is_streamed_and_persisted_immediately(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "failure-observability",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1, live_trace=True),
+    )
+    failure = harness._failure_record(
+        doc_id="doc-001",
+        phase="parse_document",
+        code="document_parse_failed",
+        scope="document",
+        message="parser child exited without result",
+        details={
+            "parser_trace_path": "C:/runs/doc-001/trace.log",
+            "parser_failure_path": "C:/runs/doc-001/failure.json",
+            "child_exitcode": 1,
+        },
+    )
+
+    harness._record_failure(failure)
+
+    event_path = harness.dumper.dump_dir / "failure_events.jsonl"
+    assert event_path.exists()
+    event = json.loads(event_path.read_text(encoding="utf-8").strip())
+    assert event["event_type"] == "longrun_failure_recorded"
+    assert event["code"] == "document_parse_failed"
+    assert event["details"]["child_exitcode"] == 1
+    assert event["details"]["parser_failure_path"].endswith("failure.json")
+    assert "[longrun] document_failure_recorded" in capsys.readouterr().err
+
+
+def test_longrun_all_failed_invariant_reports_root_failures_not_maintenance(
+    tmp_path: Path,
+):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "all-failed",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Failure fixture",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "input.md",
+        current_path=tmp_path / "failed.md",
+        status="FAILED",
+    )
+    harness.records.append(record)
+    harness._record_failure(
+        harness._failure_record(
+            doc_id=record.doc_id,
+            phase="parse_document",
+            code="document_parse_failed",
+            scope="document",
+            message="parser child timed out",
+            details={"parser_trace_path": "C:/runs/doc-001/trace.log"},
+        )
+    )
+
+    with pytest.raises(AssertionError, match="no documents completed") as exc_info:
+        harness._verify_run_invariants()
+
+    message = str(exc_info.value)
+    assert "background maintenance did not produce persisted evidence" not in message
+    assert "document_parse_failed" in message
+    assert "parser_trace_path" in message
 
 
 def test_longrun_checkpoint_state_is_loaded_across_reruns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -3987,7 +4419,14 @@ def test_longrun_run_aborts_when_llm_call_budget_is_exceeded(
     harness = LongRunHarness(run_dir=tmp_path / "budget-abort", config=config)
     harness.prepare()
     harness.llm_call_count = 1
-    monkeypatch.setattr(harness, "_run_document_workflow", lambda record: "succeeded")
+    workflow_called = False
+
+    def _unexpected_workflow(record: DocumentRecord) -> str:
+        nonlocal workflow_called
+        workflow_called = True
+        return "succeeded"
+
+    monkeypatch.setattr(harness, "_run_document_workflow", _unexpected_workflow)
     monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
 
     with pytest.raises(AssertionError, match="llm call budget exceeded"):
@@ -3995,6 +4434,9 @@ def test_longrun_run_aborts_when_llm_call_budget_is_exceeded(
 
     assert harness.aborted is True
     assert harness.abort_reason and "llm call budget exceeded" in harness.abort_reason
+    assert workflow_called is False
+    assert harness.records[0].status == "PENDING"
+    assert harness.records[0].current_path.parent == harness.run_dir / "input"
 
 
 def test_longrun_run_aborts_when_runtime_budget_is_exceeded(
@@ -4025,6 +4467,8 @@ def test_longrun_run_aborts_when_runtime_budget_is_exceeded(
 
     assert harness.aborted is True
     assert harness.abort_reason and "max runtime exceeded" in harness.abort_reason
+    assert harness.records[0].status == "PENDING"
+    assert harness.records[0].current_path.parent == harness.run_dir / "input"
 
 
 def test_longrun_config_from_env_auto_enables_pgvector_testcontainer_probe(monkeypatch: pytest.MonkeyPatch):
@@ -4529,6 +4973,7 @@ def test_longrun_final_report_renders_parser_eval_summary(
     assert "## Parser Evaluation" in report
     assert "Composite verdict" in report
     assert "Average basic sense score" in report
+    assert "Slowest parser stage" in report
 
 
 def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
@@ -4735,7 +5180,7 @@ def test_longrun_parser_subprocess_timeout_records_heartbeat(tmp_path: Path):
         parser_mode="heuristic",
     )
 
-    with pytest.raises(LongRunDocumentError, match="timed out"):
+    with pytest.raises(LongRunDocumentError, match="timed out") as exc_info:
         harness._run_parse_with_subprocess(
             record=record,
             request=request,
@@ -4746,6 +5191,15 @@ def test_longrun_parser_subprocess_timeout_records_heartbeat(tmp_path: Path):
     assert harness.parser_heartbeat["phase"] == "timeout"
     heartbeat_path = harness.dumper.dump_dir / "parser_heartbeat.json"
     assert heartbeat_path.exists()
+    assert exc_info.value.details["parser_trace_path"].endswith("trace.log")
+    assert exc_info.value.details["parser_failure_payload_path"].endswith("failure_payload.json")
+    assert exc_info.value.details["failure_kind"] == "parser_timeout"
+    assert isinstance(exc_info.value.details["parser_heartbeat"], dict)
+    assert isinstance(exc_info.value.details["parser_trace_tail"], list)
+    assert any(
+        "parent_timeout" in line
+        for line in exc_info.value.details["dump_trace_tail"]
+    )
 
 
 def test_longrun_parser_subprocess_parent_poll_trace_is_throttled(
@@ -4820,7 +5274,12 @@ def test_longrun_parser_subprocess_parent_poll_trace_is_throttled(
                         "evaluation": {},
                         "usage_summary": {},
                         "diagnostics": {},
-                        "layer_log": None,
+                        "layer_log": [
+                            {
+                                "stage": "workflow_layered_parse_complete",
+                                "source_document_id": "source-doc-001",
+                            }
+                        ],
                     },
                 )
 
@@ -4849,6 +5308,18 @@ def test_longrun_parser_subprocess_parent_poll_trace_is_throttled(
     assert "elapsed=10.00s" not in trace_text
     assert "elapsed=20.00s" not in trace_text
     assert "elapsed=50.00s" not in trace_text
+    persisted_layer_log = json.loads(
+        (harness.dumper.dump_dir / "parser_layer_logs" / "doc-001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert persisted_layer_log == [
+        {
+            "source_document_id": "source-doc-001",
+            "stage": "workflow_layered_parse_complete",
+        }
+    ]
+    assert "parent_layer_log_persisted" in trace_text
 
 
 def test_longrun_parser_subprocess_timeout_respects_remaining_runtime_budget(tmp_path: Path):

@@ -16,6 +16,88 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def summarize_stage_timings(layer_log: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Summarize paired ``*_start``/completion events from a parser layer log.
+
+    This is deliberately derived from the existing event log so it remains useful
+    for persisted runs and does not require a second timing system in the parser.
+    Repeated nested stages are handled with a stack; unfinished stages are visible
+    instead of being silently reported as zero duration.
+    """
+    terminal_suffixes = ("_complete", "_completed", "_done", "_returned", "_failed", "_skipped")
+    starts: dict[str, list[int]] = {}
+    durations: dict[str, list[int]] = {}
+    open_counts: dict[str, int] = {}
+    for event in layer_log:
+        stage = str(event.get("stage") or "")
+        timestamp = event.get("timestamp_ms")
+        if not stage or not isinstance(timestamp, int):
+            continue
+        if stage.endswith("_start"):
+            base = stage[: -len("_start")]
+            starts.setdefault(base, []).append(timestamp)
+            continue
+        base = next((stage[: -len(suffix)] for suffix in terminal_suffixes if stage.endswith(suffix)), None)
+        if base is None:
+            continue
+        pending = starts.get(base)
+        if not pending:
+            continue
+        started_at = pending.pop()
+        durations.setdefault(base, []).append(max(0, timestamp - started_at))
+    for base, pending in starts.items():
+        if pending:
+            open_counts[base] = len(pending)
+    stages: dict[str, dict[str, Any]] = {}
+    for base in sorted(set(durations) | set(open_counts)):
+        values = durations.get(base, [])
+        stages[base] = {
+            "count": len(values),
+            "total_ms": sum(values),
+            "average_ms": round(sum(values) / len(values), 2) if values else None,
+            "max_ms": max(values) if values else None,
+            "open_count": open_counts.get(base, 0),
+        }
+    ranked = sorted(stages.items(), key=lambda item: (item[1]["total_ms"], item[0]), reverse=True)
+    operation_ranked = [
+        item for item in ranked
+        if not item[0].endswith("_parse") and item[0] not in {"parse", "workflow_layered_parse"}
+    ]
+    return {
+        "stage_count": len(stages),
+        "stages": stages,
+        "dominant_stage": ranked[0][0] if ranked and ranked[0][1]["total_ms"] > 0 else None,
+        "dominant_stage_total_ms": ranked[0][1]["total_ms"] if ranked else 0,
+        "dominant_operation_stage": operation_ranked[0][0] if operation_ranked else None,
+        "dominant_operation_stage_total_ms": operation_ranked[0][1]["total_ms"] if operation_ranked else 0,
+    }
+
+
+def aggregate_stage_timings(summaries: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Aggregate per-document timing summaries for a run-level report."""
+    stages: dict[str, dict[str, int | float]] = {}
+    for summary in summaries:
+        for name, values in dict(summary.get("stages") or {}).items():
+            target = stages.setdefault(name, {"count": 0, "total_ms": 0, "open_count": 0})
+            target["count"] += int(values.get("count") or 0)
+            target["total_ms"] += int(values.get("total_ms") or 0)
+            target["open_count"] += int(values.get("open_count") or 0)
+    for values in stages.values():
+        values["average_ms"] = round(float(values["total_ms"]) / int(values["count"]), 2) if values["count"] else 0
+    ranked = sorted(stages.items(), key=lambda item: (item[1]["total_ms"], item[0]), reverse=True)
+    operation_ranked = [
+        item for item in ranked
+        if not item[0].endswith("_parse") and item[0] not in {"parse", "workflow_layered_parse"}
+    ]
+    return {
+        "stages": dict(ranked),
+        "dominant_stage": ranked[0][0] if ranked else None,
+        "dominant_stage_total_ms": ranked[0][1]["total_ms"] if ranked else 0,
+        "dominant_operation_stage": operation_ranked[0][0] if operation_ranked else None,
+        "dominant_operation_stage_total_ms": operation_ranked[0][1]["total_ms"] if operation_ranked else 0,
+    }
+
+
 def _json_default(value: object) -> object:
     if hasattr(value, "model_dump"):
         try:
@@ -87,6 +169,7 @@ _LIVE_TRACE_FIELD_ORDER = (
     "failure_path",
     "error_type",
     "error_message",
+    "errors",
     "message",
 )
 
