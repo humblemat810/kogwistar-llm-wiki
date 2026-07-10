@@ -14,6 +14,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 import tempfile
+import uuid
 from types import SimpleNamespace
 from typing import Callable, Mapping, Protocol
 
@@ -29,7 +30,7 @@ from kogwistar.logical_refs import (
     logical_ref_id,
 )
 from kogwistar.policy import PromotionDecision
-from kogwistar.runtime.budget import BudgetAttribution, budget_event_from_dict
+from kogwistar.runtime.budget import budget_event_from_dict
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
@@ -56,7 +57,7 @@ from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import GraphSpace, WorkspaceNamespaces
 from .projection import ProjectionManager
-from .usage_projection import UsageProjection, UsageProjectionSnapshot, append_usage_event
+from .usage_projection import UsageProjection, UsageProjectionSnapshot, persist_usage_events
 from .review_query import ReviewQueryService
 
 
@@ -685,8 +686,26 @@ class IngestPipeline:
             source_document_id=source_document_id,
             provider=provider,
             model=model,
+            attempt_id=str(getattr(result, "workflow_run_id", None) or uuid.uuid4()),
             usage_events=list(getattr(result, "usage_events", []) or []),
         )
+        try:
+            usage_snapshot = self.refresh_usage_projection(request.workspace_id)
+            self._trace_event(
+                "usage_projection_refreshed",
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                last_materialized_seq=usage_snapshot.last_materialized_seq,
+                materialization_status=usage_snapshot.materialization_status,
+            )
+        except Exception as exc:
+            self._trace_event(
+                "usage_projection_refresh_failed",
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
         self._trace_event(
             "workflow_layered_parse_complete",
             workspace_id=request.workspace_id,
@@ -714,52 +733,28 @@ class IngestPipeline:
         source_document_id: str,
         provider: str,
         model: str,
+        attempt_id: str,
         usage_events: list[object],
     ) -> None:
         if not usage_events:
             return
         namespaces = self.namespaces_for(request.workspace_id)
-        for index, raw_event in enumerate(usage_events):
-            if not isinstance(raw_event, dict):
-                continue
-            event = budget_event_from_dict(raw_event)
-            operation_id = str(
-                stable_id(
-                    "kogwistar_llm_wiki.parser_usage_operation",
-                    request.workspace_id,
-                    source_document_id,
-                    index,
-                    event.meta.get("reason"),
-                )
-            )
-            attribution = event.attribution or BudgetAttribution()
-            attribution = replace(
-                attribution,
-                workspace_id=attribution.workspace_id or request.workspace_id,
-                source_document_id=attribution.source_document_id or source_document_id,
-                operation_id=attribution.operation_id or operation_id,
-                operation_kind=attribution.operation_kind or "parser",
-                provider=attribution.provider or provider,
-                model=attribution.model or model,
-            )
-            enriched = replace(
-                event,
-                event_id=str(
-                    stable_id(
-                        "kogwistar_llm_wiki.parser_usage_event",
-                        request.workspace_id,
-                        source_document_id,
-                        index,
-                        event.event_id,
-                    )
-                ),
-                attribution=attribution,
-            )
-            append_usage_event(
-                self.engines.conversation.meta_sqlite,
-                namespace=namespaces.usage_events,
-                event=enriched,
-            )
+        events = [
+            budget_event_from_dict(raw_event)
+            for raw_event in usage_events
+            if isinstance(raw_event, dict)
+        ]
+        persist_usage_events(
+            self.engines.conversation.meta_sqlite,
+            namespace=namespaces.usage_events,
+            events=events,
+            workspace_id=request.workspace_id,
+            attempt_id=attempt_id,
+            source_document_id=source_document_id,
+            operation_kind="parser",
+            provider=provider,
+            model=model,
+        )
 
     def _build_parser_kwargs(
         self,

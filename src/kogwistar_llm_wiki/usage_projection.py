@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime import (
+    BudgetAttribution,
     BudgetEvent,
     ProjectionCheckpoint,
     ProjectionLoadResult,
@@ -140,12 +141,62 @@ def append_usage_event(meta: UsageMetaStore, *, namespace: str, event: BudgetEve
     )
 
 
+def persist_usage_events(
+    meta: UsageMetaStore,
+    *,
+    namespace: str,
+    events: Iterable[BudgetEvent],
+    workspace_id: str,
+    attempt_id: str,
+    source_document_id: str | None = None,
+    operation_id: str | None = None,
+    operation_kind: str | None = None,
+    maintenance_job_id: str | None = None,
+    dream_job_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> None:
+    """Persist one runtime attempt's events with host-owned attribution."""
+
+    for index, event in enumerate(events):
+        existing = event.attribution or BudgetAttribution()
+        effective_operation_id = existing.operation_id or operation_id or str(
+            stable_id("kogwistar_llm_wiki.operation", attempt_id, index)
+        )
+        attribution = replace(
+            existing,
+            workspace_id=workspace_id,
+            source_document_id=source_document_id if source_document_id is not None else existing.source_document_id,
+            operation_id=effective_operation_id,
+            operation_kind=operation_kind or existing.operation_kind,
+            maintenance_job_id=maintenance_job_id or existing.maintenance_job_id,
+            dream_job_id=dream_job_id or existing.dream_job_id,
+            provider=provider or existing.provider,
+            model=model or existing.model,
+        )
+        enriched = replace(
+            event,
+            event_id=str(
+                stable_id(
+                    "kogwistar_llm_wiki.usage_event",
+                    workspace_id,
+                    attempt_id,
+                    index,
+                    event.event_id,
+                )
+            ),
+            attribution=attribution,
+        )
+        append_usage_event(meta, namespace=namespace, event=enriched)
+
+
 def _empty_aggregate() -> dict[str, object]:
     return {
         "input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
-        "total_cost": 0.0,
+        "total_cost": None,
+        "cost_observed": False,
         "time_ms": 0,
         "event_count": 0,
         "event_counts": {},
@@ -159,10 +210,16 @@ def _merge_event(aggregate: dict[str, object], event: BudgetEvent) -> None:
     summary = summarize_budget_events([event])
     for key in ("input_tokens", "output_tokens", "total_tokens", "time_ms", "event_count"):
         aggregate[key] = int(aggregate.get(key, 0) or 0) + int(summary.get(key, 0) or 0)
-    aggregate["total_cost"] = round(
-        float(aggregate.get("total_cost", 0.0) or 0.0)
-        + float(summary.get("total_cost", 0.0) or 0.0),
-        6,
+    cost_observed = bool(aggregate.get("cost_observed")) or event.kind == "cost" or event.unit == "total_cost"
+    aggregate["cost_observed"] = cost_observed
+    aggregate["total_cost"] = (
+        round(
+            float(aggregate.get("total_cost", 0.0) or 0.0)
+            + float(summary.get("total_cost", 0.0) or 0.0),
+            6,
+        )
+        if cost_observed
+        else None
     )
     for field in ("event_counts", "by_unit"):
         target = dict(aggregate.get(field) or {})

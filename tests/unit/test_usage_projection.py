@@ -7,7 +7,7 @@ import pytest
 from kogwistar.runtime import BudgetAttribution, BudgetEvent
 from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.usage_projection import UsageProjection, append_usage_event
+from kogwistar_llm_wiki.usage_projection import UsageProjection, append_usage_event, persist_usage_events
 
 
 def _projection(tmp_path):
@@ -112,6 +112,43 @@ def test_usage_projection_resumes_from_watermark_and_is_idempotent(tmp_path):
     assert second.aggregates["unattributed"]["unattributed"]["time_ms"] == 3
     assert repeated.raw_event_count == second.raw_event_count == 2
     assert repeated.aggregates == second.aggregates
+
+
+def test_usage_projection_distinguishes_unknown_cost_from_zero_cost(tmp_path):
+    meta, namespaces, projection = _projection(tmp_path)
+    append_usage_event(
+        meta,
+        namespace=namespaces.usage_events,
+        event=BudgetEvent(
+            event_id="event-token-only",
+            run_id="run-1",
+            source="provider",
+            kind="token",
+            amount=2,
+            unit="input_tokens",
+        ),
+    )
+
+    unknown = projection.refresh()
+    unknown_aggregate = unknown.aggregates["unattributed"]["unattributed"]
+    assert unknown_aggregate["total_cost"] is None
+    assert unknown_aggregate["cost_observed"] is False
+
+    append_usage_event(
+        meta,
+        namespace=namespaces.usage_events,
+        event=BudgetEvent(
+            event_id="event-zero-cost",
+            run_id="run-1",
+            source="provider",
+            kind="cost",
+            amount=0,
+            unit="total_cost",
+        ),
+    )
+    known = projection.refresh().aggregates["unattributed"]["unattributed"]
+    assert known["total_cost"] == 0.0
+    assert known["cost_observed"] is True
 
 
 def test_usage_projection_defers_events_after_captured_watermark(tmp_path, monkeypatch):
@@ -274,3 +311,40 @@ def test_usage_event_serialization_preserves_attribution():
     restored = budget_event_from_dict(json.loads(json.dumps(budget_event_to_dict(event))))
 
     assert restored == event
+
+
+def test_persist_usage_events_scopes_ids_to_attempt_and_host_attribution(tmp_path):
+    meta, namespaces, _projection_instance = _projection(tmp_path)
+    event = BudgetEvent(
+        run_id="runtime-run",
+        source="runtime",
+        kind="token",
+        amount=4,
+        unit="input_tokens",
+    )
+
+    persist_usage_events(
+        meta,
+        namespace=namespaces.usage_events,
+        events=[event],
+        workspace_id="ws-1",
+        attempt_id="attempt-1",
+        source_document_id="doc-1",
+        operation_kind="parser",
+    )
+    persist_usage_events(
+        meta,
+        namespace=namespaces.usage_events,
+        events=[event],
+        workspace_id="ws-1",
+        attempt_id="attempt-2",
+        source_document_id="doc-1",
+        operation_kind="parser",
+    )
+
+    rows = list(meta.iter_entity_events(namespace=namespaces.usage_events, from_seq=1))
+    assert len(rows) == 2
+    payloads = [json.loads(row[4]) for row in rows]
+    assert len({payload["event_id"] for payload in payloads}) == 2
+    assert {payload["attribution"]["workspace_id"] for payload in payloads} == {"ws-1"}
+    assert {payload["attribution"]["source_document_id"] for payload in payloads} == {"doc-1"}

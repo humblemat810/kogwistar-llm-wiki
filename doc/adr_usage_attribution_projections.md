@@ -88,6 +88,18 @@ Events arriving after the captured watermark are processed by the next cycle.
 The projector reports `catching_up` when a newer source sequence exists after
 the batch was captured.
 
+The checkpoint may retain only a bounded recent event-ID tail for defensive
+deduplication. The monotonic materialized sequence and the append-only event
+store's idempotent event identity are the primary replay boundaries; the
+checkpoint must not grow with the full event history.
+
+Projection writers use a backend compare-and-swap on the previously observed
+authoritative and materialized sequences. A stale concurrent writer fails with
+a projection conflict and must retry from the newer snapshot; it must not
+overwrite that snapshot. Synchronous rebuilds do not leave a durable
+`rebuilding` row between calls; `rebuilding` is reserved for an asynchronous
+projector that exposes an in-progress state.
+
 If materialization fails, the previous aggregate and watermark remain usable;
 the projection status becomes `failed` without advancing the checkpoint. A
 missing or incompatible projection is rebuilt from sequence zero. An explicit
@@ -149,6 +161,11 @@ The raw event stream must be retained for as long as historical usage views
 need to be reproducible. Provider integration must propagate real usage
 metadata; otherwise the projection can report runtime duration while token and
 cost fields remain unknown or zero.
+
+When input and output token counts are both present, the runtime budget path
+debits those dimensions once and does not debit a redundant provider total.
+An aggregate records whether cost was observed separately from its numeric
+total, so missing cost is not represented as confirmed zero cost.
 
 ## Verification
 

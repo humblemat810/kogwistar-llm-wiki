@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from abc import ABC, abstractmethod
 
 from kogwistar.engine_core.jobs import JobQueueItem
@@ -33,6 +34,7 @@ from .namespaces import WorkspaceNamespaces
 from .provider_config import resolve_maintenance_provider_settings
 from .utils import _temporary_namespace
 from kogwistar.runtime.budget import StateBackedBudgetLedger
+from .usage_projection import UsageProjection, persist_usage_events
 
 
 logger = logging.getLogger(__name__)
@@ -341,6 +343,35 @@ class MaintenanceWorker(BaseWorker):
                     )
                     if ctx.job_id:
                         self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
+                finally:
+                    try:
+                        persist_usage_events(
+                            self.engines.conversation.meta_sqlite,
+                            namespace=ns.usage_events,
+                            events=budget_ledger.events,
+                            workspace_id=ctx.workspace_id,
+                            attempt_id=str(
+                                getattr(locals().get("result"), "run_id", None)
+                                or uuid.uuid4()
+                            ),
+                            source_document_id=str(ctx.payload.get("source_document_id") or "") or None,
+                            operation_id=str(ctx.job_id or ctx.request_node_id),
+                            operation_kind=ctx.maintenance_kind,
+                            maintenance_job_id=str(ctx.job_id or ctx.request_node_id),
+                            provider=self.provider_settings.parser.provider,
+                            model=self.provider_settings.parser.model,
+                        )
+                        UsageProjection(
+                            self.engines.conversation.meta_sqlite,
+                            workspace_id=ctx.workspace_id,
+                            source_namespace=ns.usage_events,
+                            projection_namespace=ns.usage_projection,
+                        ).refresh()
+                    except Exception:
+                        logger.exception(
+                            "Failed to persist usage events for maintenance job %s",
+                            ctx.request_node_id,
+                        )
 
     def _emit_lane_reply(
         self,
