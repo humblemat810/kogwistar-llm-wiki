@@ -13,7 +13,7 @@ from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.layerwise_llm import LayerwiseCallback, build_layerwise_llm_callbacks
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.budget_adapters import summarize_budget_events
-from kogwistar.runtime.budget import StateBackedBudgetLedger
+from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
 
 from .debug_run import LiveTracePrinter, env_flag_enabled
 from .provider_config import provider_config_summary
@@ -90,7 +90,7 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
     nodes = list(graph_payload.get("nodes") or [])
     node_count = len(nodes)
     node_types: set[str] = set()
-    excerpt_counts: Counter[str] = Counter()
+    excerpt_spans_by_cluster: dict[str, dict[str, list[tuple[int, int]]]] = defaultdict(lambda: defaultdict(list))
     cluster_intervals: dict[str, list[tuple[int, int]]] = defaultdict(list)
     max_depth = 0
 
@@ -105,8 +105,6 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
         for mention in node.get("mentions") or []:
             for span in mention.get("spans") or []:
                 excerpt = _normalize_excerpt(span.get("excerpt"))
-                if excerpt and excerpt != " ":
-                    excerpt_counts[excerpt] += 1
                 source_cluster_id = span.get("source_cluster_id")
                 start_char = span.get("start_char")
                 end_char = span.get("end_char")
@@ -114,7 +112,11 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
                     continue
                 if end_char <= start_char:
                     continue
-                cluster_intervals[str(source_cluster_id)].append((max(0, start_char), max(0, end_char)))
+                cluster_id = str(source_cluster_id)
+                interval = (max(0, start_char), max(0, end_char))
+                cluster_intervals[cluster_id].append(interval)
+                if excerpt and excerpt != " ":
+                    excerpt_spans_by_cluster[cluster_id][excerpt].append(interval)
 
     covered_total = 0
     source_total = 0
@@ -135,7 +137,22 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
         source_total += max(end_char for _, end_char in merged)
 
     coverage_ratio = covered_total / source_total if source_total else 0.0
-    duplicate_excerpt_hits = sum(count - 1 for count in excerpt_counts.values() if count > 1)
+    duplicate_excerpt_hits = 0
+    for excerpt_groups in excerpt_spans_by_cluster.values():
+        for intervals in excerpt_groups.values():
+            if len(intervals) <= 1:
+                continue
+            intervals.sort()
+            merged_span_count = 0
+            cur_start, cur_end = intervals[0]
+            for start_char, end_char in intervals[1:]:
+                if start_char <= cur_end:
+                    cur_end = max(cur_end, end_char)
+                else:
+                    merged_span_count += 1
+                    cur_start, cur_end = start_char, end_char
+            merged_span_count += 1
+            duplicate_excerpt_hits += max(0, len(intervals) - merged_span_count)
     page_index_diag = dict(diagnostics.get("page_index") or {})
     assignment_mode = str(page_index_diag.get("assignment_mode") or diagnostics.get("assignment_mode") or "")
     fallback_used = bool(
@@ -250,6 +267,14 @@ def run_workflow_layered_parse(
         workflow_run_id=getattr(run_result, "run_id", None),
     )
     final_state = dict(getattr(run_result, "final_state", {}) or {})
+    _layer_event(
+        "workflow_layered_postparse_state_snapshot",
+        workflow_status=getattr(run_result, "status", None),
+        has_semantic_tree="semantic_tree" in final_state,
+        has_validation_report="validation_report" in final_state,
+        has_export_bundle="export_bundle" in final_state,
+        workflow_error_count=len(list(final_state.get("workflow_errors") or [])),
+    )
     parse_session = final_state.get("parse_session") or {}
     proposal_summary = _proposal_mode_summary(final_state)
     _layer_event(
@@ -263,10 +288,50 @@ def run_workflow_layered_parse(
         unresolved_interval_count=proposal_summary.get("unresolved_interval_count"),
         provider_child_count=proposal_summary.get("provider_child_count"),
     )
+    bundle_source = "result"
     if not bundle and final_state.get("export_bundle"):
         bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
+        bundle_source = "final_state_export_bundle"
+    if not bundle and final_state.get("semantic_tree"):
+        from kg_doc_parser.workflow_ingest.models import WorkflowExportBundle as _WorkflowExportBundle
+        from kg_doc_parser.workflow_ingest.semantics import SemanticNode, semantic_tree_to_kge_payload
+
+        semantic_tree = SemanticNode.model_validate(final_state["semantic_tree"])
+        graph_payload = semantic_tree_to_kge_payload(semantic_tree, doc_id=source_document_id)
+        bundle = _WorkflowExportBundle(
+            graph_payload=graph_payload,
+            authoritative_source_map=final_state.get("authoritative_source_map") or {},
+            embedding_spaces=list(final_state.get("embedding_spaces") or []),
+            consolidation_candidates=[],
+            retrieval_metadata=dict(final_state.get("retrieval_metadata") or {}),
+            persistence_mode="local_debug",
+            kg_authority="local",
+            canonical_write_confirmed=False,
+            parser_owner="local",
+            server_parser_used=False,
+            persisted_to_knowledge_engine=False,
+        )
+        bundle_source = "synthesized_from_semantic_tree"
+        _layer_event(
+            "workflow_layered_export_bundle_synthesized",
+            workflow_status=getattr(run_result, "status", None),
+            graph_node_count=len(graph_payload.get("nodes", []) or []),
+            graph_edge_count=len(graph_payload.get("edges", []) or []),
+        )
     if not bundle:
+        _layer_event(
+            "workflow_layered_export_bundle_missing",
+            workflow_status=getattr(run_result, "status", None),
+            final_state_keys=sorted(final_state.keys()),
+        )
         raise RuntimeError("workflow-layered parser completed without an export bundle")
+    _layer_event(
+        "workflow_layered_export_bundle_ready",
+        workflow_status=getattr(run_result, "status", None),
+        bundle_source=bundle_source,
+        graph_node_count=len(bundle.graph_payload.get("nodes", []) or []),
+        graph_edge_count=len(bundle.graph_payload.get("edges", []) or []),
+    )
 
     graph_payload = _dump_model(bundle.graph_payload)
     evaluation = _basic_sense_eval_from_graph_payload(
@@ -329,6 +394,7 @@ def run_workflow_layered_parse(
         evaluation=evaluation,
         diagnostics=diagnostics,
         usage_summary=usage_summary,
+        usage_events=[budget_event_to_dict(event) for event in budget_ledger.events],
         layer_log=layer_log,
         parse_session=parse_session,
         workflow_status=getattr(run_result, "status", None),
@@ -340,6 +406,9 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
     heartbeat_path = Path(payload["heartbeat_path"])
     result_path = Path(payload["result_path"])
     failure_path = Path(payload["failure_path"])
+    failure_payload_path = Path(
+        str(payload.get("failure_payload_path") or failure_path.with_name("failure_payload.json"))
+    )
     trace_path = Path(payload["trace_path"])
     dump_trace_path = Path(str(payload["dump_trace_path"])) if payload.get("dump_trace_path") else None
     live_trace = bool(payload.get("live_trace")) or env_flag_enabled(
@@ -475,6 +544,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "graph_payload": graph_payload,
                 "evaluation": evaluation,
                 "usage_summary": usage_summary,
+                "usage_events": list(getattr(result, "usage_events", []) or []),
                 "diagnostics": diagnostics,
                 "layer_log": getattr(result, "layer_log", None) if parser_lane == "workflow_layered" else None,
             },
@@ -491,6 +561,10 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
         _trace("child_completed")
     except BaseException as exc:  # noqa: BLE001
         _trace(f"child_exception {type(exc).__name__}: {exc}")
+        try:
+            _write_json_file(failure_payload_path, dict(payload))
+        except Exception as payload_exc:  # noqa: BLE001
+            _trace(f"failure_payload_write_error {type(payload_exc).__name__}: {payload_exc}")
         _write_json_file(
             failure_path,
             {
@@ -498,6 +572,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "error_type": type(exc).__name__,
                 "message": str(exc),
                 "traceback": traceback.format_exc(),
+                "payload_path": str(failure_payload_path),
             },
         )
         _heartbeat("failed", failure_path=str(failure_path), error_type=type(exc).__name__)

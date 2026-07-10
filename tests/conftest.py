@@ -21,6 +21,11 @@ TEST_TMP.mkdir(parents=True, exist_ok=True)
 for key in ("TMPDIR", "TEMP", "TMP"):
     os.environ[key] = str(TEST_TMP)
 
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+for path in (KG_DOC_PARSER_SRC, OBSIDIAN_SINK_ROOT):
+    if str(path) not in sys.path:
+        sys.path.append(str(path))
 
 import pytest
 
@@ -282,13 +287,6 @@ def tmp_path():
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)
-
-# Keep the local src tree first, but do not let vendored repos shadow the repo's own tests.
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
-for path in [KG_DOC_PARSER_SRC, KOGWISTAR_ROOT, OBSIDIAN_SINK_ROOT]:
-    if str(path) not in sys.path:
-        sys.path.append(str(path))
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend

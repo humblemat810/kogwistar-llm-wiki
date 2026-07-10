@@ -7,6 +7,7 @@ from kogwistar.engine_core.models import Edge, Grounding, MentionVerification, N
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.id_provider import stable_id
 from kogwistar.typing_interfaces import WriteLike
+from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
 
 from .maintenance_patches import (
@@ -351,11 +352,35 @@ def _span_from_operation(operation: "MaintenancePatchOperation") -> Span:
     provenance = operation.provenance
     pointer: dict[str, str | int | float | bool | None] = {}
     if provenance and provenance.source_pointers:
-        pointer = dict(provenance.source_pointers[0])
+        pointer = dict(
+            next(
+                (
+                    item
+                    for item in provenance.source_pointers
+                    if source_pointer_has_character_span(item)
+                ),
+                provenance.source_pointers[0],
+            )
+        )
     doc_id = str(pointer.get("doc_id") or _source_document_id(operation))
-    start_char = int(pointer.get("start_char") or 0)
-    end_char = int(pointer.get("end_char") or max(start_char + 1, 1))
-    excerpt = str(pointer.get("excerpt") or "")
+    verified_span = False
+    if source_pointer_has_character_span(pointer):
+        validated_pointer = validate_source_pointer(
+            pointer,
+            end_mode="exclusive",
+            require_source_cluster=False,
+            require_source_text=False,
+            require_parent_containment=False,
+            require_text_match=False,
+        )
+        start_char = validated_pointer.start_char
+        end_char = validated_pointer.end_char
+        excerpt = validated_pointer.text or ""
+        verified_span = True
+    else:
+        start_char = 0
+        end_char = 1
+        excerpt = ""
     return Span(
         collection_page_url=str(pointer.get("collection_page_url") or f"maintenance/{doc_id}"),
         document_page_url=str(pointer.get("document_page_url") or f"maintenance/{doc_id}"),
@@ -367,7 +392,12 @@ def _span_from_operation(operation: "MaintenancePatchOperation") -> Span:
         excerpt=excerpt,
         context_before=str(pointer.get("context_before") or ""),
         context_after=str(pointer.get("context_after") or ""),
-        verification=MentionVerification(method="system", is_verified=True, score=provenance.confidence if provenance else 1.0, notes="maintenance patch provenance"),
+        verification=MentionVerification(
+            method="system",
+            is_verified=verified_span,
+            score=provenance.confidence if provenance and verified_span else 0.0,
+            notes="maintenance patch character span" if verified_span else "maintenance patch document-level provenance",
+        ),
     )
 
 

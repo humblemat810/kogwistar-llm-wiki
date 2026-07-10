@@ -11,6 +11,7 @@ import json
 import os
 import hashlib
 import time
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from kogwistar.logical_refs import (
     logical_ref_id,
 )
 from kogwistar.policy import PromotionDecision
+from kogwistar.runtime.budget import BudgetAttribution, budget_event_from_dict
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
@@ -54,6 +56,7 @@ from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 from .policies import LlmWikiPolicies, build_default_policies
 from .namespaces import GraphSpace, WorkspaceNamespaces
 from .projection import ProjectionManager
+from .usage_projection import UsageProjection, UsageProjectionSnapshot, append_usage_event
 from .review_query import ReviewQueryService
 
 
@@ -284,6 +287,25 @@ class IngestPipeline:
 
     def namespaces_for(self, workspace_id: str) -> WorkspaceNamespaces:
         return WorkspaceNamespaces(workspace_id)
+
+    def usage_projection(self, workspace_id: str) -> UsageProjection:
+        namespaces = self.namespaces_for(workspace_id)
+        return UsageProjection(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+            source_namespace=namespaces.usage_events,
+            projection_namespace=namespaces.usage_projection,
+        )
+
+    def refresh_usage_projection(
+        self,
+        workspace_id: str,
+        *,
+        rebuild_from_scratch: bool = False,
+    ) -> UsageProjectionSnapshot:
+        return self.usage_projection(workspace_id).refresh(
+            rebuild_from_scratch=rebuild_from_scratch,
+        )
 
     def run(self, request: IngestPipelineRequest) -> IngestPipelineArtifacts:
         ns = self.namespaces_for(request.workspace_id)
@@ -658,6 +680,13 @@ class IngestPipeline:
             engine_dir=engine_dir,
             trace=self._trace_text if self.debug_trace_path is not None else None,
         )
+        self._persist_parser_usage_events(
+            request=request,
+            source_document_id=source_document_id,
+            provider=provider,
+            model=model,
+            usage_events=list(getattr(result, "usage_events", []) or []),
+        )
         self._trace_event(
             "workflow_layered_parse_complete",
             workspace_id=request.workspace_id,
@@ -673,9 +702,64 @@ class IngestPipeline:
             evaluation=result.evaluation,
             diagnostics=result.diagnostics,
             usage_summary=result.usage_summary,
+            usage_events=list(getattr(result, "usage_events", []) or []),
             layer_log=result.layer_log,
             parse_session=getattr(result, "parse_session", None),
         )
+
+    def _persist_parser_usage_events(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        provider: str,
+        model: str,
+        usage_events: list[object],
+    ) -> None:
+        if not usage_events:
+            return
+        namespaces = self.namespaces_for(request.workspace_id)
+        for index, raw_event in enumerate(usage_events):
+            if not isinstance(raw_event, dict):
+                continue
+            event = budget_event_from_dict(raw_event)
+            operation_id = str(
+                stable_id(
+                    "kogwistar_llm_wiki.parser_usage_operation",
+                    request.workspace_id,
+                    source_document_id,
+                    index,
+                    event.meta.get("reason"),
+                )
+            )
+            attribution = event.attribution or BudgetAttribution()
+            attribution = replace(
+                attribution,
+                workspace_id=attribution.workspace_id or request.workspace_id,
+                source_document_id=attribution.source_document_id or source_document_id,
+                operation_id=attribution.operation_id or operation_id,
+                operation_kind=attribution.operation_kind or "parser",
+                provider=attribution.provider or provider,
+                model=attribution.model or model,
+            )
+            enriched = replace(
+                event,
+                event_id=str(
+                    stable_id(
+                        "kogwistar_llm_wiki.parser_usage_event",
+                        request.workspace_id,
+                        source_document_id,
+                        index,
+                        event.event_id,
+                    )
+                ),
+                attribution=attribution,
+            )
+            append_usage_event(
+                self.engines.conversation.meta_sqlite,
+                namespace=namespaces.usage_events,
+                event=enriched,
+            )
 
     def _build_parser_kwargs(
         self,

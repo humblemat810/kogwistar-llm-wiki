@@ -180,6 +180,7 @@ class LongRunConfig:
     workspace_id: str = "longrun"
     checkpoint_run_dir: str | None = None
     doc_profile: str = "medium"
+    corpus_profile: str = "watershed_stress"
     skip_maintenance_invariant: bool = False
     live_trace: bool = False
     corpus_fingerprint: str = ""
@@ -195,6 +196,8 @@ class LongRunConfig:
             raise ValueError("pg_database_mode must be one of: fingerprint, shared")
         if self.parser_proposal_mode not in {"children", "boundaries"}:
             raise ValueError("parser_proposal_mode must be one of: children, boundaries")
+        if self.corpus_profile not in {"watershed_stress", "daily_life"}:
+            raise ValueError("corpus_profile must be one of: watershed_stress, daily_life")
         if not self.corpus_fingerprint:
             object.__setattr__(self, "corpus_fingerprint", str(self._compute_corpus_fingerprint()))
 
@@ -206,6 +209,7 @@ class LongRunConfig:
             self.backend,
             self.operation_mode,
             self.pg_database_mode,
+            self.corpus_profile,
             self.doc_count,
             self.doc_profile,
             self.parser_lane,
@@ -232,6 +236,15 @@ class LongRunConfig:
             raise ValueError(
                 "KOGWISTAR_LONGRUN_DOC_PROFILE must be one of {'tiny', 'small', 'medium'}; "
                 f"got {doc_profile!r}"
+            )
+        corpus_profile = (
+            os.getenv("KOGWISTAR_LONGRUN_CORPUS_PROFILE", "watershed_stress").strip().lower()
+            or "watershed_stress"
+        )
+        if corpus_profile not in {"watershed_stress", "daily_life"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_CORPUS_PROFILE must be one of {'watershed_stress', 'daily_life'}; "
+                f"got {corpus_profile!r}"
             )
         profile_token_min, profile_token_max = _longrun_doc_profile_token_bounds(doc_profile)
         token_min = int(os.getenv("KOGWISTAR_LONGRUN_TOKEN_MIN", str(profile_token_min)))
@@ -349,6 +362,7 @@ class LongRunConfig:
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
             doc_profile=doc_profile,
+            corpus_profile=corpus_profile,
             parser_provider=parser_spec.provider,
             parser_model=parser_spec.model,
             parser_proposal_mode=resolved_parser_settings.proposal_mode,
@@ -391,6 +405,7 @@ class LongRunConfig:
             "mode": self.mode,
             "doc_count": self.doc_count,
             "doc_profile": self.doc_profile,
+            "corpus_profile": self.corpus_profile,
             "parser_provider": self.parser_provider,
             "parser_model": self.parser_model,
             "parser_proposal_mode": self.parser_proposal_mode,
@@ -2315,7 +2330,7 @@ class LongRunHarness:
             or bool(maintenance["foreground_replies"])
         )
         if not useful_maintenance and not self.config.skip_maintenance_invariant:
-            raise AssertionError("background maintenance did not produce persisted evidence")
+            raise AssertionError(self._maintenance_invariant_failure_message(maintenance))
         self._verify_runtime_events_have_run_ids()
         self._verify_derived_nodes_have_provenance()
         projection = self.projection_summary()
@@ -2324,6 +2339,31 @@ class LongRunHarness:
         progress = self.progress_summary()
         if progress["doc_count"] != len(self.records):
             raise AssertionError("progress summary doc count mismatch")
+
+    def _maintenance_invariant_failure_message(self, maintenance: dict[str, Any]) -> str:
+        diagnostic = {
+            "operation_mode": self.config.operation_mode,
+            "backend": self.config.backend,
+            "maintenance_poll_count": maintenance.get("maintenance_poll_count"),
+            "max_post_doc_maintenance_steps": self.config.max_post_doc_maintenance_steps,
+            "job_status_counts": maintenance.get("job_status_counts"),
+            "maintenance_job_ids": maintenance.get("maintenance_job_ids"),
+            "maintenance_source_document_ids": maintenance.get("maintenance_source_document_ids"),
+            "maintenance_workflow_step_count": maintenance.get("maintenance_workflow_step_count"),
+            "derived_artifact_count": maintenance.get("derived_artifact_count"),
+            "foreground_reply_count": len(list(maintenance.get("foreground_replies") or [])),
+            "lane_message_count": len(list(maintenance.get("maintenance_lane_messages") or [])),
+            "completed_document_ids": [
+                record.doc_id for record in self.records if record.status == "COMPLETED"
+            ],
+            "failed_document_ids": [
+                record.doc_id for record in self.records if record.status in {"FAILED", "QUARANTINED"}
+            ],
+        }
+        return (
+            "background maintenance did not produce persisted evidence; "
+            f"diagnostic={json.dumps(diagnostic, sort_keys=True)}"
+        )
 
     def promotion_provenance_summary(self) -> dict[str, Any]:
         verified: list[dict[str, Any]] = []
@@ -2420,6 +2460,7 @@ class LongRunHarness:
         parser_run_dir.mkdir(parents=True, exist_ok=True)
         result_path = parser_run_dir / "result.json"
         failure_path = parser_run_dir / "failure.json"
+        failure_payload_path = parser_run_dir / "failure_payload.json"
         heartbeat_path = self.dumper.dump_dir / "parser_heartbeat.json"
         trace_path = parser_run_dir / "trace.log"
         dump_trace_path = self.dumper.dump_dir / "parser_trace.log"
@@ -2433,7 +2474,7 @@ class LongRunHarness:
                 f"runtime budget exhausted before parser start for {record.doc_id}",
                 phase="parse_document",
             )
-        for path in (result_path, failure_path):
+        for path in (result_path, failure_path, failure_payload_path):
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -2459,6 +2500,7 @@ class LongRunHarness:
             "parser_run_dir": str(parser_run_dir),
             "result_path": str(result_path),
             "failure_path": str(failure_path),
+            "failure_payload_path": str(failure_payload_path),
             "heartbeat_path": str(heartbeat_path),
             "trace_path": str(trace_path),
             "dump_trace_path": str(dump_trace_path),
@@ -2648,16 +2690,18 @@ class LongRunHarness:
         )
 
     def _generate_corpus(self) -> None:
-        topic = "urban watershed resilience and stormwater infrastructure"
         for index in range(1, self.config.doc_count + 1):
             doc_id = f"doc-{index:03d}"
-            title = f"Watershed Resilience Brief {index:03d}"
+            title = _longrun_document_title(
+                index=index,
+                corpus_profile=self.config.corpus_profile,
+            )
             path = self.run_dir / "input" / f"{doc_id}.md"
             text = generate_longrun_document(
                 index=index,
                 title=title,
-                topic=topic,
                 profile=self.config.doc_profile,
+                corpus_profile=self.config.corpus_profile,
             )
             token_count = _count_tokens(text)
             if not (self.config.token_min <= token_count <= self.config.token_max):
@@ -2816,8 +2860,37 @@ def normalized_fingerprint(*, code: str, phase: str, message: str) -> str:
     return f"{code}|{phase}|{normalized}"
 
 
-def generate_longrun_document(*, index: int, title: str, topic: str, profile: str = "medium") -> str:
+def _longrun_document_title(*, index: int, corpus_profile: str) -> str:
+    if corpus_profile == "daily_life":
+        subjects = [
+            "Apartment Move Checklist",
+            "Weekly Meal Plan",
+            "Garden Maintenance Notes",
+            "Family Trip Itinerary",
+            "Home Office Setup",
+            "Pet Care Routine",
+            "Neighborhood Book Club",
+            "Car Service Log",
+            "Birthday Party Plan",
+            "Monthly Household Budget",
+        ]
+        return f"{subjects[(index - 1) % len(subjects)]} {index:03d}"
+    return f"Watershed Resilience Brief {index:03d}"
+
+
+def generate_longrun_document(
+    *,
+    index: int,
+    title: str,
+    topic: str | None = None,
+    profile: str = "medium",
+    corpus_profile: str = "watershed_stress",
+) -> str:
     profile = str(profile or "medium").strip().lower()
+    corpus_profile = str(corpus_profile or "watershed_stress").strip().lower()
+    if corpus_profile == "daily_life":
+        return _generate_daily_life_longrun_document(index=index, title=title, profile=profile)
+    topic = topic or "urban watershed resilience and stormwater infrastructure"
     section_counts = {
         "tiny": 2,
         "small": 4,
@@ -2881,6 +2954,94 @@ def generate_longrun_document(*, index: int, title: str, topic: str, profile: st
     return "\n".join(sections)
 
 
+def _generate_daily_life_longrun_document(*, index: int, title: str, profile: str) -> str:
+    section_counts = {
+        "tiny": 2,
+        "small": 4,
+        "medium": 7,
+    }
+    subject = [
+        "moving boxes and utility transfers",
+        "weekday dinners and grocery shopping",
+        "balcony herbs and shared garden chores",
+        "train tickets, hotel check-in, and museum reservations",
+        "desk lighting, cable labels, and backup routines",
+        "feeding times, vet reminders, and dog-walking coverage",
+        "reading notes, discussion snacks, and library pickups",
+        "oil changes, tire pressure, and registration reminders",
+        "guest list planning, decorations, and cake pickup",
+        "rent, subscriptions, savings goals, and repair funds",
+    ][(index - 1) % 10]
+    location = [
+        "Oak Street",
+        "Maple Court",
+        "Riverside Station",
+        "North Market",
+        "Cedar Building",
+        "Elm Park",
+        "Hillview Library",
+        "Lakeside Garage",
+        "Sunset Hall",
+        "Pine Avenue",
+    ][(index - 1) % 10]
+    helper = [
+        "Maya",
+        "Jon",
+        "Priya",
+        "Alex",
+        "Nora",
+        "Sam",
+        "Lena",
+        "Diego",
+        "Iris",
+        "Owen",
+    ][(index - 1) % 10]
+    section_count = section_counts.get(profile, section_counts["medium"])
+    sections = [
+        f"# {title}",
+        "",
+        (
+            f"This everyday note tracks {subject} for the household around {location}. "
+            f"{helper} keeps the checklist practical, with dates, owners, and small follow-up items "
+            "that should be easy to parse without needing domain-specific background knowledge."
+        ),
+        "",
+    ]
+    short_body = (
+        f"The note for {location} records who owns each task, what evidence confirms completion, "
+        "and what should be checked again later. The goal is not to prove a technical claim; it is "
+        "to keep normal life organized with clear headings and modest cross-links to related notes."
+    )
+    medium_body = (
+        f"At {location}, {helper} reviews {subject} and writes down the next concrete action. "
+        "The plan names the person responsible, the expected date, and the small source of truth, "
+        "such as a receipt, calendar invite, appliance manual, email confirmation, or checklist photo. "
+        "Related notes may mention the same person, place, or household item, but the wording is varied "
+        "enough that a parser should not confuse every document with every other document. If something "
+        "changes, the note says whether to update the calendar, ask a neighbor, file a receipt, or move "
+        "the item into a later maintenance queue. This gives the graph useful linkable content while still "
+        "feeling like ordinary user data instead of an adversarial benchmark."
+    )
+    for section in range(1, section_count + 1):
+        sections.append(f"## Step {section}: {['Plan', 'Gather', 'Confirm', 'Follow Up', 'Archive', 'Share', 'Review'][(section - 1) % 7]}")
+        sections.append("")
+        if profile == "tiny":
+            sections.append(
+                f"{helper} records one action about {subject}. The item stays linked to {location} and has a clear owner."
+            )
+        elif profile == "small":
+            sections.append(
+                f"{short_body} For step {section}, {helper} checks whether the task is done, blocked, or waiting."
+            )
+        else:
+            sections.append(
+                f"{medium_body} For step {section}, the expected outcome is written in plain language so a later "
+                "maintenance worker can add links without inventing facts."
+            )
+        sections.append("")
+    return "\n".join(sections)
+
+
 def _longrun_doc_profile_token_bounds(profile: str) -> tuple[int, int]:
     profile = str(profile or "medium").strip().lower()
     bounds = {
@@ -2908,6 +3069,49 @@ def test_generate_longrun_document_profiles_scale_by_size():
     assert tiny.count("## Finding") == 2
     assert small.count("## Finding") == 4
     assert medium.count("## Finding") == 7
+
+
+def test_generate_longrun_document_daily_life_profile_is_realistic_and_varied():
+    first = generate_longrun_document(
+        index=1,
+        title=_longrun_document_title(index=1, corpus_profile="daily_life"),
+        profile="medium",
+        corpus_profile="daily_life",
+    )
+    second = generate_longrun_document(
+        index=2,
+        title=_longrun_document_title(index=2, corpus_profile="daily_life"),
+        profile="medium",
+        corpus_profile="daily_life",
+    )
+
+    assert "Watershed" not in first
+    assert "ordinary user data" in first
+    assert "Apartment Move Checklist" in first
+    assert "Weekly Meal Plan" in second
+    assert first != second
+    assert 500 <= _count_tokens(first) <= 2000
+    assert first.count("## Step") == 7
+
+
+def test_generate_daily_life_twenty_doc_corpus_has_varied_titles_and_valid_token_bounds():
+    docs = [
+        generate_longrun_document(
+            index=index,
+            title=_longrun_document_title(index=index, corpus_profile="daily_life"),
+            profile="medium",
+            corpus_profile="daily_life",
+        )
+        for index in range(1, 21)
+    ]
+    titles = [doc.splitlines()[0] for doc in docs]
+    token_counts = [_count_tokens(doc) for doc in docs]
+
+    assert len(docs) == 20
+    assert len(set(titles)) == 20
+    assert all("Watershed" not in doc for doc in docs)
+    assert all(500 <= token_count <= 2000 for token_count in token_counts)
+
 
 def test_longrun_doc_profile_token_bounds_are_applied_by_default():
     assert _longrun_doc_profile_token_bounds("tiny") == (70, 150)
@@ -3254,8 +3458,14 @@ def test_longrun_run_invariant_fails_without_maintenance_evidence(tmp_path: Path
         },
     )
     try:
-        with pytest.raises(AssertionError, match="background maintenance did not produce persisted evidence"):
+        with pytest.raises(AssertionError) as exc_info:
             harness._verify_run_invariants()
+        message = str(exc_info.value)
+        assert "background maintenance did not produce persisted evidence" in message
+        assert '"operation_mode": "parse_first"' in message
+        assert '"job_status_counts": {}' in message
+        assert '"derived_artifact_count": 0' in message
+        assert '"completed_document_ids": ["doc-001"]' in message
     finally:
         monkeypatch.undo()
 
@@ -3445,8 +3655,21 @@ def test_longrun_config_from_env_supports_one_doc_no_resume_probe(monkeypatch: p
     assert config.parser_lane == "page_index"
     assert config.resume_probe_enabled is False
     assert config.doc_profile == "tiny"
+    assert config.corpus_profile == "watershed_stress"
     assert (config.token_min, config.token_max) == _longrun_doc_profile_token_bounds("tiny")
     assert config.skip_maintenance_invariant is True
+    assert config.corpus_fingerprint
+
+
+def test_longrun_config_from_env_supports_daily_life_corpus_profile(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "20")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_CORPUS_PROFILE", "daily_life")
+
+    config = LongRunConfig.from_env()
+
+    assert config.corpus_profile == "daily_life"
     assert config.corpus_fingerprint
 
 
@@ -3484,6 +3707,24 @@ def test_longrun_corpus_fingerprint_changes_across_proposal_modes() -> None:
     boundaries = LongRunConfig(parser_proposal_mode="boundaries", **base)
 
     assert children.corpus_fingerprint != boundaries.corpus_fingerprint
+
+
+def test_longrun_corpus_fingerprint_changes_across_corpus_profiles() -> None:
+    base = dict(
+        enabled=False,
+        mode="auto",
+        doc_count=20,
+        operation_mode="parse_first",
+        parser_lane="workflow_layered",
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    stress = LongRunConfig(corpus_profile="watershed_stress", **base)
+    daily_life = LongRunConfig(corpus_profile="daily_life", **base)
+
+    assert stress.corpus_fingerprint != daily_life.corpus_fingerprint
 
 
 def test_longrun_corpus_fingerprint_ignores_run_mode_and_budgets() -> None:
@@ -4366,12 +4607,21 @@ def test_longrun_parser_child_failure_writes_failure_json_and_mirrors_trace(tmp_
         run_longrun_parser_child(payload)
 
     failure_path = Path(str(payload["failure_path"]))
+    failure_payload_path = Path(
+        str(payload.get("failure_payload_path") or failure_path.with_name("failure_payload.json"))
+    )
     dump_trace_path = Path(str(payload["dump_trace_path"]))
 
     assert failure_path.exists()
     failure = json.loads(failure_path.read_text(encoding="utf-8"))
     assert failure["ok"] is False
     assert failure["error_type"]
+    assert failure["payload_path"] == str(failure_payload_path)
+    assert failure_payload_path.exists()
+    failure_payload = json.loads(failure_payload_path.read_text(encoding="utf-8"))
+    assert failure_payload["doc_id"] == payload["doc_id"]
+    assert failure_payload["parser_lane"] == "unsupported_lane"
+    assert failure_payload["raw_text"] == payload["raw_text"]
     assert dump_trace_path.exists()
     trace_text = dump_trace_path.read_text(encoding="utf-8")
     assert "child::child_loading_provider_settings" in trace_text

@@ -101,6 +101,10 @@ Defaults:
 - `KOGWISTAR_OLLAMA_MODEL=gemma4:e2b`
 - `KOGWISTAR_OLLAMA_BASE_URL=http://localhost:11434`
 - `KOGWISTAR_LONGRUN_DOC_COUNT=20`
+- `KOGWISTAR_LONGRUN_CORPUS_PROFILE=daily_life|watershed_stress` selects the
+  generated corpus shape. `daily_life` is the normal-usage corpus with varied
+  household, planning, and personal-knowledge notes. `watershed_stress` is the
+  harder, more repetitive stress corpus.
 - `KOGWISTAR_LONGRUN_BACKEND=chroma|postgres|pgvector`
 - `KOGWISTAR_LONGRUN_PARSER_PROVIDER=ollama|azure_openai|openai|gemini`
 - `KOGWISTAR_LONGRUN_PARSER_MODEL` selects the model for real LLM parsing.
@@ -128,6 +132,10 @@ Defaults:
   to reuse a matching checkpoint and otherwise falls back to fresh.
 - `KOGWISTAR_LONGRUN_DOC_COUNT=1|3|20` is supported for the VSCode launch
   buttons. Smaller corpora require `KOGWISTAR_LONGRUN_ALLOW_SMALL=1`.
+- The VSCode long-run buttons include a corpus profile picker. The corpus
+  profile is part of the experiment fingerprint, so `daily_life` and
+  `watershed_stress` use separate checkpoints and fingerprinted pgvector
+  databases even when the backend, parser, and operation mode are unchanged.
 
 If the long-run flag is set and Ollama is unavailable, the test fails with a
 minimal dump instead of silently skipping.
@@ -168,9 +176,9 @@ and otherwise starts from scratch. Continue and auto reruns also reload
 transition and failure history.
 
 The dump records a `corpus_fingerprint` derived from the selected corpus mode,
-operation mode, parser lane, backend, and profile settings. Checkpoint reuse
-only happens when the fingerprint matches, which keeps distinct corpus and
-operation modes from crossing over into each other.
+corpus profile, operation mode, parser lane, backend, and profile settings.
+Checkpoint reuse only happens when the fingerprint matches, which keeps
+distinct corpus and operation modes from crossing over into each other.
 
 When `KOGWISTAR_LONGRUN_RESUME_PROBE=1`, the document workflow deliberately
 suspends after parsed graph persistence and before background maintenance. The
