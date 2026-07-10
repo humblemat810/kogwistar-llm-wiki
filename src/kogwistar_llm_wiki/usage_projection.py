@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from kogwistar.id_provider import stable_id
-from kogwistar.runtime.budget import (
+from kogwistar.runtime import (
     BudgetEvent,
+    ProjectionCheckpoint,
+    ProjectionLoadResult,
+    refresh_checkpointed_named_projection,
     budget_event_from_dict,
     budget_event_to_dict,
 )
@@ -60,6 +62,11 @@ class UsageMetaStore(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class _UsageProjectionState:
+    aggregates: dict[str, dict[str, dict[str, object]]]
+
+
+@dataclass(frozen=True, slots=True)
 class UsageProjectionSnapshot:
     projection_id: str
     workspace_id: str
@@ -95,10 +102,6 @@ class UsageProjectionSnapshot:
             "rebuild_reason": self.rebuild_reason,
             "aggregates": self.aggregates,
         }
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _event_id(event: BudgetEvent) -> str:
@@ -203,6 +206,8 @@ def _decode_projection(row: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("usage projection payload must be an object")
     if int(row.get("projection_schema_version") or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
         raise ValueError("usage projection schema version is incompatible")
+    if int(payload.get("projection_schema_version") or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
+        raise ValueError("usage projection payload schema version is incompatible")
     return payload
 
 
@@ -224,12 +229,15 @@ class UsageProjection:
         self.projection_namespace = projection_namespace
         self.projection_id = projection_id
 
-    def snapshot(self) -> UsageProjectionSnapshot | None:
-        row = self.meta.get_named_projection(self.projection_namespace, self.workspace_id)
-        if not row:
-            return None
+    def _projection_checkpoint_from_row(self, row: Mapping[str, Any]) -> ProjectionCheckpoint:
         payload = _decode_projection(row)
-        return UsageProjectionSnapshot(
+        if str(payload.get("projection_id")) != self.projection_id:
+            raise ValueError("usage projection id is incompatible")
+        if str(payload.get("workspace_id")) != self.workspace_id:
+            raise ValueError("usage projection workspace is incompatible")
+        if str(payload.get("source_namespace")) != self.source_namespace:
+            raise ValueError("usage projection source namespace is incompatible")
+        return ProjectionCheckpoint(
             projection_id=str(payload.get("projection_id") or self.projection_id),
             workspace_id=str(payload.get("workspace_id") or self.workspace_id),
             projection_schema_version=int(payload.get("projection_schema_version") or USAGE_PROJECTION_SCHEMA_VERSION),
@@ -248,132 +256,127 @@ class UsageProjection:
             raw_event_count=int(payload.get("raw_event_count") or 0),
             materialization_status=str(row.get("materialization_status") or "failed"),
             rebuild_reason=str(payload["rebuild_reason"]) if payload.get("rebuild_reason") else None,
+            processed_event_ids=tuple(
+                str(item) for item in list(payload.get("processed_event_ids") or []) if str(item)
+            ),
+        )
+
+    def _projection_state_from_row(self, row: Mapping[str, Any]) -> ProjectionLoadResult[_UsageProjectionState]:
+        payload = _decode_projection(row)
+        checkpoint = self._projection_checkpoint_from_row(row)
+        aggregates = {
+            str(dimension): {
+                str(key): dict(value)
+                for key, value in dict(rows).items()
+                if isinstance(value, dict)
+            }
+            for dimension, rows in dict(payload.get("aggregates") or {}).items()
+            if isinstance(rows, dict)
+        }
+        return ProjectionLoadResult(
+            state=_UsageProjectionState(aggregates=aggregates),
+            checkpoint=checkpoint,
+            payload=dict(payload),
+        )
+
+    def _create_state(self) -> _UsageProjectionState:
+        return _UsageProjectionState(aggregates={})
+
+    def _decode_event(self, payload_json: str) -> BudgetEvent:
+        payload = json.loads(payload_json)
+        if not isinstance(payload, dict):
+            raise ValueError("usage event payload must be an object")
+        return budget_event_from_dict(payload)
+
+    def _apply_event(self, state: _UsageProjectionState, event: BudgetEvent, _seq: int) -> None:
+        for dimension, keys in _event_groups(event).items():
+            dimension_rows = state.aggregates.setdefault(dimension, {})
+            for key in keys:
+                aggregate = dimension_rows.setdefault(key, _empty_aggregate())
+                _merge_event(aggregate, event)
+
+    def _build_payload(
+        self,
+        state: _UsageProjectionState,
+        checkpoint: ProjectionCheckpoint,
+        processed_event_ids: Sequence[str],
+    ) -> dict[str, Any]:
+        return {
+            "projection_id": checkpoint.projection_id,
+            "workspace_id": checkpoint.workspace_id,
+            "projection_schema_version": checkpoint.projection_schema_version,
+            "source_namespace": checkpoint.source_namespace,
+            "source_from_seq": checkpoint.source_from_seq,
+            "source_to_seq": checkpoint.source_to_seq,
+            "projected_at_ms": checkpoint.projected_at_ms,
+            "last_source_event_ts_ms": checkpoint.last_source_event_ts_ms,
+            "snapshot_id": checkpoint.snapshot_id,
+            "raw_event_count": checkpoint.raw_event_count,
+            "rebuild_reason": checkpoint.rebuild_reason,
+            "processed_event_ids": list(processed_event_ids),
+            "aggregates": state.aggregates,
+        }
+
+    def _build_snapshot(self, row: Mapping[str, Any]) -> UsageProjectionSnapshot:
+        return UsageProjectionSnapshot(
+            projection_id=str(row["payload"].get("projection_id") or self.projection_id),
+            workspace_id=str(row["payload"].get("workspace_id") or self.workspace_id),
+            projection_schema_version=int(
+                row["payload"].get("projection_schema_version") or USAGE_PROJECTION_SCHEMA_VERSION
+            ),
+            source_namespace=str(row["payload"].get("source_namespace") or self.source_namespace),
+            source_from_seq=int(row["payload"].get("source_from_seq") or 0),
+            source_to_seq=int(row["payload"].get("source_to_seq") or 0),
+            last_authoritative_seq=int(row.get("last_authoritative_seq") or 0),
+            last_materialized_seq=int(row.get("last_materialized_seq") or 0),
+            projected_at_ms=(
+                int(row["payload"]["projected_at_ms"])
+                if row["payload"].get("projected_at_ms") is not None
+                else None
+            ),
+            last_source_event_ts_ms=(
+                int(row["payload"]["last_source_event_ts_ms"])
+                if row["payload"].get("last_source_event_ts_ms") is not None
+                else None
+            ),
+            snapshot_id=str(row["payload"].get("snapshot_id") or ""),
+            raw_event_count=int(row["payload"].get("raw_event_count") or 0),
+            materialization_status=str(row.get("materialization_status") or "failed"),
+            rebuild_reason=str(row["payload"]["rebuild_reason"]) if row["payload"].get("rebuild_reason") else None,
             aggregates={
                 str(dimension): {
                     str(key): dict(value)
                     for key, value in dict(rows).items()
                     if isinstance(value, dict)
                 }
-                for dimension, rows in dict(payload.get("aggregates") or {}).items()
+                for dimension, rows in dict(row["payload"].get("aggregates") or {}).items()
                 if isinstance(rows, dict)
             },
         )
 
+    def snapshot(self) -> UsageProjectionSnapshot | None:
+        row = self.meta.get_named_projection(self.projection_namespace, self.workspace_id)
+        if not row:
+            return None
+        self._projection_checkpoint_from_row(row)
+        return self._build_snapshot(row)
+
     def refresh(self, *, rebuild_from_scratch: bool = False) -> UsageProjectionSnapshot:
-        rebuild_reason: str | None = None
-        try:
-            current = self.snapshot()
-        except (TypeError, ValueError):
-            current = None
-            rebuild_reason = "incompatible_projection"
-        if rebuild_from_scratch:
-            current = None
-            rebuild_reason = "explicit_rebuild"
-        elif current is None and rebuild_reason is None:
-            rebuild_reason = "missing_projection"
-
-        latest = self.meta.get_latest_entity_event_seq(namespace=self.source_namespace)
-        if current is not None and current.last_authoritative_seq > latest:
-            current = None
-            rebuild_reason = "source_sequence_regressed"
-
-        from_seq = 1 if current is None else current.last_materialized_seq + 1
-        to_seq = int(latest)
-        aggregates = (
-            {dimension: {key: dict(value) for key, value in rows.items()} for dimension, rows in current.aggregates.items()}
-            if current is not None
-            else {}
+        return refresh_checkpointed_named_projection(
+            self.meta,
+            namespace=self.projection_namespace,
+            key=self.workspace_id,
+            projection_id=self.projection_id,
+            workspace_id=self.workspace_id,
+            source_namespace=self.source_namespace,
+            projection_schema_version=USAGE_PROJECTION_SCHEMA_VERSION,
+            decode_current=self._projection_state_from_row,
+            create_state=self._create_state,
+            decode_event=self._decode_event,
+            event_key=_event_id,
+            apply_event=self._apply_event,
+            build_payload=self._build_payload,
+            build_snapshot=self._build_snapshot,
+            include_event=lambda entity_kind, _entity_id, _op, _payload_json: entity_kind == USAGE_EVENT_KIND,
+            rebuild_from_scratch=rebuild_from_scratch,
         )
-        processed_ids: set[str] = set()
-        if current is not None:
-            previous_payload = self.meta.get_named_projection(self.projection_namespace, self.workspace_id) or {}
-            previous_body = dict(previous_payload.get("payload") or {})
-            processed_ids = {str(item) for item in previous_body.get("processed_event_ids", []) if str(item)}
-        committed_processed_ids = set(processed_ids)
-
-        raw_event_count = current.raw_event_count if current is not None else 0
-        last_source_event_ts_ms = current.last_source_event_ts_ms if current is not None else None
-        try:
-            for seq, entity_kind, _entity_id, _op, payload_json in self.meta.iter_entity_events(
-                namespace=self.source_namespace,
-                from_seq=from_seq,
-                to_seq=to_seq,
-            ):
-                if entity_kind != USAGE_EVENT_KIND:
-                    continue
-                payload = json.loads(payload_json)
-                if not isinstance(payload, dict):
-                    continue
-                event = budget_event_from_dict(payload)
-                event_id = _event_id(event)
-                if event_id in processed_ids:
-                    continue
-                processed_ids.add(event_id)
-                raw_event_count += 1
-                if event.ts_ms is not None:
-                    last_source_event_ts_ms = max(last_source_event_ts_ms or event.ts_ms, event.ts_ms)
-                for dimension, keys in _event_groups(event).items():
-                    dimension_rows = aggregates.setdefault(dimension, {})
-                    for key in keys:
-                        aggregate = dimension_rows.setdefault(key, _empty_aggregate())
-                        _merge_event(aggregate, event)
-
-            projected_at_ms = _now_ms()
-            authoritative_after = self.meta.get_latest_entity_event_seq(namespace=self.source_namespace)
-            status = "materialized" if authoritative_after <= to_seq else "catching_up"
-            body = {
-                "projection_id": self.projection_id,
-                "workspace_id": self.workspace_id,
-                "projection_schema_version": USAGE_PROJECTION_SCHEMA_VERSION,
-                "source_namespace": self.source_namespace,
-                "source_from_seq": from_seq,
-                "source_to_seq": to_seq,
-                "projected_at_ms": projected_at_ms,
-                "last_source_event_ts_ms": last_source_event_ts_ms,
-                "snapshot_id": str(stable_id("usage_snapshot", self.workspace_id, self.projection_id, to_seq)),
-                "raw_event_count": raw_event_count,
-                "rebuild_reason": rebuild_reason,
-                "processed_event_ids": sorted(processed_ids),
-                "aggregates": aggregates,
-            }
-            self.meta.replace_named_projection(
-                self.projection_namespace,
-                self.workspace_id,
-                body,
-                last_authoritative_seq=authoritative_after,
-                last_materialized_seq=to_seq,
-                projection_schema_version=USAGE_PROJECTION_SCHEMA_VERSION,
-                materialization_status=status,
-            )
-            result = self.snapshot()
-            if result is None:
-                raise RuntimeError("usage projection disappeared after materialization")
-            return result
-        except Exception as exc:
-            if current is None:
-                raise
-            failed_body = {
-                "projection_id": current.projection_id,
-                "workspace_id": current.workspace_id,
-                "projection_schema_version": current.projection_schema_version,
-                "source_namespace": current.source_namespace,
-                "source_from_seq": current.source_from_seq,
-                "source_to_seq": current.source_to_seq,
-                "projected_at_ms": current.projected_at_ms,
-                "last_source_event_ts_ms": current.last_source_event_ts_ms,
-                "snapshot_id": current.snapshot_id,
-                "raw_event_count": current.raw_event_count,
-                "rebuild_reason": f"projection_failed:{type(exc).__name__}",
-                "processed_event_ids": sorted(committed_processed_ids),
-                "aggregates": current.aggregates,
-            }
-            self.meta.replace_named_projection(
-                self.projection_namespace,
-                self.workspace_id,
-                failed_body,
-                last_authoritative_seq=current.last_authoritative_seq,
-                last_materialized_seq=current.last_materialized_seq,
-                projection_schema_version=current.projection_schema_version,
-                materialization_status="failed",
-            )
-            raise

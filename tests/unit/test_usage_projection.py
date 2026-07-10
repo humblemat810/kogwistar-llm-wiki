@@ -188,6 +188,27 @@ def test_usage_projection_rebuilds_when_schema_is_incompatible(tmp_path):
     assert snapshot.aggregates["unattributed"]["unattributed"]["input_tokens"] == 2
 
 
+def test_usage_projection_snapshot_rejects_incompatible_identity(tmp_path):
+    meta, namespaces, projection = _projection(tmp_path)
+    meta.replace_named_projection(
+        namespaces.usage_projection,
+        "ws-1",
+        {
+            "projection_id": "usage",
+            "workspace_id": "other-workspace",
+            "projection_schema_version": 1,
+            "source_namespace": namespaces.usage_events,
+        },
+        last_authoritative_seq=0,
+        last_materialized_seq=0,
+        projection_schema_version=1,
+        materialization_status="materialized",
+    )
+
+    with pytest.raises(ValueError, match="workspace"):
+        projection.snapshot()
+
+
 def test_usage_projection_failure_preserves_last_checkpoint(tmp_path, monkeypatch):
     meta, namespaces, projection = _projection(tmp_path)
     append_usage_event(
