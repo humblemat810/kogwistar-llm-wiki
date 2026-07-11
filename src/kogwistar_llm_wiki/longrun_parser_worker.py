@@ -16,6 +16,7 @@ from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
 
 from .debug_run import LiveTracePrinter, env_flag_enabled, summarize_stage_timings
+from .llm_usage import ProviderUsageCallback
 from .provider_config import provider_config_summary
 
 
@@ -49,7 +50,7 @@ def _dump_model(value: object) -> object:
 
 def _summarize_budget_events(events: list[object], *, provider_settings: WorkflowProviderSettings) -> dict[str, object]:
     provider_summary = provider_config_summary(provider_settings)
-    return {
+    summary = {
         "provider": provider_summary.get("provider"),
         "model": provider_summary.get("model"),
         "temperature": provider_summary.get("temperature"),
@@ -59,6 +60,13 @@ def _summarize_budget_events(events: list[object], *, provider_settings: Workflo
         "location": provider_summary.get("location"),
         "max_retries": provider_summary.get("max_retries"),
     } | summarize_budget_events(events)
+    provider_run_ids = {
+        str(getattr(event, "meta", {}).get("provider_run_id"))
+        for event in events
+        if getattr(event, "meta", {}).get("provider_run_id")
+    }
+    summary["llm_call_count"] = len(provider_run_ids)
+    return summary
 
 
 def _proposal_mode_summary(final_state: dict[str, object]) -> dict[str, object]:
@@ -195,8 +203,29 @@ def _build_provider_layer_callbacks(
     provider_settings: WorkflowProviderSettings,
     *,
     layer_event: Callable[..., None] | None = None,
+    budget_ledger: StateBackedBudgetLedger | None = None,
+    run_id: str = "",
+    source_document_id: str = "",
+    usage_event_sink: Callable[[object], None] | None = None,
 ) -> dict[str, LayerwiseCallback | int | bool]:
-    return build_layerwise_llm_callbacks(provider_settings, event_sink=layer_event)
+    model_callbacks: list[object] = []
+    if budget_ledger is not None:
+        parser = provider_settings.parser
+        model_callbacks.append(
+            ProviderUsageCallback(
+                ledger=budget_ledger,
+                run_id=run_id or f"parser:{source_document_id}",
+                source_document_id=source_document_id,
+                provider=parser.provider,
+                model=parser.model,
+                event_sink=usage_event_sink,
+            )
+        )
+    return build_layerwise_llm_callbacks(
+        provider_settings,
+        event_sink=layer_event,
+        model_callbacks=model_callbacks,
+    )
 
 
 def run_workflow_layered_parse(
@@ -209,6 +238,9 @@ def run_workflow_layered_parse(
     budget_ledger: StateBackedBudgetLedger | None = None,
     trace: Callable[[str], None] | None = None,
     heartbeat: Callable[[str], None] | None = None,
+    run_id: str | None = None,
+    resume_from_checkpoint: bool = False,
+    usage_event_path: Path | None = None,
 ) -> SimpleNamespace:
     from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput, WorkflowExportBundle
     from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
@@ -233,12 +265,24 @@ def run_workflow_layered_parse(
             "budget_kind": "token",
         }
     )
+    usage_event_sink: Callable[[object], None] | None = None
+    if usage_event_path is not None:
+        usage_event_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _append_usage_event(event: object) -> None:
+            with usage_event_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(budget_event_to_dict(event), sort_keys=True) + "\n")
+                handle.flush()
+
+        usage_event_sink = _append_usage_event
     engine_dir = Path(engine_dir)
     _layer_event(
         "workflow_layered_provider_settings_loaded",
         provider=provider_settings.parser.provider,
         model=provider_settings.parser.model,
         proposal_mode=provider_settings.proposal_mode,
+        workflow_run_id=str(run_id or f"parser:{source_document_id}"),
+        resume_from_checkpoint=resume_from_checkpoint,
     )
     _layer_event("workflow_layered_engines_build_start", engine_dir=str(engine_dir))
     workflow_engine, conversation_engine, knowledge_engine = build_default_engines(
@@ -246,13 +290,26 @@ def run_workflow_layered_parse(
         provider_settings=provider_settings,
     )
     _layer_event("workflow_layered_engines_build_done")
-    deps = _build_provider_layer_callbacks(provider_settings, layer_event=_layer_event)
+    deps = _build_provider_layer_callbacks(
+        provider_settings,
+        layer_event=_layer_event,
+        budget_ledger=budget_ledger,
+        run_id=str(run_id or f"parser:{source_document_id}"),
+        source_document_id=source_document_id,
+        usage_event_sink=usage_event_sink,
+    )
     inp = WorkflowIngestInput.from_text(
         document_id=source_document_id,
         text=str(raw_text),
         title=str(title),
     )
     _layer_event("workflow_layered_parse_start")
+    if resume_from_checkpoint:
+        _layer_event(
+            "workflow_layered_resume_requested",
+            workflow_run_id=str(run_id or f"parser:{source_document_id}"),
+            engine_dir=str(engine_dir),
+        )
     if heartbeat is not None:
         heartbeat("workflow_layered_parse_start")
     run_result, bundle = run_ingest_workflow(
@@ -261,6 +318,8 @@ def run_workflow_layered_parse(
         conversation_engine=conversation_engine,
         knowledge_engine=knowledge_engine,
         deps={**deps, "budget_ledger": budget_ledger},
+        run_id=run_id,
+        resume_from_checkpoint=resume_from_checkpoint,
     )
     _layer_event(
         "workflow_layered_parse_returned",
@@ -421,6 +480,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
         default=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
     )
     live_trace_printer = LiveTracePrinter(prefix="longrun.parser") if live_trace else None
+    budget_ledger: StateBackedBudgetLedger | None = None
 
     def _heartbeat(phase: str, **extra: object) -> None:
         _write_json_file(
@@ -528,6 +588,13 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 budget_ledger=budget_ledger,
                 trace=_trace,
                 heartbeat=_heartbeat,
+                run_id=str(payload.get("parser_workflow_run_id") or f"parser:{source_document_id}"),
+                resume_from_checkpoint=bool(payload.get("resume_from_checkpoint")),
+                usage_event_path=(
+                    Path(str(payload["usage_event_path"]))
+                    if payload.get("usage_event_path")
+                    else None
+                ),
             )
             _trace("child_workflow_layered_parse_call_returned")
             _heartbeat("workflow_layered_parse_complete")
@@ -577,6 +644,16 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "message": str(exc),
                 "traceback": traceback.format_exc(),
                 "payload_path": str(failure_payload_path),
+                "usage_events": [
+                    budget_event_to_dict(event) for event in (budget_ledger.events if budget_ledger else [])
+                ],
+                "llm_call_count": len(
+                    {
+                        str(event.meta.get("provider_run_id"))
+                        for event in (budget_ledger.events if budget_ledger else [])
+                        if event.meta.get("provider_run_id")
+                    }
+                ),
             },
         )
         _heartbeat("failed", failure_path=str(failure_path), error_type=type(exc).__name__)

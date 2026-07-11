@@ -505,6 +505,15 @@ flowchart TD
     C --> D["processing/"]
     D --> E["token_check"]
     E --> F["parse_document"]
+    subgraph PARSER["inner parser workflow: stable parser:<source-document-id>"]
+        F1["prepare layer frontier"] --> F2["proposal/review"]
+        F2 --> F3["commit completed layer checkpoint"]
+        F3 --> F4{"more layers?"}
+        F4 -->|yes| F1
+        F4 -->|no| F5["return parse result"]
+    end
+    F -. invokes .-> F1
+    F5 --> G["persist_document"]
     F --> G["persist_document"]
     G --> H["enqueue_background_maintenance"]
     H --> I["observe_background_maintenance"]
@@ -525,6 +534,16 @@ flowchart TD
     R --> B
     R --> S["abort snapshot"]
     S --> Q
+    F --> X["parser timeout / child failure"]
+    X --> Y["flush usage_events.jsonl\nmark parser resume requested"]
+    Y --> Q
+    F --> Z["Ctrl+C while waiting"]
+    Z --> ZA["terminate child\nwrite interrupted manifest"]
+    ZA --> Q
+    Q -. next run: Retry Failed .-> RB["reuse parser checkpoint\nretry only in-flight step"]
+    RB -.-> F
+    R -. next run: Continue/Auto .-> RC["reload outer checkpoint\nprocess pending documents"]
+    RC -.-> B
 
     L --> T["post-doc maintenance drain\nmax 100 steps"]
     T --> U["projection/read checks"]
@@ -542,6 +561,15 @@ stateDiagram-v2
     MAINTENANCE_ENQUEUED --> MAINTENANCE_OBSERVED
     MAINTENANCE_OBSERVED --> COMPLETED
 
+    state "Inner parser checkpoint" as INNER {
+        [*] --> LayerInFlight
+        LayerInFlight --> LayerCheckpointed: layer step committed
+        LayerCheckpointed --> LayerInFlight: more layers
+        LayerCheckpointed --> ParseReturned: no more layers
+    }
+    CLAIMED --> INNER: parse_document
+    INNER --> PARSED: parse returned
+
     TOKEN_CHECKED --> FAILED: token_count_out_of_range
     CLAIMED --> FAILED: document-specific failure
     PARSED --> FAILED: persist failed after retries
@@ -551,4 +579,8 @@ stateDiagram-v2
     TOKEN_CHECKED --> QUARANTINED: suspicious repeated failure
     PARSED --> QUARANTINED: graph invariant corruption
     PERSISTED --> QUARANTINED: runtime worker stuck
+    CLAIMED --> INTERRUPTED: Ctrl+C / process stop
+    INTERRUPTED --> RETRY_FAILED: next run
+    FAILED --> RETRY_FAILED: Retry Failed
+    RETRY_FAILED --> CLAIMED: reuse latest parser checkpoint
 ```

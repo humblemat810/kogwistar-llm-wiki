@@ -44,3 +44,39 @@ def test_longrun_usage_summary_merges_provider_metadata_with_runtime_summary() -
     assert summary["model"] == "gpt-5-nano"
     assert summary["input_tokens"] == summarize_budget_events(events)["input_tokens"]
     assert summary["total_cost"] == summarize_budget_events(events)["total_cost"]
+
+
+def test_longrun_usage_summary_counts_distinct_provider_calls() -> None:
+    settings = WorkflowProviderSettings(
+        parser=ProviderEndpointConfig(provider="azure", model="gpt-5-mini"),
+    )
+    events = [
+        BudgetEvent(
+            run_id="run-1",
+            source="langchain-provider",
+            kind="token",
+            amount=4,
+            unit="input_tokens",
+            meta={"provider_run_id": "call-1"},
+        ),
+        BudgetEvent(
+            run_id="run-1",
+            source="langchain-provider",
+            kind="time",
+            amount=12,
+            unit="ms",
+            meta={"provider_run_id": "call-1"},
+        ),
+        BudgetEvent(
+            run_id="run-1",
+            source="langchain-provider",
+            kind="token",
+            amount=8,
+            unit="output_tokens",
+            meta={"provider_run_id": "call-2"},
+        ),
+    ]
+
+    summary = _summarize_budget_events(events, provider_settings=settings)
+
+    assert summary["llm_call_count"] == 2

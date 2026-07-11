@@ -78,6 +78,30 @@ Required provenance fields:
 
 ### Typed Patch, Not Direct LLM Writes
 
+### Source-Attempt Fencing
+
+Every source registration creates an immutable `source_revision` artifact
+whose digest identifies the content and whose revision ID identifies that
+ingestion attempt. Readiness artifacts record the stages that are safe for
+maintenance, such as `source_map_seeded` or `parsed_graph_persisted`.
+
+Every maintenance request and durable job carries the source revision ID,
+source digest, and required readiness stage. Before a worker dispatches a job,
+and again immediately before graph-patch application or workflow execution, it
+checks that the job still targets the current revision and that the required
+stage is recorded. A mismatch is not retried as business work: the job is
+terminally marked failed as `stale` or `blocked`, a
+`maintenance_guard_decision` artifact is appended, and the lane receives the
+reason. A newer registration supersedes older queued jobs for the same source
+and maintenance kind without deleting their history.
+
+This is an application-level optimistic fence layered over Kogwistar's durable
+queue lease and idempotency semantics. It prevents the common admin-triggered
+retry/maintenance race and fails closed if a legacy job lacks revision
+metadata. It is not a claim of a distributed transaction across the queue and
+graph backends; graph mutation must remain append-only and patch application
+must be idempotent.
+
 LLMs may propose graph changes, but they must not directly mutate the graph.
 
 The maintenance worker should produce a typed `MaintenancePatch`, validate it,

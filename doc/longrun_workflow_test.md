@@ -29,7 +29,16 @@ Backend selection is explicit too:
 - `KOGWISTAR_LONGRUN_BACKEND=pgvector` also supports `KOGWISTAR_LONGRUN_PG_SOURCE=persistent`, which reuses one named dev container across runs and isolates experiments by database name inside that shared container.
 - `in_memory` is not supported for the long-run soak because crash-continuation needs durable state.
 
-For `pgvector`, the experiment launch configs now share one container per test session and create a fingerprinted database name for each semantic experiment. That means increasing only the runtime or LLM call budget keeps the same experiment database identity, while changing the corpus, parser, or operation mode yields a different database name. Fresh, continue, and auto reruns stay on the same experiment database so continuation does not look like a new run.
+For `pgvector`, the experiment launch configs now share one container per test session and create a fingerprinted database name for each semantic experiment. The fingerprint includes the workspace, backend, operation mode, corpus/profile, parser/provider/model, proposal mode, worker count, token bounds, and maintenance invariant. Increasing only the runtime or LLM call budget keeps the same experiment database identity, while changing those semantic inputs yields a different database name.
+
+Database lifecycle is explicit:
+
+- `fresh` + fingerprint mode on a managed `testcontainer` or `persistent` dev container drops and recreates only that fingerprinted database before the run. This is the development reset operation; it does not drop the whole PostgreSQL server or other experiment databases.
+- `continue`, `auto`, and `retry_failed` preserve the database and reuse its durable artifacts.
+- `shared` mode never resets automatically.
+- `custom` DSNs never reset automatically, even for `fresh`; use an explicit database administration operation if you intentionally own that database.
+
+The reset is performed by the pytest long-run harness, not by production `kogwistar` graph code. PostgreSQL still uses shared tables/schema inside each database; the database itself is the isolation boundary. Run IDs and workspace namespaces remain useful metadata, but they are not a substitute for database isolation.
 
 If you prefer a VSCode button, use the launch configurations in
 `.vscode/launch.json`:
@@ -60,10 +69,12 @@ If you prefer a VSCode button, use the launch configurations in
 - `Longrun: PgVector Persistent Auto Resume or Fresh (20 docs, fingerprint DB)`
 - `Longrun: PgVector Azure OpenAI Fresh (20 docs, fingerprint DB)`
 - `Longrun: PgVector Azure OpenAI Continue (20 docs, fingerprint DB)`
+- `Longrun: PgVector Azure OpenAI Retry Failed (fingerprint DB)`
 - `Longrun: PgVector Azure OpenAI Auto Resume or Fresh (20 docs, fingerprint DB)`
 
-The fresh configurations clear the run directory first via harness mode, and
-the continue configurations reuse the same stable run directory. Use separate
+The fresh configurations reset the fingerprinted dev database and clear the
+run directory first via harness mode, and the continue configurations reuse
+the same stable run directory and database. Use separate
 run directories per backend so chroma and postgres runs do not share checkpoint
 state.
 
@@ -85,6 +96,28 @@ same container with different database names. The defaults are:
 Continuation still happens by stable run directory plus stable fingerprinted
 database name. The persistent container only makes the backing service durable;
 the harness still isolates experiments by database name rather than by schema.
+
+Parser-level continuation is separate from the outer long-run document attempt:
+
+- Each parser child uses a stable inner workflow run ID,
+  `parser:<source-document-id>`.
+- The parser engine directory and workflow checkpoints remain under
+  `parser_runs/<doc-id>`, so a timeout does not create an unrelated inner run.
+- A timeout or child failure marks the next parser attempt for checkpoint
+  resume. If no inner checkpoint exists, the client safely falls back to a
+  fresh execution with the same stable ID.
+- Provider usage events are appended and flushed to `usage_events.jsonl` after
+  each callback. Recovery imports those events before returning failure, and
+  stable event IDs make repeated imports idempotent.
+- Ctrl+C while the parent is waiting for a parser child terminates that child,
+  writes an interrupted heartbeat/manifest snapshot, and marks the document
+  for parser resume. Use the `Retry Failed` launch configuration for the next
+  invocation; `continue` intentionally skips terminal failures.
+
+Completed parser steps are not replayed; only an in-flight provider call may be
+retried. The outer manifest remains the source of document-attempt status,
+while Kogwistar workflow checkpoints remain the source of inner parser
+progress.
 
 Operator guidance:
 
@@ -117,7 +150,34 @@ Defaults:
 - `KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS=1200` bounds the overall run wall-clock
   time for bounded continue probes.
 - `KOGWISTAR_LONGRUN_MAX_LLM_CALLS=100` adds an explicit call budget that is
-  recorded in the dump and stops the run once exceeded.
+  recorded in the dump and stops the run once exceeded. The recorded call
+  count is based on provider callback invocations, including proposal, review,
+  refinement, and correction calls, not merely one count per document.
+- `KOGWISTAR_LONGRUN_PARSER_WORKERS=1|N` bounds concurrent document workflows.
+  `1` preserves the legacy sequential behavior. Values above `1` require the
+  Postgres/pgvector backend because Chroma is treated as single-writer. The
+  maintenance worker remains one foreground worker; completed parser futures
+  are persisted and maintenance jobs are polled by the parent in completion
+  order. Resume-probe suspension is intentionally incompatible with multiple
+  parser workers because it is a run-level gate. The harness also exposes
+  `await harness.run_async()` using the same durable scheduler and terminal
+  status path.
+- `KOGWISTAR_LONGRUN_DOC_LIMIT=0|N` limits the number of eligible documents
+  processed in this invocation. `0` means all; on `continue`, terminal
+  documents are skipped and `N` counts additional eligible documents.
+- `KOGWISTAR_LONGRUN_MODE=retry_failed` loads an existing checkpoint and
+  reopens only `FAILED` or `QUARANTINED` documents. Completed documents and
+  prior failure records are preserved. It never creates a fresh corpus.
+- `KOGWISTAR_LONGRUN_RECOVERY_DOC_LIMIT=0|N` limits how many terminal failure
+  documents are reopened in one recovery invocation. `0` means all eligible
+  failures.
+- `KOGWISTAR_LONGRUN_RECOVERY_ATTEMPTS_PER_DOC=N` limits cumulative recovery
+  attempts for each document across recovery invocations. An attempt is
+  consumed when the document reaches `claim_document`, not merely when it is
+  selected or reopened. Recovery selections are persisted, so an interrupted
+  recovery does not consume an attempt and does not broaden into untouched
+  pending documents. A document that reaches the limit remains terminal until
+  an operator deliberately starts a fresh experiment.
 - Budget stops still fail the active pytest invocation so an incomplete
   acceptance run is visible, but untouched documents remain `PENDING` for a
   later `continue` or `auto` run instead of being quarantined.
@@ -130,9 +190,10 @@ Defaults:
   quality.
 - `KOGWISTAR_LONGRUN_RUN_DIR` can point the harness at a stable run directory
   for crash-continuation probes and repeated manual reruns.
-- `KOGWISTAR_LONGRUN_MODE=fresh|continue|auto` selects whether the harness
-  wipes the run directory first, resumes an existing checkpoint only, or tries
-  to reuse a matching checkpoint and otherwise falls back to fresh.
+- `KOGWISTAR_LONGRUN_MODE=fresh|continue|auto|retry_failed` selects whether
+  the harness wipes the run directory first, resumes an existing checkpoint
+  only, tries to reuse a matching checkpoint and otherwise falls back to
+  fresh, or performs bounded recovery of terminal failures.
 - `KOGWISTAR_LONGRUN_DOC_COUNT=1|3|20` is supported for the VSCode launch
   buttons. Smaller corpora require `KOGWISTAR_LONGRUN_ALLOW_SMALL=1`.
 - The VSCode long-run buttons include a corpus profile picker. The corpus

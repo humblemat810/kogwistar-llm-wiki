@@ -59,6 +59,12 @@ from .namespaces import GraphSpace, WorkspaceNamespaces
 from .projection import ProjectionManager
 from .usage_projection import UsageProjection, UsageProjectionSnapshot, persist_usage_events
 from .review_query import ReviewQueryService
+from .maintenance_guards import (
+    SourceRevision,
+    build_source_revision,
+    readiness_id,
+    required_stage_for_maintenance,
+)
 
 
 def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
@@ -280,6 +286,7 @@ class IngestPipeline:
             else bool(live_trace)
         )
         self.live_trace_printer = LiveTracePrinter(prefix="llm-wiki.ingest") if self.live_trace else None
+        self._source_revisions: dict[tuple[str, str], SourceRevision] = {}
         self.stats_store = (
             ParseStatisticsStore(self.debug_run_dir / "llm_wiki_stats.sqlite3")
             if self.debug_run_dir is not None
@@ -376,6 +383,11 @@ class IngestPipeline:
             source_document_id=source_document_id,
             graph_extraction=graph_extraction,
             namespace=ns.conv_fg,
+        )
+        self.record_source_readiness(
+            request=request,
+            source_document_id=source_document_id,
+            stage="parsed_graph_persisted",
         )
         self._record_parse_statistics(
             request=request,
@@ -521,7 +533,105 @@ class IngestPipeline:
             return "document_expand_parse_children"
         return "distill"
 
+    def source_revision(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+    ) -> SourceRevision:
+        key = (request.workspace_id, source_document_id)
+        revision = self._source_revisions.get(key)
+        if revision is None:
+            candidate = build_source_revision(
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                raw_text=request.raw_text,
+            )
+            source_namespace = self.namespaces_for(request.workspace_id).source_space
+            with _temporary_namespace(self.engines.kg, source_namespace):
+                persisted_nodes = self.engines.kg.read.get_nodes(
+                    where={
+                        "$and": [
+                            {"artifact_kind": "source_revision"},
+                            {"source_document_id": source_document_id},
+                            {"source_digest": candidate.source_digest},
+                        ]
+                    },
+                    limit=10_000,
+                )
+            if persisted_nodes:
+                latest = max(
+                    persisted_nodes,
+                    key=lambda node: int(
+                        (getattr(node, "metadata", {}) or {}).get("created_at_ms") or 0
+                    ),
+                )
+                metadata = dict(getattr(latest, "metadata", {}) or {})
+                revision = SourceRevision(
+                    source_document_id=source_document_id,
+                    revision_id=str(metadata.get("source_revision_id") or latest.id),
+                    source_digest=str(metadata.get("source_digest") or candidate.source_digest),
+                )
+            else:
+                revision = candidate
+            self._source_revisions[key] = revision
+        return revision
+
+    def begin_source_revision(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+    ) -> SourceRevision:
+        """Start an immutable ingestion attempt for a source document."""
+        revision = build_source_revision(
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            raw_text=request.raw_text,
+            attempt_id=str(uuid.uuid4()),
+        )
+        self._source_revisions[(request.workspace_id, source_document_id)] = revision
+        return revision
+
+    def record_source_readiness(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        stage: str,
+    ) -> str:
+        revision = self.source_revision(request=request, source_document_id=source_document_id)
+        ns = self.namespaces_for(request.workspace_id)
+        node_id = readiness_id(
+            source_document_id=source_document_id,
+            revision_id=revision.revision_id,
+            stage=stage,
+        )
+        node = self._artifact_node(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=ns.source_space,
+            node_id=node_id,
+            artifact_kind="source_readiness",
+            lane="background",
+            visibility="internal",
+            label=f"Source Readiness: {stage}",
+            summary=f"Source revision is ready for {stage}.",
+            extra_metadata={
+                "source_revision_id": revision.revision_id,
+                "source_digest": revision.source_digest,
+                "readiness_stage": stage,
+                "graph_status": "ready",
+                "created_at_ms": now_ms(),
+            },
+        )
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            if not self.engines.kg.read.node_exists(ids=[node_id]):
+                self.engines.kg.write.add_node(node)
+        return node_id
+
     def register_source(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> None:
+        revision = self.begin_source_revision(request=request, source_document_id=source_document_id)
         source_namespace = self.namespaces_for(request.workspace_id).source_space
         source_metadata = {
             "workspace_id": request.workspace_id,
@@ -551,6 +661,31 @@ class IngestPipeline:
             self.engines.kg.write.add_document(source_document)
         with _temporary_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_document(compatibility_document)
+        revision_node = self._artifact_node(
+            request=request,
+            source_document_id=source_document_id,
+            namespace=source_namespace,
+            node_id=revision.revision_id,
+            artifact_kind="source_revision",
+            lane="background",
+            visibility="internal",
+            label=f"Source Revision: {request.title}",
+            summary="Authoritative source revision fence for maintenance jobs.",
+            extra_metadata={
+                "source_revision_id": revision.revision_id,
+                "source_digest": revision.source_digest,
+                "revision_status": "current",
+                "created_at_ms": now_ms(),
+            },
+        )
+        with _temporary_namespace(self.engines.kg, source_namespace):
+            if not self.engines.kg.read.node_exists(ids=[revision.revision_id]):
+                self.engines.kg.write.add_node(revision_node)
+        self.record_source_readiness(
+            request=request,
+            source_document_id=source_document_id,
+            stage="source_registered",
+        )
 
     def seed_source_map(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
         source_namespace = self.namespaces_for(request.workspace_id).source_space
@@ -601,6 +736,11 @@ class IngestPipeline:
         with _temporary_namespace(self.engines.conversation, namespace):
             if not self.engines.conversation.read.node_exists(ids=[node_id]):
                 self.engines.conversation.write.add_node(compatibility_seed)
+        self.record_source_readiness(
+            request=request,
+            source_document_id=source_document_id,
+            stage="source_map_seeded",
+        )
         return node_id
 
     def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> ParseSourceResult:
@@ -935,6 +1075,53 @@ class IngestPipeline:
         )
         return result
 
+    def _repair_graph_extraction_spans(
+        self,
+        *,
+        graph_extraction: GraphExtractionWithIDs,
+        source_document_id: str,
+        request: IngestPipelineRequest,
+    ) -> dict[str, int]:
+        """Repair uniquely recoverable offsets before graph persistence.
+
+        Parser pointers and Kogwistar spans use different internal
+        representations, so persistence remains strict. This boundary pass
+        uses the authoritative registered source document and only accepts a
+        unique exact/fuzzy repair; ambiguous evidence still fails closed.
+        """
+        source_namespace = self.namespaces_for(request.workspace_id).source_space
+        repaired_count = 0
+        rejected_count = 0
+        with _temporary_namespace(self.engines.kg, source_namespace):
+            document = self.engines.kg.read.get_document(source_document_id)
+            validator = self.engines.kg.get_span_validator_of_doc_type(document=document)
+            for entity in [*(graph_extraction.nodes or []), *(graph_extraction.edges or [])]:
+                for grounding in entity.mentions or []:
+                    for index, span in enumerate(list(grounding.spans or [])):
+                        repaired, diagnostics = validator.repair_span(span, doc=document)
+                        final_validation = validator.validate_span(repaired, doc=document)
+                        if final_validation.get("correctness") is not True:
+                            rejected_count += 1
+                            raise ValueError(
+                                "source span could not be safely repaired before persistence: "
+                                f"doc_id={source_document_id!r} "
+                                f"start={span.start_char} end={span.end_char} "
+                                f"excerpt={span.excerpt!r} "
+                                f"extracted={final_validation.get('excerpt_from_start_end_index')!r} "
+                                f"diagnostics={diagnostics}"
+                            )
+                        if diagnostics.get("repaired") is True:
+                            repaired_count += 1
+                            grounding.spans[index] = repaired
+        if repaired_count or rejected_count:
+            self._trace_event(
+                "source_span_repair_complete",
+                source_document_id=source_document_id,
+                repaired_count=repaired_count,
+                rejected_count=rejected_count,
+            )
+        return {"repaired_count": repaired_count, "rejected_count": rejected_count}
+
     def ingest_parse_result(
         self,
         *,
@@ -957,10 +1144,15 @@ class IngestPipeline:
             source_document_id=source_document_id,
             graph_extraction=graph_extraction,
         )
+        self._repair_graph_extraction_spans(
+            graph_extraction=source_parsed,
+            source_document_id=source_document_id,
+            request=request,
+        )
         compatibility_parsed = self._source_graph_extraction(
             request=request,
             source_document_id=source_document_id,
-            graph_extraction=graph_extraction,
+            graph_extraction=source_parsed,
             legacy_namespace=namespace,
         )
 
@@ -1010,6 +1202,8 @@ class IngestPipeline:
         maintenance_kind: str | None = None,
     ) -> str:
         maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
+        revision = self.source_revision(request=request, source_document_id=source_document_id)
+        required_stage = required_stage_for_maintenance(maintenance_kind)
         self._trace_step(
             "create_maintenance_request_start",
             request=request,
@@ -1023,6 +1217,7 @@ class IngestPipeline:
                 request.workspace_id,
                 source_document_id,
                 maintenance_kind,
+                revision.revision_id,
             )
         )
         if not self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
@@ -1042,6 +1237,9 @@ class IngestPipeline:
                     "status": "pending",
                     "operation_mode": self._operation_mode(request),
                     "maintenance_kind": maintenance_kind,
+                    "source_revision_id": revision.revision_id,
+                    "source_digest": revision.source_digest,
+                    "required_stage": required_stage,
                 },
             )
             with _temporary_namespace(self.engines.conversation, namespace):
@@ -1055,6 +1253,7 @@ class IngestPipeline:
                 request.workspace_id,
                 source_document_id,
                 maintenance_kind,
+                revision.revision_id,
             )
         )
         with _temporary_namespace(self.engines.conversation, namespace):
@@ -1080,16 +1279,28 @@ class IngestPipeline:
                     "request_node_id": request_node_id,
                     "source_document_id": source_document_id,
                     "maintenance_kind": maintenance_kind,
+                    "source_revision_id": revision.revision_id,
+                    "source_digest": revision.source_digest,
+                    "required_stage": required_stage,
                 },
                 idempotency_key=lane_idempotency_key,
             )
         lane_message_id = existing_lane_message_id or lane_message.message_id
+        self._supersede_stale_maintenance_jobs(
+            namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
+            source_document_id=source_document_id,
+            maintenance_kind=maintenance_kind,
+            current_revision_id=revision.revision_id,
+        )
         if not self._job_exists(
             namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
             entity_kind="maintenance_job",
             entity_id=source_document_id,
             job_kind=f"maintenance_job:{maintenance_kind}",
-            payload_matches={"maintenance_kind": maintenance_kind},
+            payload_matches={
+                "maintenance_kind": maintenance_kind,
+                "source_revision_id": revision.revision_id,
+            },
         ):
             self._enqueue_maintenance_job(
                 request=request,
@@ -1098,6 +1309,9 @@ class IngestPipeline:
                 namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
                 lane_message_id=lane_message_id,
                 maintenance_kind=maintenance_kind,
+                source_revision_id=revision.revision_id,
+                source_digest=revision.source_digest,
+                required_stage=required_stage,
             )
         self._trace_step(
             "create_maintenance_request_complete",
@@ -1107,6 +1321,8 @@ class IngestPipeline:
             maintenance_kind=maintenance_kind,
             request_node_id=request_node_id,
             lane_message_id=lane_message_id,
+            source_revision_id=revision.revision_id,
+            required_stage=required_stage,
         )
         return request_node_id
 
@@ -1558,6 +1774,9 @@ class IngestPipeline:
         namespace: str,
         lane_message_id: str | None = None,
         maintenance_kind: str = "distill",
+        source_revision_id: str = "",
+        source_digest: str = "",
+        required_stage: str = "parsed_graph_persisted",
     ) -> str:
         payload = {
             "workspace_id": request.workspace_id,
@@ -1565,6 +1784,9 @@ class IngestPipeline:
             "source_document_id": source_document_id,
             "maintenance_kind": maintenance_kind,
             "lane_message_id": lane_message_id,
+            "source_revision_id": source_revision_id,
+            "source_digest": source_digest,
+            "required_stage": required_stage,
         }
         job_id = request_node_id
         self.engines.conversation.jobs.require_available(enqueue=True)
@@ -1578,6 +1800,37 @@ class IngestPipeline:
             payload=payload,
         )
         return job_id
+
+    def _supersede_stale_maintenance_jobs(
+        self,
+        *,
+        namespace: str,
+        source_document_id: str,
+        maintenance_kind: str,
+        current_revision_id: str,
+    ) -> None:
+        """Fence queued work from an older ingestion attempt.
+
+        The queue remains append-only/auditable: an old job is terminally
+        failed as superseded rather than deleted or reused for a new source
+        revision.
+        """
+        for job in self.engines.conversation.jobs.list(
+            namespace=namespace,
+            status="PENDING",
+            limit=10_000,
+        ):
+            if (
+                str(job.entity_id) != source_document_id
+                or str(job.job_kind) != f"maintenance_job:{maintenance_kind}"
+                or str(job.payload.get("source_revision_id") or "") == current_revision_id
+            ):
+                continue
+            self.engines.conversation.jobs.mark_failed(
+                job.job_id,
+                f"superseded_by_source_revision:{current_revision_id}",
+                final=True,
+            )
 
     def _enqueue_projection_job(
         self,

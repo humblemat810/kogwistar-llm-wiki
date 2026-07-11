@@ -25,6 +25,12 @@ from .maintenance_policy import (
 from .maintenance_designs import materialize_maintenance_designs
 from .maintenance_patch_apply import apply_maintenance_patch_for_scope
 from .maintenance_patches import MaintenancePatch
+from .maintenance_guards import (
+    MaintenanceGuardDecision,
+    SourceRevision,
+    evaluate_maintenance_guard,
+    required_stage_for_maintenance,
+)
 from .maintenance_strategies import (
     MaintenanceJobExecutionContext,
     MaintenanceStrategy,
@@ -160,8 +166,154 @@ class MaintenanceWorker(BaseWorker):
             lane_message_id=lane_message_id,
             maintenance_kind=maintenance_kind,
         )
+        decision = self._evaluate_maintenance_guard(ctx)
+        if decision.status != "ready":
+            self._block_guarded_job(ctx, decision)
+            return
         strategy: MaintenanceStrategy = self.strategy_registry.resolve(maintenance_kind)
         strategy.handle(self, ctx)
+
+    def _evaluate_maintenance_guard(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+    ) -> MaintenanceGuardDecision:
+        """Verify that a claimed job still targets the current ready source attempt."""
+        source_document_id = str(ctx.payload.get("source_document_id") or "")
+        requested_revision_id = str(ctx.payload.get("source_revision_id") or "")
+        requested_digest = str(ctx.payload.get("source_digest") or "")
+        required_stage = str(
+            ctx.payload.get("required_stage")
+            or required_stage_for_maintenance(ctx.maintenance_kind)
+        )
+        if not source_document_id or not requested_revision_id or not requested_digest:
+            return MaintenanceGuardDecision(
+                status="blocked",
+                reason="job_revision_metadata_missing",
+                source_document_id=source_document_id,
+                source_revision_id=requested_revision_id,
+                source_digest=requested_digest,
+                required_stage=required_stage,
+            )
+
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            revision_nodes: list[Node] = self.engines.kg.read.get_nodes(
+                where=_and_where(
+                    {"artifact_kind": "source_revision"},
+                    {"source_document_id": source_document_id},
+                ),
+                limit=10_000,
+            )
+            readiness_nodes: list[Node] = self.engines.kg.read.get_nodes(
+                where=_and_where(
+                    {"artifact_kind": "source_readiness"},
+                    {"source_document_id": source_document_id},
+                    {"source_revision_id": requested_revision_id},
+                    {"readiness_stage": required_stage},
+                ),
+                limit=10_000,
+            )
+
+        def metadata(node: Node) -> dict[str, object]:
+            raw = getattr(node, "metadata", {})
+            return dict(raw) if isinstance(raw, dict) else {}
+
+        current_node = max(
+            revision_nodes,
+            key=lambda node: int(metadata(node).get("created_at_ms") or 0),
+            default=None,
+        )
+        current_revision = (
+            SourceRevision(
+                source_document_id=source_document_id,
+                revision_id=str(metadata(current_node).get("source_revision_id") or current_node.id),
+                source_digest=str(metadata(current_node).get("source_digest") or ""),
+            )
+            if current_node is not None
+            else None
+        )
+        ready_revision_ids = {
+            str(metadata(node).get("source_revision_id") or "")
+            for node in readiness_nodes
+        }
+        return evaluate_maintenance_guard(
+            source_revision=current_revision,
+            requested_revision_id=requested_revision_id,
+            requested_digest=requested_digest,
+            required_stage=required_stage,
+            ready_revision_ids=ready_revision_ids,
+        )
+
+    def _block_guarded_job(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        decision: MaintenanceGuardDecision,
+    ) -> None:
+        """Persist and surface a non-destructive source-fence refusal."""
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        artifact_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.maintenance_guard_decision",
+                ctx.job_id,
+                decision.status,
+                decision.reason,
+            )
+        )
+        node = Node(
+            id=artifact_id,
+            label="Maintenance Guard Decision",
+            type="entity",
+            summary=f"Maintenance job blocked: {decision.reason}",
+            doc_id=decision.source_document_id or None,
+            mentions=[Grounding(spans=[Span(
+                collection_page_url=f"conversation/{ns.conv_bg}",
+                document_page_url=f"conversation/{ns.conv_bg}",
+                doc_id=f"conv:{ns.conv_bg}",
+                insertion_method="maintenance_guard",
+                page_number=1,
+                start_char=0,
+                end_char=1,
+                excerpt="maintenance_guard",
+                context_before="",
+                context_after="",
+                chunk_id=None,
+                source_cluster_id=None,
+            )])],
+            metadata={
+                "workspace_id": ctx.workspace_id,
+                "source_document_id": decision.source_document_id,
+                "artifact_kind": "maintenance_guard_decision",
+                "maintenance_guard_status": decision.status,
+                "reason": decision.reason,
+                "source_revision_id": decision.source_revision_id,
+                "source_digest": decision.source_digest,
+                "required_stage": decision.required_stage,
+                "job_id": ctx.job_id,
+                "maintenance_kind": ctx.maintenance_kind,
+                "created_at_ms": int(time.time() * 1000),
+            },
+        )
+        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            if not self.engines.conversation.read.node_exists(ids=[artifact_id]):
+                self.engines.conversation.write.add_node(node)
+        self._emit_lane_reply(
+            workspace_id=ctx.workspace_id,
+            source_document_id=decision.source_document_id,
+            request_node_id=ctx.request_node_id,
+            reply_to_message_id=ctx.lane_message_id or None,
+            status="failed",
+            payload={
+                "maintenance_kind": ctx.maintenance_kind,
+                "maintenance_guard_status": decision.status,
+                "maintenance_guard_reason": decision.reason,
+                "guard_artifact_id": artifact_id,
+            },
+        )
+        self.engines.conversation.jobs.mark_failed(
+            ctx.job_id,
+            f"maintenance_guard_{decision.status}:{decision.reason}",
+            final=True,
+        )
 
     def _handle_execution_wisdom_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
         workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
@@ -203,6 +355,10 @@ class MaintenanceWorker(BaseWorker):
                 self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
 
     def _handle_graph_patch_apply_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
+        decision = self._evaluate_maintenance_guard(ctx)
+        if decision.status != "ready":
+            self._block_guarded_job(ctx, decision)
+            return
         patch_payload = ctx.payload.get("patch")
         if not isinstance(patch_payload, dict):
             self._handle_runtime_workflow_strategy(ctx)
@@ -252,6 +408,10 @@ class MaintenanceWorker(BaseWorker):
                 self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
 
     def _handle_runtime_workflow_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
+        decision = self._evaluate_maintenance_guard(ctx)
+        if decision.status != "ready":
+            self._block_guarded_job(ctx, decision)
+            return
         ns = WorkspaceNamespaces(ctx.workspace_id)
         workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         import warnings

@@ -226,6 +226,31 @@ def _ensure_pgvector_database_with_retry(
     return _ensure_pgvector_database(dsn, database_name)
 
 
+def _prepare_longrun_pgvector_database_with_retry(
+    dsn: str,
+    database_name: str,
+    *,
+    pg_source: str,
+    ready_timeout_seconds: float = 45.0,
+    retry_interval_seconds: float = 1.0,
+) -> str:
+    deadline = time.monotonic() + ready_timeout_seconds
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            return _prepare_longrun_pgvector_database(
+                dsn,
+                database_name,
+                pg_source=pg_source,
+            )
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            last_error = exc
+            time.sleep(retry_interval_seconds)
+    if last_error is not None:
+        raise last_error
+    return _prepare_longrun_pgvector_database(dsn, database_name, pg_source=pg_source)
+
+
 def _longrun_requested(config: pytest.Config) -> bool:
     return bool(
         config.getoption("kogwistar_longrun", default=False)
@@ -388,11 +413,18 @@ def _longrun_pgvector_database_name() -> str:
         os.getenv("KOGWISTAR_LONGRUN_WORKSPACE_ID", "longrun"),
         os.getenv("KOGWISTAR_LONGRUN_BACKEND", "pgvector"),
         os.getenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "parse_first"),
+        os.getenv("KOGWISTAR_LONGRUN_PG_DATABASE_MODE", "fingerprint"),
+        os.getenv("KOGWISTAR_LONGRUN_CORPUS_PROFILE", "watershed_stress"),
         os.getenv("KOGWISTAR_LONGRUN_PARSER", "workflow_layered"),
         os.getenv("KOGWISTAR_LONGRUN_DOC_COUNT", "20"),
         os.getenv("KOGWISTAR_LONGRUN_DOC_PROFILE", "medium"),
         os.getenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER", os.getenv("KOGWISTAR_PARSER_PROVIDER", "ollama")),
         os.getenv("KOGWISTAR_LONGRUN_PARSER_MODEL", os.getenv("KOGWISTAR_PARSER_MODEL", "gemma4:e2b")),
+        os.getenv("KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE", "children"),
+        os.getenv("KOGWISTAR_LONGRUN_PARSER_WORKERS", "1"),
+        os.getenv("KOGWISTAR_LONGRUN_TOKEN_MIN", "500"),
+        os.getenv("KOGWISTAR_LONGRUN_TOKEN_MAX", "2000"),
+        os.getenv("KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT", "0"),
     )
     return f"kogwistar_lr_{fingerprint.hex[:16]}"
 
@@ -425,6 +457,69 @@ def _ensure_pgvector_database(dsn: str, database_name: str) -> str:
         except Exception:
             logger.exception("Failed to dispose pgvector admin engine while creating database %s", database_name)
     return url.set(drivername="postgresql+psycopg", database=database_name).render_as_string(hide_password=False)
+
+
+def _reset_pgvector_database(dsn: str, database_name: str) -> str:
+    """Drop and recreate one harness-owned development database.
+
+    This is intentionally separate from ``_ensure_pgvector_database`` so that
+    continuation and shared modes cannot accidentally become destructive.
+    The caller must already have restricted this operation to a managed
+    testcontainer/persistent-dev-container and fingerprint mode.
+    """
+    try:
+        import sqlalchemy as sa
+    except Exception:
+        return dsn
+
+    url = sa.engine.make_url(dsn)
+    database_name = _normalize_pg_identifier(database_name)
+    if database_name in {"postgres", "template0", "template1"}:
+        raise ValueError(f"refusing to reset protected PostgreSQL database {database_name!r}")
+
+    admin_url = url.set(drivername="postgresql+psycopg", database="postgres")
+    engine = sa.create_engine(
+        admin_url.render_as_string(hide_password=False),
+        future=True,
+        isolation_level="AUTOCOMMIT",
+    )
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                sa.text(
+                    "SELECT pg_terminate_backend(pid) "
+                    "FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": database_name},
+            )
+            conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{database_name}"'))
+            conn.execute(sa.text(f'CREATE DATABASE "{database_name}"'))
+    finally:
+        try:
+            engine.dispose()
+        except Exception:
+            logger.exception("Failed to dispose pgvector admin engine after resetting database %s", database_name)
+    return url.set(drivername="postgresql+psycopg", database=database_name).render_as_string(hide_password=False)
+
+
+def _prepare_longrun_pgvector_database(
+    dsn: str,
+    database_name: str,
+    *,
+    pg_source: str,
+) -> str:
+    """Apply the non-destructive/ destructive policy for a long-run database."""
+    mode = os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto"
+    database_mode = _longrun_pgvector_database_mode()
+    if mode == "fresh" and database_mode == "fingerprint" and pg_source in {"testcontainer", "persistent"}:
+        logger.warning(
+            "Resetting dev pgvector experiment database for fresh run: database=%s source=%s",
+            database_name,
+            pg_source,
+        )
+        return _reset_pgvector_database(dsn, database_name)
+    return _ensure_pgvector_database(dsn, database_name)
 
 
 def _start_longrun_pgvector_container(container_cls, image: str):
@@ -473,7 +568,11 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
             dsn = _ensure_longrun_persistent_pgvector_container(image)
             dsn = _normalize_pg_dsn(dsn)
             database_name = _longrun_pgvector_database_name()
-            dsn = _ensure_pgvector_database_with_retry(dsn, database_name)
+            dsn = _prepare_longrun_pgvector_database_with_retry(
+                dsn,
+                database_name,
+                pg_source="persistent",
+            )
         except Exception as exc:  # pragma: no cover - environment-dependent
             reason = f"Failed to prepare persistent longrun pgvector container: {exc}"
             _append_longrun_skip_notice(reason)
@@ -530,7 +629,11 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
 
     dsn = _normalize_pg_dsn(container.get_connection_url())
     database_name = _longrun_pgvector_database_name()
-    dsn = _ensure_pgvector_database_with_retry(dsn, database_name)
+    dsn = _prepare_longrun_pgvector_database_with_retry(
+        dsn,
+        database_name,
+        pg_source="testcontainer",
+    )
     logger.info(
         "Using longrun pgvector experiment database name=%s mode=%s",
         database_name,
