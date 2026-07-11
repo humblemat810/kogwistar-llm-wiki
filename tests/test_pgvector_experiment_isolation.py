@@ -86,7 +86,6 @@ def test_longrun_pgvector_shared_database_name_is_stable(monkeypatch: pytest.Mon
     [
         ("KOGWISTAR_LONGRUN_CORPUS_PROFILE", "daily_life", "watershed_stress"),
         ("KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE", "children", "boundaries"),
-        ("KOGWISTAR_LONGRUN_PARSER_WORKERS", "1", "2"),
         ("KOGWISTAR_LONGRUN_TOKEN_MIN", "500", "700"),
         ("KOGWISTAR_LONGRUN_TOKEN_MAX", "2000", "3000"),
     ],
@@ -110,6 +109,24 @@ def test_longrun_pgvector_database_name_changes_with_experiment_dimension(
     baseline = test_conf._longrun_pgvector_database_name()
     monkeypatch.setenv(variable, second)
     assert test_conf._longrun_pgvector_database_name() != baseline
+
+
+def test_longrun_pgvector_database_name_ignores_parser_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PG_DATABASE_MODE", "fingerprint")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_WORKSPACE_ID", "demo")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "pgvector")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "parse_first")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER", "workflow_layered")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "20")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_PROFILE", "medium")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER", "ollama")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_MODEL", "gemma4:e2b")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE", "children")
+
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_WORKERS", "1")
+    baseline = test_conf._longrun_pgvector_database_name()
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSER_WORKERS", "2")
+    assert test_conf._longrun_pgvector_database_name() == baseline
 
 
 def test_fresh_fingerprint_managed_database_resets(monkeypatch: pytest.MonkeyPatch) -> None:

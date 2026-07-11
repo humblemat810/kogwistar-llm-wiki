@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
+import threading
 import time
 import traceback
 from collections import Counter, defaultdict
@@ -16,7 +18,7 @@ from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
 
 from .debug_run import LiveTracePrinter, env_flag_enabled, summarize_stage_timings
-from .llm_usage import ProviderUsageCallback
+from .llm_usage import ProviderUsageCallback, resolve_token_pricing
 from .provider_config import provider_config_summary
 
 
@@ -33,6 +35,20 @@ def _append_trace_line(path: Path, message: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(f"{_now_ms()} | {message}\n")
+
+
+def _close_resources_quietly(*resources: object) -> None:
+    """Close child-owned backend resources without masking the parse result."""
+
+    for resource in resources:
+        close = getattr(resource, "close", None)
+        if not callable(close):
+            continue
+        try:
+            close()
+        except Exception:
+            # Shutdown cleanup must not replace a provider or parser error.
+            continue
 
 
 def _dump_model(value: object) -> object:
@@ -66,6 +82,31 @@ def _summarize_budget_events(events: list[object], *, provider_settings: Workflo
         if getattr(event, "meta", {}).get("provider_run_id")
     }
     summary["llm_call_count"] = len(provider_run_ids)
+    cost_events = [
+        event for event in events
+        if getattr(event, "kind", None) == "cost" or getattr(event, "unit", None) == "total_cost"
+    ]
+    if not cost_events:
+        summary["total_cost"] = None
+        summary["cost_status"] = "unavailable"
+        summary["cost_source"] = None
+    elif any(getattr(event, "meta", {}).get("cost_status") for event in cost_events):
+        statuses = {
+            str(getattr(event, "meta", {}).get("cost_status"))
+            for event in cost_events
+            if getattr(event, "meta", {}).get("cost_status")
+        }
+        summary["cost_status"] = "estimated_partial" if "estimated_partial" in statuses else "estimated"
+        summary["cost_source"] = sorted(
+            {
+                str(getattr(event, "meta", {}).get("cost_source"))
+                for event in cost_events
+                if getattr(event, "meta", {}).get("cost_source")
+            }
+        )
+    else:
+        summary["cost_status"] = "observed"
+        summary["cost_source"] = "provider"
     return summary
 
 
@@ -218,6 +259,10 @@ def _build_provider_layer_callbacks(
                 source_document_id=source_document_id,
                 provider=parser.provider,
                 model=parser.model,
+                pricing=resolve_token_pricing(
+                    provider=parser.provider,
+                    model=parser.model,
+                ),
                 event_sink=usage_event_sink,
             )
         )
@@ -312,15 +357,19 @@ def run_workflow_layered_parse(
         )
     if heartbeat is not None:
         heartbeat("workflow_layered_parse_start")
-    run_result, bundle = run_ingest_workflow(
-        inp=inp,
-        workflow_engine=workflow_engine,
-        conversation_engine=conversation_engine,
-        knowledge_engine=knowledge_engine,
-        deps={**deps, "budget_ledger": budget_ledger},
-        run_id=run_id,
-        resume_from_checkpoint=resume_from_checkpoint,
-    )
+    try:
+        run_result, bundle = run_ingest_workflow(
+            inp=inp,
+            workflow_engine=workflow_engine,
+            conversation_engine=conversation_engine,
+            knowledge_engine=knowledge_engine,
+            deps={**deps, "budget_ledger": budget_ledger},
+            run_id=run_id,
+            resume_from_checkpoint=resume_from_checkpoint,
+        )
+    finally:
+        _close_resources_quietly(workflow_engine, conversation_engine, knowledge_engine)
+        _layer_event("workflow_layered_engines_closed")
     _layer_event(
         "workflow_layered_parse_returned",
         workflow_status=getattr(run_result, "status", None),
@@ -481,6 +530,13 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
     )
     live_trace_printer = LiveTracePrinter(prefix="longrun.parser") if live_trace else None
     budget_ledger: StateBackedBudgetLedger | None = None
+    trace_context = (
+        f"doc={payload.get('doc_id')} "
+        f"parser_lane={payload.get('parser_lane')} "
+        f"provider={payload.get('parser_provider') or 'unknown'} "
+        f"model={payload.get('parser_model') or 'unknown'} "
+        f"parser_workflow_run_id={payload.get('parser_workflow_run_id') or 'unknown'}"
+    )
 
     def _heartbeat(phase: str, **extra: object) -> None:
         _write_json_file(
@@ -490,27 +546,41 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "timestamp_ms": _now_ms(),
                 "parser_lane": payload["parser_lane"],
                 "doc_id": payload["doc_id"],
+                "parser_provider": payload.get("parser_provider"),
+                "parser_model": payload.get("parser_model"),
+                "parser_workflow_run_id": payload.get("parser_workflow_run_id"),
                 "pid": os.getpid(),
                 **extra,
             },
         )
 
     def _trace(message: str) -> None:
-        _append_trace_line(trace_path, message)
+        contextual_message = f"{message} {trace_context}"
+        _append_trace_line(trace_path, contextual_message)
         if dump_trace_path is not None:
-            _append_trace_line(dump_trace_path, f"child::{message}")
+            _append_trace_line(dump_trace_path, f"child::{contextual_message}")
         if live_trace_printer is not None:
             live_trace_printer.emit(
                 {
                     "stage": "parser_trace",
-                    "message": f"child::{message}",
+                    "message": f"child::{contextual_message}",
                     "doc_id": payload.get("doc_id"),
                     "parser_lane": payload.get("parser_lane"),
+                    "parser_provider": payload.get("parser_provider"),
+                    "parser_model": payload.get("parser_model"),
+                    "parser_workflow_run_id": payload.get("parser_workflow_run_id"),
+                    "pid": os.getpid(),
+                    "process_name": multiprocessing.current_process().name,
+                    "thread_name": threading.current_thread().name,
                 }
             )
 
     try:
-        _trace(f"child_boot doc={payload.get('doc_id')} pid={os.getpid()}")
+        _trace(
+            f"child_boot doc={payload.get('doc_id')} pid={os.getpid()} "
+            f"process_name={multiprocessing.current_process().name} "
+            f"parent_pid={os.getppid()} thread={threading.current_thread().name}"
+        )
         if payload.get("child_mode") == "sleep":
             _trace("child_sleep_mode entered")
             _heartbeat("sleeping")
@@ -605,11 +675,16 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
             diagnostics = dict(result.diagnostics)
         else:
             raise ValueError(f"unsupported long-run parser lane: {parser_lane!r}")
+        workflow_status = str(diagnostics.get("workflow_status") or "").strip().lower()
+        result_ok = workflow_status not in {"failure", "failed", "error"}
         _trace("child_write_result_json")
         _write_json_file(
             result_path,
             {
-                "ok": True,
+                "ok": result_ok,
+                "parser_workflow_run_id": str(
+                    payload.get("parser_workflow_run_id") or f"parser:{source_document_id}"
+                ),
                 "parser_lane": parser_lane,
                 "title": title,
                 "graph_payload": graph_payload,
@@ -617,6 +692,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "usage_summary": usage_summary,
                 "usage_events": list(getattr(result, "usage_events", []) or []),
                 "diagnostics": diagnostics,
+                "workflow_status": workflow_status or None,
                 "layer_log": getattr(result, "layer_log", None) if parser_lane == "workflow_layered" else None,
             },
         )

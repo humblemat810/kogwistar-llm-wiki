@@ -2,17 +2,99 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from collections.abc import Mapping
 from types import SimpleNamespace
-from typing import Callable
+from typing import Callable, Sequence
 
 from langchain_core.callbacks import BaseCallbackHandler
 from kogwistar.runtime.budget import BudgetAttribution, BudgetEvent, StateBackedBudgetLedger
 from kogwistar.runtime.budget_adapters import adapt_budget_events
+from kogwistar.runtime.pricing import TokenPricing, estimate_token_cost_usd
 
 
 _USAGE_KEYS = ("usage_metadata", "token_usage", "usage")
+
+
+_REFERENCE_TOKEN_PRICING: dict[tuple[str, str], TokenPricing] = {
+    # Public OpenAI standard rates, expressed per 1K tokens. Azure deployments
+    # may differ by region/SKU; explicit environment rates always take priority.
+    ("openai", "gpt-5-mini"): TokenPricing(
+        input_per_1k=0.00025,
+        cached_input_per_1k=0.000025,
+        output_per_1k=0.002,
+        source="reference:openai-public-standard:gpt-5-mini",
+    ),
+    ("azure", "gpt-5-mini"): TokenPricing(
+        input_per_1k=0.00025,
+        cached_input_per_1k=0.000025,
+        output_per_1k=0.002,
+        source="reference:openai-public-standard:gpt-5-mini:azure-estimate",
+    ),
+    ("openai", "gpt-5-nano"): TokenPricing(
+        input_per_1k=0.00005,
+        cached_input_per_1k=0.000005,
+        output_per_1k=0.0004,
+        source="reference:openai-public-standard:gpt-5-nano",
+    ),
+    ("azure", "gpt-5-nano"): TokenPricing(
+        input_per_1k=0.00005,
+        cached_input_per_1k=0.000005,
+        output_per_1k=0.0004,
+        source="reference:openai-public-standard:gpt-5-nano:azure-estimate",
+    ),
+}
+
+
+def resolve_token_pricing(
+    *,
+    provider: str,
+    model: str,
+    prefixes: Sequence[str] = (
+        "KOGWISTAR_LONGRUN_PARSER",
+        "KOGWISTAR_PARSER",
+        "KG_DOC_PARSER",
+        "KOGWISTAR_LLM",
+    ),
+) -> TokenPricing:
+    """Resolve overrides, then a labelled public reference rate card."""
+
+    def read_rate(suffix: str) -> tuple[float | None, str | None]:
+        for prefix in prefixes:
+            name = f"{prefix}_{suffix}"
+            raw = os.getenv(name)
+            if raw in {None, ""}:
+                continue
+            try:
+                value = float(raw)
+            except ValueError as exc:
+                raise ValueError(f"{name} must be a non-negative number") from exc
+            if value < 0:
+                raise ValueError(f"{name} must be a non-negative number")
+            return value, name
+        return None, None
+
+    input_rate, input_source = read_rate("INPUT_COST_PER_1K_TOKENS")
+    output_rate, output_source = read_rate("OUTPUT_COST_PER_1K_TOKENS")
+    cached_rate, cached_source = read_rate("CACHED_INPUT_COST_PER_1K_TOKENS")
+    reference = _REFERENCE_TOKEN_PRICING.get((provider.lower(), model.lower()))
+    source = input_source or output_source or cached_source
+    if source is None and reference is not None:
+        return TokenPricing(
+            input_per_1k=reference.input_per_1k,
+            output_per_1k=reference.output_per_1k,
+            cached_input_per_1k=reference.cached_input_per_1k,
+            source=reference.source,
+        )
+    if source is None:
+        source = f"unavailable:{provider}/{model}"
+    return TokenPricing(
+        input_per_1k=input_rate,
+        output_per_1k=output_rate,
+        cached_input_per_1k=cached_rate,
+        source=source,
+    )
 
 
 def _as_mapping(value: object) -> Mapping[str, object] | None:
@@ -42,6 +124,11 @@ def _usage_candidates(response: object) -> list[Mapping[str, object]]:
             add(getattr(message, "usage_metadata", None))
             add(getattr(message, "response_metadata", None))
             add(getattr(generation, "generation_info", None))
+    for candidate in tuple(candidates):
+        for key in ("prompt_tokens_details", "input_token_details", "input_tokens_details"):
+            nested = _as_mapping(candidate.get(key))
+            if nested is not None:
+                candidates.append(nested)
     return candidates
 
 
@@ -58,6 +145,7 @@ def extract_provider_usage(response: object) -> dict[str, float]:
         "output_tokens": ("output_tokens", "completion_tokens", "output_token_count"),
         "total_tokens": ("total_tokens", "token_count"),
         "total_cost": ("total_cost", "cost", "cost_usd"),
+        "cached_input_tokens": ("cached_input_tokens", "cached_tokens"),
     }
     usage: dict[str, float] = {}
     for candidate in _usage_candidates(response):
@@ -87,6 +175,7 @@ class ProviderUsageCallback(BaseCallbackHandler):
         source_document_id: str,
         provider: str,
         model: str,
+        pricing: TokenPricing | None = None,
         event_sink: Callable[[BudgetEvent], None] | None = None,
     ) -> None:
         self.ledger = ledger
@@ -94,6 +183,7 @@ class ProviderUsageCallback(BaseCallbackHandler):
         self.source_document_id = source_document_id
         self.provider = provider
         self.model = model
+        self.pricing = pricing
         self.event_sink = event_sink
         self._started_at: dict[str, float] = {}
         self._recorded_runs: set[str] = set()
@@ -114,12 +204,45 @@ class ProviderUsageCallback(BaseCallbackHandler):
             provider=self.provider,
             model=self.model,
         )
-        for event in adapt_budget_events(
+        provider_events = adapt_budget_events(
             {"usage": usage},
             run_id=self.run_id,
             scope="run",
             attribution=attribution,
-        ):
+        )
+        has_provider_cost = any(
+            event.kind == "cost" or event.unit == "total_cost"
+            for event in provider_events
+        )
+        estimated_cost = (
+            estimate_token_cost_usd(usage, self.pricing)
+            if self.pricing is not None and not has_provider_cost
+            else None
+        )
+        if estimated_cost is not None:
+            amount, cost_status = estimated_cost
+            provider_events.append(
+                BudgetEvent(
+                    run_id=self.run_id,
+                    source="llm-wiki-cost-estimator",
+                    kind="cost",
+                    amount=amount,
+                    unit="total_cost",
+                    scope="run",
+                    ts_ms=int(time.time() * 1000),
+                    meta={
+                        "cost_status": cost_status,
+                        "cost_source": self.pricing.source,
+                        "input_cost_per_1k": self.pricing.input_per_1k,
+                        "cached_input_cost_per_1k": self.pricing.cached_input_per_1k,
+                        "output_cost_per_1k": self.pricing.output_per_1k,
+                        "provider_run_id": provider_run_id,
+                    },
+                    event_id=_stable_event_id(self.run_id, provider_run_id, "total_cost"),
+                    attribution=attribution,
+                )
+            )
+        for event in provider_events:
             event = BudgetEvent(
                 run_id=event.run_id,
                 source="langchain-provider",

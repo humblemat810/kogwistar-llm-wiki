@@ -10,6 +10,7 @@ import inspect
 import json
 import os
 import hashlib
+import shutil
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -251,6 +252,7 @@ def _build_postgres_engine(
             dsn=dsn,
             embedding_dim=embedding_dim,
             schema=schema,
+            application_name=f"kogwistar-llm-wiki-{kg_graph_type}",
         )
     )
     return GraphKnowledgeEngine(
@@ -813,14 +815,23 @@ class IngestPipeline:
             model=model,
             engine_dir=str(engine_dir),
         )
-        result = run_workflow_layered_parse(
-            source_document_id=source_document_id,
-            title=request.title,
-            raw_text=request.raw_text,
-            provider_settings=provider_settings,
-            engine_dir=engine_dir,
-            trace=self._trace_text if self.debug_trace_path is not None else None,
-        )
+        try:
+            result = run_workflow_layered_parse(
+                source_document_id=source_document_id,
+                title=request.title,
+                raw_text=request.raw_text,
+                provider_settings=provider_settings,
+                engine_dir=engine_dir,
+                trace=self._trace_text if self.debug_trace_path is not None else None,
+            )
+        finally:
+            shutil.rmtree(engine_dir, ignore_errors=True)
+            self._trace_event(
+                "workflow_layered_engine_dir_cleaned",
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                engine_dir=str(engine_dir),
+            )
         self._persist_parser_usage_events(
             request=request,
             source_document_id=source_document_id,

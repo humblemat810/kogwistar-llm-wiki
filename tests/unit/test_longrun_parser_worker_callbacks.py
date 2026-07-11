@@ -18,6 +18,13 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
 ):
     captured: dict[str, Any] = {}
 
+    class FakeEngine:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
     def fake_build_layerwise_llm_callbacks(provider_settings, *, event_sink=None, **kwargs):
         captured["provider_settings"] = provider_settings
         captured["event_sink"] = event_sink
@@ -41,7 +48,9 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
 
     def fake_build_default_engines(engine_dir, *, provider_settings):
         captured["engine_dir"] = str(engine_dir)
-        return SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+        engines = (FakeEngine(), FakeEngine(), FakeEngine())
+        captured["engines"] = engines
+        return engines
 
     def fake_run_ingest_workflow(**kwargs):
         captured["workflow_deps"] = kwargs["deps"]
@@ -95,6 +104,7 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
     assert result.diagnostics["parse_session_mode"] == "workflow_layered"
     assert result.usage_summary["proposal_mode"] == "boundaries"
     assert result.diagnostics["proposal_summary"]["boundary_proposed_count"] == 2
+    assert all(engine.closed for engine in captured["engines"])
 
 
 def test_run_workflow_layered_parse_synthesizes_missing_export_bundle_from_semantic_tree(

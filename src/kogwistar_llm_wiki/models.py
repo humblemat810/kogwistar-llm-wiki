@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict
 
@@ -73,9 +73,41 @@ class NamespaceEngines:
     kg: GraphKnowledgeEngine            # Knowledge-family engine
     wisdom: GraphKnowledgeEngine        # For wisdom
     derived_knowledge: GraphKnowledgeEngine | None = None
+    _closed: bool = field(default=False, init=False, repr=False)
 
     def derived_knowledge_engine(self) -> GraphKnowledgeEngine:
         return self.derived_knowledge or self.kg
+
+    def close(self) -> None:
+        """Close each owned engine exactly once.
+
+        ``derived_knowledge`` may alias ``kg``; identity de-duplication keeps
+        cleanup safe for both split and shared graph layouts.
+        """
+        if self._closed:
+            return
+        seen: set[int] = set()
+        first_error: Exception | None = None
+        for engine in (
+            self.conversation,
+            self.workflow,
+            self.kg,
+            self.wisdom,
+            self.derived_knowledge,
+        ):
+            if engine is None or id(engine) in seen:
+                continue
+            seen.add(id(engine))
+            close = getattr(engine, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as exc:  # noqa: BLE001
+                    if first_error is None:
+                        first_error = exc
+        self._closed = True
+        if first_error is not None:
+            raise first_error
 
 
 @dataclass(slots=True)

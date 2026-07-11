@@ -421,7 +421,6 @@ def _longrun_pgvector_database_name() -> str:
         os.getenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER", os.getenv("KOGWISTAR_PARSER_PROVIDER", "ollama")),
         os.getenv("KOGWISTAR_LONGRUN_PARSER_MODEL", os.getenv("KOGWISTAR_PARSER_MODEL", "gemma4:e2b")),
         os.getenv("KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE", "children"),
-        os.getenv("KOGWISTAR_LONGRUN_PARSER_WORKERS", "1"),
         os.getenv("KOGWISTAR_LONGRUN_TOKEN_MIN", "500"),
         os.getenv("KOGWISTAR_LONGRUN_TOKEN_MAX", "2000"),
         os.getenv("KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT", "0"),

@@ -29,7 +29,9 @@ Backend selection is explicit too:
 - `KOGWISTAR_LONGRUN_BACKEND=pgvector` also supports `KOGWISTAR_LONGRUN_PG_SOURCE=persistent`, which reuses one named dev container across runs and isolates experiments by database name inside that shared container.
 - `in_memory` is not supported for the long-run soak because crash-continuation needs durable state.
 
-For `pgvector`, the experiment launch configs now share one container per test session and create a fingerprinted database name for each semantic experiment. The fingerprint includes the workspace, backend, operation mode, corpus/profile, parser/provider/model, proposal mode, worker count, token bounds, and maintenance invariant. Increasing only the runtime or LLM call budget keeps the same experiment database identity, while changing those semantic inputs yields a different database name.
+For `pgvector`, the experiment launch configs now share one container per test session and create a fingerprinted database name for each semantic experiment. The fingerprint includes the workspace, backend, operation mode, corpus/profile, parser/provider/model, proposal mode, token bounds, and maintenance invariant. `parser_workers` is intentionally excluded so you can change parallelism without invalidating the experiment identity. Increasing only the runtime or LLM call budget also keeps the same experiment database identity, while changing the semantic inputs yields a different database name.
+
+Resume compatibility is intentionally worker-agnostic too: a `continue` run can pick up a prior checkpoint even if the old manifest was created with a different parser worker count. That keeps parallelism tunable without forcing a fresh rebuild.
 
 Database lifecycle is explicit:
 
@@ -153,13 +155,25 @@ Defaults:
   recorded in the dump and stops the run once exceeded. The recorded call
   count is based on provider callback invocations, including proposal, review,
   refinement, and correction calls, not merely one count per document.
+- `KOGWISTAR_LONGRUN_PARSER_INPUT_COST_PER_1K_TOKENS` and
+  `KOGWISTAR_LONGRUN_PARSER_OUTPUT_COST_PER_1K_TOKENS` optionally provide an
+  explicit USD rate card; `KOGWISTAR_LONGRUN_PARSER_CACHED_INPUT_COST_PER_1K_TOKENS`
+  optionally prices cached input separately. For known GPT-5 mini/nano models,
+  a labelled public reference card is used when overrides are absent; Azure
+  values remain estimates because deployment pricing can differ.
+  explicit USD rate card for providers such as Azure that return token usage
+  but not monetary cost. Cost reports then include `cost_status=estimated` and
+  the configured rate-card source. Without these settings, missing provider
+  cost is reported as `total_cost=null` and `cost_status=unavailable`, never as
+  a measured zero.
 - `KOGWISTAR_LONGRUN_PARSER_WORKERS=1|N` bounds concurrent document workflows.
   `1` preserves the legacy sequential behavior. Values above `1` require the
   Postgres/pgvector backend because Chroma is treated as single-writer. The
   maintenance worker remains one foreground worker; completed parser futures
   are persisted and maintenance jobs are polled by the parent in completion
-  order. Resume-probe suspension is intentionally incompatible with multiple
-  parser workers because it is a run-level gate. The harness also exposes
+  order. Resume-probe suspension is a thread-safe, one-shot run-level gate,
+  so a parallel parser run may suspend one document and continue later with a
+  different worker count. The harness also exposes
   `await harness.run_async()` using the same durable scheduler and terminal
   status path.
 - `KOGWISTAR_LONGRUN_DOC_LIMIT=0|N` limits the number of eligible documents
@@ -245,7 +259,10 @@ Checkpoint reuse only happens when the fingerprint matches, which keeps
 distinct corpus and operation modes from crossing over into each other.
 
 When `KOGWISTAR_LONGRUN_RESUME_PROBE=1`, the document workflow deliberately
-suspends after parsed graph persistence and before background maintenance. The
+suspends after parsed graph persistence and before background maintenance. In
+parallel mode, exactly one document claims this run-level gate; other workers
+remain ordinary pending work and are cancelled or checkpointed by the parent.
+The
 dump records the runtime checkpoint step, suspended node id, and suspended token
 id. A later continue run uses those values with `WorkflowRuntime.resume_run(...)`
 so the same document workflow continues past the suspension point instead of
@@ -342,3 +359,17 @@ the final folder state.
 For the longer architectural explanation of why the harness exists, see
 [diagrams.md](./diagrams.md#long-run-workflow-test) and
 [testing_guide.md](./testing_guide.md#long-run-workflow-test).
+
+# Experiment Isolation
+
+Long-run artifacts are fingerprint-scoped. The VS Code launch configurations
+prompt for an optional `experiment_run` label. Reuse the same label to continue
+the same experiment; change it for a fresh repeat such as `mini-2`. The label
+is included in the corpus fingerprint and therefore selects a separate
+fingerprinted PostgreSQL namespace and dump directory. Parser worker count is
+not included in the fingerprint, so a continuation may use a different worker
+count.
+
+If an older fixed run directory already contains a different fingerprint, the
+harness places the new experiment under `experiments/<fingerprint>` and never
+resets the existing directory.

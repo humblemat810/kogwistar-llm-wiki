@@ -80,3 +80,24 @@ def test_longrun_usage_summary_counts_distinct_provider_calls() -> None:
     summary = _summarize_budget_events(events, provider_settings=settings)
 
     assert summary["llm_call_count"] == 2
+
+
+def test_longrun_usage_summary_does_not_report_missing_cost_as_zero() -> None:
+    settings = WorkflowProviderSettings(
+        parser=ProviderEndpointConfig(provider="azure", model="gpt-5-mini"),
+    )
+    events = [
+        BudgetEvent(
+            run_id="run-1",
+            source="langchain-provider",
+            kind="token",
+            amount=100,
+            unit="input_tokens",
+            meta={"provider_run_id": "call-1"},
+        ),
+    ]
+
+    summary = _summarize_budget_events(events, provider_settings=settings)
+
+    assert summary["total_cost"] is None
+    assert summary["cost_status"] == "unavailable"
