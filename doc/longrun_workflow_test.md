@@ -1,10 +1,38 @@
 # Long-Run Workflow Test
 
+## Fair Maintenance-First Slices
+
+The `Longrun: PgVector Fair Maintenance First (3 docs)` launch profile runs
+`maintenance_first` with cooperative maintenance slices. Each document first
+persists its authoritative source seed and maintenance request. The worker then
+executes at most the configured slice budget, checkpoints the runtime frontier,
+and requeues unfinished work at the durable queue tail before the harness moves
+to the next document.
+
+The VS Code prompts control:
+
+- `KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE`
+- `KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE`
+- `KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE`
+
+Successful jobs are marked `DONE`; suspended jobs retain their continuation
+run, node, and token IDs in the queue payload. A later claim resumes that
+checkpoint. The source graph and usage events are persisted before the job is
+returned to the queue. The fair queue primitive is implemented by Kogwistar's
+job subsystem and is shared by SQLite, Postgres, and in-memory test stores.
+
 The long-run workflow test is an opt-in diagnostic soak harness for
 `kogwistar-llm-wiki`. It is intentionally not a production CLI command. The
 test drives a generated corpus through the same runtime, ingestion, projection,
 and maintenance primitives that normal app code uses, then writes a diagnostic
 dump that can be shared with ChatGPT for post-run analysis.
+
+`KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS` controls how many maintenance workers
+claim jobs during a poll. `1` is the safest sequential setting. Values greater
+than `1` use the Kogwistar durable lease/claim queue and require PostgreSQL or
+PgVector because Chroma is single-writer. This is execution parallelism, not
+parser-worker configuration and is intentionally not part of the experiment
+fingerprint.
 
 See the workflow diagrams in [diagrams.md](./diagrams.md#long-run-workflow-test)
 for the step flow and document-state view.

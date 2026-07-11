@@ -190,6 +190,11 @@ class LongRunConfig:
     ollama_base_url: str = "http://localhost:11434"
     max_repeated_systemic_errors: int = 3
     max_post_doc_maintenance_steps: int = 100
+    maintenance_schedule_mode: str = "drain"
+    maintenance_workers: int = 1
+    maintenance_steps_per_slice: int = 2
+    maintenance_llm_calls_per_slice: int = 0
+    maintenance_seconds_per_slice: int = 0
     max_llm_calls: int = 100
     backend: str = "chroma"
     parser_lane: str = "workflow_layered"
@@ -217,9 +222,15 @@ class LongRunConfig:
             raise ValueError("max_runtime_seconds must be positive")
         if not 1 <= self.parser_workers <= 16:
             raise ValueError("parser_workers must be between 1 and 16")
+        if not 1 <= self.maintenance_workers <= 16:
+            raise ValueError("maintenance_workers must be between 1 and 16")
         if self.parser_workers > 1 and self.backend == "chroma":
             raise ValueError(
                 "parser_workers > 1 requires postgres/pgvector; Chroma persistence is single-writer"
+            )
+        if self.maintenance_workers > 1 and self.backend == "chroma":
+            raise ValueError(
+                "maintenance_workers > 1 requires postgres/pgvector; Chroma persistence is single-writer"
             )
         if self.doc_limit is not None and not 1 <= self.doc_limit <= self.doc_count:
             raise ValueError("doc_limit must be between 1 and doc_count")
@@ -231,6 +242,14 @@ class LongRunConfig:
             raise ValueError("mode must be one of: fresh, continue, auto, retry_failed")
         if self.operation_mode not in {"parse_first", "maintenance_first", "hybrid"}:
             raise ValueError("operation_mode must be one of: parse_first, maintenance_first, hybrid")
+        if self.maintenance_schedule_mode not in {"drain", "fair_slices"}:
+            raise ValueError("maintenance_schedule_mode must be one of: drain, fair_slices")
+        if self.maintenance_steps_per_slice <= 0:
+            raise ValueError("maintenance_steps_per_slice must be positive")
+        if self.maintenance_llm_calls_per_slice < 0:
+            raise ValueError("maintenance_llm_calls_per_slice must be >= 0")
+        if self.maintenance_seconds_per_slice < 0:
+            raise ValueError("maintenance_seconds_per_slice must be >= 0")
         if self.pg_database_mode not in {"fingerprint", "shared"}:
             raise ValueError("pg_database_mode must be one of: fingerprint, shared")
         if self.parser_proposal_mode not in {"children", "boundaries"}:
@@ -247,6 +266,10 @@ class LongRunConfig:
             self.workspace_id,
             self.backend,
             self.operation_mode,
+            self.maintenance_schedule_mode,
+            self.maintenance_steps_per_slice,
+            self.maintenance_llm_calls_per_slice,
+            self.maintenance_seconds_per_slice,
             self.pg_database_mode,
             self.corpus_profile,
             self.doc_count,
@@ -426,6 +449,26 @@ class LongRunConfig:
         max_llm_calls = int(os.getenv("KOGWISTAR_LONGRUN_MAX_LLM_CALLS", "100"))
         if max_llm_calls <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_MAX_LLM_CALLS must be positive")
+        maintenance_schedule_mode = (
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE", "drain").strip().lower()
+            or "drain"
+        )
+        if maintenance_schedule_mode not in {"drain", "fair_slices"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE must be one of: drain, fair_slices"
+            )
+        maintenance_workers = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS", "1")
+        )
+        maintenance_steps_per_slice = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE", "2")
+        )
+        maintenance_llm_calls_per_slice = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE", "0")
+        )
+        maintenance_seconds_per_slice = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE", "0")
+        )
         pg_database_mode = os.getenv("KOGWISTAR_LONGRUN_PG_DATABASE_MODE", "fingerprint").strip().lower() or "fingerprint"
         if pg_database_mode not in {"fingerprint", "shared"}:
             raise ValueError("KOGWISTAR_LONGRUN_PG_DATABASE_MODE must be one of: fingerprint, shared")
@@ -524,6 +567,11 @@ class LongRunConfig:
             parser_lane=parser_lane,
             parse_timeout_seconds=parse_timeout_seconds,
             operation_mode=operation_mode,
+            maintenance_schedule_mode=maintenance_schedule_mode,
+            maintenance_workers=maintenance_workers,
+            maintenance_steps_per_slice=maintenance_steps_per_slice,
+            maintenance_llm_calls_per_slice=maintenance_llm_calls_per_slice,
+            maintenance_seconds_per_slice=maintenance_seconds_per_slice,
             pg_database_mode=pg_database_mode,
             max_runtime_seconds=max_runtime_seconds,
             max_llm_calls=max_llm_calls,
@@ -571,6 +619,11 @@ class LongRunConfig:
             "backend": self.backend,
             "parser_lane": self.parser_lane,
             "operation_mode": self.operation_mode,
+            "maintenance_schedule_mode": self.maintenance_schedule_mode,
+            "maintenance_workers": self.maintenance_workers,
+            "maintenance_steps_per_slice": self.maintenance_steps_per_slice,
+            "maintenance_llm_calls_per_slice": self.maintenance_llm_calls_per_slice,
+            "maintenance_seconds_per_slice": self.maintenance_seconds_per_slice,
             "pg_database_mode": self.pg_database_mode,
             "parse_timeout_seconds": self.parse_timeout_seconds,
             "max_runtime_seconds": self.max_runtime_seconds,
@@ -955,7 +1008,7 @@ class LongRunHarness:
         self._engines: Any | None = None
         self._engines_closed = False
         self._pipeline: IngestPipeline | None = None
-        self._maintenance_worker: MaintenanceWorker | None = None
+        self._maintenance_workers: list[MaintenanceWorker] = []
         self._projection_worker: ProjectionWorker | None = None
         self.active_document_id: str | None = None
         self.active_step_name: str | None = None
@@ -1021,10 +1074,10 @@ class LongRunHarness:
 
     @property
     def maintenance_worker(self) -> MaintenanceWorker:
-        if self._maintenance_worker is None:
+        if not self._maintenance_workers:
             self._rebuild_runtime_objects()
-        assert self._maintenance_worker is not None
-        return self._maintenance_worker
+        assert self._maintenance_workers
+        return self._maintenance_workers[0]
 
     @property
     def projection_worker(self) -> ProjectionWorker:
@@ -1072,7 +1125,20 @@ class LongRunHarness:
         self._engines_closed = False
         self._pipeline = IngestPipeline(engines, live_trace=self.config.live_trace)
         self._pipeline.parser = self._build_parser()
-        self._maintenance_worker = MaintenanceWorker(engines)
+        fair_maintenance = (
+            self.config.operation_mode == "maintenance_first"
+            and self.config.maintenance_schedule_mode == "fair_slices"
+        )
+        self._maintenance_workers = [
+            MaintenanceWorker(
+                engines,
+                fair_scheduling=fair_maintenance,
+                maintenance_steps_per_slice=self.config.maintenance_steps_per_slice,
+                maintenance_llm_calls_per_slice=self.config.maintenance_llm_calls_per_slice,
+                maintenance_seconds_per_slice=self.config.maintenance_seconds_per_slice,
+            )
+            for _ in range(self.config.maintenance_workers)
+        ]
         self._projection_worker = ProjectionWorker(engines)
         self.dumper = DiagnosticDumper(self.run_dir, self)
         if self.live_trace_printer is not None:
@@ -1526,6 +1592,11 @@ class LongRunHarness:
             "parser_model": self.config.parser_model,
             "parser_lane": self.config.parser_lane,
             "parser_workers": self.config.parser_workers,
+            "maintenance_schedule_mode": self.config.maintenance_schedule_mode,
+            "maintenance_workers": self.config.maintenance_workers,
+            "maintenance_steps_per_slice": self.config.maintenance_steps_per_slice,
+            "maintenance_llm_calls_per_slice": self.config.maintenance_llm_calls_per_slice,
+            "maintenance_seconds_per_slice": self.config.maintenance_seconds_per_slice,
             "doc_profile": self.config.doc_profile,
             "corpus_fingerprint": self.config.corpus_fingerprint,
             "resume_probe_enabled": self.config.resume_probe_enabled,
@@ -2924,7 +2995,20 @@ class LongRunHarness:
     def _poll_maintenance_once(self, *, phase: str) -> None:
         del phase
         self.maintenance_poll_count += 1
-        self.maintenance_worker.process_pending_jobs(self.config.workspace_id)
+        workers = self._maintenance_workers or [self.maintenance_worker]
+        if len(workers) == 1:
+            workers[0].process_pending_jobs(self.config.workspace_id)
+            return
+        with ThreadPoolExecutor(
+            max_workers=len(workers),
+            thread_name_prefix="llm-wiki-maintenance",
+        ) as executor:
+            futures = [
+                executor.submit(worker.process_pending_jobs, self.config.workspace_id)
+                for worker in workers
+            ]
+            for future in futures:
+                future.result()
 
     def _drain_maintenance_after_documents(self) -> None:
         ns = WorkspaceNamespaces(self.config.workspace_id)
@@ -4828,6 +4912,65 @@ def test_longrun_config_from_env_accepts_backend_selection(
     assert config.dsn == "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
 
 
+def test_longrun_fair_maintenance_slice_config_is_fingerprinted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "chroma")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "maintenance_first")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE", "fair_slices")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE", "3")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE", "12")
+
+    fair = LongRunConfig.from_env()
+    drain = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="maintenance_first",
+    )
+
+    assert fair.maintenance_schedule_mode == "fair_slices"
+    assert fair.maintenance_steps_per_slice == 3
+    assert fair.maintenance_llm_calls_per_slice == 1
+    assert fair.maintenance_seconds_per_slice == 12
+    assert fair.corpus_fingerprint != drain.corpus_fingerprint
+
+
+def test_longrun_maintenance_workers_are_execution_config_not_fingerprint() -> None:
+    base = dict(
+        enabled=False,
+        mode="fresh",
+        backend="postgres",
+        operation_mode="maintenance_first",
+        maintenance_schedule_mode="fair_slices",
+        maintenance_steps_per_slice=2,
+        doc_count=2,
+    )
+    one = LongRunConfig(maintenance_workers=1, **base)
+    two = LongRunConfig(maintenance_workers=2, **base)
+
+    assert one.maintenance_workers == 1
+    assert two.maintenance_workers == 2
+    assert one.corpus_fingerprint == two.corpus_fingerprint
+    assert two.as_dict()["maintenance_workers"] == 2
+
+
+def test_longrun_maintenance_workers_require_multi_writer_backend() -> None:
+    with pytest.raises(ValueError, match="maintenance_workers > 1"):
+        LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            backend="chroma",
+            doc_count=1,
+            maintenance_workers=2,
+        )
+
+
 @pytest.mark.parametrize("backend", ["postgres", "pgvector"])
 def test_longrun_config_from_env_rejects_missing_postgres_dsn(
     monkeypatch: pytest.MonkeyPatch,
@@ -6006,8 +6149,10 @@ def test_longrun_harness_rebuilds_pipeline_with_live_trace_enabled(tmp_path: Pat
             self.parser = None
 
     class FakeWorker:
-        def __init__(self, engines: Any) -> None:
+        def __init__(self, engines: Any, **kwargs: Any) -> None:
             self.engines = engines
+            if kwargs:
+                captured["worker_kwargs"] = kwargs
 
     class FakeDumper:
         def __init__(self, run_dir: Path, harness: Any) -> None:
@@ -6064,6 +6209,7 @@ def test_longrun_harness_rebuilds_pipeline_with_live_trace_enabled(tmp_path: Pat
     harness._rebuild_runtime_objects()
 
     assert captured["live_trace"] is True
+    assert captured["worker_kwargs"]["fair_scheduling"] is False
 
 
 def test_longrun_harness_enrich_runtime_event_adds_step_name(tmp_path: Path):

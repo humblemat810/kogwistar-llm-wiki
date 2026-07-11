@@ -35,6 +35,127 @@ def _lane_payload(node) -> dict:
     return {}
 
 
+def test_fair_maintenance_worker_processes_one_claimed_job_per_poll() -> None:
+    class FakeJobs:
+        def __init__(self) -> None:
+            self.claims = 0
+
+        def require_available(self, *, claim: bool) -> None:
+            assert claim is True
+
+        def claim(self, *, limit: int, lease_seconds: int, namespace: str):
+            self.claims += 1
+            assert limit == 1
+            return [SimpleNamespace(job_id="job-1")] if self.claims == 1 else [SimpleNamespace(job_id="job-2")]
+
+    jobs = FakeJobs()
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=jobs))
+    worker.fair_scheduling = True
+    handled: list[str] = []
+    worker._handle_job = lambda _workspace, job: handled.append(job.job_id)
+
+    worker.process_pending_jobs("demo")
+
+    assert handled == ["job-1"]
+    assert jobs.claims == 1
+
+
+def test_suspended_maintenance_payload_carries_checkpoint_frontier() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeJobs:
+        def requeue_at_tail(self, job, *, payload):
+            captured["job"] = job
+            captured["payload"] = payload
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=FakeJobs()))
+    ctx = SimpleNamespace(
+        job=SimpleNamespace(job_id="job-1"),
+        job_id="job-1",
+        payload={"source_document_id": "doc-1", "maintenance_kind": "document_seed_graph"},
+    )
+    result = SimpleNamespace(
+        run_id="maintenance-run-1",
+        final_state={"_rt_join": {"suspended": [["node-2", 0, "token-2", None]]}},
+    )
+
+    worker._requeue_suspended_maintenance_job(ctx, result)
+
+    assert captured["job"].job_id == "job-1"
+    assert captured["payload"] == {
+        "source_document_id": "doc-1",
+        "maintenance_kind": "document_seed_graph",
+        "continuation_run_id": "maintenance-run-1",
+        "suspended_node_id": "node-2",
+        "suspended_token_id": "token-2",
+    }
+
+
+def test_fair_runtime_suspension_reads_job_payload_and_requeues_at_tail(
+    pipeline: IngestPipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch,
+) -> None:
+    request = ingest_request.model_copy(update={"promotion_mode": "sync"})
+    artifacts = pipeline.run(request)
+    worker = MaintenanceWorker(
+        pipeline.engines,
+        fair_scheduling=True,
+        maintenance_steps_per_slice=1,
+    )
+    captured: dict[str, object] = {}
+
+    class SuspendedRuntime:
+        def run(self, **kwargs):
+            captured["run_kwargs"] = kwargs
+            return SimpleNamespace(
+                status="suspended",
+                run_id="maintenance-run-1",
+                final_state={
+                    "_rt_join": {
+                        "suspended": [["next-node", 0, "next-token", None]],
+                    }
+                },
+            )
+
+        def resume_run(self, **kwargs):
+            captured["resume_kwargs"] = kwargs
+            return SimpleNamespace(status="finished", run_id="maintenance-run-1")
+
+    monkeypatch.setattr(worker, "runtime", SuspendedRuntime())
+
+    original_requeue = pipeline.engines.conversation.jobs.requeue_at_tail
+
+    def capture_requeue(job, *, payload):
+        captured["job"] = job
+        captured["payload"] = payload
+        return original_requeue(job, payload=payload)
+
+    monkeypatch.setattr(
+        pipeline.engines.conversation.jobs,
+        "requeue_at_tail",
+        capture_requeue,
+    )
+
+    worker.process_pending_jobs(request.workspace_id)
+
+    run_kwargs = captured["run_kwargs"]
+    assert run_kwargs["initial_state"]["request_id"]
+    assert captured["payload"]["source_document_id"] == artifacts.source_document_id
+    assert captured["payload"]["continuation_run_id"] == "maintenance-run-1"
+    assert captured["payload"]["suspended_node_id"] == "next-node"
+    assert captured["payload"]["suspended_token_id"] == "next-token"
+
+    worker.process_pending_jobs(request.workspace_id)
+
+    resume_kwargs = captured["resume_kwargs"]
+    assert resume_kwargs["run_id"] == "maintenance-run-1"
+    assert resume_kwargs["suspended_node_id"] == "next-node"
+    assert resume_kwargs["suspended_token_id"] == "next-token"
+
+
 def test_maintenance_flow_records_graph_native_trace(pipeline: IngestPipeline, ingest_request: IngestPipelineRequest):
     # 1. Setup - Materialize design
     materialize_maintenance_designs(pipeline.engines.workflow)
@@ -181,9 +302,25 @@ def test_maintenance_worker_preserves_suspended_runtime_status(
 ):
     sync_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
     pipeline.run(sync_request)
-    worker = MaintenanceWorker(pipeline.engines)
+    worker = MaintenanceWorker(
+        pipeline.engines,
+        fair_scheduling=True,
+        maintenance_steps_per_slice=1,
+    )
     ns = WorkspaceNamespaces(sync_request.workspace_id)
-    monkeypatch.setattr(worker.runtime, "run", lambda **kwargs: SimpleNamespace(status="suspended"))
+    monkeypatch.setattr(
+        worker.runtime,
+        "run",
+        lambda **kwargs: SimpleNamespace(
+            status="suspended",
+            run_id="maintenance-run-suspended",
+            final_state={
+                "_rt_join": {
+                    "suspended": [["next-node", 0, "next-token", None]],
+                }
+            },
+        ),
+    )
 
     worker.process_pending_jobs(sync_request.workspace_id)
 
@@ -198,9 +335,13 @@ def test_maintenance_worker_preserves_suspended_runtime_status(
         limit=10,
     )
     assert len(jobs) == 1
-    assert _job_field(jobs[0], "status") == "DOING"
+    assert _job_field(jobs[0], "status") == "PENDING"
     assert int(_job_field(jobs[0], "retry_count") or 0) == 0
-    assert _job_field(jobs[0], "lease_until") is not None
+    assert _job_field(jobs[0], "lease_until") is None
+    payload = _job_payload(jobs[0])
+    assert payload["continuation_run_id"] == "maintenance-run-suspended"
+    assert payload["suspended_node_id"] == "next-node"
+    assert payload["suspended_token_id"] == "next-token"
 
     with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
         replies = pipeline.engines.conversation.read.get_nodes(

@@ -86,6 +86,10 @@ class MaintenanceWorker(BaseWorker):
         *,
         policies: LlmWikiPolicies | None = None,
         provider_settings: WorkflowProviderSettings | None = None,
+        fair_scheduling: bool = False,
+        maintenance_steps_per_slice: int = 0,
+        maintenance_llm_calls_per_slice: int = 0,
+        maintenance_seconds_per_slice: int = 0,
     ) -> None:
         """
         Initialize the MaintenanceWorker.
@@ -98,6 +102,10 @@ class MaintenanceWorker(BaseWorker):
         self.eager_mode = eager_mode
         self.policies = policies or build_default_policies()
         self.provider_settings: WorkflowProviderSettings = provider_settings or resolve_maintenance_provider_settings()
+        self.fair_scheduling = bool(fair_scheduling)
+        self.maintenance_steps_per_slice = max(0, int(maintenance_steps_per_slice))
+        self.maintenance_llm_calls_per_slice = max(0, int(maintenance_llm_calls_per_slice))
+        self.maintenance_seconds_per_slice = max(0, int(maintenance_seconds_per_slice))
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
@@ -121,9 +129,10 @@ class MaintenanceWorker(BaseWorker):
         """
         ns = WorkspaceNamespaces(workspace_id)
         self.engines.conversation.jobs.require_available(claim=True)
+        claim_limit = 1 if self.fair_scheduling else 50
         while True:
             jobs = self.engines.conversation.jobs.claim(
-                limit=50,
+                limit=claim_limit,
                 lease_seconds=60,
                 namespace=ns.maintenance_jobs,
             )
@@ -141,6 +150,8 @@ class MaintenanceWorker(BaseWorker):
                     )
                     self.engines.conversation.jobs.retry_or_fail(job, exc)
                     raise
+                if self.fair_scheduling:
+                    return
 
     def _handle_job(self, workspace_id: str, job: JobQueueItem) -> None:
         job_id = str(job.job_id)
@@ -414,12 +425,20 @@ class MaintenanceWorker(BaseWorker):
             return
         ns = WorkspaceNamespaces(ctx.workspace_id)
         workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
+        payload: dict[str, object] = dict(ctx.payload)
         import warnings
         budget_state: dict[str, str | int] = {
             "token_budget": 10_000_000,
             "budget_scope": "run",
             "budget_kind": "token",
         }
+        if self.fair_scheduling:
+            if self.maintenance_steps_per_slice:
+                budget_state["step_budget"] = self.maintenance_steps_per_slice
+            if self.maintenance_llm_calls_per_slice:
+                budget_state["call_budget"] = self.maintenance_llm_calls_per_slice
+            if self.maintenance_seconds_per_slice:
+                budget_state["time_budget_ms"] = self.maintenance_seconds_per_slice * 1000
         budget_ledger: StateBackedBudgetLedger = StateBackedBudgetLedger(budget_state)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
             self.engines.workflow, ns.workflow_maintenance
@@ -444,21 +463,38 @@ class MaintenanceWorker(BaseWorker):
                     message="Using advanced underscore state key '_deps'",
                 )
                 try:
-                    result: RunResult = self.runtime.run(
-                        workflow_id=workflow_id,
-                        initial_state={
-                            "workspace_id": ctx.workspace_id,
-                            "request_id": ctx.request_node_id,
-                            "maintenance_kind": ctx.maintenance_kind,
-                            "_deps": {
-                                "engines": self.engines,
-                                "provider_settings": self.provider_settings,
-                                "budget_ledger": budget_ledger,
+                    runtime_deps = {
+                        "engines": self.engines,
+                        "provider_settings": self.provider_settings,
+                        "budget_ledger": budget_ledger,
+                    }
+                    continuation_run_id = str(payload.get("continuation_run_id") or "")
+                    suspended_node_id = str(payload.get("suspended_node_id") or "")
+                    suspended_token_id = str(payload.get("suspended_token_id") or "")
+                    if continuation_run_id and suspended_node_id and suspended_token_id:
+                        result = self.runtime.resume_run(
+                            run_id=continuation_run_id,
+                            suspended_node_id=suspended_node_id,
+                            suspended_token_id=suspended_token_id,
+                            client_result=RunSuccess(
+                                state_update=[("u", {"_deps": runtime_deps})]
+                            ),
+                            workflow_id=workflow_id,
+                            conversation_id=ns.conv_bg,
+                            turn_node_id=ctx.request_node_id,
+                        )
+                    else:
+                        result = self.runtime.run(
+                            workflow_id=workflow_id,
+                            initial_state={
+                                "workspace_id": ctx.workspace_id,
+                                "request_id": ctx.request_node_id,
+                                "maintenance_kind": ctx.maintenance_kind,
+                                "_deps": runtime_deps,
                             },
-                        },
-                        conversation_id=ns.conv_bg,
-                        turn_node_id=ctx.request_node_id,
-                    )
+                            conversation_id=ns.conv_bg,
+                            turn_node_id=ctx.request_node_id,
+                        )
                     status: str = result.status if hasattr(result, "status") else "finished"
                     logger.info(
                         "Maintenance job %s execution finished: %s (%s)",
@@ -482,7 +518,9 @@ class MaintenanceWorker(BaseWorker):
                     )
                     if terminal_success and ctx.job_id:
                         self.engines.conversation.jobs.mark_done(ctx.job_id)
-                    elif status != "suspended" and ctx.job_id:
+                    elif status == "suspended" and ctx.job_id:
+                        self._requeue_suspended_maintenance_job(ctx, result)
+                    elif ctx.job_id:
                         self.engines.conversation.jobs.retry_or_fail(
                             ctx.job,
                             RuntimeError(f"maintenance workflow ended with status={status!r}"),
@@ -532,6 +570,32 @@ class MaintenanceWorker(BaseWorker):
                             "Failed to persist usage events for maintenance job %s",
                             ctx.request_node_id,
                         )
+
+    def _requeue_suspended_maintenance_job(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        result: RunResult,
+    ) -> None:
+        suspended = list(
+            (getattr(result, "final_state", {}) or {})
+            .get("_rt_join", {})
+            .get("suspended", [])
+        )
+        if not suspended:
+            raise RuntimeError("maintenance workflow suspended without a resumable frontier")
+        next_node_id, _mask, next_token_id, _parent_token_id = suspended[0]
+        next_payload = dict(ctx.payload)
+        next_payload.update(
+            {
+                "continuation_run_id": str(getattr(result, "run_id", "")),
+                "suspended_node_id": str(next_node_id),
+                "suspended_token_id": str(next_token_id),
+            }
+        )
+        self.engines.conversation.jobs.requeue_at_tail(
+            ctx.job,
+            payload=next_payload,
+        )
 
     def _emit_lane_reply(
         self,
