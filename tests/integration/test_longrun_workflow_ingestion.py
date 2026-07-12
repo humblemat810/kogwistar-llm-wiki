@@ -31,6 +31,8 @@ if os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1" or os.getenv("KOGWISTAR_LONGRU
 
 import pytest
 
+pytestmark = [pytest.mark.slow, pytest.mark.ci_full]
+
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
@@ -65,6 +67,7 @@ from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
+from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
 
 
 STATUSES = {
@@ -823,6 +826,10 @@ class DiagnosticDumper:
         self._write_json("graph_export.json", self.harness.graph_export())
         self._write_json("projection_summary.json", self.harness.projection_summary())
         self._write_json("maintenance_summary.json", self.harness.maintenance_summary())
+        self._write_json(
+            "maintenance_statistics.json",
+            self.harness.maintenance_statistics(),
+        )
         self._write_json("llm_calls_summary.json", self.harness.llm_summary())
         parser_trace_tails: dict[str, list[str]] = {}
         for parser_trace in sorted((self.harness.run_dir / "parser_runs").glob("*/trace.log")):
@@ -840,7 +847,10 @@ class DiagnosticDumper:
             self._write_json("parser_trace_tail.json", parser_trace_tails["doc-001"])
         self._write_jsonl("sampled_prompts_and_responses.jsonl", [])
         self._copy_raw_documents()
-        self._write_report(reason=reason)
+        if final:
+            self._write_report(reason=reason)
+        else:
+            self._write_report(reason=reason, filename="interim_report.md")
         if final:
             zip_path = self.run_dir / "longrun-dump.zip"
             with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -850,11 +860,40 @@ class DiagnosticDumper:
             self._write_json("dump_package.json", {"zip_path": str(zip_path)})
         return self.dump_dir
 
+    def prepare_final_report(self, *, reason: str) -> Path:
+        """Freeze report text before resource close without publishing it yet."""
+        path = self.dump_dir / "final_report.pending.md"
+        self._write_report(reason=reason, filename=path.name)
+        return path
+
+    def commit_final_report(self, *, reason: str, report_path: Path) -> Path:
+        """Publish the frozen report only after runtime resources are closed."""
+        final_path = self.dump_dir / "final_report.md"
+        report_path.replace(final_path)
+        terminal = {
+            "status": self.harness.lifecycle_status,
+            "completed_at_ms": _now_ms(),
+            "report_path": str(final_path),
+            "reason": reason,
+            "run_id": self.harness.run_id,
+        }
+        self._write_json("run_terminal.json", terminal)
+        zip_path = self.run_dir / "longrun-dump.zip"
+        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in self.dump_dir.rglob("*"):
+                if path.is_file():
+                    archive.write(path, path.relative_to(self.dump_dir))
+        self._write_json("dump_package.json", {"zip_path": str(zip_path)})
+        return final_path
+
     def _write_json(self, name: str, payload: Any) -> None:
-        (self.dump_dir / name).write_text(
+        path = self.dump_dir / name
+        temporary = path.with_name(f".{path.name}.tmp")
+        temporary.write_text(
             json.dumps(_jsonable(payload), indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        temporary.replace(path)
 
     def write_parser_layer_log(self, *, doc_id: str, layer_log: list[object]) -> Path:
         """Persist one parser layer log without letting documents overwrite each other."""
@@ -890,7 +929,7 @@ class DiagnosticDumper:
             if record.current_path.exists():
                 shutil.copy2(record.current_path, target / record.current_path.name)
 
-    def _write_report(self, *, reason: str) -> None:
+    def _write_report(self, *, reason: str, filename: str = "final_report.md") -> None:
         counts = Counter(record.status for record in self.harness.records)
         progress = self.harness.progress_summary()
         recovery = self.harness.recovery_summary()
@@ -982,7 +1021,7 @@ class DiagnosticDumper:
                 f"```json\n{json.dumps(_jsonable(self.harness.promotion_provenance_summary()), indent=2, sort_keys=True)}\n```",
             ]
         )
-        (self.dump_dir / "final_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (self.dump_dir / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 class LongRunHarness:
@@ -1022,7 +1061,19 @@ class LongRunHarness:
         self.recovery_missing_payload_document_ids: list[str] = []
         self.live_trace_printer = LiveTracePrinter(prefix="longrun") if config.live_trace else None
         self.run_started_monotonic: float | None = None
+        self.lifecycle_status = "running"
+        self.lifecycle_events: list[dict[str, Any]] = []
+        self.maintenance_health: dict[str, Any] = {
+            "active_worker_ids": [], "active_job_id": None,
+            "active_document_id": None, "current_maintenance_kind": None,
+            "phase_started_at_ms": None, "last_trace_timestamp_ms": None,
+            "lease_age_seconds": None, "queue_pending_count": None,
+            "queue_doing_count": None, "queue_failed_count": None,
+            "last_error": None,
+        }
+        self._pending_final_report: tuple[str, Path] | None = None
         self._state_lock = threading.RLock()
+        self._maintenance_trace_lock = threading.Lock()
         self.dumper = DiagnosticDumper(self.run_dir, self)
 
     @staticmethod
@@ -1047,6 +1098,14 @@ class LongRunHarness:
 
         same_fingerprint = existing_fingerprint == config.corpus_fingerprint
         if same_fingerprint:
+            return run_dir
+
+        # Older checkpoints predate run_config.json.  Resume modes must still
+        # inspect those artifacts in place; otherwise the compatibility
+        # resolver would move the manifest away before _load_checkpoint_state
+        # can validate its document rows.
+        legacy_manifest = run_dir / "dump" / "manifest.jsonl"
+        if config.mode in {"continue", "retry_failed"} and legacy_manifest.exists():
             return run_dir
 
         has_existing_artifacts = run_dir.exists() and any(run_dir.iterdir())
@@ -1136,13 +1195,76 @@ class LongRunHarness:
                 maintenance_steps_per_slice=self.config.maintenance_steps_per_slice,
                 maintenance_llm_calls_per_slice=self.config.maintenance_llm_calls_per_slice,
                 maintenance_seconds_per_slice=self.config.maintenance_seconds_per_slice,
+                worker_id=f"maintenance-{index + 1}",
+                trace_sink=self._emit_maintenance_trace,
+                document_parser=self._maintenance_parse_document,
             )
-            for _ in range(self.config.maintenance_workers)
+            for index in range(self.config.maintenance_workers)
         ]
         self._projection_worker = ProjectionWorker(engines)
         self.dumper = DiagnosticDumper(self.run_dir, self)
         if self.live_trace_printer is not None:
             self.live_trace_printer.emit({"stage": "rebuild_runtime_objects_complete", "run_id": self.run_id})
+
+    def _maintenance_parse_document(self, ctx: Any) -> dict[str, object]:
+        """Parse a seeded source as one planner-owned maintenance phase.
+
+        The parser runs outside graph transactions. Only the resulting graph
+        extraction is persisted, so the durable maintenance job can safely be
+        retried or advanced to the next phase.
+        """
+        pipeline = self.pipeline
+        workspace_id = str(ctx.workspace_id)
+        source_document_id = str(ctx.payload.get("source_document_id") or "")
+        ns = WorkspaceNamespaces(workspace_id)
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            document = self.engines.kg.read.get_document(source_document_id)
+        metadata = dict(document.metadata or {})
+        request = IngestPipelineRequest(
+            workspace_id=workspace_id,
+            source_uri=str(metadata.get("source_uri") or source_document_id),
+            title=str(metadata.get("title") or source_document_id),
+            raw_text=str(document.content or ""),
+            source_format=str(metadata.get("source_format") or "text"),
+            operation_mode="parse_first",
+            parser_mode=str(metadata.get("parser_mode") or "heuristic"),
+            parser_lane=str(metadata.get("parser_lane") or "page_index"),
+            promotion_mode=str(metadata.get("promotion_mode") or "pending"),
+            llm_provider=(str(metadata["llm_provider"]) if metadata.get("llm_provider") else None),
+            llm_model=(str(metadata["llm_model"]) if metadata.get("llm_model") else None),
+        )
+        parse_result = pipeline.parse_source(
+            request=request,
+            source_document_id=source_document_id,
+        )
+        pipeline.create_parse_retry_history(
+            request=request,
+            source_document_id=source_document_id,
+            parse_result=parse_result,
+            namespace=ns.conv_bg,
+        )
+        extraction = pipeline.translate_parse_result(
+            parse_result=parse_result,
+            source_document_id=source_document_id,
+        )
+        pipeline.ingest_parse_result(
+            request=request,
+            source_document_id=source_document_id,
+            graph_extraction=extraction,
+            namespace=ns.conv_fg,
+        )
+        pipeline.record_source_readiness(
+            request=request,
+            source_document_id=source_document_id,
+            stage="parsed_graph_persisted",
+        )
+        return {
+            "node_count": len(extraction.nodes or []),
+            "edge_count": len(extraction.edges or []),
+            "llm_call_count": int(
+                dict(getattr(parse_result, "usage_summary", {}) or {}).get("llm_call_count") or 0
+            ),
+        }
 
     def _build_runtime_event_sink(self, *, downstream_sink: Any | None = None) -> LongRunJsonlTraceSink:
         return LongRunJsonlTraceSink(
@@ -1213,6 +1335,13 @@ class LongRunHarness:
         if not loaded:
             if self.live_trace_printer is not None:
                 self.live_trace_printer.emit({"stage": "prepare_reset_run_directory_start", "run_id": self.run_id})
+            # Fresh preparation owns the requested run root.  When a
+            # fingerprint mismatch caused this harness to resolve into an
+            # experiment subdirectory, clear the old root before building any
+            # engines as well; otherwise stale root-level engine state can
+            # survive beside the isolated run and be observed by setup hooks.
+            if self.config.mode == "fresh" and self.requested_run_dir != self.run_dir:
+                self._reset_directory(self.requested_run_dir)
             self._reset_run_directory()
             if self.live_trace_printer is not None:
                 self.live_trace_printer.emit({"stage": "prepare_reset_run_directory_complete", "run_id": self.run_id})
@@ -1249,6 +1378,7 @@ class LongRunHarness:
         started = time.monotonic()
         self.run_started_monotonic = started
         idle_loops = 0
+        self._lifecycle("run_started", status="running", started_at_ms=_now_ms())
         self.dumper.dump(reason="run_started")
         self._log_heartbeat(phase="run_started", started=started)
         if self.config.parser_workers > 1:
@@ -1397,21 +1527,33 @@ class LongRunHarness:
     def _finalize_run(self, *, started: float) -> None:
         try:
             if self.early_stop_reason is not None:
+                self._lifecycle("maintenance_drain_completed", status="incomplete", reason=self.early_stop_reason)
                 self._log_heartbeat(phase="document_limit_reached", started=started)
-                self.dumper.dump(reason="document_limit_reached", final=True)
+                self.dumper.dump(reason="document_limit_reached")
+                self._pending_final_report = (
+                    "document_limit_reached",
+                    self.dumper.prepare_final_report(reason="document_limit_reached"),
+                )
                 return
             if self.aborted:
                 self.dumper.dump(reason="abort_snapshot")
                 if not self.abort_preserves_pending:
                     self._quarantine_processing_docs()
-                self.dumper.dump(reason="abort_finalized", final=True)
+                self.lifecycle_status = "incomplete"
+                self.dumper.dump(reason="abort_finalized")
+                self._pending_final_report = (
+                    "abort_finalized",
+                    self.dumper.prepare_final_report(reason="abort_finalized"),
+                )
                 raise AssertionError(self.abort_reason or "long-run workflow aborted")
             try:
                 finalize_started = time.monotonic()
+                self._lifecycle("maintenance_drain_started", status="draining_maintenance")
                 self._emit_live_progress("finalize_start")
                 maintenance_started = time.monotonic()
                 self._emit_live_progress("finalize_maintenance_drain_start")
                 self._drain_maintenance_after_documents()
+                self._lifecycle("maintenance_drain_completed", status="finalizing")
                 self._emit_live_progress(
                     "finalize_maintenance_drain_complete",
                     duration_ms=round((time.monotonic() - maintenance_started) * 1000),
@@ -1438,17 +1580,40 @@ class LongRunHarness:
                     details={"failed_document_count": sum(record.status == "FAILED" for record in self.records)},
                 )
                 self._log_heartbeat(phase="invariant_failure", started=started)
-                self._safe_failure_dump(reason="invariant_failure", final=True)
+                self.lifecycle_status = "failed"
+                self._safe_failure_dump(reason="invariant_failure")
+                try:
+                    self._pending_final_report = (
+                        "invariant_failure",
+                        self.dumper.prepare_final_report(reason="invariant_failure"),
+                    )
+                except Exception:
+                    logger.exception("Could not freeze invariant failure report")
                 raise
             dump_started = time.monotonic()
+            self._lifecycle("finalization_started", status="finalizing")
             self._emit_live_progress("finalize_success_dump_start")
-            self.dumper.dump(reason="success", final=True)
+            self.dumper.dump(reason="success")
+            self.lifecycle_status = "completed"
+            self._pending_final_report = (
+                "success",
+                self.dumper.prepare_final_report(reason="success"),
+            )
             self._emit_live_progress(
                 "finalize_success_dump_complete",
                 duration_ms=round((time.monotonic() - dump_started) * 1000),
             )
         finally:
+            if self._pending_final_report is not None:
+                self._lifecycle("resource_close_started")
             self._close_runtime_objects(reason="run_finally")
+            if self._pending_final_report is not None:
+                reason, report_path = self._pending_final_report
+                self._lifecycle("resource_close_completed")
+                self.dumper.commit_final_report(reason=reason, report_path=report_path)
+                self._lifecycle("final_report_written")
+                self._lifecycle("run_terminal", status=self.lifecycle_status)
+                self._pending_final_report = None
 
     def _close_runtime_objects(self, *, reason: str) -> None:
         """Release pooled engines after the durable snapshot is written."""
@@ -1636,7 +1801,20 @@ class LongRunHarness:
             "parser_eval": self.parser_eval_summary(),
             "llm_call_count": self.llm_call_count,
             "llm_call_budget": self.config.max_llm_calls,
+            "lifecycle_status": self.lifecycle_status,
+            "selected_nonterminal_document_ids": [
+                record.doc_id for record in self.records
+                if record.status not in TERMINAL_STATES
+                and (self.config.mode != "retry_failed" or record.recovery_selected)
+            ],
+            "maintenance_health": dict(self.maintenance_health),
+            "lifecycle_event_count": len(self.lifecycle_events),
         }
+
+    def maintenance_statistics(self) -> dict[str, Any]:
+        path = self.dumper.dump_dir / "maintenance_worker_trace.jsonl"
+        rows = self._load_jsonl_rows(path) if path.exists() else []
+        return build_maintenance_statistics(rows)
 
     def maintenance_summary(self) -> dict[str, Any]:
         ns = WorkspaceNamespaces(self.config.workspace_id)
@@ -1692,6 +1870,7 @@ class LongRunHarness:
             "maintenance_workflow_step_ids": [str(row["id"]) for row in maintenance_steps],
             "derived_artifact_count": len(derived_rows),
             "derived_artifact_ids": [str(row["id"]) for row in derived_rows],
+            "statistics": self.maintenance_statistics(),
         }
 
     def projection_summary(self) -> dict[str, Any]:
@@ -1963,9 +2142,13 @@ class LongRunHarness:
             (self.run_dir / name).mkdir(parents=True, exist_ok=True)
 
     def _reset_run_directory(self) -> None:
-        if not self.run_dir.exists():
+        self._reset_directory(self.run_dir)
+
+    @staticmethod
+    def _reset_directory(directory: Path) -> None:
+        if not directory.exists():
             return
-        for child in self.run_dir.iterdir():
+        for child in directory.iterdir():
             if child.is_dir():
                 shutil.rmtree(child, ignore_errors=True)
             else:
@@ -2912,10 +3095,56 @@ class LongRunHarness:
                 }
             )
 
+    def _lifecycle(self, event: str, *, status: str | None = None, **details: Any) -> None:
+        if status is not None:
+            self.lifecycle_status = status
+        row = {
+            "event": event,
+            "status": self.lifecycle_status,
+            "run_id": self.run_id,
+            "timestamp_ms": _now_ms(),
+            **_jsonable(details),
+        }
+        self.lifecycle_events.append(row)
+        with (self.dumper.dump_dir / "lifecycle_events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+        self.dumper._write_json("run_lifecycle.json", {"status": self.lifecycle_status, "last_event": row})
+        self.dumper._write_json("maintenance_health.json", self.maintenance_health)
+        self._emit_live_progress(event, lifecycle_status=self.lifecycle_status, **details)
+
+    def _emit_maintenance_trace(self, payload: dict[str, object]) -> None:
+        """Persist and optionally stream worker-level queue diagnostics."""
+        record = {
+            "stage": "maintenance_worker_trace",
+            "run_id": self.run_id,
+            **payload,
+        }
+        path = self.dumper.dump_dir / "maintenance_worker_trace.jsonl"
+        with self._maintenance_trace_lock:
+            if payload.get("event") == "maintenance_parse_complete":
+                self.llm_call_count += int(payload.get("llm_call_count") or 0)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True, default=str))
+                handle.write("\n")
+            self.maintenance_health.update(
+                {
+                    "active_worker_ids": [payload.get("worker_id")] if payload.get("worker_id") else [],
+                    "active_job_id": payload.get("job_id"),
+                    "active_document_id": payload.get("doc_id"),
+                    "current_maintenance_kind": payload.get("kind") or payload.get("maintenance_kind"),
+                    "last_trace_timestamp_ms": _now_ms(),
+                    "last_error": payload.get("error") or payload.get("last_error"),
+                }
+            )
+            self.dumper._write_json("maintenance_health.json", self.maintenance_health)
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(record)
+
     def _move_failed_or_quarantine(self, record: DocumentRecord, failure: FailureRecord) -> None:
         target_dir = "quarantine" if failure.scope == "systemic" else "failed"
         status = "QUARANTINED" if failure.scope == "systemic" else "FAILED"
         target = self.run_dir / target_dir / record.current_path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
         if record.current_path.exists() and record.current_path != target:
             shutil.move(str(record.current_path), str(target))
             record.current_path = target
@@ -3013,6 +3242,23 @@ class LongRunHarness:
     def _drain_maintenance_after_documents(self) -> None:
         ns = WorkspaceNamespaces(self.config.workspace_id)
         for _ in range(self.config.max_post_doc_maintenance_steps):
+            budget_stop_reason = self._budget_stop_reason(
+                started=(self.run_started_monotonic or time.monotonic())
+            )
+            if budget_stop_reason is not None:
+                self.early_stop_reason = budget_stop_reason
+                self._emit_live_progress(
+                    "maintenance_drain_stopped",
+                    reason=budget_stop_reason,
+                    pending_jobs=len(
+                        self.engines.conversation.meta_sqlite.list_index_jobs(
+                            namespace=ns.maintenance_jobs,
+                            status="PENDING",
+                            limit=10_000,
+                        )
+                    ),
+                )
+                return
             pending_before = self.engines.conversation.meta_sqlite.list_index_jobs(
                 namespace=ns.maintenance_jobs,
                 status="PENDING",
@@ -3044,8 +3290,15 @@ class LongRunHarness:
         trace_path: Path,
         failure_path: Path,
     ) -> str:
-        pid = process_pid if process_pid is not None else process.pid
-        exitcode = process_exitcode if process_exitcode is not None else process.exitcode
+        # Keep this formatter usable with process-shaped test doubles as well as
+        # multiprocessing.Process instances.  The exit code is the useful
+        # diagnostic; a PID is optional when a child never exposed one.
+        pid = process_pid if process_pid is not None else getattr(process, "pid", None)
+        exitcode = (
+            process_exitcode
+            if process_exitcode is not None
+            else getattr(process, "exitcode", None)
+        )
         if failure:
             return (
                 f"parser lane {self.config.parser_lane!r} failed for {record.doc_id}: "
@@ -4971,6 +5224,77 @@ def test_longrun_maintenance_workers_require_multi_writer_backend() -> None:
         )
 
 
+def test_maintenance_statistics_group_by_document_operation_and_failure() -> None:
+    stats = build_maintenance_statistics(
+        [
+            {
+                "event": "maintenance_poll_start",
+                "worker_id": "maintenance-1",
+            },
+            {
+                "event": "maintenance_runtime_attempt_start",
+                "worker_id": "maintenance-1",
+                "source_document_id": "doc-1",
+                "maintenance_kind": "distill",
+            },
+            {
+                "event": "maintenance_graph_effect",
+                "worker_id": "maintenance-1",
+                "source_document_id": "doc-1",
+                "maintenance_kind": "distill",
+                "source_node_count": 3,
+                "derived_node_count": 1,
+            },
+            {
+                "event": "maintenance_runtime_attempt_complete",
+                "worker_id": "maintenance-1",
+                "source_document_id": "doc-1",
+                "maintenance_kind": "distill",
+                "runtime_status": "suspended",
+                "duration_ms": 1200,
+            },
+            {
+                "event": "maintenance_runtime_attempt_failed",
+                "worker_id": "maintenance-2",
+                "source_document_id": "doc-2",
+                "maintenance_kind": "crosslink",
+                "error_type": "ValidationError",
+            },
+        ]
+    )
+
+    assert stats["documents"]["doc-1"]["average_duration_ms"] == 1200
+    assert stats["document_count"] == 2
+    assert stats["documents"]["doc-1"]["suspended_count"] == 1
+    assert stats["documents"]["doc-1"]["derived_node_count"] == 1
+    assert stats["documents"]["doc-1"]["operation_categories"]["distillation"] == 2
+    assert stats["documents"]["doc-2"]["operation_categories"]["linking"] == 1
+    assert stats["failure_hotspots"]["failed:ValidationError"] == 1
+
+
+def test_maintenance_statistics_include_planner_parse_effects() -> None:
+    stats = build_maintenance_statistics(
+        [
+            {
+                "event": "maintenance_parse_complete",
+                "source_document_id": "doc-parse",
+                "maintenance_kind": "document_parse_graph",
+                "duration_ms": 1234,
+                "node_count": 4,
+                "edge_count": 2,
+                "llm_call_count": 3,
+            },
+        ]
+    )
+
+    document = stats["documents"]["doc-parse"]
+    assert document["parse_count"] == 1
+    assert document["parsed_node_count"] == 4
+    assert document["parsed_edge_count"] == 2
+    assert document["llm_call_count"] == 3
+    assert document["operation_categories"]["breakdown"] == 1
+
+
 @pytest.mark.parametrize("backend", ["postgres", "pgvector"])
 def test_longrun_config_from_env_rejects_missing_postgres_dsn(
     monkeypatch: pytest.MonkeyPatch,
@@ -5459,6 +5783,9 @@ def test_longrun_finalization_trace_reports_slow_phases(tmp_path: Path) -> None:
     harness._poll_projection_once = lambda: None  # type: ignore[method-assign]
     harness._verify_run_invariants = lambda: None  # type: ignore[method-assign]
     harness.dumper.dump = lambda **_: None  # type: ignore[method-assign]
+    harness.recovery_summary = lambda: {}  # type: ignore[method-assign]
+    harness.maintenance_summary = lambda: {}  # type: ignore[method-assign]
+    harness.projection_summary = lambda: {}  # type: ignore[method-assign]
     harness._engines = SimpleNamespace(close=lambda: None)
 
     harness._finalize_run(started=time.monotonic())
@@ -5948,6 +6275,10 @@ def test_longrun_doc_limit_stops_cleanly_without_full_corpus_completion(
     harness.run()
 
     assert called == ["doc-001", "doc-002"]
+    assert (harness.dumper.dump_dir / "interim_report.md").exists()
+    assert (harness.dumper.dump_dir / "final_report.md").exists()
+    terminal = json.loads((harness.dumper.dump_dir / "run_terminal.json").read_text(encoding="utf-8"))
+    assert terminal["status"] == "incomplete"
     assert harness.aborted is False
     assert harness.early_stop_reason == "document limit reached (2/20)"
     assert (harness.dumper.dump_dir / "final_report.md").exists()
@@ -6210,6 +6541,8 @@ def test_longrun_harness_rebuilds_pipeline_with_live_trace_enabled(tmp_path: Pat
 
     assert captured["live_trace"] is True
     assert captured["worker_kwargs"]["fair_scheduling"] is False
+    assert captured["worker_kwargs"]["worker_id"] == "maintenance-1"
+    assert callable(captured["worker_kwargs"]["trace_sink"])
 
 
 def test_longrun_harness_enrich_runtime_event_adds_step_name(tmp_path: Path):

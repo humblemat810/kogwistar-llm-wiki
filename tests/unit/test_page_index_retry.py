@@ -125,7 +125,7 @@ def test_page_index_llm_retry_succeeds_after_first_heading_flatten(monkeypatch):
     )
 
     diag = result.diagnostics
-    assert diag["assignment_mode"] == "llm_flat_assignment_retry"
+    assert diag["assignment_mode"] == "ollama_flat_assignment_retry"
     assert diag["assignment_attempt_count"] == 2
     assert diag["assignment_retry_used"] is True
     assert diag["assignment_retry_succeeded"] is True
@@ -155,7 +155,7 @@ def test_page_index_llm_first_pass_success_skips_retry(monkeypatch):
     )
 
     diag = result.diagnostics
-    assert diag["assignment_mode"] == "llm_flat_assignment"
+    assert diag["assignment_mode"] == "ollama_flat_assignment"
     assert diag["final_outcome"] == "first_pass_success"
     assert diag["assignment_attempt_count"] == 1
     assert diag["assignment_retry_used"] is False
@@ -226,7 +226,7 @@ def test_page_index_structure_retry_succeeds_after_tree_validation_failure(monke
     )
 
     diag = result.diagnostics
-    assert diag["assignment_mode"] == "llm_flat_assignment_structure_retry"
+    assert diag["assignment_mode"] == "ollama_flat_assignment_structure_retry"
     assert diag["final_outcome"] == "structure_retry_success"
     assert diag["assignment_attempt_count"] == 2
     assert diag["assignment_retry_used"] is False

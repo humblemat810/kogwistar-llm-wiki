@@ -13,7 +13,6 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 KOGWISTAR_ROOT = ROOT / "kogwistar"
-KG_DOC_PARSER_SRC = ROOT / "kg-doc-parser" / "src"
 OBSIDIAN_SINK_ROOT = ROOT / "kogwistar-obsidian-sink"
 TEST_TMP = ROOT / "tests" / "_tmp"
 
@@ -23,7 +22,7 @@ for key in ("TMPDIR", "TEMP", "TMP"):
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
-for path in (KG_DOC_PARSER_SRC, OBSIDIAN_SINK_ROOT):
+for path in (OBSIDIAN_SINK_ROOT,):
     if str(path) not in sys.path:
         sys.path.append(str(path))
 
@@ -561,6 +560,23 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
         yield
         return
 
+    runtime_env_keys = (
+        "KOGWISTAR_LONGRUN_DSN",
+        "KOGWISTAR_LLM_WIKI_TEST_PG_DSN",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_NAME",
+        "TESTCONTAINERS_RYUK_DISABLED",
+    )
+    original_runtime_env = {
+        key: os.environ.get(key) for key in runtime_env_keys
+    }
+
+    def restore_runtime_env() -> None:
+        for key, value in original_runtime_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
     if pg_source == "persistent":
         image = os.getenv("KOGWISTAR_LONGRUN_PG_IMAGE", "pgvector/pgvector:pg17")
         try:
@@ -573,6 +589,7 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
                 pg_source="persistent",
             )
         except Exception as exc:  # pragma: no cover - environment-dependent
+            restore_runtime_env()
             reason = f"Failed to prepare persistent longrun pgvector container: {exc}"
             _append_longrun_skip_notice(reason)
             pytest.skip(reason)
@@ -587,12 +604,16 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
         os.environ["KOGWISTAR_LONGRUN_DSN"] = dsn
         os.environ["KOGWISTAR_LLM_WIKI_TEST_PG_DSN"] = dsn
         os.environ["KOGWISTAR_LONGRUN_PG_DATABASE_NAME"] = database_name
-        yield
+        try:
+            yield
+        finally:
+            restore_runtime_env()
         return
 
     try:
         PostgresContainer = _load_longrun_postgres_container_cls()
     except Exception as exc:  # pragma: no cover - optional dependency
+        restore_runtime_env()
         reason = f"pgvector long-run probe requires testcontainers[postgresql]: {exc}"
         _append_longrun_skip_notice(reason)
         pytest.skip(reason)
@@ -615,6 +636,7 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
                 PostgresContainer = _load_longrun_postgres_container_cls()
                 container = _start_longrun_pgvector_container(PostgresContainer, image)
             except Exception as retry_exc:  # pragma: no cover - environment-dependent
+                restore_runtime_env()
                 reason = (
                     f"Failed to start longrun pgvector test container image={image} "
                     f"after retry without Ryuk: {retry_exc}"
@@ -622,6 +644,7 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
                 _append_longrun_skip_notice(reason)
                 pytest.skip(reason)
         else:
+            restore_runtime_env()
             reason = f"Failed to start longrun pgvector test container image={image}: {exc}"
             _append_longrun_skip_notice(reason)
             pytest.skip(reason)
@@ -649,3 +672,5 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
             container.stop()
         except Exception:
             logger.exception("Failed to stop longrun pgvector test container image=%s", image)
+        finally:
+            restore_runtime_env()

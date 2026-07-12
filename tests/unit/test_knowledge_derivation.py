@@ -61,6 +61,11 @@ def _run_sync_ingest_with_trace(pipeline, request):
         graph_extraction=graph_extraction,
         namespace=ns.conv_fg,
     )
+    pipeline.record_source_readiness(
+        request=request,
+        source_document_id=source_document_id,
+        stage="parsed_graph_persisted",
+    )
     maintenance_job_id = pipeline.create_maintenance_request(
         request=request,
         source_document_id=source_document_id,

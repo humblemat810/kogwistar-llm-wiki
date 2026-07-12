@@ -56,7 +56,7 @@ def build_source_revision(
 
 
 def required_stage_for_maintenance(maintenance_kind: str) -> str:
-    if maintenance_kind == "document_seed_graph":
+    if maintenance_kind in {"document_seed_graph", "document_parse_graph"}:
         return "source_map_seeded"
     return "parsed_graph_persisted"
 

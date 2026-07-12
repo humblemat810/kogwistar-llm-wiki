@@ -258,6 +258,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -292,6 +293,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -325,8 +327,9 @@
         "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -363,6 +366,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -402,6 +406,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -441,6 +446,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -477,6 +483,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -511,6 +518,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -544,6 +552,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -578,6 +587,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -613,6 +623,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-probe",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -652,6 +663,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-probe",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -689,6 +701,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-custom-probe",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -728,6 +741,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-probe",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -764,6 +778,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -801,7 +816,8 @@
         "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -838,6 +854,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -876,6 +893,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -912,6 +930,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -950,6 +969,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -988,8 +1008,9 @@
         "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
-        "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -1031,6 +1052,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
@@ -1075,6 +1097,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
@@ -1117,6 +1140,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
@@ -1155,6 +1179,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -1190,6 +1215,7 @@
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -1224,8 +1250,9 @@
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -1259,8 +1286,9 @@
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -1294,8 +1322,9 @@
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -1329,8 +1358,9 @@
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }

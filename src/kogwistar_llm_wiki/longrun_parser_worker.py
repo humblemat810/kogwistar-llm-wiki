@@ -86,17 +86,17 @@ def _summarize_budget_events(events: list[object], *, provider_settings: Workflo
         event for event in events
         if getattr(event, "kind", None) == "cost" or getattr(event, "unit", None) == "total_cost"
     ]
-    if not cost_events:
+    statuses = {
+        str(getattr(event, "meta", {}).get("cost_status"))
+        for event in cost_events
+        if getattr(event, "meta", {}).get("cost_status")
+    }
+    if not cost_events or statuses == {"unavailable_missing_tokens"}:
         summary["total_cost"] = None
-        summary["cost_status"] = "unavailable"
+        summary["cost_status"] = "unavailable_missing_tokens"
         summary["cost_source"] = None
-    elif any(getattr(event, "meta", {}).get("cost_status") for event in cost_events):
-        statuses = {
-            str(getattr(event, "meta", {}).get("cost_status"))
-            for event in cost_events
-            if getattr(event, "meta", {}).get("cost_status")
-        }
-        summary["cost_status"] = "estimated_partial" if "estimated_partial" in statuses else "estimated"
+    elif statuses:
+        summary["cost_status"] = "+".join(sorted(statuses))
         summary["cost_source"] = sorted(
             {
                 str(getattr(event, "meta", {}).get("cost_source"))
@@ -105,7 +105,7 @@ def _summarize_budget_events(events: list[object], *, provider_settings: Workflo
             }
         )
     else:
-        summary["cost_status"] = "observed"
+        summary["cost_status"] = "provider_reported"
         summary["cost_source"] = "provider"
     return summary
 

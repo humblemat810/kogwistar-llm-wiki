@@ -202,8 +202,9 @@ def test_maintenance_daemon_stop_exits_after_current_poll_cycle(monkeypatch):
     calls: list[str] = []
 
     class _FakeWorker:
-        def __init__(self, engines):
+        def __init__(self, engines, **kwargs):
             del engines
+            del kwargs
 
         def process_pending_jobs(self, workspace_id: str):
             calls.append(workspace_id)

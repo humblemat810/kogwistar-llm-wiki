@@ -211,7 +211,8 @@ class ProviderUsageCallback(BaseCallbackHandler):
             attribution=attribution,
         )
         has_provider_cost = any(
-            event.kind == "cost" or event.unit == "total_cost"
+            (event.kind == "cost" or event.unit == "total_cost")
+            and event.meta.get("cost_status") not in {"estimated", "estimated_partial"}
             for event in provider_events
         )
         estimated_cost = (
@@ -231,7 +232,9 @@ class ProviderUsageCallback(BaseCallbackHandler):
                     scope="run",
                     ts_ms=int(time.time() * 1000),
                     meta={
-                        "cost_status": cost_status,
+                        "cost_status": "estimated_from_tokens",
+                        "cost_provenance": "estimated_from_tokens",
+                        "estimator_status": cost_status,
                         "cost_source": self.pricing.source,
                         "input_cost_per_1k": self.pricing.input_per_1k,
                         "cached_input_cost_per_1k": self.pricing.cached_input_per_1k,
@@ -243,9 +246,10 @@ class ProviderUsageCallback(BaseCallbackHandler):
                 )
             )
         for event in provider_events:
+            is_estimate = event.source == "llm-wiki-cost-estimator"
             event = BudgetEvent(
                 run_id=event.run_id,
-                source="langchain-provider",
+                source=event.source,
                 kind=event.kind,
                 amount=event.amount,
                 unit=event.unit,
@@ -254,6 +258,11 @@ class ProviderUsageCallback(BaseCallbackHandler):
                 meta={
                     **event.meta,
                     "provider_run_id": provider_run_id,
+                    **(
+                        {"cost_provenance": "provider_reported", "cost_status": "provider_reported"}
+                        if event.kind == "cost" and not is_estimate
+                        else {}
+                    ),
                     **(
                         {"provider_error": str(kwargs["_provider_error"])}
                         if kwargs.get("_provider_error")
@@ -266,6 +275,27 @@ class ProviderUsageCallback(BaseCallbackHandler):
             self.ledger.ingest(event)
             if self.event_sink is not None:
                 self.event_sink(event)
+        if not any(event.kind == "cost" or event.unit == "total_cost" for event in provider_events):
+            unavailable = BudgetEvent(
+                run_id=self.run_id,
+                source="llm-wiki-cost-estimator",
+                kind="cost",
+                amount=0.0,
+                unit="total_cost",
+                scope="run",
+                ts_ms=int(time.time() * 1000),
+                meta={
+                    "cost_status": "unavailable_missing_tokens",
+                    "cost_provenance": "unavailable_missing_tokens",
+                    "provider_run_id": provider_run_id,
+                },
+                event_id=_stable_event_id(self.run_id, provider_run_id, "total_cost_unavailable"),
+                attribution=attribution,
+            )
+            self.ledger.ingest(unavailable)
+            if self.event_sink is not None:
+                self.event_sink(unavailable)
+
         started_at = self._started_at.pop(provider_run_id, None)
         if started_at is not None:
             elapsed_ms = max(0, int((time.monotonic() - started_at) * 1000))

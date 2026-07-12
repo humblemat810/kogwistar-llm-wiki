@@ -65,7 +65,9 @@ from .maintenance_guards import (
     build_source_revision,
     readiness_id,
     required_stage_for_maintenance,
+    source_digest,
 )
+from .maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
 
 
 def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
@@ -586,6 +588,34 @@ class IngestPipeline:
         source_document_id: str,
     ) -> SourceRevision:
         """Start an immutable ingestion attempt for a source document."""
+        digest = source_digest(request.raw_text)
+        source_namespace = self.namespaces_for(request.workspace_id).source_space
+        with _temporary_namespace(self.engines.kg, source_namespace):
+            persisted_nodes = self.engines.kg.read.get_nodes(
+                where={
+                    "$and": [
+                        {"artifact_kind": "source_revision"},
+                        {"source_document_id": source_document_id},
+                        {"source_digest": digest},
+                    ],
+                },
+                limit=10_000,
+            )
+        if persisted_nodes:
+            latest = max(
+                persisted_nodes,
+                key=lambda node: int(
+                    (getattr(node, "metadata", {}) or {}).get("created_at_ms") or 0
+                ),
+            )
+            metadata = dict(getattr(latest, "metadata", {}) or {})
+            revision = SourceRevision(
+                source_document_id=source_document_id,
+                revision_id=str(metadata.get("source_revision_id") or latest.id),
+                source_digest=str(metadata.get("source_digest") or digest),
+            )
+            self._source_revisions[(request.workspace_id, source_document_id)] = revision
+            return revision
         revision = build_source_revision(
             workspace_id=request.workspace_id,
             source_document_id=source_document_id,
@@ -643,6 +673,10 @@ class IngestPipeline:
             "source_format": request.source_format,
             "operation_mode": self._operation_mode(request),
             "parser_mode": request.parser_mode,
+            "parser_lane": request.parser_lane,
+            "promotion_mode": request.promotion_mode,
+            "llm_provider": request.llm_provider,
+            "llm_model": request.llm_model,
         }
         source_document = Document(
             id=source_document_id,
@@ -1799,6 +1833,15 @@ class IngestPipeline:
             "source_digest": source_digest,
             "required_stage": required_stage,
         }
+        if request.operation_mode == "maintenance_first" and maintenance_kind == "document_seed_graph":
+            payload.update(
+                {
+                    "maintenance_plan": list(DEFAULT_DOCUMENT_MAINTENANCE_PLAN),
+                    "maintenance_phase_index": 0,
+                    "maintenance_round": 0,
+                    "maintenance_max_rounds": 0,
+                }
+            )
         job_id = request_node_id
         self.engines.conversation.jobs.require_available(enqueue=True)
         self.engines.conversation.jobs.enqueue(

@@ -130,7 +130,8 @@ def test_provider_usage_callback_estimates_cost_when_provider_omits_price() -> N
     assert summary["total_cost"] == 0.0018
     cost_events = [event for event in ledger.events if event.kind == "cost"]
     assert len(cost_events) == 1
-    assert cost_events[0].meta["cost_status"] == "estimated"
+    assert cost_events[0].meta["cost_status"] == "estimated_from_tokens"
+    assert cost_events[0].meta["cost_provenance"] == "estimated_from_tokens"
     assert cost_events[0].meta["cost_source"] == "test-rate-card"
 
 
@@ -187,6 +188,25 @@ def test_provider_usage_callback_estimates_cached_input_at_cached_rate() -> None
     summary = summarize_budget_events(ledger.events)
     assert summary["total_cost"] == 0.00084
     assert summary["cached_input_tokens"] == 400
+
+
+def test_provider_usage_callback_labels_missing_token_cost_without_fabricating_estimate() -> None:
+    ledger = StateBackedBudgetLedger({"token_budget": 10_000, "budget_scope": "run"})
+    callback = ProviderUsageCallback(
+        ledger=ledger,
+        run_id="parser:doc-001",
+        source_document_id="doc-001",
+        provider="azure",
+        model="unknown-model",
+        pricing=TokenPricing(input_per_1k=0.001, output_per_1k=0.002, source="test-rate-card"),
+    )
+
+    callback.on_llm_end(SimpleNamespace(response_metadata={}, generations=[]), run_id="provider-call-1")
+
+    cost_events = [event for event in ledger.events if event.kind == "cost"]
+    assert len(cost_events) == 1
+    assert cost_events[0].amount == 0
+    assert cost_events[0].meta["cost_status"] == "unavailable_missing_tokens"
 
 
 def test_provider_usage_callback_is_accepted_by_azure_chat_model() -> None:

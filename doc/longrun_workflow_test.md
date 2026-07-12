@@ -21,6 +21,16 @@ checkpoint. The source graph and usage events are persisted before the job is
 returned to the queue. The fair queue primitive is implemented by Kogwistar's
 job subsystem and is shared by SQLite, Postgres, and in-memory test stores.
 
+In `maintenance_first`, a successful document phase also advances the durable
+maintenance plan one phase at a time: seed, parse, crosslink proposal, and
+crosslink validation. The parse phase reconstructs its request from the
+persisted source document and performs the LLM call outside graph transactions.
+The planner requeues at the queue tail after each phase, so another document
+can run before the first document reaches its next phase. A plan stops when it
+has no remaining phase, reaches its round limit, or the run budget prevents a
+new claim. Crosslink proposal and validation remain evidence-gated; a planned
+phase does not imply that an edge was created.
+
 The long-run workflow test is an opt-in diagnostic soak harness for
 `kogwistar-llm-wiki`. It is intentionally not a production CLI command. The
 test drives a generated corpus through the same runtime, ingestion, projection,

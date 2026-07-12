@@ -344,7 +344,11 @@ def test_longrun_pgvector_fixture_uses_persistent_container_without_teardown(mon
         "_ensure_longrun_persistent_pgvector_container",
         lambda image: (ensure_calls.append(image) or "postgresql://user:pass@127.0.0.1:35432/postgres"),
     )
-    monkeypatch.setattr(test_conftest, "_ensure_pgvector_database_with_retry", lambda dsn, database_name: dsn)
+    monkeypatch.setattr(
+        test_conftest,
+        "_prepare_longrun_pgvector_database_with_retry",
+        lambda dsn, database_name, *, pg_source: dsn,
+    )
     monkeypatch.setattr(test_conftest.logger, "info", lambda *args, **kwargs: None)
 
     fixture = test_conftest._longrun_pgvector_testcontainer.__wrapped__
@@ -388,7 +392,11 @@ def test_longrun_pgvector_fixture_retries_without_ryuk_on_8080_mapping_failure(m
     monkeypatch.setattr(test_conftest, "_load_longrun_postgres_container_cls", _fake_load)
     monkeypatch.setattr(test_conftest, "_start_longrun_pgvector_container", _fake_start)
     monkeypatch.setattr(test_conftest, "_purge_testcontainers_modules", lambda: load_calls.append("purge"))
-    monkeypatch.setattr(test_conftest, "_ensure_pgvector_database", lambda dsn, database_name: dsn)
+    monkeypatch.setattr(
+        test_conftest,
+        "_prepare_longrun_pgvector_database_with_retry",
+        lambda dsn, database_name, *, pg_source: dsn,
+    )
     monkeypatch.setattr(test_conftest.logger, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(test_conftest.logger, "info", lambda *args, **kwargs: None)
 

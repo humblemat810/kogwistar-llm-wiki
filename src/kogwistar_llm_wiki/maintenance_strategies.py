@@ -27,6 +27,8 @@ class MaintenanceJobExecutionContext:
 
 
 class MaintenanceWorkerLike(Protocol):
+    def _handle_document_parse_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
     def _handle_execution_wisdom_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
 
     def _handle_graph_patch_apply_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
@@ -100,11 +102,22 @@ class RuntimeWorkflowMaintenanceStrategy:
         worker._handle_runtime_workflow_strategy(ctx)
 
 
+class DocumentParseMaintenanceStrategy:
+    name = "document_parse"
+
+    def can_handle(self, maintenance_kind: str) -> bool:
+        return normalize_maintenance_kind(maintenance_kind) == "document_parse_graph"
+
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
+        worker._handle_document_parse_strategy(ctx)
+
+
 def build_default_maintenance_strategy_registry() -> MaintenanceStrategyRegistry:
     return MaintenanceStrategyRegistry(
         [
             ExecutionWisdomMaintenanceStrategy(),
             GraphPatchApplyMaintenanceStrategy(),
+            DocumentParseMaintenanceStrategy(),
             GraphPatchProposalMaintenanceStrategy(),
             RuntimeWorkflowMaintenanceStrategy(),
         ]

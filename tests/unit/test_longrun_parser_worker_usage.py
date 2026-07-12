@@ -100,4 +100,4 @@ def test_longrun_usage_summary_does_not_report_missing_cost_as_zero() -> None:
     summary = _summarize_budget_events(events, provider_settings=settings)
 
     assert summary["total_cost"] is None
-    assert summary["cost_status"] == "unavailable"
+    assert summary["cost_status"] == "unavailable_missing_tokens"

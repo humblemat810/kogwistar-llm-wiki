@@ -173,3 +173,18 @@ Tests must cover incremental batches, late events, idempotent replay, failed
 checkpoint preservation, incompatible-schema rebuilds, timestamp and watermark
 reporting, and reconciliation across document, operation, maintenance-job,
 dream-job, run, and unattributed views.
+
+## Cost And Run-Report Authority
+
+Provider-reported prices are marked `provider_reported`. When a provider omits
+price but supplies usable token dimensions, Kogwistar calculates an explicitly
+labelled `estimated_from_tokens` value from the configured rate card. If token
+dimensions are also absent, the event is marked
+`unavailable_missing_tokens`; it is never presented as provider billing.
+
+Long-run diagnostic output follows the same authority rule: interim progress
+snapshots and maintenance-health files are readable while work is active, but
+`final_report.md` is published only after selected documents and maintenance
+drain have reached a terminal condition and resources have been closed. The
+`run_terminal.json` marker is the authority for whether the final report is
+complete.

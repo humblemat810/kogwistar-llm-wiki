@@ -15,6 +15,7 @@ EXECUTION_WISDOM_KINDS = {
 
 GRAPH_PATCH_PROPOSAL_KINDS = {
     "document_seed_graph",
+    "document_parse_graph",
     "document_expand_parse_children",
     "document_correct_parse_children",
     "document_summarize_units",
@@ -31,6 +32,8 @@ GRAPH_PATCH_PROPOSAL_KINDS = {
     "conversation_promote_to_kg",
     "graph_patch_review",
 }
+
+DOCUMENT_PARSE_KINDS = {"document_parse_graph"}
 
 GRAPH_PATCH_APPLY_KINDS = {
     "graph_patch_apply",

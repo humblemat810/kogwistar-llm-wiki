@@ -30,6 +30,34 @@ source map.
 
 ## Decision
 
+### Bounded Maintenance Planner
+
+`maintenance_first` uses a durable, phase-oriented planner. A document is not
+held by one worker until it is complete. Its job payload carries a typed
+`maintenance_plan`, `maintenance_phase_index`, and `maintenance_round`. After
+one phase succeeds, the worker persists the phase transition and requeues the
+same job at the durable queue tail. This gives other documents an opportunity
+to run between phases and makes resume independent of worker count.
+
+The initial document plan is:
+
+1. `document_seed_graph`
+2. `document_parse_graph`
+3. `document_propose_crosslinks`
+4. `document_validate_crosslinks`
+
+The parse phase reads the persisted source document and performs the LLM call
+outside graph transactions. Only the resulting extraction and readiness
+checkpoint are persisted before the next phase is queued. Crosslink phases are
+proposal/review work and may not create an edge without two-sided evidence and
+the normal append-only patch application rules.
+
+The planner stops when the plan is complete, an explicit stop is requested, a
+per-document round limit is reached, or the global run budget prevents another
+claim. A suspended runtime continuation remains distinct from a successful
+planner phase continuation; both are durable queue payloads and both re-enter
+at the queue tail.
+
 Introduce an iterative maintenance graph construction mode at the
 `kogwistar-llm-wiki` layer.
 
