@@ -1366,7 +1366,7 @@
       }
     },
     {
-      "name": "Longrun: PgVector Fair Maintenance First (3 docs)",
+      "name": "Longrun: PgVector Fair Maintenance First — Ollama (3 docs)",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
@@ -1384,6 +1384,8 @@
         "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
         "KOGWISTAR_LONGRUN_MODE": "fresh",
         "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "maintenance_first",
         "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE": "fair_slices",
         "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
@@ -1392,8 +1394,8 @@
         "KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE": "${input:longrunMaintenanceSecondsPerSlice}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PARSER": "workflow_layered",
-        "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "${input:longrunMaintenanceParserProvider}",
-        "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunMaintenanceParserModel}",
+        "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "ollama",
+        "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
@@ -1402,6 +1404,51 @@
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-fair-maintenance",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: PgVector Fair Maintenance First — Azure OpenAI (3 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}\\.env",
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "maintenance_first",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE": "fair_slices",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE": "${input:longrunMaintenanceStepsPerSlice}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE": "${input:longrunMaintenanceCallsPerSlice}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE": "${input:longrunMaintenanceSecondsPerSlice}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PARSER": "workflow_layered",
+        "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-fair-maintenance-azure",
+        "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
+        "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
+        "KOGWISTAR_MAINTENANCE_MODEL": "${input:longrunAzureModel}"
       }
     }
   ],
@@ -1559,7 +1606,7 @@
       "id": "longrunPgCustomDsn",
       "type": "promptString",
       "description": "Custom PgVector DSN (used when PgVector probe DSN source is custom)",
-      "default": "postgresql+psycopg://user:pass@localhost:5432/dbname"
+      "default": "postgresql+psycopg://postgres:postgres@127.0.0.1:35432/postgres"
     },
     {
       "id": "longrunPersistentPgContainerName",
@@ -1577,7 +1624,7 @@
       "id": "longrunPgDsn",
       "type": "promptString",
       "description": "Long-run Postgres/PgVector DSN",
-      "default": "postgresql+psycopg://user:pass@localhost:5432/dbname"
+      "default": "postgresql+psycopg://postgres:postgres@127.0.0.1:35432/postgres"
     },
     {
       "id": "longrunMaxRuntimeSeconds",
