@@ -374,6 +374,8 @@ def _normalize_pg_dsn(connection_url: str) -> str:
     try:
         from sqlalchemy.engine import make_url
     except Exception:
+        if connection_url.startswith("postgresql://"):
+            return connection_url.replace("postgresql://", "postgresql+psycopg://", 1)
         return connection_url
     url = make_url(connection_url)
     return url.set(drivername="postgresql+psycopg").render_as_string(hide_password=False)

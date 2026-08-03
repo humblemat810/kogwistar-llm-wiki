@@ -194,9 +194,8 @@ def test_apply_longrun_probe_env_materializes_pgvector_testcontainer(monkeypatch
     assert test_conftest.os.environ["KOGWISTAR_LONGRUN_PG_SOURCE"] == "testcontainer"
     assert test_conftest.os.environ["KOGWISTAR_LONGRUN_PARSER"] == "page_index"
     assert test_conftest.os.environ["KOGWISTAR_LONGRUN_DOC_COUNT"] == "1"
-    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_RUN_DIR"].endswith(
-        "tests\\_tmp\\longrun-vscode-pgvector-probe"
-    )
+    run_dir = Path(test_conftest.os.environ["KOGWISTAR_LONGRUN_RUN_DIR"])
+    assert run_dir.parts[-3:] == ("tests", "_tmp", "longrun-vscode-pgvector-probe")
 
 
 def test_apply_longrun_probe_env_materializes_pgvector_persistent(monkeypatch):
@@ -216,8 +215,11 @@ def test_apply_longrun_probe_env_materializes_pgvector_persistent(monkeypatch):
     assert test_conftest.os.environ["KOGWISTAR_LLM_WIKI_LONGRUN"] == "1"
     assert test_conftest.os.environ["KOGWISTAR_LONGRUN_BACKEND"] == "pgvector"
     assert test_conftest.os.environ["KOGWISTAR_LONGRUN_PG_SOURCE"] == "persistent"
-    assert test_conftest.os.environ["KOGWISTAR_LONGRUN_RUN_DIR"].endswith(
-        "tests\\_tmp\\longrun-vscode-pgvector-persistent-probe"
+    run_dir = Path(test_conftest.os.environ["KOGWISTAR_LONGRUN_RUN_DIR"])
+    assert run_dir.parts[-3:] == (
+        "tests",
+        "_tmp",
+        "longrun-vscode-pgvector-persistent-probe",
     )
 
 

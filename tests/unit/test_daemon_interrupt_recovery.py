@@ -24,12 +24,11 @@ def _request() -> IngestPipelineRequest:
     )
 
 
-def _expire_claimed_job_lease(engines, job_id: str) -> None:
-    with engines.conversation.meta_sqlite.transaction() as conn:
-        conn.execute(
-            "UPDATE index_jobs SET status = 'DOING', lease_until = ?, updated_at = ? WHERE job_id = ?",
-            (0, 0, str(job_id)),
-        )
+def _expire_claimed_job_lease(engines, job_id: str, claim_token: str) -> None:
+    """Expire through the store contract; never open a second raw writer."""
+    assert engines.conversation.meta_sqlite.renew_index_job_lease(
+        str(job_id), claim_token=str(claim_token), lease_seconds=-1
+    )
 
 
 def test_maintenance_daemon_startup_repairs_missing_lane_projection_rows(tmp_path):
@@ -170,7 +169,10 @@ def test_restart_after_interrupt_reclaims_expired_job_lease(tmp_path, monkeypatc
         lease_seconds=60,
     )
     assert len(claimed) == 1
-    _expire_claimed_job_lease(engines, claimed[0].job_id)
+    assert claimed[0].claim_token is not None
+    _expire_claimed_job_lease(
+        engines, claimed[0].job_id, claimed[0].claim_token
+    )
 
     restarted = build_persistent_namespace_engines(base_dir)
     daemon = MaintenanceDaemon(restarted, "demo", poll_interval=0.01)

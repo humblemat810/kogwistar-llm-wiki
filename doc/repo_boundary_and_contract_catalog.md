@@ -9,6 +9,10 @@ This document defines the explicit boundaries, dependency rules, and contract su
 - `kogwistar-obsidian-sink`
 - `kogwistar-llm-wiki`
 
+For the implementation-port release gate that keeps these consumer contracts
+working while `kogwistar` core moves to Rust, see
+[`kogwistar_rust_port_compatibility_reminder.md`](kogwistar_rust_port_compatibility_reminder.md).
+
 It is aligned with:
 
 - provenance-first Kogwistar entities
