@@ -346,6 +346,49 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
     daemon.run()
 
 
+def _cmd_workbench(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.codex_workbench_agent import CodexCliCockpitResponder, CodexCliSettings
+    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+    from kogwistar_llm_wiki.workbench_http import serve_workbench
+
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    responder = CodexCliCockpitResponder(
+        CodexCliSettings(
+            executable=args.codex_executable,
+            model=args.codex_model,
+            profile=args.codex_profile,
+            timeout_seconds=args.codex_timeout,
+        ),
+        trace_line=lambda line: logger.info("workbench_codex_trace %s", line),
+    )
+    api = WorkbenchApi(
+        IngestPipeline(engines),
+        cockpit_responder=responder,
+        codex_worker_count=args.codex_workers,
+        trace_sink=lambda event: logger.info("workbench_worker_trace %s", json.dumps(event, sort_keys=True)),
+    )
+    api.recover_interactions(args.workspace)
+    logger.info(
+        "workbench_started workspace=%s host=%s port=%s codex_model=%s workers=%s",
+        args.workspace,
+        args.host,
+        args.port,
+        args.codex_model or "codex-default",
+        args.codex_workers,
+    )
+    try:
+        serve_workbench(api, host=args.host, port=args.port)
+    finally:
+        engines.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m kogwistar_llm_wiki",
@@ -517,6 +560,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Host derived knowledge on a dedicated engine instead of reusing raw KG",
     )
     report_p.set_defaults(func=_cmd_report)
+
+    workbench_p = sub.add_parser(
+        "workbench",
+        help="Serve the interactive graph workbench with durable Codex workers",
+    )
+    workbench_p.add_argument("--workspace", required=True, help="Workspace ID")
+    workbench_p.add_argument("--host", default="127.0.0.1", help="HTTP bind host")
+    workbench_p.add_argument("--port", type=int, default=8765, help="HTTP bind port")
+    workbench_p.add_argument("--codex-workers", type=int, default=1, help="Concurrent Codex turns")
+    workbench_p.add_argument("--codex-executable", default=None, help="Codex executable override")
+    workbench_p.add_argument("--codex-model", default=None, help="Codex model override")
+    workbench_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
+    workbench_p.add_argument("--codex-timeout", type=int, default=300, help="Per-turn timeout in seconds")
+    workbench_p.set_defaults(func=_cmd_workbench)
 
     # daemon sub-command
     daemon_p = sub.add_parser("daemon", help="Run a background daemon")

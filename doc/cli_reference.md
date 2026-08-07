@@ -90,6 +90,35 @@ Current semantics:
 - Interrupted work is recovered by core projection repair plus lease redelivery.
 - Delivery remains at-least-once; duplicate execution should converge through deterministic IDs, completion checks, and versioned replacement.
 
+## `llm-wiki workbench`
+
+Serve the interactive graph workbench and its durable background Codex brain:
+
+```bash
+python -m kogwistar_llm_wiki \
+  --data-dir <persistent-data-directory> \
+  workbench \
+  --workspace <workspace-id> \
+  [--host 127.0.0.1] \
+  [--port 8765] \
+  [--codex-workers 1] \
+  [--codex-executable <path>] \
+  [--codex-model <model>] \
+  [--codex-profile <profile>] \
+  [--codex-timeout 300]
+```
+
+The command recovers pending workbench interactions, serves the lens/history/
+proposal and interaction APIs, and invokes Codex in an ephemeral read-only
+sandbox. Model activity renews the job lease; ownership is checked again before
+the first terminal result is appended. Browser clients submit Codex turns to
+`POST /api/interactions` and poll `GET /api/interactions` rather than holding a
+model-length HTTP request open.
+
+The current Codex worker answers from the bounded lens or returns `no_change`.
+It does not receive direct graph-write access. Any future mutation proposal
+still requires host validation and confirmation.
+
 ## Programmatic API Cheatsheet
 
 ```python
@@ -121,7 +150,8 @@ python -m kogwistar_llm_wiki --help
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
+| `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `workbench`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
+| `KOGWISTAR_CODEX_EXECUTABLE` | workbench | Optional Codex CLI path when `codex` is not on `PATH` |
 | `KOGWISTAR_PARSER_PROVIDER` | CLI, parser workflows | Explicit parser provider alias. `azure_openai` is normalized to the `azure` chat provider. |
 | `KOGWISTAR_PARSER_MODEL` | CLI, parser workflows | Explicit parser model or Azure deployment name |
 | `KOGWISTAR_PARSER_BASE_URL` | CLI, parser workflows | Parser endpoint URL, for example Ollama base URL or Azure OpenAI endpoint |

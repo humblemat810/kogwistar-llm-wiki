@@ -34,12 +34,21 @@ All state is:
 
 ### 2.2 Projection, Not Duplication
 
-External views (e.g., Obsidian):
+External views and workbenches (e.g., Obsidian and the interactive explorer):
 
 * are rebuildable projections
 * must not become sources of truth
+* may submit explicit commands, but never mutate graph storage directly
+* must disclose their snapshot watermark and whether a result is partial
 
-**Authority:** `kogwistar-obsidian-sink`
+**Graph truth authority:** `kogwistar`.
+
+**Obsidian projection implementation authority:** `kogwistar-obsidian-sink`.
+
+The interactive workbench has a broader role than a passive viewer. It owns
+query presentation, bounded subgraph interaction, user questions, proposal
+review, and refresh behavior. Kogwistar still owns command execution,
+append-only events, provenance, revisions, and tombstones.
 
 ---
 

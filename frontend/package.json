@@ -1,0 +1,26 @@
+{
+  "name": "kogwistar-llm-wiki-workbench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "graphology": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "sigma": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@playwright/test": "^1.52.0",
+    "typescript": "latest",
+    "vite": "^6.1.0"
+  }
+}

@@ -584,3 +584,33 @@ stateDiagram-v2
     FAILED --> RETRY_FAILED: Retry Failed
     RETRY_FAILED --> CLAIMED: reuse latest parser checkpoint
 ```
+
+## Interactive Knowledge Workbench
+
+```mermaid
+flowchart LR
+    USER["user question or selection"] --> MODE{"orchestration mode"}
+    MODE --> CODEX["Codex cockpit mode (target)"]
+    MODE --> FLOW["deterministic workflow mode"]
+    CODEX --> QUEUE["durable interaction job\nclaim token + lease"]
+    QUEUE --> LENS["semantic lens query\nscoped snapshot + watermark"]
+    FLOW --> LENS
+    LENS --> INSPECT["bounded subgraph\nevidence + explanations"]
+    INSPECT --> ANSWER["cited answer or no_change\n(current Codex capability)"]
+    INSPECT -. target Codex tool loop .-> TOOLS["inspect evidence/history\nexpand lens / ask follow-up"]
+    TOOLS -.-> INSPECT
+    TOOLS -. target proposal .-> PROPOSE["grounded typed command proposal"]
+    FLOW --> PROPOSE
+    PROPOSE --> VALIDATE["provenance + policy +\ngraph revision validation"]
+    VALIDATE -->|accepted| EVENTS["Kogwistar authoritative\nappend-only event/tombstone"]
+    VALIDATE -->|rejected or stale| REVIEW["review history / retry"]
+    EVENTS --> REFRESH["refresh lens"]
+    REFRESH --> INSPECT
+    USER -.-> HISTORY["queryable investigation history"]
+    LENS -.-> HISTORY
+    ANSWER -.-> HISTORY
+    PROPOSE -.-> HISTORY
+```
+
+The workbench is an additional application projection. It does not alter the
+Obsidian projection path.

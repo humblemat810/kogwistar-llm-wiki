@@ -60,6 +60,8 @@ from .namespaces import GraphSpace, WorkspaceNamespaces
 from .projection import ProjectionManager
 from .usage_projection import UsageProjection, UsageProjectionSnapshot, persist_usage_events
 from .review_query import ReviewQueryService
+from .semantic_lens import SemanticLensRequest, SemanticLensService, SemanticLensSnapshot, InvestigationOutcome
+from .investigation_history import InvestigationHistoryRecord, InvestigationHistoryService
 from .maintenance_guards import (
     SourceRevision,
     build_source_revision,
@@ -281,6 +283,8 @@ class IngestPipeline:
         self.policies = policies or build_default_policies()
         self.projection = ProjectionManager(engines, policies=self.policies)
         self.query_service = GraphSpaceQueryService(engines)
+        self.semantic_lens_service = SemanticLensService(engines, query_service=self.query_service)
+        self.investigation_history_service = InvestigationHistoryService(engines)
         self.review_query_service = ReviewQueryService(engines)
         self.debug_run_dir = configure_debug_logging(debug_run_dir)
         self.debug_trace_path = self.debug_run_dir / "run_trace.jsonl" if self.debug_run_dir else None
@@ -1943,6 +1947,44 @@ class IngestPipeline:
             graph_spaces=graph_spaces,
             where=where,
             resolve_mode=resolve_mode,
+        )
+
+    def resolve_semantic_lens(self, request: SemanticLensRequest) -> SemanticLensSnapshot:
+        """Resolve a bounded workbench lens through the app-owned service."""
+        return self.semantic_lens_service.resolve(request)
+
+    def record_investigation(
+        self,
+        *,
+        workspace_id: str,
+        session_id: str,
+        question: str,
+        action_kind: str,
+        snapshot: SemanticLensSnapshot,
+        outcome: InvestigationOutcome,
+        created_at_ms: int | None = None,
+    ) -> InvestigationHistoryRecord:
+        return self.investigation_history_service.record(
+            workspace_id=workspace_id,
+            session_id=session_id,
+            question=question,
+            action_kind=action_kind,
+            snapshot=snapshot,
+            outcome=outcome,
+            created_at_ms=now_ms() if created_at_ms is None else created_at_ms,
+        )
+
+    def query_investigation_history(
+        self,
+        *,
+        workspace_id: str,
+        session_id: str | None = None,
+        limit: int = 100,
+    ) -> list[InvestigationHistoryRecord]:
+        return self.investigation_history_service.query(
+            workspace_id=workspace_id,
+            session_id=session_id,
+            limit=limit,
         )
 
     def _artifact_node(

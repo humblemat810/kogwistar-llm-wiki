@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager, nullcontext
-from typing import Callable, Protocol, cast, runtime_checkable
+from typing import Callable, Mapping, Protocol, cast, runtime_checkable
 
 from kogwistar.engine_core.models import Edge, Grounding, MentionVerification, Node, Span
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -15,6 +15,7 @@ from .maintenance_patches import (
     MaintenancePatch,
     MaintenancePatchOperation,
     MaintenancePatchStatus,
+    MaintenancePatchValidationIssue,
     MaintenancePatchValidationReport,
     validate_maintenance_patch,
 )
@@ -27,6 +28,12 @@ from .utils import _temporary_namespace
 JsonScalar = str | int | float | bool | None
 EngineUnitOfWork = AbstractContextManager[object | None]
 MaintenanceEntity = Node | Edge
+
+
+class _StaleMaintenancePatch(Exception):
+    def __init__(self, issues: list[MaintenancePatchValidationIssue]) -> None:
+        super().__init__("maintenance patch targets changed after proposal")
+        self.issues = issues
 
 
 @runtime_checkable
@@ -96,6 +103,7 @@ def apply_maintenance_patch(
     active_edge_ids: set[str] | None = None,
     namespace_prefix: str | None = None,
     emit_artifact: bool = True,
+    expected_revisions: Mapping[str, str | int | None] | None = None,
 ) -> MaintenancePatchApplyResult:
     """Validate and apply a maintenance patch through kogwistar graph primitives.
 
@@ -124,12 +132,25 @@ def apply_maintenance_patch(
     status = MaintenancePatchStatus.APPLIED
     try:
         with _engine_uow(engine):
+            stale_issues = _stale_revision_issues(engine, expected_revisions or {})
+            if stale_issues:
+                raise _StaleMaintenancePatch(stale_issues)
             for operation in patch.operations:
                 result = _apply_operation(engine, patch, operation)
                 operation_results.append(result)
                 if result.status == "failed":
                     status = MaintenancePatchStatus.NEEDS_REVIEW
         artifact_id = _emit_patch_artifact(engine, patch, validation, operation_results, status) if emit_artifact else None
+    except _StaleMaintenancePatch as exc:
+        validation = MaintenancePatchValidationReport(valid=False, issues=[*validation.issues, *exc.issues])
+        artifact_id = _emit_patch_artifact(engine, patch, validation, operation_results, MaintenancePatchStatus.REJECTED) if emit_artifact else None
+        return MaintenancePatchApplyResult(
+            patch_id=patch.patch_id,
+            status=MaintenancePatchStatus.REJECTED,
+            validation=validation,
+            operation_results=operation_results,
+            artifact_id=artifact_id,
+        )
     except Exception as exc:
         status = MaintenancePatchStatus.NEEDS_REVIEW
         operation_results.append(
@@ -157,6 +178,7 @@ def apply_maintenance_patch_for_scope(
     *,
     namespace_prefix: str | None = None,
     emit_artifact: bool = True,
+    expected_revisions: Mapping[str, str | int | None] | None = None,
 ) -> MaintenancePatchApplyResult:
     """Apply a patch to the graph space implied by its maintenance scope."""
 
@@ -168,15 +190,124 @@ def apply_maintenance_patch_for_scope(
                 patch,
                 namespace_prefix=namespace_prefix,
                 emit_artifact=emit_artifact,
+                expected_revisions=expected_revisions,
             )
 
     with _temporary_namespace(engines.conversation, ns.conv_bg):
+        scope_issues = _non_workspace_scope_issues(engines.conversation, patch)
+        if scope_issues:
+            validation = MaintenancePatchValidationReport(valid=False, issues=scope_issues)
+            artifact_id = _emit_patch_artifact(
+                engines.conversation,
+                patch,
+                validation,
+                [],
+                MaintenancePatchStatus.REJECTED,
+            ) if emit_artifact else None
+            return MaintenancePatchApplyResult(
+                patch_id=patch.patch_id,
+                status=MaintenancePatchStatus.REJECTED,
+                validation=validation,
+                artifact_id=artifact_id,
+            )
         return apply_maintenance_patch(
             engines.conversation,
             patch,
             namespace_prefix=namespace_prefix,
             emit_artifact=emit_artifact,
+            expected_revisions=expected_revisions,
         )
+
+
+def _non_workspace_scope_issues(
+    engine: _MaintenanceEngineLike,
+    patch: MaintenancePatch,
+) -> list[MaintenancePatchValidationIssue]:
+    """Prevent a scoped patch from mutating entities owned by another scope."""
+
+    if patch.scope.scope_kind == "workspace":
+        return []
+    metadata_key = "conversation_id" if patch.scope.scope_kind == "conversation" else "thread_id"
+    expected_value = getattr(patch.scope, metadata_key)
+    referenced_node_ids: set[str] = set()
+    referenced_edge_ids: set[str] = set()
+    for operation in patch.operations:
+        if operation.kind == MaintenanceOperationKind.ADD_EDGE:
+            referenced_node_ids.update(
+                entity_id
+                for entity_id in (operation.from_node_id, operation.to_node_id)
+                if entity_id
+            )
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE and operation.tombstone_target_id:
+            referenced_node_ids.add(operation.tombstone_target_id)
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE and operation.tombstone_target_id:
+            referenced_edge_ids.add(operation.tombstone_target_id)
+
+    issues: list[MaintenancePatchValidationIssue] = []
+    nodes = {node.id: node for node in engine.read.get_nodes(ids=sorted(referenced_node_ids), resolve_mode="active_only")}
+    edges = {edge.id: edge for edge in engine.read.get_edges(ids=sorted(referenced_edge_ids), resolve_mode="active_only")}
+    for entity_id, entity in {**nodes, **edges}.items():
+        metadata = dict(entity.metadata or {})
+        if metadata.get("scope_kind") != patch.scope.scope_kind or metadata.get(metadata_key) != expected_value:
+            issues.append(
+                MaintenancePatchValidationIssue(
+                    code="scope_entity_mismatch",
+                    message=(
+                        f"{entity_id} does not belong to {patch.scope.scope_kind} scope "
+                        f"{expected_value!r}"
+                    ),
+                )
+            )
+    return issues
+
+
+def _stale_revision_issues(
+    engine: _MaintenanceEngineLike,
+    expected_revisions: Mapping[str, str | int | None],
+) -> list[MaintenancePatchValidationIssue]:
+    if not expected_revisions:
+        return []
+    read = getattr(engine, "read", engine)
+    node_getter = getattr(read, "get_nodes", None)
+    edge_getter = getattr(read, "get_edges", None)
+    current: dict[str, str | int | None] = {}
+    if callable(node_getter):
+        current.update(_entity_revisions(node_getter, list(expected_revisions)))
+    if callable(edge_getter):
+        current.update(_entity_revisions(edge_getter, list(expected_revisions)))
+    return [
+        MaintenancePatchValidationIssue(
+            code="missing_entity_revision" if expected is None else "stale_entity_revision",
+            message=(
+                f"target {entity_id!r} has no revision suitable for safe confirmation"
+                if expected is None
+                else f"target {entity_id!r} changed since the proposal was created"
+            ),
+        )
+        for entity_id, expected in expected_revisions.items()
+        if expected is None or entity_id not in current or current[entity_id] != expected
+    ]
+
+
+def _entity_revisions(getter: Callable[..., list[MaintenanceEntity]], ids: list[str]) -> dict[str, str | int | None]:
+    try:
+        items = getter(ids=ids, resolve_mode="active_only")
+    except TypeError:
+        items = getter(ids=ids)
+    return {
+        str(getattr(item, "id")): _revision_from_entity(item)
+        for item in items
+        if getattr(item, "id", None)
+    }
+
+
+def _revision_from_entity(entity: MaintenanceEntity) -> str | int | None:
+    metadata = dict(getattr(entity, "metadata", None) or {})
+    for key in ("entity_revision", "revision_id", "revision"):
+        value = metadata.get(key)
+        if isinstance(value, (str, int)) and value != "":
+            return value
+    return None
 
 
 def _engine_uow(engine: _MaintenanceEngineLike) -> EngineUnitOfWork:
