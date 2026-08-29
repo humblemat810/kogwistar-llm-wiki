@@ -104,3 +104,10 @@ cancellation. A manual real-agent smoke also starts the workbench transport,
 uses the installed Codex CLI, and drives the browser without route mocks. For
 manual review, inspect both a desktop viewport and a 390px-wide mobile
 viewport after changes to graph layout or evidence panels.
+- [x] Grounded seed bundles validate unique exact excerpts and half-open spans.
+- [x] Seed import is idempotent and rejects cross-bundle entity-ID collisions.
+- [x] Ordinary edges and multi-endpoint hyperedges survive persisted export and reseed.
+- [x] Source text and primary-source URLs survive export without the input fixture.
+- [x] A fake cockpit end-to-end test reads the seeded graph before export/reseed.
+- [x] A real Codex cockpit smoke can run from `seed-bundle --cockpit-question`.
+- [x] Codex structured output uses a strict transport envelope and host-validates patch JSON.

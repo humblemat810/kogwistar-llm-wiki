@@ -45,6 +45,14 @@ from .workbench_background import (
     WorkbenchInteractionStore,
 )
 from .codex_workbench_agent import CodexCliCockpitResponder, CodexCliResponder, CodexCliSettings
+from .graph_seed_bundle import (
+    GraphSeedBundle,
+    SeedBundleResult,
+    dump_seed_bundle,
+    export_graph_seed_bundle,
+    load_seed_bundle,
+    seed_graph_bundle,
+)
 
 __all__ = [
     "IngestPipeline",
@@ -97,4 +105,10 @@ __all__ = [
     "CodexCliResponder",
     "CodexCliCockpitResponder",
     "CodexCliSettings",
+    "GraphSeedBundle",
+    "SeedBundleResult",
+    "dump_seed_bundle",
+    "export_graph_seed_bundle",
+    "load_seed_bundle",
+    "seed_graph_bundle",
 ]

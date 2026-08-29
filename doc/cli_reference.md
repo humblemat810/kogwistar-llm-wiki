@@ -174,3 +174,39 @@ the page-index parser.
 .venv\Scripts\python.exe -m pytest tests/unit/test_temporary_namespace.py -q
 .venv\Scripts\python.exe -m pytest tests/unit/test_projection_consistency.py -q
 ```
+
+## `llm-wiki seed-bundle`
+
+Seed a versioned, source-grounded learning graph into the curated workspace,
+optionally run a real Codex cockpit review over the persisted graph, and export
+the graph back to canonical JSON:
+
+```powershell
+python -m kogwistar_llm_wiki `
+  --data-dir logs/workbench_seed_rl/state `
+  seed-bundle `
+  --workspace rl-agent-learning `
+  --bundle data/seed_bundles/rl_llm_agent_tool_use_v1.json `
+  --output logs/workbench_seed_rl/exported.json `
+  --cockpit-question "Compare DeepSeek-R1, Kimi k1.5, and Kimi K2 from the grounded graph."
+```
+
+The command fails if source excerpts are absent, ambiguous, or inconsistent
+with their half-open offsets; if IDs collide with another seed bundle; or if
+the persisted export differs from the canonical input. Re-running the same
+bundle in the same workspace is idempotent. Source records are persisted as
+curated graph entities, so a future export does not depend on retaining the
+original input file.
+
+`--cockpit-question` is optional because it invokes the installed Codex CLI.
+When supplied, the turn uses the normal read-only cockpit contract: reads are
+bounded, any graph patch remains a proposal, and `no_change` is a valid result.
+The interaction and investigation history are persisted before the graph is
+exported and checked again. The concise cockpit outcome is printed to stdout;
+the complete lens, trace, observations, and answer are written beside the
+export as `<export-stem>.cockpit.json`.
+
+The repository includes
+`data/seed_bundles/rl_llm_agent_tool_use_v1.json`, covering RLHF, WebGPT,
+ReAct, Toolformer, GRPO, DeepSeek-R1, Kimi k1.5, Kimi K2, and host-executed
+tool calling with ordinary edges and first-class multi-endpoint hyperedges.

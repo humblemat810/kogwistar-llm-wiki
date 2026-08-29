@@ -389,6 +389,102 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
         engines.close()
 
 
+def _cmd_seed_bundle(args: argparse.Namespace) -> None:
+    """Seed, optionally inspect through cockpit mode, and export a graph bundle."""
+
+    from kogwistar_llm_wiki.codex_workbench_agent import CodexCliCockpitResponder, CodexCliSettings
+    from kogwistar_llm_wiki.graph_seed_bundle import (
+        dump_seed_bundle,
+        export_graph_seed_bundle,
+        load_seed_bundle,
+        seed_graph_bundle,
+    )
+    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    api: WorkbenchApi | None = None
+    try:
+        bundle = load_seed_bundle(args.bundle)
+        seeded = seed_graph_bundle(engines, workspace_id=args.workspace, bundle=bundle)
+        cockpit_response: dict[str, object] | None = None
+        if args.cockpit_question:
+            responder = CodexCliCockpitResponder(
+                CodexCliSettings(
+                    executable=args.codex_executable,
+                    model=args.codex_model,
+                    profile=args.codex_profile,
+                    timeout_seconds=args.codex_timeout,
+                ),
+                trace_line=lambda line: logger.info("seed_cockpit_trace %s", line),
+            )
+            api = WorkbenchApi(IngestPipeline(engines), cockpit_responder=responder)
+            cockpit_response = api.ask(
+                {
+                    "workspace_id": args.workspace,
+                    "session_id": args.cockpit_session,
+                    "interaction_id": args.cockpit_interaction,
+                    "mode": "codex",
+                    "query_text": args.cockpit_question,
+                    "graph_spaces": ["curated_kg"],
+                    "semantic_retrieval": False,
+                    "max_nodes": 48,
+                    "max_edges": 48,
+                    "max_hyperedges": 12,
+                    "hop_limit": 2,
+                }
+            )
+        exported = export_graph_seed_bundle(
+            engines,
+            workspace_id=args.workspace,
+            bundle_id=bundle.bundle_id,
+        )
+        output_path = dump_seed_bundle(exported, args.output)
+        cockpit_summary: dict[str, object] | None = None
+        if cockpit_response is not None:
+            cockpit_path = output_path.with_name(output_path.stem + ".cockpit.json")
+            cockpit_path.write_text(
+                json.dumps(cockpit_response, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            answer = dict(cockpit_response.get("answer") or {})
+            cockpit_summary = {
+                "agent_status": cockpit_response.get("agent_status"),
+                "interaction_id": cockpit_response.get("interaction_id"),
+                "outcome": answer.get("outcome"),
+                "answer": answer.get("text"),
+                "cited_entity_ids": answer.get("cited_entity_ids"),
+                "artifact_path": str(cockpit_path.resolve()),
+            }
+        result = {
+            "workspace_id": args.workspace,
+            "bundle_id": bundle.bundle_id,
+            "seed": asdict(seeded),
+            "export_path": str(output_path.resolve()),
+            "integrity": {
+                "round_trip_equal": exported == bundle,
+                "sources": len(exported.sources),
+                "nodes": len(exported.nodes),
+                "edges": len(exported.edges),
+                "hyperedges": len(exported.hyperedges),
+            },
+            "cockpit": cockpit_summary,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        if exported != bundle:
+            raise RuntimeError("persisted seed bundle failed canonical round-trip integrity")
+    finally:
+        if api is not None:
+            api.close()
+        engines.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m kogwistar_llm_wiki",
@@ -574,6 +670,30 @@ def main(argv: list[str] | None = None) -> int:
     workbench_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
     workbench_p.add_argument("--codex-timeout", type=int, default=300, help="Per-turn timeout in seconds")
     workbench_p.set_defaults(func=_cmd_workbench)
+
+    seed_p = sub.add_parser(
+        "seed-bundle",
+        help="Seed a grounded graph bundle, optionally review it in Codex cockpit mode, and export it",
+    )
+    seed_p.add_argument("--workspace", required=True, help="Workspace ID")
+    seed_p.add_argument("--bundle", required=True, help="Input seed-bundle JSON path")
+    seed_p.add_argument("--output", required=True, help="Canonical JSON export path")
+    seed_p.add_argument(
+        "--cockpit-question",
+        default=None,
+        help="Optional real Codex cockpit question used to verify the persisted graph",
+    )
+    seed_p.add_argument("--cockpit-session", default="seed-review", help="Cockpit history session ID")
+    seed_p.add_argument(
+        "--cockpit-interaction",
+        default="seed-review-v1",
+        help="Stable idempotency ID for the cockpit interaction",
+    )
+    seed_p.add_argument("--codex-executable", default=None, help="Codex executable override")
+    seed_p.add_argument("--codex-model", default=None, help="Codex model override")
+    seed_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
+    seed_p.add_argument("--codex-timeout", type=int, default=300, help="Per-action timeout in seconds")
+    seed_p.set_defaults(func=_cmd_seed_bundle)
 
     # daemon sub-command
     daemon_p = sub.add_parser("daemon", help="Run a background daemon")

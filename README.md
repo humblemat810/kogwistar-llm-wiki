@@ -196,6 +196,8 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/diagrams.md](doc/diagrams.md) | CLI spider map, pipeline, algorithm & data-flow diagrams |
 | [doc/architecture.md](doc/architecture.md) | System design |
 | [doc/core_workflows.md](doc/core_workflows.md) | Workflow graph designs |
+| [doc/adr_observability_staged_materialization_goal_mode.md](doc/adr_observability_staged_materialization_goal_mode.md) | Proposed OpenTelemetry, staged vector materialization, and goal-mode ownership boundaries |
+| [doc/implementation_plan_observability_staged_materialization_goal_mode.md](doc/implementation_plan_observability_staged_materialization_goal_mode.md) | Dependency-ordered delivery plan and acceptance gates for that ADR |
 | [doc/testing_guide.md](doc/testing_guide.md) | Local test-running pitfalls and pytest cache guidance |
 | [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
 | [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |

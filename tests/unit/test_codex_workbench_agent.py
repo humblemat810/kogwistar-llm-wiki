@@ -4,8 +4,16 @@ import io
 import json
 from pathlib import Path
 
-from kogwistar_llm_wiki.codex_workbench_agent import CodexCliCockpitResponder, CodexCliResponder, CodexCliSettings, CodexProcessRunner
+from kogwistar_llm_wiki.codex_workbench_agent import (
+    CodexCliCockpitResponder,
+    CodexCliResponder,
+    CodexCliSettings,
+    CodexProcessRunner,
+    _cockpit_transport_schema,
+    _strict_output_schema,
+)
 from kogwistar_llm_wiki.semantic_lens import SemanticLensRequest, SemanticLensSnapshot
+from kogwistar_llm_wiki.workbench_cockpit import CockpitAction
 
 
 class FakeRunner:
@@ -145,6 +153,53 @@ def test_process_runner_passes_the_typed_output_schema(monkeypatch):
     assert raw == '{"kind":"no_change"}'
     assert "--output-schema" in command
     assert captured["schema"]["type"] == "object"
+    assert captured["schema"]["required"] == ["kind"]
+    assert captured["schema"]["additionalProperties"] is False
+
+
+def test_cockpit_schema_is_strict_at_every_object_boundary():
+    schema = _strict_output_schema(CockpitAction.model_json_schema())
+
+    def assert_strict(value):
+        if isinstance(value, list):
+            for item in value:
+                assert_strict(item)
+            return
+        if not isinstance(value, dict):
+            return
+        if isinstance(value.get("properties"), dict):
+            assert set(value["required"]) == set(value["properties"])
+            assert value["additionalProperties"] is False
+        elif value.get("type") == "object":
+            assert value["additionalProperties"] is False
+        assert "default" not in value
+        for nested in (value.get("$defs") or {}).values():
+            assert_strict(nested)
+        for nested in (value.get("properties") or {}).values():
+            assert_strict(nested)
+        assert_strict(value.get("items"))
+        for key in ("anyOf", "allOf", "oneOf"):
+            assert_strict(value.get(key))
+
+    assert_strict(schema)
+    assert "rationale" in schema["required"]
+
+
+def test_real_cockpit_transport_avoids_open_patch_maps():
+    schema = _cockpit_transport_schema()
+
+    assert schema["required"] == [
+        "kind",
+        "answer",
+        "query_text",
+        "entity_ids",
+        "patch_json",
+        "cited_entity_ids",
+        "rationale",
+    ]
+    assert schema["additionalProperties"] is False
+    assert "patch" not in schema["properties"]
+    assert schema["properties"]["patch_json"]["anyOf"][-1] == {"type": "null"}
 
 
 def _snapshot() -> SemanticLensSnapshot:

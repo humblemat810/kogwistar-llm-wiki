@@ -226,6 +226,32 @@ to the available authoritative artifact rather than changing core.
 
 The workbench composes existing capabilities only:
 
+### Portable grounded seed bundles
+
+Reusable learning datasets are app-owned curated-knowledge inputs, not new
+Kogwistar primitives. A versioned seed bundle maps onto existing Kogwistar
+`Node`, multi-endpoint `Edge`, `Grounding`, and `Span` models in the workspace's
+curated graph namespace. Each paper or report is persisted as a source entity;
+concepts, ordinary relations, and hyperedges carry exact half-open source
+spans into the bundle's curated paraphrase. This keeps every displayed claim
+grounded while avoiding a false claim that the paraphrase is verbatim paper
+text.
+
+The app validates global ID uniqueness, endpoint existence, ordinary-edge and
+hyperedge cardinality, source membership, and exact or uniquely resolvable
+excerpts before writing. Bundle ownership is persisted with entities, and an
+ID already owned by another bundle is an error. Re-seeding the same bundle is
+idempotent. Export reconstructs JSON from persisted entities and source text;
+it must not merely echo the input file. A canonical export can seed a different
+workspace and must reproduce the same source, node, edge, hyperedge, and
+grounding content.
+
+Cockpit review is an end-to-end acceptance path for these datasets. The
+cockpit reads the persisted graph through a normal semantic lens and records
+its interaction history. It may answer, return `no_change`, request bounded
+inspection, or propose a separately confirmed patch. Successful cockpit review
+does not waive deterministic round-trip integrity checks.
+
 - existing scoped graph reads for nodes, edges, and supported hypergraph data;
 - existing vector query APIs after llm-wiki supplies an embedding;
 - existing namespace and graph-space filtering;

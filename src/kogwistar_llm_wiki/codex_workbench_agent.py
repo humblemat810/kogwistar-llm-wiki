@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import copy
 import json
 import os
 from pathlib import Path
@@ -16,13 +17,41 @@ from collections.abc import Callable, Sequence
 from collections import deque
 from typing import Mapping, Protocol
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .semantic_lens import SemanticLensRequest, SemanticLensSnapshot
-from .workbench_cockpit import CockpitAction, CockpitObservation
+from .workbench_cockpit import CockpitAction, CockpitActionKind, CockpitObservation
 from .workbench_background import ProgressCallback
 
 LineSink = Callable[[str], None]
+
+
+class _CockpitActionTransport(BaseModel):
+    """Strict provider envelope; the host validates ``patch_json`` separately."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: CockpitActionKind
+    answer: str | None
+    query_text: str | None
+    entity_ids: list[str] = Field(max_length=12)
+    patch_json: str | None
+    cited_entity_ids: list[str] = Field(max_length=24)
+    rationale: str = Field(max_length=2_000)
+
+    def to_action(self) -> CockpitAction:
+        patch: object = None
+        if self.patch_json is not None:
+            patch = json.loads(self.patch_json)
+        return CockpitAction(
+            kind=self.kind,
+            answer=self.answer,
+            query_text=self.query_text,
+            entity_ids=self.entity_ids,
+            patch=patch,
+            cited_entity_ids=self.cited_entity_ids,
+            rationale=self.rationale,
+        )
 
 
 class CodexRunner(Protocol):
@@ -75,7 +104,10 @@ class CodexProcessRunner:
                 str(output_path),
             ]
             if output_schema is not None:
-                schema_path.write_text(json.dumps(output_schema, sort_keys=True), encoding="utf-8")
+                schema_path.write_text(
+                    json.dumps(_strict_output_schema(output_schema), sort_keys=True),
+                    encoding="utf-8",
+                )
                 codex_args.extend(["--output-schema", str(schema_path)])
             if settings.model:
                 codex_args.extend(["--model", settings.model])
@@ -220,11 +252,11 @@ class CodexCliCockpitResponder:
                     + ". Return one corrected action that conforms to action_schema."
                 )
             if isinstance(self.runner, CodexProcessRunner):
-                raw = self.runner.run(**run_kwargs, output_schema=CockpitAction.model_json_schema())
+                raw = self.runner.run(**run_kwargs, output_schema=_cockpit_transport_schema())
             else:
                 raw = self.runner.run(**run_kwargs)
             try:
-                return CockpitAction.model_validate_json(_json_object(raw))
+                return _parse_cockpit_action(raw)
             except (ValidationError, ValueError) as exc:
                 validation_error = exc
                 if self.trace_line is not None:
@@ -275,7 +307,7 @@ def _build_cockpit_prompt(
         "workspace_id": request.workspace_id,
         "lens": snapshot.to_dict(),
         "observations": [observation.model_dump(mode="json") for observation in observations],
-        "action_schema": CockpitAction.model_json_schema(),
+        "action_schema": _cockpit_transport_schema(),
     }
     return (
         "You are the read-only central reasoning worker for the Kogwistar llm-wiki cockpit. "
@@ -283,6 +315,7 @@ def _build_cockpit_prompt(
         "Choose answer, no_change, or request_clarification when no more inspection is needed. "
         "You may request resolve_lens, inspect_evidence, or query_history; the host will execute only bounded reads. "
         "A propose_patch action is optional, non-authoritative, and must be grounded in visible source evidence. "
+        "For propose_patch, encode the complete MaintenancePatch object as a JSON string in patch_json; otherwise use null. "
         "Never claim an edit has already been applied. Do not use external knowledge or files.\n\n"
         + json.dumps(context, ensure_ascii=False, sort_keys=True, default=str)
     )
@@ -302,6 +335,68 @@ def _json_object(raw: str) -> str:
     if start < 0 or end <= start:
         raise ValueError("response did not contain a JSON object")
     return text[start : end + 1]
+
+
+def _parse_cockpit_action(raw: str) -> CockpitAction:
+    payload = _json_object(raw)
+    try:
+        return _CockpitActionTransport.model_validate_json(payload).to_action()
+    except ValidationError as transport_error:
+        try:
+            # Provider-agnostic injected runners may return the domain shape
+            # directly and do not need the strict Codex transport envelope.
+            return CockpitAction.model_validate_json(payload)
+        except (ValidationError, ValueError) as domain_error:
+            raise ValueError(
+                f"invalid cockpit transport ({transport_error}); invalid cockpit action ({domain_error})"
+            ) from domain_error
+
+
+def _cockpit_transport_schema() -> dict[str, object]:
+    return _strict_output_schema(_CockpitActionTransport.model_json_schema())
+
+
+def _strict_output_schema(schema: Mapping[str, object]) -> dict[str, object]:
+    """Adapt a Pydantic schema to the strict Responses API object contract.
+
+    Strict structured output requires every declared object property to appear
+    in ``required`` and disallows open-ended object keys. Nullable/defaulted
+    Pydantic fields remain optional in meaning by carrying ``null`` or an empty
+    collection, but the model must emit their keys explicitly.
+    """
+
+    normalized = copy.deepcopy(dict(schema))
+
+    def visit(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+            return
+        if not isinstance(value, dict):
+            return
+        value.pop("default", None)
+        properties = value.get("properties")
+        if isinstance(properties, dict):
+            value["required"] = list(properties)
+            value["additionalProperties"] = False
+        elif value.get("type") == "object":
+            # The strict transport cannot represent arbitrary dictionaries.
+            # Cockpit patches still support their fixed typed fields; open maps
+            # must be empty and can be enriched after host-side review.
+            value["additionalProperties"] = False
+        definitions = value.get("$defs")
+        if isinstance(definitions, dict):
+            for nested in definitions.values():
+                visit(nested)
+        if isinstance(properties, dict):
+            for nested in properties.values():
+                visit(nested)
+        visit(value.get("items"))
+        for combinator in ("anyOf", "allOf", "oneOf"):
+            visit(value.get(combinator))
+
+    visit(normalized)
+    return normalized
 
 
 __all__ = ["CodexCliCockpitResponder", "CodexCliResponder", "CodexCliSettings", "CodexProcessRunner"]
