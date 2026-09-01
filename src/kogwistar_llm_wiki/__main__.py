@@ -60,6 +60,13 @@ def _conversation_persistence_kwargs(args: argparse.Namespace) -> dict[str, str]
     return {} if mode == "single_stage" else {"conversation_persistence_mode": mode}
 
 
+def _close_engines(engines: "NamespaceEngines") -> None:
+    """Close real engine bundles while remaining compatible with test doubles."""
+    close = getattr(engines, "close", None)
+    if callable(close):
+        close()
+
+
 def _build_engines(
     workspace_id: str,
     data_dir: str | None,
@@ -243,7 +250,7 @@ def _cmd_demo(args: argparse.Namespace) -> None:
             )
         )
     finally:
-        engines.close()
+        _close_engines(engines)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
@@ -277,7 +284,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             )
         )
     finally:
-        engines.close()
+        _close_engines(engines)
 
 
 def _cmd_report(args: argparse.Namespace) -> None:
@@ -338,7 +345,7 @@ def _cmd_report(args: argparse.Namespace) -> None:
             )
         )
     finally:
-        engines.close()
+        _close_engines(engines)
 
 
 def _cmd_daemon_projection(args: argparse.Namespace) -> None:
@@ -436,7 +443,7 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
     try:
         serve_workbench(api, host=args.host, port=args.port)
     finally:
-        engines.close()
+        _close_engines(engines)
 
 
 def _cmd_mcp(args: argparse.Namespace) -> None:
@@ -463,7 +470,7 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
             run_kwargs.update({"host": args.host, "port": args.port, "path": args.path})
         mcp.run(**run_kwargs)
     finally:
-        engines.close()
+        _close_engines(engines)
 
 
 def _cmd_seed_bundle(args: argparse.Namespace) -> None:
@@ -563,7 +570,7 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
     finally:
         if api is not None:
             api.close()
-        engines.close()
+        _close_engines(engines)
 
 
 def main(argv: list[str] | None = None) -> int:

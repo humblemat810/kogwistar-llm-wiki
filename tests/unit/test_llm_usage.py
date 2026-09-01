@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
+import httpx
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_openai import AzureChatOpenAI
 from kogwistar.runtime.budget import StateBackedBudgetLedger
@@ -219,12 +221,20 @@ def test_provider_usage_callback_is_accepted_by_azure_chat_model() -> None:
         model="gpt-5-mini",
     )
 
-    model = AzureChatOpenAI(
-        azure_deployment="gpt-5-mini",
-        azure_endpoint="https://example.openai.azure.com",
-        api_version="2024-12-01-preview",
-        api_key="test-key",
-        callbacks=[callback],
-    )
-
-    assert model.callbacks == [callback]
+    transport = httpx.MockTransport(lambda request: httpx.Response(200))
+    client = httpx.Client(transport=transport)
+    async_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+    try:
+        model = AzureChatOpenAI(
+            azure_deployment="gpt-5-mini",
+            azure_endpoint="https://example.openai.azure.com",
+            api_version="2024-12-01-preview",
+            api_key="test-key",
+            callbacks=[callback],
+            http_client=client,
+            http_async_client=async_client,
+        )
+        assert model.callbacks == [callback]
+    finally:
+        client.close()
+        asyncio.run(async_client.aclose())
