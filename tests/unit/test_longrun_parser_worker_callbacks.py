@@ -46,8 +46,11 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
             "allow_review": True,
         }
 
-    def fake_build_default_engines(engine_dir, *, provider_settings):
+    def fake_build_default_engines(engine_dir, *, provider_settings, **kwargs):
         captured["engine_dir"] = str(engine_dir)
+        captured["conversation_persistence_mode"] = kwargs.get(
+            "conversation_persistence_mode"
+        )
         engines = (FakeEngine(), FakeEngine(), FakeEngine())
         captured["engines"] = engines
         return engines
@@ -91,9 +94,11 @@ def test_run_workflow_layered_parse_wires_event_sink_into_parser_callbacks(
             parser=ProviderEndpointConfig(provider="fake", model="fake-model"),
         ),
         engine_dir=tmp_path / "engine",
+        conversation_persistence_mode="two_stage",
     )
 
     assert captured["provider_settings"].parser.model == "fake-model"
+    assert captured["conversation_persistence_mode"] == "two_stage"
     assert callable(captured["event_sink"])
     assert captured["workflow_deps"]["propose_layer_fn"] is not None
     assert any(entry["stage"] == "wiring_test" for entry in result.layer_log)

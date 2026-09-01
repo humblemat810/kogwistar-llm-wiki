@@ -201,6 +201,7 @@ class LongRunConfig:
     max_llm_calls: int = 100
     backend: str = "chroma"
     parser_lane: str = "workflow_layered"
+    conversation_persistence_mode: str = "single_stage"
     parse_timeout_seconds: int = 1200
     max_runtime_seconds: int = 3600
     dsn: str | None = None
@@ -257,6 +258,10 @@ class LongRunConfig:
             raise ValueError("pg_database_mode must be one of: fingerprint, shared")
         if self.parser_proposal_mode not in {"children", "boundaries"}:
             raise ValueError("parser_proposal_mode must be one of: children, boundaries")
+        if self.conversation_persistence_mode not in {"single_stage", "two_stage"}:
+            raise ValueError(
+                "conversation_persistence_mode must be one of: single_stage, two_stage"
+            )
         if self.corpus_profile not in {"watershed_stress", "daily_life"}:
             raise ValueError("corpus_profile must be one of: watershed_stress, daily_life")
         if any(char in self.experiment_run for char in '\\/:*?"<>|'):
@@ -285,6 +290,8 @@ class LongRunConfig:
             self.token_max,
             self.skip_maintenance_invariant,
         ]
+        if self.conversation_persistence_mode == "two_stage":
+            parts.extend(["conversation_persistence_mode", self.conversation_persistence_mode])
         if self.experiment_run.strip():
             parts.append(self.experiment_run.strip())
         return str(stable_id("llm_wiki.longrun.corpus", *parts))
@@ -427,6 +434,17 @@ class LongRunConfig:
                 "KOGWISTAR_LONGRUN_PARSER must be one of {'workflow_layered', 'page_index'}; "
                 f"got {parser_lane!r}"
             )
+        conversation_persistence_mode = (
+            os.getenv("KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE", "single_stage")
+            .strip()
+            .lower()
+            or "single_stage"
+        )
+        if conversation_persistence_mode not in {"single_stage", "two_stage"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE must be one of: "
+                "single_stage, two_stage"
+            )
         parse_timeout_seconds = int(os.getenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "1200"))
         if parse_timeout_seconds <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS must be positive")
@@ -568,6 +586,7 @@ class LongRunConfig:
             parser_max_retries=parser_spec.max_retries,
             backend=backend,
             parser_lane=parser_lane,
+            conversation_persistence_mode=conversation_persistence_mode,
             parse_timeout_seconds=parse_timeout_seconds,
             operation_mode=operation_mode,
             maintenance_schedule_mode=maintenance_schedule_mode,
@@ -621,6 +640,7 @@ class LongRunConfig:
             "parser_max_retries": self.parser_max_retries,
             "backend": self.backend,
             "parser_lane": self.parser_lane,
+            "conversation_persistence_mode": self.conversation_persistence_mode,
             "operation_mode": self.operation_mode,
             "maintenance_schedule_mode": self.maintenance_schedule_mode,
             "maintenance_workers": self.maintenance_workers,
@@ -3784,6 +3804,7 @@ class LongRunHarness:
             "live_trace": self.config.live_trace,
             "parser_provider": parser_provider,
             "parser_model": parser_model,
+            "conversation_persistence_mode": self.config.conversation_persistence_mode,
         }
         _append_trace_line(
             dump_trace_path,
@@ -5440,6 +5461,38 @@ def test_longrun_config_from_env_supports_daily_life_corpus_profile(monkeypatch:
     assert config.corpus_fingerprint
 
 
+def test_longrun_config_from_env_supports_two_stage_conversation_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv(
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE", "two_stage"
+    )
+
+    config = LongRunConfig.from_env()
+
+    assert config.conversation_persistence_mode == "two_stage"
+    assert config.as_dict()["conversation_persistence_mode"] == "two_stage"
+    assert config.corpus_fingerprint != LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+    ).corpus_fingerprint
+
+
+def test_longrun_config_rejects_invalid_conversation_persistence_mode() -> None:
+    with pytest.raises(ValueError, match="conversation_persistence_mode"):
+        LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            doc_count=1,
+            conversation_persistence_mode="invalid",
+        )
+
+
 def test_longrun_corpus_fingerprint_changes_across_operation_modes() -> None:
     base = dict(
         enabled=False,
@@ -6608,6 +6661,7 @@ def _parser_child_payload(tmp_path: Path, *, parser_lane: str) -> dict[str, Any]
     run_dir = tmp_path / f"parser-{parser_lane}"
     return {
         "parser_lane": parser_lane,
+        "conversation_persistence_mode": "single_stage",
         "parser_provider": "fake",
         "parser_model": "fake-parser",
         "parser_workflow_run_id": "parser:source-doc-001",

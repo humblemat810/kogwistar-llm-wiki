@@ -163,3 +163,32 @@ def test_pending_interaction_recovers_after_process_style_engine_restart(tmp_pat
         assert result.response == {"resumed": "turn-resume"}
     finally:
         restarted.close()
+
+
+def test_concurrent_terminal_writes_have_one_winner():
+    engines = build_in_memory_namespace_engines()
+    try:
+        store = WorkbenchInteractionStore(engines)
+        store.enqueue(_payload("concurrent-write-test", "turn-same"))
+        barrier = threading.Barrier(2)
+        winners: list[bool] = []
+
+        def write_result() -> None:
+            barrier.wait()
+            _, created = store.persist_result(
+                workspace_id="concurrent-write-test",
+                interaction_id="turn-same",
+                session_id="browser-1",
+                submitted_at_ms=1,
+                response={"answer": "one"},
+            )
+            winners.append(created)
+
+        threads = [threading.Thread(target=write_result) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+        assert sorted(winners) == [False, True]
+    finally:
+        engines.close()

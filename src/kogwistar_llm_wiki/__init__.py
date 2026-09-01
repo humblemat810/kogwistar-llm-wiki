@@ -38,6 +38,9 @@ from .investigation_history import InvestigationHistoryRecord, InvestigationHist
 from .workbench_api import WorkbenchApi
 from .workbench import GroundedAnswer, KnowledgeWorkbench, WorkbenchTurn
 from .workbench_http import build_workbench_handler, serve_workbench
+from .agent_gateway import AgentGateway, AgentTurn
+from .otel import LlmWikiTelemetry
+from .mcp_agent_server import build_agent_mcp
 from .workbench_background import (
     CodexWorkbenchDispatcher,
     CodexWorkbenchWorker,
@@ -98,6 +101,10 @@ __all__ = [
     "WorkbenchTurn",
     "build_workbench_handler",
     "serve_workbench",
+    "AgentGateway",
+    "AgentTurn",
+    "LlmWikiTelemetry",
+    "build_agent_mcp",
     "CodexWorkbenchDispatcher",
     "CodexWorkbenchWorker",
     "WorkbenchInteraction",

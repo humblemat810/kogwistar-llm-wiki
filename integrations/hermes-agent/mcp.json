@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "llm-wiki": {
+      "command": "llm-wiki",
+      "args": ["--data-dir", "${LLM_WIKI_DATA_DIR}", "--backend", "${LLM_WIKI_BACKEND}", "mcp", "--workspace", "${LLM_WIKI_WORKSPACE}", "--transport", "stdio"],
+      "enabled": true,
+      "timeout": 120
+    }
+  }
+}

@@ -9,7 +9,7 @@ import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
+from typing import Callable, Literal
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.layerwise_llm import LayerwiseCallback, build_layerwise_llm_callbacks
@@ -286,9 +286,15 @@ def run_workflow_layered_parse(
     run_id: str | None = None,
     resume_from_checkpoint: bool = False,
     usage_event_path: Path | None = None,
+    conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> SimpleNamespace:
     from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput, WorkflowExportBundle
     from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
+
+    if conversation_persistence_mode not in {"single_stage", "two_stage"}:
+        raise ValueError(
+            "conversation_persistence_mode must be one of: single_stage, two_stage"
+        )
 
     layer_log: list[dict[str, object]] = []
 
@@ -326,15 +332,24 @@ def run_workflow_layered_parse(
         provider=provider_settings.parser.provider,
         model=provider_settings.parser.model,
         proposal_mode=provider_settings.proposal_mode,
+        conversation_persistence_mode=conversation_persistence_mode,
         workflow_run_id=str(run_id or f"parser:{source_document_id}"),
         resume_from_checkpoint=resume_from_checkpoint,
     )
     _layer_event("workflow_layered_engines_build_start", engine_dir=str(engine_dir))
+    engine_kwargs: dict[str, object] = {"provider_settings": provider_settings}
+    # Do not add a new keyword on the historical default path. This keeps
+    # parser-service wrappers compatible while making the opt-in explicit.
+    if conversation_persistence_mode != "single_stage":
+        engine_kwargs["conversation_persistence_mode"] = conversation_persistence_mode
     workflow_engine, conversation_engine, knowledge_engine = build_default_engines(
         engine_dir,
-        provider_settings=provider_settings,
+        **engine_kwargs,
     )
-    _layer_event("workflow_layered_engines_build_done")
+    _layer_event(
+        "workflow_layered_engines_build_done",
+        conversation_persistence_mode=conversation_persistence_mode,
+    )
     deps = _build_provider_layer_callbacks(
         provider_settings,
         layer_event=_layer_event,
@@ -664,6 +679,9 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                     Path(str(payload["usage_event_path"]))
                     if payload.get("usage_event_path")
                     else None
+                ),
+                conversation_persistence_mode=str(
+                    payload.get("conversation_persistence_mode") or "single_stage"
                 ),
             )
             _trace("child_workflow_layered_parse_call_returned")

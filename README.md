@@ -97,6 +97,12 @@ llm-wiki demo --workspace demo --source logs/llm_wiki_demo/my_document.md --vaul
 
 Then open `logs/llm_wiki_demo/vault` in Obsidian.
 
+For the agent gateway and optional OpenTelemetry contract, see
+[`doc/adr_agent_gateway_and_otel.md`](doc/adr_agent_gateway_and_otel.md).
+Agent protocol routes are opt-in with `LLM_WIKI_AGENT_API_ENABLED=true`; keep
+them behind authentication when binding beyond localhost. Install optional
+support with `pip install -e ".[agent,otel]"`.
+
 To try the iterative layerwise parser path, add `--parser-lane workflow_layered`
 to the same command and keep the same provider/model settings.
 
@@ -196,8 +202,11 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/diagrams.md](doc/diagrams.md) | CLI spider map, pipeline, algorithm & data-flow diagrams |
 | [doc/architecture.md](doc/architecture.md) | System design |
 | [doc/core_workflows.md](doc/core_workflows.md) | Workflow graph designs |
-| [doc/adr_observability_staged_materialization_goal_mode.md](doc/adr_observability_staged_materialization_goal_mode.md) | Proposed OpenTelemetry, staged vector materialization, and goal-mode ownership boundaries |
-| [doc/implementation_plan_observability_staged_materialization_goal_mode.md](doc/implementation_plan_observability_staged_materialization_goal_mode.md) | Dependency-ordered delivery plan and acceptance gates for that ADR |
+| [doc/adr_conversation_two_stage_materialization.md](doc/adr_conversation_two_stage_materialization.md) | Optional two-stage conversation materialization, ownership boundaries, and benchmark contract |
+| [doc/agent_gateway_quickstart.md](doc/agent_gateway_quickstart.md) | Agent integration quickstart for OpenAI-shaped, A2A, MCP, and OTel usage |
+| [doc/adr_agent_gateway_and_otel.md](doc/adr_agent_gateway_and_otel.md) | Agent gateway architecture, safety boundaries, and optional OpenTelemetry |
+| [skills/llm-wiki-knowledge/SKILL.md](skills/llm-wiki-knowledge/SKILL.md) | Portable grounded knowledge-management and proposal-review instructions for compatible agents |
+| [doc/implementation_plan_observability_staged_materialization_goal_mode.md](doc/implementation_plan_observability_staged_materialization_goal_mode.md) | Historical dependency-order reference and remaining goal-mode delivery gates |
 | [doc/testing_guide.md](doc/testing_guide.md) | Local test-running pitfalls and pytest cache guidance |
 | [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
 | [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |

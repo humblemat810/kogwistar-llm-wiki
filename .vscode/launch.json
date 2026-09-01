@@ -919,6 +919,7 @@
         "KOGWISTAR_LONGRUN_MODE": "auto",
         "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
         "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
@@ -1039,6 +1040,7 @@
         "KOGWISTAR_LONGRUN_MODE": "continue",
         "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "parse_first",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "boundaries",
         "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
         "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
@@ -1082,6 +1084,7 @@
         "KOGWISTAR_LONGRUN_MODE": "retry_failed",
         "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
         "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
@@ -1169,6 +1172,7 @@
         "KOGWISTAR_LONGRUN_MODE": "fresh",
         "KOGWISTAR_LONGRUN_BACKEND": "postgres",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
@@ -1205,6 +1209,7 @@
         "KOGWISTAR_LONGRUN_MODE": "continue",
         "KOGWISTAR_LONGRUN_BACKEND": "postgres",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
@@ -1387,6 +1392,7 @@
         "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
         "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "maintenance_first",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE": "fair_slices",
         "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE": "${input:longrunMaintenanceStepsPerSlice}",
@@ -1429,6 +1435,7 @@
         "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
         "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "maintenance_first",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE": "fair_slices",
         "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE": "${input:longrunMaintenanceStepsPerSlice}",
@@ -1543,6 +1550,16 @@
       "options": [
         "children",
         "boundaries"
+      ]
+    },
+    {
+      "id": "longrunConversationPersistenceMode",
+      "type": "pickString",
+      "description": "Parser conversation graph persistence",
+      "default": "single_stage",
+      "options": [
+        "single_stage",
+        "two_stage"
       ]
     },
     {

@@ -17,7 +17,7 @@ from pathlib import Path
 import tempfile
 import uuid
 from types import SimpleNamespace
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Literal, Mapping, Protocol
 
 from .utils import _temporary_namespace
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -47,6 +47,7 @@ from .debug_run import (
     now_ms,
 )
 from .longrun_parser_worker import run_workflow_layered_parse
+from .otel import LlmWikiTelemetry
 from .models import (
     IngestPipelineArtifacts,
     IngestPipelineRequest,
@@ -117,12 +118,18 @@ def build_in_memory_namespace_engines(
     base_dir: str | Path | None = None,
     *,
     split_derived_knowledge: bool = False,
+    conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> NamespaceEngines:
     root = Path(base_dir) if base_dir is not None else Path(tempfile.mkdtemp(prefix="kogwistar-llm-wiki-"))
     embedding = _TinyEmbeddingFunction()
     
     # Shared conversation engine (fg/bg lanes)
-    conversation = _build_engine(root / "conversation", kg_graph_type="conversation", embedding_function=embedding)
+    conversation = _build_engine(
+        root / "conversation",
+        kg_graph_type="conversation",
+        embedding_function=embedding,
+        persistence_mode=conversation_persistence_mode,
+    )
     
     derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embedding) if split_derived_knowledge else None
     return NamespaceEngines(
@@ -138,13 +145,19 @@ def build_persistent_namespace_engines(
     base_dir: str | Path,
     *,
     split_derived_knowledge: bool = False,
+    conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> NamespaceEngines:
     root = Path(base_dir)
     root.mkdir(parents=True, exist_ok=True)
     embedding = _TinyEmbeddingFunction()
     derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embedding) if split_derived_knowledge else None
     return NamespaceEngines(
-        conversation=_build_persistent_engine(root / "conversation", kg_graph_type="conversation", embedding_function=embedding),
+        conversation=_build_persistent_engine(
+            root / "conversation",
+            kg_graph_type="conversation",
+            embedding_function=embedding,
+            persistence_mode=conversation_persistence_mode,
+        ),
         workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embedding),
         kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embedding),
         wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embedding),
@@ -159,6 +172,7 @@ def build_postgres_namespace_engines(
     embedding_dim: int = 2,
     schema: str = "public",
     split_derived_knowledge: bool = False,
+    conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> NamespaceEngines:
     root = Path(base_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -179,6 +193,7 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dim,
             schema=schema,
+            persistence_mode=conversation_persistence_mode,
         ),
         workflow=_build_postgres_engine(
             root / "workflow",
@@ -213,6 +228,7 @@ def _build_engine(
     *,
     kg_graph_type: str,
     embedding_function: EmbeddingFunctionLike,
+    persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
     return GraphKnowledgeEngine(
@@ -221,6 +237,7 @@ def _build_engine(
         embedding_function=embedding_function,
         backend_factory=build_in_memory_backend,
         namespace=kg_graph_type,
+        persistence_mode=persistence_mode,
     )
 
 
@@ -229,6 +246,7 @@ def _build_persistent_engine(
     *,
     kg_graph_type: str,
     embedding_function: EmbeddingFunctionLike,
+    persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
     return GraphKnowledgeEngine(
@@ -236,6 +254,7 @@ def _build_persistent_engine(
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
         namespace=kg_graph_type,
+        persistence_mode=persistence_mode,
     )
 
 
@@ -247,6 +266,7 @@ def _build_postgres_engine(
     dsn: str,
     embedding_dim: int,
     schema: str,
+    persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     from kogwistar.engine_core.engine_postgres import EnginePostgresConfig, build_postgres_backend
 
@@ -265,6 +285,7 @@ def _build_postgres_engine(
         embedding_function=embedding_function,
         backend=backend,
         namespace=kg_graph_type,
+        persistence_mode=persistence_mode,
     )
 
 
@@ -277,6 +298,7 @@ class IngestPipeline:
         policies: LlmWikiPolicies | None = None,
         debug_run_dir: str | Path | None = None,
         live_trace: bool | None = None,
+        conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
     ) -> None:
         self.engines = engines
         self.parser = parser
@@ -294,6 +316,8 @@ class IngestPipeline:
             else bool(live_trace)
         )
         self.live_trace_printer = LiveTracePrinter(prefix="llm-wiki.ingest") if self.live_trace else None
+        self.telemetry = LlmWikiTelemetry.from_environment()
+        self.conversation_persistence_mode = conversation_persistence_mode
         self._source_revisions: dict[tuple[str, str], SourceRevision] = {}
         self.stats_store = (
             ParseStatisticsStore(self.debug_run_dir / "llm_wiki_stats.sqlite3")
@@ -861,6 +885,7 @@ class IngestPipeline:
                 provider_settings=provider_settings,
                 engine_dir=engine_dir,
                 trace=self._trace_text if self.debug_trace_path is not None else None,
+                conversation_persistence_mode=self.conversation_persistence_mode,
             )
         finally:
             shutil.rmtree(engine_dir, ignore_errors=True)
@@ -1006,6 +1031,7 @@ class IngestPipeline:
             append_jsonl(self.debug_trace_path, payload)
         if self.live_trace_printer is not None:
             self.live_trace_printer.emit(payload)
+        self.telemetry.instrument_event(payload)
 
     def _record_parse_statistics(
         self,

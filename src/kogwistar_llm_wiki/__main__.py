@@ -50,6 +50,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("kogwistar_llm_wiki")
 
 
+def _conversation_persistence_kwargs(args: argparse.Namespace) -> dict[str, str]:
+    """Forward the new engine option only when an operator opts in.
+
+    This keeps existing command-handler seams and third-party builder wrappers
+    compatible with the historical default single-stage invocation.
+    """
+    mode = str(getattr(args, "conversation_persistence_mode", "single_stage"))
+    return {} if mode == "single_stage" else {"conversation_persistence_mode": mode}
+
+
 def _build_engines(
     workspace_id: str,
     data_dir: str | None,
@@ -57,6 +67,7 @@ def _build_engines(
     dsn: str | None,
     *,
     split_derived_knowledge: bool = False,
+    conversation_persistence_mode: str = "single_stage",
 ) -> "NamespaceEngines":
     """Construct a NamespaceEngines bundle from the selected backend."""
     from kogwistar_llm_wiki.ingest_pipeline import (
@@ -69,10 +80,15 @@ def _build_engines(
         raise ValueError(
             "persistent commands require --data-dir or KOGWISTAR_DATA_DIR"
         )
+    builder_kwargs: dict[str, object] = {
+        "split_derived_knowledge": split_derived_knowledge,
+    }
+    if conversation_persistence_mode != "single_stage":
+        builder_kwargs["conversation_persistence_mode"] = conversation_persistence_mode
     if backend == "chroma":
         return build_persistent_namespace_engines(
             base_dir=effective_data_dir,
-            split_derived_knowledge=split_derived_knowledge,
+            **builder_kwargs,
         )
     if backend == "postgres":
         if not dsn:
@@ -80,15 +96,24 @@ def _build_engines(
         return build_postgres_namespace_engines(
             base_dir=effective_data_dir,
             dsn=dsn,
-            split_derived_knowledge=split_derived_knowledge,
+            **builder_kwargs,
         )
     raise ValueError(f"Unsupported backend: {backend!r}")
 
 
-def _build_demo_engines(*, split_derived_knowledge: bool = False) -> "NamespaceEngines":
+def _build_demo_engines(
+    *,
+    split_derived_knowledge: bool = False,
+    conversation_persistence_mode: str = "single_stage",
+) -> "NamespaceEngines":
     from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 
-    return build_in_memory_namespace_engines(split_derived_knowledge=split_derived_knowledge)
+    builder_kwargs: dict[str, object] = {
+        "split_derived_knowledge": split_derived_knowledge,
+    }
+    if conversation_persistence_mode != "single_stage":
+        builder_kwargs["conversation_persistence_mode"] = conversation_persistence_mode
+    return build_in_memory_namespace_engines(**builder_kwargs)
 
 
 def _read_request_from_source(args: argparse.Namespace) -> tuple[Path, "IngestPipelineRequest"]:
@@ -166,49 +191,59 @@ def _cmd_demo(args: argparse.Namespace) -> None:
     vault_root = Path(args.vault).expanduser().resolve()
     vault_root.mkdir(parents=True, exist_ok=True)
 
-    engines = _build_demo_engines(split_derived_knowledge=args.split_derived_knowledge)
-    pipeline = IngestPipeline(engines, debug_run_dir=args.debug_run_dir)
-    materialize_maintenance_designs(engines.workflow)
-    artifacts_by_source: list[dict[str, object]] = []
-    last_source_path: Path | None = None
-    last_artifacts = None
-    for source_path, request in request_items:
-        last_source_path = source_path
-        last_artifacts = pipeline.run(request)
-        artifacts_by_source.append(
-            {
-                "source": str(source_path),
-                "artifacts": asdict(last_artifacts),
-            }
-        )
-    MaintenanceWorker(engines).process_pending_jobs(args.workspace)
-    vault_result = pipeline.build_obsidian_vault(
-        vault_root,
-        workspace_id=args.workspace,
-        graph_spaces=[GraphSpace.BASE_KG],
-        projection_filter="demo",
+    engines = _build_demo_engines(
+        split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
     )
+    try:
+        pipeline = IngestPipeline(
+            engines,
+            debug_run_dir=args.debug_run_dir,
+            **_conversation_persistence_kwargs(args),
+        )
+        materialize_maintenance_designs(engines.workflow)
+        artifacts_by_source: list[dict[str, object]] = []
+        last_source_path: Path | None = None
+        last_artifacts = None
+        for source_path, request in request_items:
+            last_source_path = source_path
+            last_artifacts = pipeline.run(request)
+            artifacts_by_source.append(
+                {
+                    "source": str(source_path),
+                    "artifacts": asdict(last_artifacts),
+                }
+            )
+        MaintenanceWorker(engines).process_pending_jobs(args.workspace)
+        vault_result = pipeline.build_obsidian_vault(
+            vault_root,
+            workspace_id=args.workspace,
+            graph_spaces=[GraphSpace.BASE_KG],
+            projection_filter="demo",
+        )
 
-    print(
-        json.dumps(
-            {
-                "workspace_id": args.workspace,
-                "source": str(last_source_path) if last_source_path is not None else str(args.source),
-                "vault": str(vault_root),
-                "mode": "demo-memory-single-process",
-                "corpus_mode": "directory" if len(request_items) > 1 else "single-file",
-                "corpus_count": len(request_items),
-                "artifacts": asdict(last_artifacts) if last_artifacts is not None else None,
-                "artifacts_by_source": artifacts_by_source,
-                "vault_result": {
-                    **asdict(vault_result),
-                    "vault_root": str(vault_result.vault_root),
+        print(
+            json.dumps(
+                {
+                    "workspace_id": args.workspace,
+                    "source": str(last_source_path) if last_source_path is not None else str(args.source),
+                    "vault": str(vault_root),
+                    "mode": "demo-memory-single-process",
+                    "corpus_mode": "directory" if len(request_items) > 1 else "single-file",
+                    "corpus_count": len(request_items),
+                    "artifacts": asdict(last_artifacts) if last_artifacts is not None else None,
+                    "artifacts_by_source": artifacts_by_source,
+                    "vault_result": {
+                        **asdict(vault_result),
+                        "vault_root": str(vault_result.vault_root),
+                    },
                 },
-            },
-            indent=2,
-            sort_keys=True,
+                indent=2,
+                sort_keys=True,
+            )
         )
-    )
+    finally:
+        engines.close()
 
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
@@ -221,20 +256,28 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
         args.backend,
         args.dsn,
         split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
     )
-    pipeline = IngestPipeline(engines, debug_run_dir=args.debug_run_dir)
-    artifacts = pipeline.run(request)
-    print(
-        json.dumps(
-            {
-                "workspace_id": args.workspace,
-                "source": str(source_path),
-                "artifacts": asdict(artifacts),
-            },
-            indent=2,
-            sort_keys=True,
+    try:
+        pipeline = IngestPipeline(
+            engines,
+            debug_run_dir=args.debug_run_dir,
+            **_conversation_persistence_kwargs(args),
         )
-    )
+        artifacts = pipeline.run(request)
+        print(
+            json.dumps(
+                {
+                    "workspace_id": args.workspace,
+                    "source": str(source_path),
+                    "artifacts": asdict(artifacts),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    finally:
+        engines.close()
 
 
 def _cmd_report(args: argparse.Namespace) -> None:
@@ -249,49 +292,53 @@ def _cmd_report(args: argparse.Namespace) -> None:
         args.backend,
         args.dsn,
         split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
     )
-    report = build_workspace_quality_report(
-        engines,
-        workspace_id=args.workspace,
-        report_scope=args.report_scope,
-    )
-    artifact_dump = None
-    if args.dump_mode in {"raw", "both"}:
-        artifact_dump = build_workspace_graph_artifact_dump(
+    try:
+        report = build_workspace_quality_report(
             engines,
             workspace_id=args.workspace,
             report_scope=args.report_scope,
-            raw_limit_per_space=args.dump_limit_per_space,
         )
-    print(
-        json.dumps(
-            {
-                "workspace_id": report.workspace_id,
-                "report_scope": report.report_scope,
-                "dump_mode": args.dump_mode,
-                "graph_quality": report.graph_quality,
-                "graph_health_score": report.graph_health_score,
-                "graph_spaces": [asdict(item) for item in report.graph_spaces],
-                "review_artifact_counts": report.review_artifact_counts,
-                "maintenance_patch_report": asdict(report.maintenance_patch_report),
-                "sample_nodes": [asdict(item) for item in report.sample_nodes],
-                "sample_edges": [asdict(item) for item in report.sample_edges],
-                "notes": list(report.notes),
-                **(
-                    {
-                        "raw_node_count": artifact_dump.node_count,
-                        "raw_edge_count": artifact_dump.edge_count,
-                        "raw_nodes": [asdict(item) for item in artifact_dump.raw_nodes],
-                        "raw_edges": [asdict(item) for item in artifact_dump.raw_edges],
-                    }
-                    if artifact_dump is not None
-                    else {}
-                ),
-            },
-            indent=2,
-            sort_keys=True,
+        artifact_dump = None
+        if args.dump_mode in {"raw", "both"}:
+            artifact_dump = build_workspace_graph_artifact_dump(
+                engines,
+                workspace_id=args.workspace,
+                report_scope=args.report_scope,
+                raw_limit_per_space=args.dump_limit_per_space,
+            )
+        print(
+            json.dumps(
+                {
+                    "workspace_id": report.workspace_id,
+                    "report_scope": report.report_scope,
+                    "dump_mode": args.dump_mode,
+                    "graph_quality": report.graph_quality,
+                    "graph_health_score": report.graph_health_score,
+                    "graph_spaces": [asdict(item) for item in report.graph_spaces],
+                    "review_artifact_counts": report.review_artifact_counts,
+                    "maintenance_patch_report": asdict(report.maintenance_patch_report),
+                    "sample_nodes": [asdict(item) for item in report.sample_nodes],
+                    "sample_edges": [asdict(item) for item in report.sample_edges],
+                    "notes": list(report.notes),
+                    **(
+                        {
+                            "raw_node_count": artifact_dump.node_count,
+                            "raw_edge_count": artifact_dump.edge_count,
+                            "raw_nodes": [asdict(item) for item in artifact_dump.raw_nodes],
+                            "raw_edges": [asdict(item) for item in artifact_dump.raw_edges],
+                        }
+                        if artifact_dump is not None
+                        else {}
+                    ),
+                },
+                indent=2,
+                sort_keys=True,
+            )
         )
-    )
+    finally:
+        engines.close()
 
 
 def _cmd_daemon_projection(args: argparse.Namespace) -> None:
@@ -303,6 +350,7 @@ def _cmd_daemon_projection(args: argparse.Namespace) -> None:
         args.backend,
         args.dsn,
         split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
     )
     Path(args.vault).expanduser().resolve().mkdir(parents=True, exist_ok=True)
     daemon = ProjectionDaemon(
@@ -330,6 +378,7 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
         args.backend,
         args.dsn,
         split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
     )
     daemon = MaintenanceDaemon(
         engines=engines,
@@ -358,6 +407,7 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
         args.backend,
         args.dsn,
         split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
     )
     responder = CodexCliCockpitResponder(
         CodexCliSettings(
@@ -369,7 +419,7 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
         trace_line=lambda line: logger.info("workbench_codex_trace %s", line),
     )
     api = WorkbenchApi(
-        IngestPipeline(engines),
+        IngestPipeline(engines, **_conversation_persistence_kwargs(args)),
         cockpit_responder=responder,
         codex_worker_count=args.codex_workers,
         trace_sink=lambda event: logger.info("workbench_worker_trace %s", json.dumps(event, sort_keys=True)),
@@ -385,6 +435,33 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
     )
     try:
         serve_workbench(api, host=args.host, port=args.port)
+    finally:
+        engines.close()
+
+
+def _cmd_mcp(args: argparse.Namespace) -> None:
+    """Serve the full MCP protocol through the optional FastMCP dependency."""
+    from kogwistar_llm_wiki.agent_gateway import AgentGateway
+    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+    from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
+    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
+    )
+    try:
+        gateway = AgentGateway(WorkbenchApi(IngestPipeline(engines, **_conversation_persistence_kwargs(args))))
+        mcp = build_agent_mcp(gateway)
+        logger.info("agent_mcp_started workspace=%s transport=%s host=%s port=%s", args.workspace, args.transport, args.host, args.port)
+        run_kwargs: dict[str, object] = {"transport": args.transport}
+        if args.transport != "stdio":
+            run_kwargs.update({"host": args.host, "port": args.port, "path": args.path})
+        mcp.run(**run_kwargs)
     finally:
         engines.close()
 
@@ -408,6 +485,7 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
         args.backend,
         args.dsn,
         split_derived_knowledge=args.split_derived_knowledge,
+        **_conversation_persistence_kwargs(args),
     )
     api: WorkbenchApi | None = None
     try:
@@ -424,7 +502,10 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
                 ),
                 trace_line=lambda line: logger.info("seed_cockpit_trace %s", line),
             )
-            api = WorkbenchApi(IngestPipeline(engines), cockpit_responder=responder)
+            api = WorkbenchApi(
+                IngestPipeline(engines, **_conversation_persistence_kwargs(args)),
+                cockpit_responder=responder,
+            )
             cockpit_response = api.ask(
                 {
                     "workspace_id": args.workspace,
@@ -506,6 +587,12 @@ def main(argv: list[str] | None = None) -> int:
         "--split-derived-knowledge",
         action="store_true",
         help="Host derived knowledge on a dedicated engine instead of reusing raw KG",
+    )
+    parser.add_argument(
+        "--conversation-persistence-mode",
+        choices=["single_stage", "two_stage"],
+        default="single_stage",
+        help="Conversation graph materialization mode; two_stage defers semantic embeddings to the batch worker",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -670,6 +757,18 @@ def main(argv: list[str] | None = None) -> int:
     workbench_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
     workbench_p.add_argument("--codex-timeout", type=int, default=300, help="Per-turn timeout in seconds")
     workbench_p.set_defaults(func=_cmd_workbench)
+
+    mcp_p = sub.add_parser(
+        "mcp",
+        help="Serve the full llm-wiki MCP tool server (requires the agent extra)",
+    )
+    mcp_p.add_argument("--workspace", required=True, help="Workspace ID")
+    mcp_p.add_argument("--host", default="127.0.0.1", help="HTTP bind host")
+    mcp_p.add_argument("--port", type=int, default=8780, help="HTTP MCP port")
+    mcp_p.add_argument("--path", default="/mcp", help="HTTP MCP path")
+    mcp_p.add_argument("--transport", choices=["stdio", "http", "streamable-http"], default="stdio")
+    mcp_p.add_argument("--split-derived-knowledge", action="store_true")
+    mcp_p.set_defaults(func=_cmd_mcp)
 
     seed_p = sub.add_parser(
         "seed-bundle",

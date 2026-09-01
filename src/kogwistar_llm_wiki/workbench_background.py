@@ -25,6 +25,19 @@ ProgressCallback = Callable[[], None]
 ExecuteTurn = Callable[[Mapping[str, object], ProgressCallback], Mapping[str, object]]
 TraceSink = Callable[[dict[str, object]], None]
 
+_ARTIFACT_LOCKS: dict[tuple[int, str, str], threading.Lock] = {}
+_ARTIFACT_LOCKS_GUARD = threading.Lock()
+
+
+def _artifact_lock(engines: NamespaceEngines, namespace: str, node_id: str) -> threading.Lock:
+    key = (id(engines.conversation), namespace, node_id)
+    with _ARTIFACT_LOCKS_GUARD:
+        lock = _ARTIFACT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _ARTIFACT_LOCKS[key] = lock
+        return lock
+
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchInteraction:
@@ -185,28 +198,29 @@ class WorkbenchInteractionStore:
         payload: Mapping[str, object],
     ) -> bool:
         namespace = WorkspaceNamespaces(workspace_id).conversation_fg_space
-        with _temporary_namespace(self.engines.conversation, namespace):
-            if self.engines.conversation.read.get_nodes(ids=[node_id], limit=1):
-                return False
-            span = Span.from_dummy_for_conversation(f"workbench:{interaction_id}")
-            self.engines.conversation.write.add_node(
-                Node(
-                    id=node_id,
-                    label=f"Workbench interaction: {artifact_kind}",
-                    type="entity",
-                    summary=str(payload.get("query_text") or payload.get("status") or artifact_kind),
-                    doc_id=f"_conv:{interaction_id}",
-                    mentions=[Grounding(spans=[span])],
-                    metadata={
-                        "workspace_id": workspace_id,
-                        "graph_space": "conversation",
-                        "graph_lane": "foreground",
-                        "artifact_kind": artifact_kind,
-                        "interaction_id": interaction_id,
-                        "interaction_payload_json": json.dumps(payload, sort_keys=True, default=str),
-                    },
+        with _artifact_lock(self.engines, namespace, node_id):
+            with _temporary_namespace(self.engines.conversation, namespace):
+                if self.engines.conversation.read.get_nodes(ids=[node_id], limit=1):
+                    return False
+                span = Span.from_dummy_for_conversation(f"workbench:{interaction_id}")
+                self.engines.conversation.write.add_node(
+                    Node(
+                        id=node_id,
+                        label=f"Workbench interaction: {artifact_kind}",
+                        type="entity",
+                        summary=str(payload.get("query_text") or payload.get("status") or artifact_kind),
+                        doc_id=f"_conv:{interaction_id}",
+                        mentions=[Grounding(spans=[span])],
+                        metadata={
+                            "workspace_id": workspace_id,
+                            "graph_space": "conversation",
+                            "graph_lane": "foreground",
+                            "artifact_kind": artifact_kind,
+                            "interaction_id": interaction_id,
+                            "interaction_payload_json": json.dumps(payload, sort_keys=True, default=str),
+                        },
+                    )
                 )
-            )
         return True
 
     def _read_artifact(self, *, workspace_id: str, node_id: str) -> dict[str, object] | None:
