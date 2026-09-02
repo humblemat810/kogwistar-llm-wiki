@@ -1,0 +1,106 @@
+name: ${COMPOSE_PROJECT_NAME:-llm-wiki}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-llm_wiki}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_wiki}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}
+      KOGWISTAR_POSTGRES_DSN: postgresql://${POSTGRES_USER:-llm_wiki}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}@postgres:5432/${POSTGRES_DB:-llm_wiki}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  rest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &app_environment
+      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki
+      LLM_WIKI_AGENT_API_ENABLED: ${LLM_WIKI_AGENT_API_ENABLED:-false}
+      KOGWISTAR_PARSER_PROVIDER: ${KOGWISTAR_PARSER_PROVIDER:-ollama}
+      KOGWISTAR_PARSER_MODEL: ${KOGWISTAR_PARSER_MODEL:-gemma4:e2b}
+      KOGWISTAR_PARSER_BASE_URL: ${KOGWISTAR_PARSER_BASE_URL:-http://host.docker.internal:11434}
+      KOGWISTAR_MAINTENANCE_PROVIDER: ${KOGWISTAR_MAINTENANCE_PROVIDER:-ollama}
+      KOGWISTAR_MAINTENANCE_MODEL: ${KOGWISTAR_MAINTENANCE_MODEL:-gemma4:e2b}
+      KOGWISTAR_MAINTENANCE_BASE_URL: ${KOGWISTAR_MAINTENANCE_BASE_URL:-http://host.docker.internal:11434}
+      POSTGRES_DB: ${POSTGRES_DB:-llm_wiki}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_wiki}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}
+    command:
+      - llm-wiki
+      - --data-dir
+      - /var/lib/llm-wiki
+      - --backend
+      - postgres
+      - workbench
+      - --workspace
+      - ${LLM_WIKI_WORKSPACE:-default}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+    volumes:
+      - app_data:/var/lib/llm-wiki
+    ports:
+      - "127.0.0.1:${LLM_WIKI_REST_PORT:-8765}:8765"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *app_environment
+    command:
+      - llm-wiki
+      - --data-dir
+      - /var/lib/llm-wiki
+      - --backend
+      - postgres
+      - mcp
+      - --workspace
+      - ${LLM_WIKI_WORKSPACE:-default}
+      - --transport
+      - streamable-http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8780"
+      - --path
+      - /mcp
+    volumes:
+      - app_data:/var/lib/llm-wiki
+    ports:
+      - "127.0.0.1:${LLM_WIKI_MCP_PORT:-8780}:8780"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8780), 3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  app_data:

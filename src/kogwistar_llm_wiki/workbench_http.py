@@ -27,6 +27,8 @@ def build_workbench_handler(
                 if parsed.path in {"/.well-known/agent.json", "/.well-known/agent-card.json", "/a2a/.well-known/agent-card"}:
                     self._require_agent_api()
                     body = _agent_card()
+                elif parsed.path == "/healthz":
+                    body = {"ok": True, "service": "kogwistar-llm-wiki", "workspace_id": _first(query, "workspace_id", "default")}
                 elif parsed.path.startswith("/a2a/v1/tasks/"):
                     self._require_agent_api()
                     workspace_id = _first(query, "workspace_id", "default")

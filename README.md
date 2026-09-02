@@ -106,6 +106,11 @@ support with `pip install -e ".[agent,otel]"`.
 To try the iterative layerwise parser path, add `--parser-lane workflow_layered`
 to the same command and keep the same provider/model settings.
 
+For isolated REST and MCP serving in containers, see
+[`doc/docker_deployment.md`](doc/docker_deployment.md). The Compose stack runs
+separate REST and MCP containers against Postgres/pgvector with persistent
+named volumes and workspace isolation.
+
 If you use VS Code, the launch presets already read `.env` and only prompt for
 the parser lane:
 - `Demo: Ollama (gemma4:e2b)`

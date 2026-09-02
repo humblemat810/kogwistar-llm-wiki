@@ -70,6 +70,25 @@ def test_workbench_http_serves_lens_contract_without_core_changes():
         engines.close()
 
 
+def test_workbench_http_exposes_container_health_endpoint():
+    engines = build_in_memory_namespace_engines()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(WorkbenchApi(IngestPipeline(engines))))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/healthz?workspace_id=container-test")
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload == {"ok": True, "service": "kogwistar-llm-wiki", "workspace_id": "container-test"}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        engines.close()
+
+
 def test_workbench_http_runs_codex_turn_as_durable_background_interaction():
     engines = build_in_memory_namespace_engines()
     api = WorkbenchApi(

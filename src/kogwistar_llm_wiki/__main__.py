@@ -587,8 +587,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--dsn",
-        default=None,
-        help="PostgreSQL DSN for --backend postgres",
+        default=os.environ.get("KOGWISTAR_POSTGRES_DSN"),
+        help="PostgreSQL DSN for --backend postgres (or KOGWISTAR_POSTGRES_DSN)",
     )
     parser.add_argument(
         "--split-derived-knowledge",
