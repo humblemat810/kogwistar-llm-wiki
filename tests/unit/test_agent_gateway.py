@@ -5,12 +5,18 @@ from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from threading import Thread
 
+import pytest
+
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
+from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
 from kogwistar_llm_wiki.workbench_http import build_workbench_handler
 
 
 class FakeApi:
     dispatcher = None
+
+    def readiness(self):
+        return {"ready": True, "service": "kogwistar-llm-wiki", "checks": {"fake": "open"}}
 
     def ask(self, payload):
         return {
@@ -59,6 +65,80 @@ def test_agent_protocol_routes_are_opt_in(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_public_discovery_and_readiness_endpoints(monkeypatch):
+    monkeypatch.delenv("LLM_WIKI_AGENT_API_ENABLED", raising=False)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        for path in ("/healthz", "/readyz", "/api/capabilities", "/v1/models"):
+            connection.request("GET", path)
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            assert response.status == 200
+            assert payload
+        connection.request("GET", "/api/capabilities")
+        capabilities = json.loads(connection.getresponse().read())
+        assert capabilities["api_version"] == "v1"
+        assert capabilities["protocols"]["mcp"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_agent_routes_require_bearer_token_and_scope(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
+    monkeypatch.setenv("LLM_WIKI_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN", "secret")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN_SCOPES", "read")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/mcp/tools/list")
+        unauthorized = connection.getresponse()
+        assert unauthorized.status == 401
+        unauthorized.read()
+
+        connection.request("GET", "/mcp/tools/list", headers={"Authorization": "Bearer secret"})
+        authorized = connection.getresponse()
+        assert authorized.status == 200
+        authorized.read()
+
+        body = json.dumps({"name": "llm_wiki.search", "arguments": {"workspace_id": "w", "query_text": "q"}}).encode()
+        connection.request(
+            "POST",
+            "/mcp/tools/call",
+            body=body,
+            headers={"Authorization": "Bearer secret", "content-type": "application/json", "content-length": str(len(body))},
+        )
+        forbidden = connection.getresponse()
+        assert forbidden.status == 403
+        forbidden.read()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_native_mcp_requires_configured_token_when_requested(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
+    monkeypatch.delenv("LLM_WIKI_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("LLM_WIKI_API_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="no token is configured"):
+        build_agent_mcp(AgentGateway(FakeApi()))
+
+
+def test_native_mcp_accepts_explicit_token(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "secret")
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+    assert mcp.auth is not None
 
 
 def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):

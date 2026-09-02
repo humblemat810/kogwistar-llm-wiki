@@ -59,6 +59,29 @@ class WorkbenchApi:
             )
             self.dispatcher = CodexWorkbenchDispatcher(worker, worker_count=codex_worker_count)
 
+    def readiness(self) -> dict[str, object]:
+        """Check that owned engines are open and SQL backends accept a probe."""
+        engines = self.pipeline.engines
+        if getattr(engines, "_closed", False):
+            return {"ready": False, "service": "kogwistar-llm-wiki", "reason": "engines_closed"}
+        checks: dict[str, str] = {}
+        try:
+            for name in ("conversation", "workflow", "kg", "wisdom", "derived_knowledge"):
+                engine = getattr(engines, name, None)
+                if engine is None:
+                    continue
+                backend = getattr(engine, "backend", None)
+                sql_engine = getattr(backend, "engine", None)
+                if sql_engine is not None and hasattr(sql_engine, "connect"):
+                    with sql_engine.connect() as connection:
+                        connection.exec_driver_sql("SELECT 1")
+                    checks[name] = "ok"
+                else:
+                    checks[name] = "open"
+        except Exception as exc:  # noqa: BLE001
+            return {"ready": False, "service": "kogwistar-llm-wiki", "checks": checks, "reason": str(exc)}
+        return {"ready": True, "service": "kogwistar-llm-wiki", "checks": checks}
+
     def get_lens(self, payload: Mapping[str, Any]) -> dict[str, object]:
         request = _lens_request(payload)
         return self.pipeline.resolve_semantic_lens(request).to_dict()

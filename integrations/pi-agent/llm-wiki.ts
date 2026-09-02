@@ -7,11 +7,15 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const BASE_URL = (process.env.LLM_WIKI_BASE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 const WORKSPACE = process.env.LLM_WIKI_WORKSPACE ?? "default";
+const TOKEN = process.env.LLM_WIKI_API_TOKEN;
 
 async function callTool(name: string, arguments_: Record<string, unknown>, signal?: AbortSignal) {
   const response = await fetch(`${BASE_URL}/mcp/tools/call`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}),
+    },
     body: JSON.stringify({ name, arguments: arguments_ }),
     signal,
   });

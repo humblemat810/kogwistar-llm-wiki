@@ -4,11 +4,14 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from kogwistar_llm_wiki.codex_workbench_agent import (
     CodexCliCockpitResponder,
     CodexCliResponder,
     CodexCliSettings,
     CodexProcessRunner,
+    HostCockpitResponder,
     _cockpit_transport_schema,
     _strict_output_schema,
 )
@@ -200,6 +203,18 @@ def test_real_cockpit_transport_avoids_open_patch_maps():
     assert schema["additionalProperties"] is False
     assert "patch" not in schema["properties"]
     assert schema["properties"]["patch_json"]["anyOf"][-1] == {"type": "null"}
+
+
+def test_host_cockpit_responder_requires_allowlisted_endpoint():
+    HostCockpitResponder(
+        "http://host.docker.internal:9000/cockpit",
+        allowed_hosts=["host.docker.internal"],
+    )
+    with pytest.raises(ValueError, match="ALLOWED_HOSTS"):
+        HostCockpitResponder(
+            "http://unexpected.example/cockpit",
+            allowed_hosts=["host.docker.internal"],
+        )
 
 
 def _snapshot() -> SemanticLensSnapshot:

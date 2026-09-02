@@ -47,7 +47,7 @@ from .workbench_background import (
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
-from .codex_workbench_agent import CodexCliCockpitResponder, CodexCliResponder, CodexCliSettings
+from .codex_workbench_agent import CodexCliCockpitResponder, CodexCliResponder, CodexCliSettings, HostCockpitResponder
 from .graph_seed_bundle import (
     GraphSeedBundle,
     SeedBundleResult,
@@ -112,6 +112,7 @@ __all__ = [
     "CodexCliResponder",
     "CodexCliCockpitResponder",
     "CodexCliSettings",
+    "HostCockpitResponder",
     "GraphSeedBundle",
     "SeedBundleResult",
     "dump_seed_bundle",

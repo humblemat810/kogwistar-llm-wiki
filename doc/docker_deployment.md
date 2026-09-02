@@ -19,11 +19,21 @@ The default development endpoints are bound to loopback:
 - REST/workbench: `http://127.0.0.1:8765`
 - MCP Streamable HTTP: `http://127.0.0.1:8780/mcp`
 - REST health: `http://127.0.0.1:8765/healthz`
+- REST readiness: `http://127.0.0.1:8765/readyz`
+- API capabilities: `http://127.0.0.1:8765/api/capabilities`
 
 REST agent protocol routes are disabled by default. Enable them explicitly for
-local use with `LLM_WIKI_AGENT_API_ENABLED=true`. For any non-local bind or
-production deployment, put authentication, TLS, rate limiting, and network
-policy in front of both services.
+local use with `LLM_WIKI_AGENT_API_ENABLED=true`. Bearer authentication is
+available through `LLM_WIKI_API_TOKEN` and `LLM_WIKI_AUTH_REQUIRED=true`;
+configure token scopes with `LLM_WIKI_API_TOKEN_SCOPES=read,write` or `admin`.
+The native MCP transport has its own equivalent boundary: set
+`LLM_WIKI_MCP_AUTH_REQUIRED=true` and `LLM_WIKI_MCP_TOKEN`. If the MCP token is
+omitted, it falls back to `LLM_WIKI_API_TOKEN`; `LLM_WIKI_MCP_TOKEN_SCOPES`
+falls back to `LLM_WIKI_API_TOKEN_SCOPES`. Static tokens are intended for local
+or private development deployments; use a terminating proxy or an OAuth-aware
+FastMCP provider for production identity management.
+For any non-local bind or production deployment, require authentication, TLS,
+rate limiting, and network policy in front of both services.
 
 ## Isolation
 
@@ -51,6 +61,16 @@ or `.env`. For Ollama on the host, the default URL uses
 `host.docker.internal`. For Azure/OpenAI, set the corresponding provider,
 model, endpoint, and API-key environment variables without putting secrets in
 the image.
+
+## Host Cockpit Callback
+
+The container does not include Codex or Claude Code. To let a host-side agent
+drive Codex cockpit turns, set `LLM_WIKI_COCKPIT_CALLBACK_URL` and explicitly
+allow its hostname with `LLM_WIKI_COCKPIT_CALLBACK_ALLOWED_HOSTS`. The callback
+receives only the bounded cockpit request, current lens snapshot, and prior
+observations. It must return a validated cockpit action. Set
+`LLM_WIKI_COCKPIT_CALLBACK_TOKEN` when the host endpoint authenticates callers.
+Keep this callback on the local host or a trusted private network.
 
 ## Direct Image Usage
 

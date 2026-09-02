@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import secrets
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -12,6 +13,9 @@ import os
 from .agent_gateway import AgentGateway
 from .workbench_api import WorkbenchApi
 
+API_VERSION = "v1"
+CAPABILITIES_SCHEMA_VERSION = "1"
+
 
 def build_workbench_handler(
     api: WorkbenchApi,
@@ -19,6 +23,9 @@ def build_workbench_handler(
 ) -> type[BaseHTTPRequestHandler]:
     gateway = gateway or AgentGateway(api)
     agent_api_enabled = os.getenv("LLM_WIKI_AGENT_API_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+    api_token = os.getenv("LLM_WIKI_API_TOKEN", "").strip()
+    auth_required = os.getenv("LLM_WIKI_AUTH_REQUIRED", "").lower() in {"1", "true", "yes", "on"}
+    configured_scopes = frozenset(filter(None, (item.strip() for item in os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write").split(","))))
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
@@ -29,8 +36,16 @@ def build_workbench_handler(
                     body = _agent_card()
                 elif parsed.path == "/healthz":
                     body = {"ok": True, "service": "kogwistar-llm-wiki", "workspace_id": _first(query, "workspace_id", "default")}
+                elif parsed.path == "/readyz":
+                    body = api.readiness()
+                    if not body.get("ready"):
+                        self._write_json(body, status=503)
+                        return
+                elif parsed.path in {"/api/capabilities", "/v1/models"}:
+                    body = _capabilities() if parsed.path == "/api/capabilities" else _models()
                 elif parsed.path.startswith("/a2a/v1/tasks/"):
                     self._require_agent_api()
+                    self._require_scope("read")
                     workspace_id = _first(query, "workspace_id", "default")
                     task_id = parsed.path.rsplit("/", 1)[-1]
                     body = gateway.a2a_task(workspace_id=workspace_id, task_id=task_id)
@@ -39,8 +54,10 @@ def build_workbench_handler(
                         return
                 elif parsed.path == "/mcp/tools/list":
                     self._require_agent_api()
+                    self._require_scope("read")
                     body = {"tools": [{"name": name, "description": _mcp_description(name)} for name in gateway.mcp_tool_names()]}
                 elif parsed.path == "/api/lens":
+                    self._require_scope("read")
                     payload = {
                         "workspace_id": _first(query, "workspace_id", "rl-fixture"),
                         "query_text": _first(query, "query", ""),
@@ -53,12 +70,14 @@ def build_workbench_handler(
                     }
                     body = api.get_lens(payload)
                 elif parsed.path == "/api/history":
+                    self._require_scope("read")
                     body = api.get_history(
                         workspace_id=_first(query, "workspace_id", "rl-fixture"),
                         session_id=_first(query, "session_id", "") or None,
                         limit=int(_first(query, "limit", "100")),
                     )
                 elif parsed.path == "/api/interactions":
+                    self._require_scope("read")
                     workspace_id = _first(query, "workspace_id", "")
                     interaction_id = _first(query, "interaction_id", "")
                     if not workspace_id or not interaction_id:
@@ -89,6 +108,11 @@ def build_workbench_handler(
             try:
                 if parsed.path in agent_paths:
                     self._require_agent_api()
+                    self._require_scope("write" if parsed.path in {"/mcp/tools/call", "/a2a/v1/message:send", "/a2a/v1/message:stream"} else "read")
+                elif parsed.path in {"/api/ask", "/api/proposal/validate"}:
+                    self._require_scope("read")
+                else:
+                    self._require_scope("write")
                 size = int(self.headers.get("content-length", "0"))
                 payload = json.loads(self.rfile.read(size))
                 if parsed.path == "/v1/responses":
@@ -138,6 +162,18 @@ def build_workbench_handler(
         def _require_agent_api(self) -> None:
             if not agent_api_enabled:
                 self._write_json({"error": "agent_api_disabled", "detail": "Set LLM_WIKI_AGENT_API_ENABLED=true to enable agent protocol routes"}, status=404)
+                raise _RouteHandled
+
+        def _require_scope(self, scope: str) -> None:
+            if not auth_required and not api_token:
+                return
+            authorization = self.headers.get("authorization", "")
+            supplied = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+            if not api_token or not supplied or not secrets.compare_digest(supplied, api_token):
+                self._write_json({"error": "unauthorized"}, status=401)
+                raise _RouteHandled
+            if scope not in configured_scopes and "admin" not in configured_scopes:
+                self._write_json({"error": "forbidden", "required_scope": scope}, status=403)
                 raise _RouteHandled
 
         def _write_json(self, body: object, *, status: int = 200) -> None:
@@ -242,12 +278,27 @@ def _agent_card() -> dict[str, object]:
     return {
         "name": "llm-wiki",
         "description": "Grounded knowledge-graph investigation and explicit proposal workflow",
-        "version": "1",
+        "version": API_VERSION,
         "url": "/a2a/v1/message:send",
         "capabilities": {"streaming": True, "pushNotifications": False},
         "defaultInputModes": ["text"],
         "defaultOutputModes": ["text", "application/json"],
     }
+
+
+def _capabilities() -> dict[str, object]:
+    return {
+        "service": "kogwistar-llm-wiki",
+        "api_version": API_VERSION,
+        "schema_version": CAPABILITIES_SCHEMA_VERSION,
+        "protocols": {"rest": True, "openai_responses": True, "openai_chat": True, "a2a": True, "mcp": True},
+        "modes": ["deterministic", "codex"],
+        "mutation_policy": "validate_then_explicit_confirm",
+    }
+
+
+def _models() -> dict[str, object]:
+    return {"object": "list", "data": [{"id": "llm-wiki-deterministic", "object": "model", "owned_by": "kogwistar-llm-wiki"}]}
 
 
 def _mcp_description(name: str) -> str:

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "llm-wiki": {
+      "url": "http://127.0.0.1:8780/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LLM_WIKI_API_TOKEN}"
+      },
+      "timeout": 120
+    }
+  }
+}

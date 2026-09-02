@@ -16,6 +16,8 @@ import time
 from collections.abc import Callable, Sequence
 from collections import deque
 from typing import Mapping, Protocol
+from urllib.parse import urlparse
+from urllib import request as urllib_request
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -264,6 +266,65 @@ class CodexCliCockpitResponder:
         raise RuntimeError(f"Codex returned an invalid cockpit action after repair: {validation_error}") from validation_error
 
 
+class HostCockpitResponder:
+    """Delegate one bounded cockpit action to an explicitly allowlisted host."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        allowed_hosts: Sequence[str],
+        token: str | None = None,
+        timeout_seconds: float = 300.0,
+        trace_line: LineSink | None = None,
+    ) -> None:
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("cockpit callback URL must use http or https and include a host")
+        if parsed.username or parsed.password or parsed.fragment:
+            raise ValueError("cockpit callback URL must not contain credentials or a fragment")
+        permitted = {host.strip().lower() for host in allowed_hosts if host.strip()}
+        if parsed.hostname.lower() not in permitted:
+            raise ValueError("cockpit callback host is not in LLM_WIKI_COCKPIT_CALLBACK_ALLOWED_HOSTS")
+        self.endpoint = endpoint
+        self.token = token
+        self.timeout_seconds = timeout_seconds
+        self.trace_line = trace_line
+
+    def __call__(
+        self,
+        request: SemanticLensRequest,
+        snapshot: SemanticLensSnapshot,
+        observations: tuple[CockpitObservation, ...],
+        progress: ProgressCallback | None = None,
+    ) -> CockpitAction:
+        if progress is not None:
+            progress()
+        payload = {
+            "request": request.model_dump(mode="json"),
+            "snapshot": snapshot.to_dict(),
+            "observations": [item.model_dump(mode="json") for item in observations],
+        }
+        headers = {"content-type": "application/json"}
+        if self.token:
+            headers["authorization"] = f"Bearer {self.token}"
+        http_request = urllib_request.Request(
+            self.endpoint,
+            data=json.dumps(payload, sort_keys=True).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urllib_request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        try:
+            action = body.get("action", body) if isinstance(body, dict) else body
+            return CockpitAction.model_validate(action)
+        except (TypeError, ValueError) as exc:
+            if self.trace_line is not None:
+                self.trace_line(f"host_cockpit_action_validation_failed error={exc}")
+            raise RuntimeError(f"host cockpit returned an invalid action: {exc}") from exc
+
+
 def _resolve_codex_executable(explicit: str | None) -> str:
     configured = explicit or os.environ.get("KOGWISTAR_CODEX_EXECUTABLE")
     executable = configured or shutil.which("codex")
@@ -399,4 +460,4 @@ def _strict_output_schema(schema: Mapping[str, object]) -> dict[str, object]:
     return normalized
 
 
-__all__ = ["CodexCliCockpitResponder", "CodexCliResponder", "CodexCliSettings", "CodexProcessRunner"]
+__all__ = ["CodexCliCockpitResponder", "CodexCliResponder", "CodexCliSettings", "CodexProcessRunner", "HostCockpitResponder"]

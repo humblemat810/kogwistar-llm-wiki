@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import os
 
 from .agent_gateway import AgentGateway
 
@@ -10,10 +11,38 @@ from .agent_gateway import AgentGateway
 def build_agent_mcp(gateway: AgentGateway) -> Any:
     try:
         from fastmcp import FastMCP
+        from fastmcp.server.auth import StaticTokenVerifier
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Install the optional 'agent' extra to serve MCP: pip install -e '.[agent]'") from exc
 
-    mcp = FastMCP("llm-wiki")
+    token = os.getenv("LLM_WIKI_MCP_TOKEN", os.getenv("LLM_WIKI_API_TOKEN", "")).strip()
+    auth_required = os.getenv("LLM_WIKI_MCP_AUTH_REQUIRED", os.getenv("LLM_WIKI_AUTH_REQUIRED", "")).lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if auth_required and not token:
+        raise RuntimeError(
+            "MCP authentication is required but no token is configured; "
+            "set LLM_WIKI_MCP_TOKEN or LLM_WIKI_API_TOKEN"
+        )
+    auth = None
+    if token:
+        scopes = [
+            item.strip()
+            for item in os.getenv("LLM_WIKI_MCP_TOKEN_SCOPES", os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write")).split(",")
+            if item.strip()
+        ]
+        auth = StaticTokenVerifier(
+            {
+                token: {
+                    "client_id": "llm-wiki-mcp-client",
+                    "scopes": scopes,
+                }
+            }
+        )
+    mcp = FastMCP("llm-wiki", auth=auth)
 
     @mcp.tool(name="llm_wiki.ask")
     def ask(workspace_id: str, query_text: str, session_id: str = "default", mode: str = "deterministic") -> dict[str, object]:

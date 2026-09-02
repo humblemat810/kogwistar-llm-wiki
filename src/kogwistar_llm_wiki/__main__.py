@@ -403,7 +403,7 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
 
 
 def _cmd_workbench(args: argparse.Namespace) -> None:
-    from kogwistar_llm_wiki.codex_workbench_agent import CodexCliCockpitResponder, CodexCliSettings
+    from kogwistar_llm_wiki.codex_workbench_agent import CodexCliCockpitResponder, CodexCliSettings, HostCockpitResponder
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.workbench_api import WorkbenchApi
     from kogwistar_llm_wiki.workbench_http import serve_workbench
@@ -416,15 +416,30 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
         split_derived_knowledge=args.split_derived_knowledge,
         **_conversation_persistence_kwargs(args),
     )
-    responder = CodexCliCockpitResponder(
-        CodexCliSettings(
-            executable=args.codex_executable,
-            model=args.codex_model,
-            profile=args.codex_profile,
-            timeout_seconds=args.codex_timeout,
-        ),
-        trace_line=lambda line: logger.info("workbench_codex_trace %s", line),
-    )
+    trace_line = lambda line: logger.info("workbench_cockpit_trace %s", line)
+    callback_url = os.environ.get("LLM_WIKI_COCKPIT_CALLBACK_URL", "").strip()
+    if callback_url:
+        allowed_hosts = os.environ.get(
+            "LLM_WIKI_COCKPIT_CALLBACK_ALLOWED_HOSTS",
+            "host.docker.internal,localhost,127.0.0.1",
+        ).split(",")
+        responder = HostCockpitResponder(
+            callback_url,
+            allowed_hosts=allowed_hosts,
+            token=os.environ.get("LLM_WIKI_COCKPIT_CALLBACK_TOKEN"),
+            timeout_seconds=max(1.0, float(os.environ.get("LLM_WIKI_COCKPIT_CALLBACK_TIMEOUT_SECONDS", args.codex_timeout))),
+            trace_line=trace_line,
+        )
+    else:
+        responder = CodexCliCockpitResponder(
+            CodexCliSettings(
+                executable=args.codex_executable,
+                model=args.codex_model,
+                profile=args.codex_profile,
+                timeout_seconds=args.codex_timeout,
+            ),
+            trace_line=trace_line,
+        )
     api = WorkbenchApi(
         IngestPipeline(engines, **_conversation_persistence_kwargs(args)),
         cockpit_responder=responder,
