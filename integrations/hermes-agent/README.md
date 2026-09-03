@@ -15,3 +15,10 @@ HTTP agent flag is needed for this integration. For HTTP MCP, start
 `url` instead; `mcp-http.json` is a starting configuration. Set
 `LLM_WIKI_API_TOKEN` when the remote server requires bearer authentication.
 Keep shared deployments behind authentication.
+
+The server exposes the semantic tools `query`, `search`, `ingest`, `source`,
+`reingest`, `maintain`, `status`, `hypergraph_search`, `history`, `propose`,
+and `confirm`. Use `query`/`search` for grounded reads, `ingest`/`source`/
+`reingest` for source lifecycle, `maintain` for directed background work, and
+`propose` followed by explicit `confirm` for durable changes. Internal queue,
+database, worker, and direct graph-write operations are not exposed.

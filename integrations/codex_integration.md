@@ -16,3 +16,9 @@ configuration. For a host-driven cockpit, configure the container with
 `LLM_WIKI_COCKPIT_CALLBACK_ALLOWED_HOSTS`. The callback receives a bounded
 request, semantic-lens snapshot, and prior observations, and returns a
 validated cockpit action. Graph mutations remain behind explicit confirmation.
+
+The semantic MCP tools are `query`, `search`, `ingest`, `source`, `reingest`,
+`maintain`, `status`, `hypergraph_search`, `history`, `propose`, and `confirm`.
+Use `propose` followed by explicit `confirm`; there is no direct graph-write
+tool. Configure `LLM_WIKI_MCP_TOKEN` and `LLM_WIKI_MCP_TOKEN_SCOPES` for the
+remote MCP transport.

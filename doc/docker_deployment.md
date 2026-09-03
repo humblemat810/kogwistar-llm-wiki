@@ -35,6 +35,18 @@ FastMCP provider for production identity management.
 For any non-local bind or production deployment, require authentication, TLS,
 rate limiting, and network policy in front of both services.
 
+Agent source fetching is disabled unless the host is explicitly allowlisted:
+set `LLM_WIKI_SOURCE_FETCH_ALLOWED_HOSTS=docs.example.test` and optionally
+adjust `LLM_WIKI_SOURCE_FETCH_MAX_BYTES` and
+`LLM_WIKI_SOURCE_FETCH_TIMEOUT_SECONDS`. The MCP boundary accepts only
+HTTP(S) URLs for fetching and never accepts local filesystem paths.
+
+The semantic MCP tools are `query`, `search`, `ingest`, `source`, `reingest`,
+`maintain`, `status`, `hypergraph_search`, `history`, `propose`, and `confirm`.
+Read-only tools use `read` scope; source capture, maintenance, and proposal
+application use `write` scope. Internal queues, workers, databases, and direct
+graph writes are intentionally not exposed.
+
 ## Isolation
 
 Use a distinct Compose project and workspace for an isolated experiment:

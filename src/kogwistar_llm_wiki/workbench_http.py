@@ -15,6 +15,9 @@ from .workbench_api import WorkbenchApi
 
 API_VERSION = "v1"
 CAPABILITIES_SCHEMA_VERSION = "1"
+MCP_READ_TOOLS = frozenset({
+    "query", "search", "source", "status", "hypergraph_search", "history",
+})
 
 
 def build_workbench_handler(
@@ -33,7 +36,7 @@ def build_workbench_handler(
             try:
                 if parsed.path in {"/.well-known/agent.json", "/.well-known/agent-card.json", "/a2a/.well-known/agent-card"}:
                     self._require_agent_api()
-                    body = _agent_card()
+                    body = _agent_card(gateway.mcp_tool_names())
                 elif parsed.path == "/healthz":
                     body = {"ok": True, "service": "kogwistar-llm-wiki", "workspace_id": _first(query, "workspace_id", "default")}
                 elif parsed.path == "/readyz":
@@ -42,7 +45,7 @@ def build_workbench_handler(
                         self._write_json(body, status=503)
                         return
                 elif parsed.path in {"/api/capabilities", "/v1/models"}:
-                    body = _capabilities() if parsed.path == "/api/capabilities" else _models()
+                    body = _capabilities(gateway.mcp_tool_names()) if parsed.path == "/api/capabilities" else _models()
                 elif parsed.path.startswith("/a2a/v1/tasks/"):
                     self._require_agent_api()
                     self._require_scope("read")
@@ -55,7 +58,8 @@ def build_workbench_handler(
                 elif parsed.path == "/mcp/tools/list":
                     self._require_agent_api()
                     self._require_scope("read")
-                    body = {"tools": [{"name": name, "description": _mcp_description(name)} for name in gateway.mcp_tool_names()]}
+                    descriptions = gateway.mcp_tool_descriptions()
+                    body = {"tools": [{"name": name, "description": descriptions[name]} for name in gateway.mcp_tool_names()]}
                 elif parsed.path == "/api/lens":
                     self._require_scope("read")
                     payload = {
@@ -108,7 +112,8 @@ def build_workbench_handler(
             try:
                 if parsed.path in agent_paths:
                     self._require_agent_api()
-                    self._require_scope("write" if parsed.path in {"/mcp/tools/call", "/a2a/v1/message:send", "/a2a/v1/message:stream"} else "read")
+                    if parsed.path != "/mcp/tools/call":
+                        self._require_scope("write" if parsed.path in {"/a2a/v1/message:send", "/a2a/v1/message:stream"} else "read")
                 elif parsed.path in {"/api/ask", "/api/proposal/validate"}:
                     self._require_scope("read")
                 else:
@@ -134,6 +139,7 @@ def build_workbench_handler(
                     arguments = payload.get("arguments") or {}
                     if not isinstance(name, str) or not isinstance(arguments, dict):
                         raise ValueError("MCP tool call requires string name and object arguments")
+                    self._require_scope("read" if name in MCP_READ_TOOLS else "write")
                     structured = gateway.call_mcp_tool(name, arguments)
                     body = {"content": [{"type": "text", "text": json.dumps(structured, sort_keys=True, default=str)}], "structuredContent": structured}
                     status = 200
@@ -274,24 +280,25 @@ def _sse_bytes(event: str, body: object) -> bytes:
     ).encode("utf-8")
 
 
-def _agent_card() -> dict[str, object]:
+def _agent_card(mcp_tools: tuple[str, ...]) -> dict[str, object]:
     return {
         "name": "llm-wiki",
-        "description": "Grounded knowledge-graph investigation and explicit proposal workflow",
+        "description": "Grounded knowledge management with explicit proposal workflow",
         "version": API_VERSION,
         "url": "/a2a/v1/message:send",
-        "capabilities": {"streaming": True, "pushNotifications": False},
+        "capabilities": {"streaming": True, "pushNotifications": False, "mcp_tools": list(mcp_tools)},
         "defaultInputModes": ["text"],
         "defaultOutputModes": ["text", "application/json"],
     }
 
 
-def _capabilities() -> dict[str, object]:
+def _capabilities(mcp_tools: tuple[str, ...]) -> dict[str, object]:
     return {
         "service": "kogwistar-llm-wiki",
         "api_version": API_VERSION,
         "schema_version": CAPABILITIES_SCHEMA_VERSION,
         "protocols": {"rest": True, "openai_responses": True, "openai_chat": True, "a2a": True, "mcp": True},
+        "mcp_tools": list(mcp_tools),
         "modes": ["deterministic", "codex"],
         "mutation_policy": "validate_then_explicit_confirm",
     }
@@ -299,16 +306,6 @@ def _capabilities() -> dict[str, object]:
 
 def _models() -> dict[str, object]:
     return {"object": "list", "data": [{"id": "llm-wiki-deterministic", "object": "model", "owned_by": "kogwistar-llm-wiki"}]}
-
-
-def _mcp_description(name: str) -> str:
-    return {
-        "llm_wiki.ask": "Ask a grounded question; returns answer, lens, citations, and optional proposal.",
-        "llm_wiki.search": "Build a bounded grounded graph lens for a query.",
-        "llm_wiki.history": "Read queryable investigation history.",
-        "llm_wiki.propose": "Validate a proposed edit without applying it.",
-        "llm_wiki.confirm": "Apply a previously validated explicit proposal.",
-    }[name]
 
 
 __all__ = ["build_workbench_handler", "serve_workbench"]

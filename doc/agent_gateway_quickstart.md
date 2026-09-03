@@ -72,6 +72,10 @@ valid outcome.
 | MCP bridge | `GET /mcp/tools/list` | List app tools |
 | MCP bridge | `POST /mcp/tools/call` | Invoke an app tool |
 
+The MCP bridge applies `read` scope to `query`, `search`, `source`, `status`,
+`hypergraph_search`, and `history`. It applies `write` scope to `ingest`,
+`reingest`, `maintain`, `propose`, and `confirm`.
+
 The standard OpenAI `usage` field is `null` when the workbench turn has no
 provider token usage. Use llm-wiki usage projections for authoritative or
 explicitly estimated cost reporting.
@@ -126,18 +130,50 @@ second task database is created.
 
 ## MCP Tools
 
-The app-level MCP bridge exposes:
+The app-level MCP bridge and native MCP server expose exactly these semantic
+tools:
 
-- `llm_wiki.ask`: grounded question and answer.
-- `llm_wiki.search`: bounded graph lens.
-- `llm_wiki.history`: investigation history.
-- `llm_wiki.propose`: validate an edit without applying it.
-- `llm_wiki.confirm`: apply an already validated proposal explicitly.
+| Group | Tools | Meaning |
+|---|---|---|
+| Primary | `query`, `search` | Grounded answers and bounded retrieval |
+| Source | `ingest`, `source`, `reingest` | Canonical source capture and lifecycle |
+| Management | `maintain`, `status` | Directed maintenance and health/state |
+| Advanced | `hypergraph_search`, `history` | Read-only structure and prior context |
+| Controlled mutation | `propose`, `confirm` | Validate, then explicitly apply changes |
+
+`query` returns the grounded answer, citations, lens ID, source watermark, and
+an insufficiency/no-change result when appropriate. `search` returns bounded
+nodes, edges, hyperedges, grounding, and selection metadata. The advanced
+`hypergraph_search` tool is read-only and is not a graph mutation escape hatch.
+
+`ingest` accepts raw text with a stable `source_uri`, or fetches an HTTP(S)
+source when its host is explicitly listed in
+`LLM_WIKI_SOURCE_FETCH_ALLOWED_HOSTS`. Local filesystem paths are never
+accepted by the agent boundary. `source` can inspect by URI or stable source
+ID. `reingest` uses the same canonical pipeline and accepts either identity
+plus replacement text or an allowlisted URI fetch.
+
+Ingestion provenance is explicit: `required` rejects missing provenance,
+`optional` validates supplied provenance but allows source capture without it,
+and `disabled` removes the requirement without fabricating evidence. Supplied
+workspace, URI, span, and excerpt fields must agree with the request and raw
+text. User-provided text without provenance remains user/source input rather
+than silently becoming external authoritative evidence.
+
+`maintain` is asynchronous and returns durable job IDs. Its optional budgets
+are `max_time_seconds`, `max_llm_calls`, `max_tokens`, `max_cost_usd`, and
+`max_steps`; the worker persists these with the request and carries cumulative
+usage across fair-scheduling requeues. `status` reports readiness separately
+from an empty knowledge result and includes source and maintenance state.
 
 The `confirm` tool is a mutation boundary. Never call it merely because an
 LLM suggested an edit. First validate the proposal, show or review the result,
 then send an explicit confirmation using the same interaction and proposal.
 A valid answer may propose no changes.
+
+The MCP surface intentionally hides raw queue administration, worker control,
+database access, migrations, projection controls, debug operations, arbitrary
+graph writes, and internal daemon mechanics.
 
 For a native MCP client such as Hermes, use the full FastMCP server instead of
 the lightweight REST bridge:
@@ -155,6 +191,11 @@ llm-wiki --data-dir .\data --backend chroma mcp --workspace demo `
 
 The REST bridge is at `/mcp/tools/*`; the native MCP server is the compatible
 protocol surface for MCP clients.
+
+For remote native MCP, configure `LLM_WIKI_MCP_AUTH_REQUIRED=true`,
+`LLM_WIKI_MCP_TOKEN`, and optionally `LLM_WIKI_MCP_TOKEN_SCOPES`. Static tokens
+are suitable for local/private development; use a trusted OAuth-aware provider
+or proxy for production identity and authorization.
 
 ## Grounding And Ownership
 

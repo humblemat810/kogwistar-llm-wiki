@@ -29,7 +29,13 @@ project `.mcp.json` shape is:
 }
 ```
 
-Use the `llm_wiki.ask` and `llm_wiki.search` tools for grounded reads. Treat
-`llm_wiki.propose` as a review operation and call `llm_wiki.confirm` only after
+Use the `query` and `search` tools for grounded reads. Treat
+`propose` as a review operation and call `confirm` only after
 the user explicitly approves the proposal. A proposal may validly contain no
 changes.
+
+Use `ingest`, `source`, and `reingest` for canonical source lifecycle; use
+`maintain` for directed asynchronous knowledge management and `status` for
+health/state. Use `hypergraph_search` only for bounded structural inspection
+and `history` for prior interaction context. The server rejects unallowlisted
+URI fetches and enforces its configured provenance policy.

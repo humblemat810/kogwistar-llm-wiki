@@ -705,6 +705,8 @@ class IngestPipeline:
             "promotion_mode": request.promotion_mode,
             "llm_provider": request.llm_provider,
             "llm_model": request.llm_model,
+            "provenance_policy": request.provenance_policy,
+            "provenance": _metadata_digest_value(dict(request.provenance or {})),
         }
         source_document = Document(
             id=source_document_id,
@@ -739,6 +741,15 @@ class IngestPipeline:
                 "source_revision_id": revision.revision_id,
                 "source_digest": revision.source_digest,
                 "revision_status": "current",
+                "source_raw_text": request.raw_text,
+                "source_format": request.source_format,
+                "operation_mode": self._operation_mode(request),
+                "parser_lane": request.parser_lane,
+                "promotion_mode": request.promotion_mode,
+                "llm_provider": request.llm_provider,
+                "llm_model": request.llm_model,
+                "provenance_policy": request.provenance_policy,
+                "provenance": _metadata_digest_value(dict(request.provenance or {})),
                 "created_at_ms": now_ms(),
             },
         )
@@ -1275,6 +1286,8 @@ class IngestPipeline:
         source_document_id: str,
         namespace: str,
         maintenance_kind: str | None = None,
+        objective: str | None = None,
+        budgets: Mapping[str, object] | None = None,
     ) -> str:
         maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
         revision = self.source_revision(request=request, source_document_id=source_document_id)
@@ -1315,6 +1328,8 @@ class IngestPipeline:
                     "source_revision_id": revision.revision_id,
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
+                    "objective": objective,
+                    "budgets": _metadata_digest_value(dict(budgets or {})),
                 },
             )
             with _temporary_namespace(self.engines.conversation, namespace):
@@ -1357,6 +1372,8 @@ class IngestPipeline:
                     "source_revision_id": revision.revision_id,
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
+                    "objective": objective,
+                    "budgets": dict(budgets or {}),
                 },
                 idempotency_key=lane_idempotency_key,
             )
@@ -1387,6 +1404,8 @@ class IngestPipeline:
                 source_revision_id=revision.revision_id,
                 source_digest=revision.source_digest,
                 required_stage=required_stage,
+                objective=objective,
+                budgets=budgets,
             )
         self._trace_step(
             "create_maintenance_request_complete",
@@ -1852,6 +1871,8 @@ class IngestPipeline:
         source_revision_id: str = "",
         source_digest: str = "",
         required_stage: str = "parsed_graph_persisted",
+        objective: str | None = None,
+        budgets: Mapping[str, object] | None = None,
     ) -> str:
         payload = {
             "workspace_id": request.workspace_id,
@@ -1862,6 +1883,8 @@ class IngestPipeline:
             "source_revision_id": source_revision_id,
             "source_digest": source_digest,
             "required_stage": required_stage,
+            "objective": objective,
+            "budgets": dict(budgets or {}),
         }
         if request.operation_mode == "maintenance_first" and maintenance_kind == "document_seed_graph":
             payload.update(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -7,6 +8,7 @@ from threading import Thread
 
 import pytest
 
+from fastmcp.server.auth import AccessToken, AuthContext, run_auth_checks
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
 from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
 from kogwistar_llm_wiki.workbench_http import build_workbench_handler
@@ -50,6 +52,22 @@ def test_protocols_share_grounded_gateway_result():
     assert chat["choices"][0]["message"]["content"] == responses["output"][0]["content"][0]["text"]
 
 
+def test_gateway_dispatches_query_history_and_controlled_mutation_tools():
+    gateway = AgentGateway(FakeApi())
+    query = gateway.call_mcp_tool("query", {"workspace_id": "w", "query_text": "hello"})
+    history = gateway.call_mcp_tool("history", {"workspace_id": "w"})
+    proposal = gateway.call_mcp_tool(
+        "propose", {"request": {"workspace_id": "w", "query_text": "hello"}, "proposal": {}}
+    )
+    confirmation = gateway.call_mcp_tool(
+        "confirm", {"workspace_id": "w", "interaction_id": "i", "confirmed": False}
+    )
+    assert query["answer"]["text"] == "grounded: hello"
+    assert history["records"] == [{"id": "hist:1"}]
+    assert proposal["requires_confirmation"] is True
+    assert confirmation["status"] == "rejected"
+
+
 def test_agent_protocol_routes_are_opt_in(monkeypatch):
     monkeypatch.delenv("LLM_WIKI_AGENT_API_ENABLED", raising=False)
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
@@ -84,6 +102,10 @@ def test_public_discovery_and_readiness_endpoints(monkeypatch):
         capabilities = json.loads(connection.getresponse().read())
         assert capabilities["api_version"] == "v1"
         assert capabilities["protocols"]["mcp"] is True
+        assert capabilities["mcp_tools"] == [
+            "query", "search", "ingest", "source", "reingest", "maintain",
+            "status", "hypergraph_search", "history", "propose", "confirm",
+        ]
     finally:
         server.shutdown()
         server.server_close()
@@ -110,7 +132,18 @@ def test_agent_routes_require_bearer_token_and_scope(monkeypatch):
         assert authorized.status == 200
         authorized.read()
 
-        body = json.dumps({"name": "llm_wiki.search", "arguments": {"workspace_id": "w", "query_text": "q"}}).encode()
+        body = json.dumps({"name": "search", "arguments": {"workspace_id": "w", "query_text": "q"}}).encode()
+        connection.request(
+            "POST",
+            "/mcp/tools/call",
+            body=body,
+            headers={"Authorization": "Bearer secret", "content-type": "application/json", "content-length": str(len(body))},
+        )
+        readable = connection.getresponse()
+        assert readable.status == 200
+        readable.read()
+
+        body = json.dumps({"name": "confirm", "arguments": {"workspace_id": "w", "interaction_id": "i", "confirmed": False}}).encode()
         connection.request(
             "POST",
             "/mcp/tools/call",
@@ -141,6 +174,36 @@ def test_native_mcp_accepts_explicit_token(monkeypatch):
     assert mcp.auth is not None
 
 
+def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+    tools = asyncio.run(mcp.list_tools())
+    assert [tool.name for tool in tools] == [
+        "query", "search", "ingest", "source", "reingest", "maintain",
+        "status", "hypergraph_search", "history", "propose", "confirm",
+    ]
+    assert all(tool.description for tool in tools)
+    query = next(tool for tool in tools if tool.name == "query")
+    assert query.parameters["required"] == ["workspace_id", "query_text"]
+    reingest = next(tool for tool in tools if tool.name == "reingest")
+    assert "source_document_id" in reingest.parameters["properties"]
+
+
+def test_native_mcp_applies_read_and_write_scopes_to_tools(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "secret")
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+    # The provider-level list is intentionally unfiltered; list_tools() needs a
+    # live transport auth context and would hide every tool in this unit test.
+    tools = {tool.name: tool for tool in asyncio.run(mcp._list_tools())}
+    read_token = AccessToken(token="secret", client_id="client", scopes=["read"])
+    write_token = AccessToken(token="secret", client_id="client", scopes=["write"])
+    read_ctx = lambda name, token: AuthContext(token=token, component=tools[name])
+
+    assert asyncio.run(run_auth_checks(tools["search"].auth, read_ctx("search", read_token))) is True
+    assert asyncio.run(run_auth_checks(tools["confirm"].auth, read_ctx("confirm", read_token))) is False
+    assert asyncio.run(run_auth_checks(tools["confirm"].auth, read_ctx("confirm", write_token))) is True
+    assert asyncio.run(run_auth_checks(tools["query"].auth, read_ctx("query", write_token))) is False
+
+
 def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):
     monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
@@ -166,7 +229,10 @@ def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):
         connection.request("GET", "/mcp/tools/list")
         response = connection.getresponse()
         assert response.status == 200
-        assert {tool["name"] for tool in json.loads(response.read())["tools"]} >= {"llm_wiki.ask", "llm_wiki.confirm"}
+        assert {tool["name"] for tool in json.loads(response.read())["tools"]} == {
+            "query", "search", "ingest", "source", "reingest", "maintain",
+            "status", "hypergraph_search", "history", "propose", "confirm",
+        }
 
         encoded = json.dumps({"message": {"parts": [{"text": "hello"}]}, "workspace_id": "w", "background": False}).encode()
         connection.request("POST", "/a2a/v1/message:stream", body=encoded, headers={"content-type": "application/json", "content-length": str(len(encoded))})

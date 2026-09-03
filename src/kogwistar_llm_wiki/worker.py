@@ -14,6 +14,8 @@ from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.maintenance.models import MaintenanceTemplateResult
 from kogwistar.runtime import RunResult
+from kogwistar.runtime import budget_event_from_dict
+from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.models import RunSuccess, StepRunResult
 from kogwistar.runtime.resolvers import MappingStepResolver
 from kogwistar.runtime.runtime import StepContext, WorkflowRuntime
@@ -56,6 +58,139 @@ logger = logging.getLogger(__name__)
 def _and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
     """Compose a Chroma-compatible conjunction filter from simple metadata clauses."""
     return {"$and": [dict(clause) for clause in clauses]}
+
+
+def _persisted_budget_state(state: Mapping[str, object]) -> dict[str, object]:
+    """Keep only JSON-safe cumulative budget fields on a requeued job."""
+    allowed = {
+        "token_budget", "token_used", "step_budget", "step_used", "call_budget",
+        "call_used", "time_budget_ms", "time_used_ms", "cost_budget", "cost_used",
+        "request_token_budget", "request_step_budget", "request_call_budget",
+        "request_time_budget_ms", "request_cost_budget",
+    }
+    return {
+        key: value
+        for key, value in state.items()
+        if key in allowed and isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+
+
+def _maintenance_budget_state(
+    payload: Mapping[str, object],
+    *,
+    fair_scheduling: bool,
+    maintenance_steps_per_slice: int,
+    maintenance_llm_calls_per_slice: int,
+    maintenance_seconds_per_slice: int,
+    durable_usage: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Build the current attempt's ledger from durable request/job state.
+
+    Request limits and usage survive phase requeues. Fair-scheduling limits are
+    raised one slice at a time so they do not turn a cumulative job counter into
+    an accidental per-slice reset.
+    """
+    previous = payload.get("maintenance_budget_state")
+    state: dict[str, object] = dict(previous) if isinstance(previous, Mapping) else {}
+    budgets = payload.get("budgets")
+    budgets = budgets if isinstance(budgets, Mapping) else {}
+
+    token_limit = int(budgets.get("max_tokens") or 10_000_000)
+    call_limit = int(budgets.get("max_llm_calls") or 0)
+    step_limit = int(budgets.get("max_steps") or 0)
+    time_limit_ms = int(float(budgets.get("max_time_seconds") or 0) * 1000)
+    cost_limit = float(budgets.get("max_cost_usd") or 0.0)
+    request_limits = {
+        "request_token_budget": token_limit,
+        "request_call_budget": call_limit,
+        "request_step_budget": step_limit,
+        "request_time_budget_ms": time_limit_ms,
+        "request_cost_budget": cost_limit,
+    }
+    state.update(request_limits)
+    used = {
+        key: state.get(key, 0)
+        for key in ("token_used", "call_used", "step_used", "time_used_ms", "cost_used")
+    }
+    for key, value in (durable_usage or {}).items():
+        if key not in used or isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        used[key] = max(float(used[key] or 0), float(value))
+        state[key] = int(used[key]) if key != "cost_used" else float(used[key])
+    state["token_budget"] = token_limit
+    state["call_budget"] = call_limit
+    state["step_budget"] = step_limit
+    state["time_budget_ms"] = time_limit_ms
+    state["cost_budget"] = cost_limit
+
+    if fair_scheduling:
+        slice_limits = {
+            "step_budget": maintenance_steps_per_slice,
+            "call_budget": maintenance_llm_calls_per_slice,
+            "time_budget_ms": maintenance_seconds_per_slice * 1000,
+        }
+        request_keys = {
+            "step_budget": "request_step_budget",
+            "call_budget": "request_call_budget",
+            "time_budget_ms": "request_time_budget_ms",
+        }
+        used_keys = {
+            "step_budget": "step_used",
+            "call_budget": "call_used",
+            "time_budget_ms": "time_used_ms",
+        }
+        for limit_key, slice_limit in slice_limits.items():
+            if not slice_limit:
+                continue
+            request_limit = int(state[request_keys[limit_key]] or 0)
+            slice_cap = int(used[used_keys[limit_key]] or 0) + slice_limit
+            state[limit_key] = min(request_limit, slice_cap) if request_limit else slice_cap
+    return state
+
+
+def _durable_maintenance_usage(
+    meta: object,
+    *,
+    namespace: str,
+    maintenance_job_id: str,
+) -> dict[str, object]:
+    """Recover budget usage from authoritative events after a failed retry."""
+    iterator = getattr(meta, "iter_entity_events", None)
+    if not callable(iterator) or not maintenance_job_id:
+        return {}
+    events = []
+    try:
+        rows = iterator(namespace=namespace, from_seq=1, batch_size=500)
+        for _seq, _event_id, _entity_kind, _entity_id, payload_json in rows:
+            try:
+                payload = json.loads(payload_json)
+                attribution = payload.get("attribution")
+                if not isinstance(attribution, Mapping):
+                    continue
+                if str(attribution.get("maintenance_job_id") or "") != maintenance_job_id:
+                    continue
+                if payload.get("artifact_kind") != "usage_event":
+                    continue
+                events.append(budget_event_from_dict(payload))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+    except Exception:
+        logger.exception("Failed to recover durable usage for maintenance job %s", maintenance_job_id)
+        return {}
+    summary = summarize_budget_events(events)
+    token_used = sum(
+        float(event.amount or 0)
+        for event in events
+        if event.kind in {"debit", "token"}
+        and event.unit not in {"call", "llm_call", "step", "ms"}
+    )
+    return {
+        "token_used": int(token_used),
+        "call_used": sum(1 for event in events if event.unit in {"call", "llm_call"}),
+        "step_used": sum(int(event.amount or 0) for event in events if event.unit == "step"),
+        "time_used_ms": int(summary.get("time_ms", 0) or 0),
+        "cost_used": float(summary.get("total_cost", 0.0) or 0.0),
+    }
 
 
 class BaseWorker(ABC):
@@ -445,7 +580,12 @@ class MaintenanceWorker(BaseWorker):
             ),
         }
 
-    def _advance_maintenance_plan(self, ctx: MaintenanceJobExecutionContext) -> bool:
+    def _advance_maintenance_plan(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        *,
+        budget_state: Mapping[str, object] | None = None,
+    ) -> bool:
         """Requeue one planned phase, returning whether work remains."""
         decision = decide_next_maintenance_phase(
             ctx.payload,
@@ -463,6 +603,8 @@ class MaintenanceWorker(BaseWorker):
             )
             return False
         next_payload = dict(ctx.payload)
+        if budget_state is not None:
+            next_payload["maintenance_budget_state"] = _persisted_budget_state(budget_state)
         next_payload.update(
             {
                 "maintenance_kind": decision.next_kind,
@@ -739,18 +881,24 @@ class MaintenanceWorker(BaseWorker):
         workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         payload: dict[str, object] = dict(ctx.payload)
         import warnings
-        budget_state: dict[str, str | int] = {
-            "token_budget": 10_000_000,
-            "budget_scope": "run",
-            "budget_kind": "token",
-        }
+        durable_usage = _durable_maintenance_usage(
+            self.engines.conversation.meta_sqlite,
+            namespace=ns.usage_events,
+            maintenance_job_id=str(ctx.job_id or ctx.request_node_id),
+        )
+        budget_state = _maintenance_budget_state(
+            ctx.payload,
+            fair_scheduling=self.fair_scheduling,
+            maintenance_steps_per_slice=self.maintenance_steps_per_slice,
+            maintenance_llm_calls_per_slice=self.maintenance_llm_calls_per_slice,
+            maintenance_seconds_per_slice=self.maintenance_seconds_per_slice,
+            durable_usage=durable_usage,
+        )
         if self.fair_scheduling:
-            if self.maintenance_steps_per_slice:
-                budget_state["step_budget"] = self.maintenance_steps_per_slice
-            if self.maintenance_llm_calls_per_slice:
-                budget_state["call_budget"] = self.maintenance_llm_calls_per_slice
-            if self.maintenance_seconds_per_slice:
-                budget_state["time_budget_ms"] = self.maintenance_seconds_per_slice * 1000
+            budget_state["budget_scope"] = "maintenance_slice"
+        else:
+            budget_state["budget_scope"] = "maintenance_job"
+        budget_state.setdefault("budget_kind", "token")
         budget_ledger: StateBackedBudgetLedger = StateBackedBudgetLedger(budget_state)
         started_ms = int(time.time() * 1000)
         self._emit_trace(
@@ -764,6 +912,12 @@ class MaintenanceWorker(BaseWorker):
             step_budget=budget_state.get("step_budget", 0),
             call_budget=budget_state.get("call_budget", 0),
             time_budget_ms=budget_state.get("time_budget_ms", 0),
+            cost_budget=budget_state.get("cost_budget", 0),
+            token_used=budget_state.get("token_used", 0),
+            call_used=budget_state.get("call_used", 0),
+            step_used=budget_state.get("step_used", 0),
+            time_used_ms=budget_state.get("time_used_ms", 0),
+            cost_used=budget_state.get("cost_used", 0),
         )
         with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
             self.engines.workflow, ns.workflow_maintenance
@@ -848,7 +1002,7 @@ class MaintenanceWorker(BaseWorker):
                     terminal_success = status in {"succeeded", "completed", "success", "finished"}
                     reply_status = "completed" if terminal_success else status
                     if terminal_success and ctx.job_id:
-                        if self._advance_maintenance_plan(ctx):
+                        if self._advance_maintenance_plan(ctx, budget_state=budget_state):
                             return
                         self._emit_lane_reply(
                             workspace_id=ctx.workspace_id,
@@ -890,7 +1044,11 @@ class MaintenanceWorker(BaseWorker):
                             },
                         )
                         if ctx.job_id:
-                            self._requeue_suspended_maintenance_job(ctx, result)
+                            self._requeue_suspended_maintenance_job(
+                                ctx,
+                                result,
+                                budget_state=budget_state,
+                            )
                     elif ctx.job_id:
                         self.engines.conversation.jobs.retry_or_fail(
                             ctx.job,
@@ -957,6 +1115,8 @@ class MaintenanceWorker(BaseWorker):
         self,
         ctx: MaintenanceJobExecutionContext,
         result: RunResult,
+        *,
+        budget_state: Mapping[str, object] | None = None,
     ) -> None:
         suspended = list(
             (getattr(result, "final_state", {}) or {})
@@ -967,6 +1127,8 @@ class MaintenanceWorker(BaseWorker):
             raise RuntimeError("maintenance workflow suspended without a resumable frontier")
         next_node_id, _mask, next_token_id, _parent_token_id = suspended[0]
         next_payload = dict(ctx.payload)
+        if budget_state is not None:
+            next_payload["maintenance_budget_state"] = _persisted_budget_state(budget_state)
         next_payload.update(
             {
                 "continuation_run_id": str(getattr(result, "run_id", "")),

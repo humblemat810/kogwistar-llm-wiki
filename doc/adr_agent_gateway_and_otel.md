@@ -22,7 +22,35 @@ second accounting or graph store.
 llm-wiki exposes one app-owned `AgentGateway` over the existing `WorkbenchApi`.
 It provides OpenAI-compatible Responses and Chat Completions adapters, A2A-
 style agent card/message/task routes, and an app-level MCP tool bridge for
-ask, search, history, proposal validation, and explicit confirmation.
+the following small semantic capability surface:
+
+- Primary reads: `query`, `search`.
+- Source lifecycle: `ingest`, `source`, `reingest`.
+- Management: `maintain`, `status`.
+- Advanced reads: `hypergraph_search`, `history`.
+- Controlled mutation: `propose`, `confirm`.
+
+These names are the stable agent-facing contract. CLI commands, queue
+administration, worker control, database access, migrations, projection
+controls, debug operations, and arbitrary graph writes remain hidden.
+
+`ingest` and `reingest` always use the canonical `IngestPipeline`; MCP never
+writes graph storage directly. Source capture accepts raw text plus a stable
+URI, or an explicitly allowlisted HTTP(S) URI fetch. Local filesystem paths
+are not accepted through the agent boundary. `maintain` queues durable work
+through the existing maintenance request, lease, strategy, and worker path and
+returns job identifiers rather than exposing queue mechanics.
+
+Ingestion provenance is an explicit request policy: `required` rejects missing
+or invalid provenance, `optional` validates supplied provenance but allows
+capture without it, and `disabled` removes the requirement without inventing
+evidence. Workspace, source identity, revision/span, and excerpt checks remain
+authoritative application validation. Text without provenance is retained as
+source/user input and is not silently promoted to external evidence.
+
+`maintain` supports request budgets for time, LLM calls, tokens, cost, and
+steps. Those values are persisted in the maintenance payload and cumulative
+usage is carried across fair-scheduling phase requeues.
 
 All protocol responses include an `llm_wiki` extension containing the grounded
 answer payload, lens metadata, citations, and proposal state. Background Codex
@@ -50,6 +78,12 @@ compatible agents can use `skills/llm-wiki-knowledge/`.
 ## Invariants
 
 - Every answer is grounded in a bounded lens or explicitly reports insufficiency.
+- `hypergraph_search` is read-only and bounded; it cannot mutate graph truth.
+- Source lifecycle operations are workspace-scoped and use stable source identity.
+- MCP read tools require `read` authorization; source, maintenance, and mutation
+  tools require `write` authorization at the HTTP bridge.
+- `propose` never applies a change; only explicit `confirm` can cross the
+  mutation boundary.
 - History and graph events remain the source of truth; OTel is diagnostic.
 - Protocol adapters cannot bypass proposal validation or confirmation.
 - Deterministic and Codex cockpit modes remain distinct.

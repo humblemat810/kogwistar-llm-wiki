@@ -35,7 +35,7 @@ export default function (pi: ExtensionAPI) {
     description: "Ask llm-wiki a grounded question over a bounded graph lens. Inspect citations and proposals before acting.",
     parameters: Type.Object({ query_text: Type.String(), session_id: Type.Optional(Type.String()) }),
     async execute(_toolCallId, params, signal) {
-      return result(await callTool("llm_wiki.ask", { workspace_id: WORKSPACE, query_text: params.query_text, session_id: params.session_id ?? "pi" }, signal));
+      return result(await callTool("query", { workspace_id: WORKSPACE, query_text: params.query_text, session_id: params.session_id ?? "pi" }, signal));
     },
   });
 
@@ -45,7 +45,7 @@ export default function (pi: ExtensionAPI) {
     description: "Retrieve a bounded graph lens with nodes, edges, grounding, and selection explanations.",
     parameters: Type.Object({ query_text: Type.String(), hop_limit: Type.Optional(Type.Integer({ minimum: 0, maximum: 8 })), max_nodes: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })) }),
     async execute(_toolCallId, params, signal) {
-      return result(await callTool("llm_wiki.search", { workspace_id: WORKSPACE, query_text: params.query_text, hop_limit: params.hop_limit ?? 1, max_nodes: params.max_nodes ?? 40 }, signal));
+      return result(await callTool("search", { workspace_id: WORKSPACE, query_text: params.query_text, hop_limit: params.hop_limit ?? 1, max_nodes: params.max_nodes ?? 40 }, signal));
     },
   });
 
@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI) {
     description: "Validate a graph proposal without changing the graph. A no_change outcome is valid.",
     parameters: Type.Object({ request: Type.Record(Type.String(), Type.Unknown()), proposal: Type.Record(Type.String(), Type.Unknown()) }),
     async execute(_toolCallId, params, signal) {
-      return result(await callTool("llm_wiki.propose", params, signal));
+      return result(await callTool("propose", params, signal));
     },
   });
 
@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
     description: "Explicitly confirm one previously reviewed proposal. Never call this implicitly after an LLM suggestion.",
     parameters: Type.Object({ interaction_id: Type.String(), confirmed: Type.Boolean(), proposal: Type.Optional(Type.Record(Type.String(), Type.Unknown())) }),
     async execute(_toolCallId, params, signal) {
-      return result(await callTool("llm_wiki.confirm", { workspace_id: WORKSPACE, interaction_id: params.interaction_id, confirmed: params.confirmed, proposal: params.proposal }, signal));
+      return result(await callTool("confirm", { workspace_id: WORKSPACE, interaction_id: params.interaction_id, confirmed: params.confirmed, proposal: params.proposal }, signal));
     },
   });
 

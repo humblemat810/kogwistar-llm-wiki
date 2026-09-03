@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Literal
 
 from pydantic import BaseModel
 from pydantic_extension.model_slicing import ModeSlicingMixin, DtoType
@@ -64,6 +64,8 @@ class IngestPipelineRequest(ModeSlicingMixin, BaseModel):
     auto_accept_threshold: DtoType[float] = 0.95
     llm_provider: DtoType[str | None] = None
     llm_model: DtoType[str | None] = None
+    provenance_policy: DtoType[Literal["required", "optional", "disabled"]] = "optional"
+    provenance: DtoType[dict[str, object] | None] = None
 
 
 @dataclass(slots=True)

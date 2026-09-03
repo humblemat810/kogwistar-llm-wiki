@@ -10,5 +10,8 @@ $env:LLM_WIKI_WORKSPACE = "demo"
 pi
 ```
 
-It registers grounded ask/search/proposal/confirmation tools. Confirmation is
-explicit and must not be called without human or policy approval.
+It can use the semantic MCP surface: `query`, `search`, `ingest`, `source`,
+`reingest`, `maintain`, `status`, `hypergraph_search`, `history`, `propose`,
+and `confirm`. Confirmation is explicit and must not be called without human
+or policy approval. Source capture still uses the canonical ingestion path and
+the server's configured provenance policy.

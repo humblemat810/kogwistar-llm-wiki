@@ -1,6 +1,6 @@
 ---
 name: llm-wiki-knowledge
-description: Use llm-wiki for grounded knowledge management: query a scoped graph, inspect provenance and history, and propose only explicitly reviewed changes.
+description: Use llm-wiki for grounded knowledge management: query a scoped graph, inspect provenance and history, manage canonical sources, and propose only explicitly reviewed changes.
 ---
 
 # llm-wiki Knowledge Management
@@ -11,11 +11,13 @@ a conversation.
 
 ## Workflow
 
-1. Search or ask for a bounded knowledge lens.
-2. Inspect nodes, edges, hyperedges, grounding, source watermark, and citations.
-3. Query interaction history when the user asks what happened previously.
-4. Validate a proposed graph edit against the current lens and evidence.
-5. Apply a change only after explicit confirmation.
+1. Use `query` for a grounded answer or `search` for bounded retrieval.
+2. Use `ingest`, `source`, and `reingest` for canonical source lifecycle.
+3. Use `maintain` for directed work and `status` for health and progress.
+4. Use `hypergraph_search` for bounded structural inspection and `history` for prior context.
+5. Inspect nodes, edges, hyperedges, grounding, source watermark, and citations.
+6. Validate a proposed graph edit against the current lens and evidence.
+7. Apply a change only after explicit confirmation.
 
 `no_change` is a successful result. Never invent a node, edge, evidence ID,
 source span, revision, or confidence value. If evidence is insufficient, say
