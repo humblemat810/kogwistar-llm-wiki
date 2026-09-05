@@ -103,6 +103,13 @@ still validates Compose interpolation; it cannot validate a model's actual
 output dimension, so that dimension check remains an application startup
 check.
 
+The image also has a startup entrypoint that validates embedding configuration
+before launching the requested CLI command. Invalid settings cause the app
+container to exit with status `78`; the Postgres infrastructure container is
+independent and may still start. This gate validates declared configuration,
+not a live embedding request, so the model's actual output dimension must still
+match the declared value.
+
 ## Host Cockpit Callback
 
 The container does not include Codex or Claude Code. To let a host-side agent
