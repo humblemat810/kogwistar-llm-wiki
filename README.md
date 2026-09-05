@@ -136,6 +136,49 @@ KOGWISTAR_MAINTENANCE_MODEL=gemma4:e2b
 KOGWISTAR_MAINTENANCE_BASE_URL=http://localhost:11434
 ```
 
+### Embedding settings
+
+The llm-wiki engine builders use a small deterministic `tiny`-style embedder
+when no embedding settings are present. This is intentional for demos and
+tests. To use a real embedding model, configure the shared parser provider
+factory with `KG_DOC_EMBED_*` settings before starting the app:
+
+```bash
+KG_DOC_EMBED_PROVIDER=ollama
+KG_DOC_EMBED_MODEL=qwen3-embedding:0.6b
+KG_DOC_EMBED_BASE_URL=http://localhost:11434
+# Set this to the model's actual output dimension, especially for Postgres.
+KG_DOC_EMBED_DIMENSION=1024
+```
+
+The same settings are honored by the in-memory, persistent, and Postgres
+namespace builders. For application-owned deployments, prefer the
+`KOGWISTAR_LLM_WIKI_EMBED_*` names; they override `KOGWISTAR_EMBED_*`, which in
+turn overrides the parser compatibility names above. Code callers can instead
+pass `embedding_config` or the explicit `embedding_provider`,
+`embedding_model`, and `embedding_dimension` arguments. For Postgres, a real
+provider without a declared dimension is rejected rather than silently
+creating an incompatible 2D vector index. Changing the model or dimension for
+an existing persistent store requires a separate store or an intentional
+migration.
+
+Embedding settings may also be scoped to a graph space by inserting the space
+name before `EMBED`, for example:
+
+```bash
+KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_PROVIDER=ollama
+KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_MODEL=nomic-embed-text
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_PROVIDER=ollama
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_MODEL=qwen3-embedding:0.6b
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_DIMENSION=1024
+KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_PROVIDER=fake
+```
+
+The spaces are `conversation` (history and interaction), `workflow` (runtime
+and maintenance state), `knowledge` (durable KG), and `wisdom`. An unset space
+inherits the global app setting. `derived_knowledge` uses the knowledge
+embedder by design.
+
 Azure OpenAI example using GPT-4o:
 
 ```bash

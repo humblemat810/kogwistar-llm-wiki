@@ -66,6 +66,7 @@ valid outcome.
 | OpenAI Responses | `POST /v1/responses` | Canonical synchronous grounded answer |
 | Chat compatibility | `POST /v1/chat/completions` | OpenAI Chat Completions-shaped adapter |
 | A2A discovery | `GET /.well-known/agent-card.json` | Agent capability card |
+| A2A JSON-RPC | `POST /a2a` | Standard `message/send`, `message/stream`, and `tasks/get` binding |
 | A2A message | `POST /a2a/v1/message:send` | Synchronous or background task submission |
 | A2A stream | `POST /a2a/v1/message:stream` | Task-shaped SSE response |
 | A2A task | `GET /a2a/v1/tasks/{id}?workspace_id=...` | Poll durable background interaction |
@@ -123,10 +124,17 @@ For Chat Completions, use `messages` instead of `input`:
 
 ## A2A Behavior
 
+The preferred interoperability endpoint is `POST /a2a` with a JSON-RPC 2.0
+body. Use `message/send` to submit a message, `tasks/get` to poll a durable
+task, and `message/stream` for SSE updates. JSON-RPC responses preserve the
+request ID and use standard error objects. The older `/a2a/v1/...` routes remain
+available as HTTP+JSON compatibility endpoints.
+
 If Codex workers are configured, a background A2A request returns a task in
-`working` state. Poll the task endpoint until its state is `completed` or
-`failed`. Task IDs map to the existing durable workbench interaction IDs; no
-second task database is created.
+`submitted` or `working` state. Poll until `completed`, `failed`, `canceled`,
+or another terminal state. Task IDs map to existing durable workbench
+interaction IDs; no second task database is created. Push notifications are
+not advertised or accepted.
 
 ## MCP Tools
 

@@ -35,6 +35,10 @@ from kogwistar.runtime.budget import budget_event_from_dict
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+from kg_doc_parser.workflow_ingest.providers import (
+    EmbeddingProviderConfig,
+    build_embedding_function,
+)
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
 from .provider_config import normalize_provider_name, resolve_parser_provider_settings
 from .debug_run import (
@@ -100,6 +104,149 @@ class _TinyEmbeddingFunction:
         return vectors
 
 
+def _resolve_embedding_function(
+    *,
+    namespace: str = "global",
+    embedding_function: EmbeddingFunctionLike | None = None,
+    embedding_config: EmbeddingProviderConfig | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key_env: str | None = None,
+) -> tuple[EmbeddingFunctionLike, EmbeddingProviderConfig]:
+    """Resolve the app embedding choice without changing the test default.
+
+    The tiny embedder remains the default when no embedding setting is supplied.
+    Any explicit setting, or embedding environment configuration, uses the
+    shared parser provider factory instead of creating a second implementation.
+    App-owned ``KOGWISTAR_LLM_WIKI_EMBED_*`` settings take precedence over
+    ``KOGWISTAR_EMBED_*`` and parser-owned ``KG_DOC_EMBED_*`` compatibility
+    settings.
+    """
+    def _embedding_env(suffix: str, default: str | None = None) -> str | None:
+        namespace_prefix = (
+            "KOGWISTAR_LLM_WIKI_"
+            + namespace.upper().replace("-", "_")
+            + "_EMBED_"
+        )
+        for prefix in (
+            namespace_prefix,
+            "KOGWISTAR_LLM_WIKI_EMBED_",
+            "KOGWISTAR_EMBED_",
+            "KG_DOC_EMBED_",
+        ):
+            value = os.getenv(prefix + suffix)
+            if value not in {None, ""}:
+                return value
+        return default
+
+    if embedding_function is not None and embedding_config is not None:
+        raise ValueError("pass either embedding_function or embedding_config, not both")
+
+    configured = any(
+        value is not None
+        for value in (
+            embedding_provider,
+            embedding_model,
+            embedding_dimension,
+            embedding_base_url,
+            embedding_api_key_env,
+        )
+    ) or any(_embedding_env(suffix) is not None for suffix in (
+        "PROVIDER", "MODEL", "DIMENSION", "BASE_URL", "API_KEY_ENV"
+    ))
+
+    if embedding_function is not None:
+        config = embedding_config or EmbeddingProviderConfig(
+            provider="fake", model=embedding_function.name(), dimension=2
+        )
+        return embedding_function, config
+    if embedding_config is None and not configured:
+        tiny = _TinyEmbeddingFunction()
+        return tiny, EmbeddingProviderConfig(provider="fake", model=tiny.name(), dimension=2)
+
+    config = embedding_config or EmbeddingProviderConfig(
+        provider=embedding_provider or _embedding_env("PROVIDER", "fake"),
+        model=embedding_model or _embedding_env("MODEL", "kg-doc-parser-workflow-embedding-v1"),
+        dimension=int(embedding_dimension or _embedding_env("DIMENSION", "2")),
+        base_url=embedding_base_url or _embedding_env("BASE_URL"),
+        api_key_env=embedding_api_key_env or _embedding_env("API_KEY_ENV"),
+    )
+    return build_embedding_function(config), config
+
+
+_EMBEDDING_SPACES = ("conversation", "workflow", "knowledge", "wisdom")
+
+
+def _resolve_embedding_functions(
+    *,
+    embedding_function: EmbeddingFunctionLike | None = None,
+    embedding_config: EmbeddingProviderConfig | None = None,
+    embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
+    embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key_env: str | None = None,
+) -> tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]:
+    """Resolve one embedding function per graph space.
+
+    A shared function/config remains a supported fallback. Per-space entries
+    take precedence, allowing conversation/history, workflow/runtime, durable
+    knowledge, and wisdom to use different vector models and dimensions.
+    """
+    if embedding_functions and embedding_function is not None:
+        raise ValueError("pass either embedding_function or embedding_functions, not both")
+    if embedding_configs and embedding_config is not None:
+        raise ValueError("pass either embedding_config or embedding_configs, not both")
+
+    shared_function, shared_config = _resolve_embedding_function(
+        embedding_function=embedding_function,
+        embedding_config=embedding_config,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_base_url=embedding_base_url,
+        embedding_api_key_env=embedding_api_key_env,
+    )
+    functions: dict[str, EmbeddingFunctionLike] = {}
+    configs: dict[str, EmbeddingProviderConfig] = {}
+    for space in _EMBEDDING_SPACES:
+        space_function = (embedding_functions or {}).get(space)
+        space_config = (embedding_configs or {}).get(space)
+        if space_function is None and space_config is None:
+            # Avoid rebuilding the default provider for every engine. A
+            # namespace-specific environment setting still gets its own model.
+            namespace_setting = any(
+                os.getenv(
+                    "KOGWISTAR_LLM_WIKI_"
+                    + space.upper()
+                    + "_EMBED_"
+                    + suffix
+                ) not in {None, ""}
+                for suffix in ("PROVIDER", "MODEL", "DIMENSION", "BASE_URL", "API_KEY_ENV")
+            )
+            if not namespace_setting:
+                functions[space] = shared_function
+                configs[space] = shared_config
+                continue
+        resolved_function, resolved_config = _resolve_embedding_function(
+            namespace=space,
+            embedding_function=space_function,
+            embedding_config=space_config,
+            embedding_provider=None if space_function or space_config else embedding_provider,
+            embedding_model=None if space_function or space_config else embedding_model,
+            embedding_dimension=None if space_function or space_config else embedding_dimension,
+            embedding_base_url=None if space_function or space_config else embedding_base_url,
+            embedding_api_key_env=None if space_function or space_config else embedding_api_key_env,
+        )
+        functions[space] = resolved_function
+        configs[space] = resolved_config
+    return functions, configs
+
+
 
 
 
@@ -119,24 +266,43 @@ def build_in_memory_namespace_engines(
     *,
     split_derived_knowledge: bool = False,
     conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    embedding_function: EmbeddingFunctionLike | None = None,
+    embedding_config: EmbeddingProviderConfig | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key_env: str | None = None,
+    embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
+    embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
 ) -> NamespaceEngines:
     root = Path(base_dir) if base_dir is not None else Path(tempfile.mkdtemp(prefix="kogwistar-llm-wiki-"))
-    embedding = _TinyEmbeddingFunction()
+    embeddings, _ = _resolve_embedding_functions(
+        embedding_function=embedding_function,
+        embedding_config=embedding_config,
+        embedding_functions=embedding_functions,
+        embedding_configs=embedding_configs,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_base_url=embedding_base_url,
+        embedding_api_key_env=embedding_api_key_env,
+    )
     
     # Shared conversation engine (fg/bg lanes)
     conversation = _build_engine(
         root / "conversation",
         kg_graph_type="conversation",
-        embedding_function=embedding,
+        embedding_function=embeddings["conversation"],
         persistence_mode=conversation_persistence_mode,
     )
     
-    derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embedding) if split_derived_knowledge else None
+    derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"]) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=conversation,
-        workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embedding),
-        kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embedding),
-        wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embedding),
+        workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"]),
+        kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"]),
+        wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"]),
         derived_knowledge=derived_engine,
     )
 
@@ -146,21 +312,40 @@ def build_persistent_namespace_engines(
     *,
     split_derived_knowledge: bool = False,
     conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    embedding_function: EmbeddingFunctionLike | None = None,
+    embedding_config: EmbeddingProviderConfig | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key_env: str | None = None,
+    embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
+    embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
 ) -> NamespaceEngines:
     root = Path(base_dir)
     root.mkdir(parents=True, exist_ok=True)
-    embedding = _TinyEmbeddingFunction()
-    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embedding) if split_derived_knowledge else None
+    embeddings, _ = _resolve_embedding_functions(
+        embedding_function=embedding_function,
+        embedding_config=embedding_config,
+        embedding_functions=embedding_functions,
+        embedding_configs=embedding_configs,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_base_url=embedding_base_url,
+        embedding_api_key_env=embedding_api_key_env,
+    )
+    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"]) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_persistent_engine(
             root / "conversation",
             kg_graph_type="conversation",
-            embedding_function=embedding,
+            embedding_function=embeddings["conversation"],
             persistence_mode=conversation_persistence_mode,
         ),
-        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embedding),
-        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embedding),
-        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embedding),
+        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"]),
+        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"]),
+        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"]),
         derived_knowledge=derived_engine,
     )
 
@@ -169,54 +354,93 @@ def build_postgres_namespace_engines(
     *,
     base_dir: str | Path,
     dsn: str,
-    embedding_dim: int = 2,
+    embedding_dim: int | None = None,
     schema: str = "public",
     split_derived_knowledge: bool = False,
     conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    embedding_function: EmbeddingFunctionLike | None = None,
+    embedding_config: EmbeddingProviderConfig | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key_env: str | None = None,
+    embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
+    embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
 ) -> NamespaceEngines:
     root = Path(base_dir)
     root.mkdir(parents=True, exist_ok=True)
-    embedding = _TinyEmbeddingFunction()
+    embeddings, resolved_embedding_configs = _resolve_embedding_functions(
+        embedding_function=embedding_function,
+        embedding_config=embedding_config,
+        embedding_functions=embedding_functions,
+        embedding_configs=embedding_configs,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_base_url=embedding_base_url,
+        embedding_api_key_env=embedding_api_key_env,
+    )
+    resolved_embedding_config = resolved_embedding_configs["knowledge"]
+    effective_embedding_dim = embedding_dim or resolved_embedding_config.dimension
+    has_configured_dimension = (
+        embedding_dim is not None
+        or embedding_dimension is not None
+        or embedding_config is not None
+        or any(
+            os.getenv(prefix + "DIMENSION") not in {None, ""}
+            for prefix in (
+                "KOGWISTAR_LLM_WIKI_EMBED_",
+                "KOGWISTAR_EMBED_",
+                "KG_DOC_EMBED_",
+            )
+        )
+    )
+    if resolved_embedding_config.provider != "fake" and not has_configured_dimension:
+        raise ValueError(
+            "embedding_dim is required for a real Postgres embedding provider; "
+            "set embedding_dim or KG_DOC_EMBED_DIMENSION to the model output dimension"
+        )
     derived_engine = _build_postgres_engine(
         root / "derived_knowledge",
         kg_graph_type="derived_knowledge",
-        embedding_function=embedding,
+        embedding_function=embeddings["knowledge"],
         dsn=dsn,
-        embedding_dim=embedding_dim,
+        embedding_dim=effective_embedding_dim,
         schema=schema,
     ) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_postgres_engine(
             root / "conversation",
             kg_graph_type="conversation",
-            embedding_function=embedding,
+            embedding_function=embeddings["conversation"],
             dsn=dsn,
-            embedding_dim=embedding_dim,
+            embedding_dim=effective_embedding_dim,
             schema=schema,
             persistence_mode=conversation_persistence_mode,
         ),
         workflow=_build_postgres_engine(
             root / "workflow",
             kg_graph_type="workflow",
-            embedding_function=embedding,
+            embedding_function=embeddings["workflow"],
             dsn=dsn,
-            embedding_dim=embedding_dim,
+            embedding_dim=effective_embedding_dim,
             schema=schema,
         ),
         kg=_build_postgres_engine(
             root / "kg",
             kg_graph_type="knowledge",
-            embedding_function=embedding,
+            embedding_function=embeddings["knowledge"],
             dsn=dsn,
-            embedding_dim=embedding_dim,
+            embedding_dim=effective_embedding_dim,
             schema=schema,
         ),
         wisdom=_build_postgres_engine(
             root / "wisdom",
             kg_graph_type="wisdom",
-            embedding_function=embedding,
+            embedding_function=embeddings["wisdom"],
             dsn=dsn,
-            embedding_dim=embedding_dim,
+            embedding_dim=effective_embedding_dim,
             schema=schema,
         ),
         derived_knowledge=derived_engine,
@@ -274,7 +498,7 @@ def _build_postgres_engine(
     backend, _ = build_postgres_backend(
         EnginePostgresConfig(
             dsn=dsn,
-            embedding_dim=embedding_dim,
+            embedding_dim=effective_embedding_dim,
             schema=schema,
             application_name=f"kogwistar-llm-wiki-{kg_graph_type}",
         )

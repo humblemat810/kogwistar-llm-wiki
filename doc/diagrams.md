@@ -88,6 +88,78 @@ flowchart LR
 
 ---
 
+## Agent Protocol Boundary
+
+All agent-facing protocols enter through the same application-owned gateway.
+MCP exposes semantic tools; OpenAI and A2A expose request/response adapters.
+None of these paths bypass grounding, provenance, or proposal confirmation.
+
+```mermaid
+flowchart LR
+    CLIENTS["External agents\nHermes / Pi / Claude / Codex"]
+    MCP["MCP\n11 semantic tools"]
+    OPENAI["OpenAI-compatible\nResponses / Chat"]
+    A2A["A2A\nJSON-RPC /a2a"]
+    LEGACY["A2A HTTP+JSON\n/a2a/v1/* compatibility"]
+    GATEWAY["AgentGateway\nshared normalization + auth boundary"]
+    API["WorkbenchApi\ngrounded lens + history + proposals"]
+    PIPE["IngestPipeline\nsource lifecycle + provenance"]
+    JOBS["Durable interactions +\nmaintenance workers"]
+    GRAPH["Scoped knowledge graph"]
+
+    CLIENTS --> MCP --> GATEWAY
+    CLIENTS --> OPENAI --> GATEWAY
+    CLIENTS --> A2A --> GATEWAY
+    CLIENTS --> LEGACY --> GATEWAY
+    GATEWAY --> API
+    GATEWAY --> PIPE
+    GATEWAY --> JOBS
+    API --> GRAPH
+    PIPE --> GRAPH
+    JOBS --> GRAPH
+```
+
+---
+
+## A2A JSON-RPC Lifecycle
+
+The preferred A2A endpoint is `POST /a2a`. A background request returns a
+durable task, while streaming emits ordered JSON-RPC responses inside SSE
+events. `tasks/get` reads the same durable interaction instead of a second task
+store.
+
+```mermaid
+sequenceDiagram
+    participant A as A2A client
+    participant C as Agent Card
+    participant H as /a2a JSON-RPC
+    participant G as AgentGateway
+    participant W as Workbench interaction store
+
+    A->>C: GET /.well-known/agent.json
+    C-->>A: protocolVersion, endpoint, skills, auth
+    A->>H: message/send(id, params.message)
+    H->>G: validate JSON-RPC + authorize
+    G->>W: submit durable interaction
+    W-->>G: interaction_id
+    G-->>H: JSON-RPC result(Task: submitted/working)
+    H-->>A: same request id
+    loop until terminal
+        A->>H: tasks/get(id)
+        H->>W: read interaction status
+        W-->>H: task + artifacts or error
+        H-->>A: JSON-RPC result(Task)
+    end
+    A->>H: message/stream(id, params.message)
+    H-->>A: SSE data: JSON-RPC result(status/artifact)
+```
+
+The server advertises streaming but does not advertise push notifications. The
+legacy `/a2a/v1/...` routes remain available for clients using the HTTP+JSON
+binding.
+
+---
+
 ## Maintenance Worker — Distillation Algorithm
 
 ```mermaid

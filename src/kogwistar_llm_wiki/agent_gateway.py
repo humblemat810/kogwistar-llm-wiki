@@ -99,6 +99,34 @@ class AgentGateway:
             return None
         return _a2a_task(interaction)
 
+    def a2a_jsonrpc(self, payload: Mapping[str, Any]) -> dict[str, object]:
+        """Handle the A2A JSON-RPC binding without duplicating task logic."""
+        request_id = payload.get("id")
+        if payload.get("jsonrpc") != "2.0":
+            return _jsonrpc_error(request_id, -32600, "Invalid Request", "jsonrpc must be '2.0'")
+        method = payload.get("method")
+        params = payload.get("params") or {}
+        if not isinstance(method, str) or not isinstance(params, Mapping):
+            return _jsonrpc_error(request_id, -32600, "Invalid Request", "method and params are invalid")
+        try:
+            if method == "message/send":
+                return _jsonrpc_result(request_id, _a2a_task(self.a2a_message(params), standard=True))
+            if method == "tasks/get":
+                metadata = params.get("metadata") if isinstance(params.get("metadata"), Mapping) else {}
+                workspace_id = str(params.get("workspace_id") or metadata.get("workspace_id") or "default")
+                task_id = str(params.get("id") or params.get("taskId") or "")
+                if not task_id:
+                    return _jsonrpc_error(request_id, -32602, "Invalid params", "tasks/get requires id")
+                task = self.a2a_task(workspace_id=workspace_id, task_id=task_id)
+                if task is None:
+                    return _jsonrpc_error(request_id, -32001, "Task not found", {"taskId": task_id})
+                return _jsonrpc_result(request_id, _a2a_task(task, standard=True))
+            if method == "message/stream":
+                return _jsonrpc_result(request_id, _a2a_task(self.a2a_message(params), standard=True))
+            return _jsonrpc_error(request_id, -32601, "Method not found", method)
+        except (KeyError, TypeError, ValueError) as exc:
+            return _jsonrpc_error(request_id, -32602, "Invalid params", str(exc))
+
     def mcp_tool_names(self) -> tuple[str, ...]:
         return (
             "query", "search", "ingest", "source", "reingest", "maintain",
@@ -703,17 +731,37 @@ def _request_id(payload: Mapping[str, Any], prefix: str) -> str:
     return str(payload.get("id") or f"{prefix}_{uuid.uuid4().hex}")
 
 
-def _a2a_task(interaction: Mapping[str, Any]) -> dict[str, object]:
+def _a2a_task(interaction: Mapping[str, Any], *, standard: bool = False) -> dict[str, object]:
+    if isinstance(interaction.get("status"), Mapping):
+        result = dict(interaction)
+        result.setdefault("contextId", (result.get("metadata") or {}).get("workspace_id", "default"))
+        return result
     status = str(interaction.get("status") or "pending")
-    state = {"pending": "working", "completed": "completed", "failed": "failed"}.get(status, status)
+    state = {"pending": "submitted" if standard else "working", "completed": "completed", "failed": "failed"}.get(status, status)
     response = interaction.get("response")
     text = _answer_text(response) if isinstance(response, Mapping) else ""
-    result: dict[str, object] = {"id": interaction.get("interaction_id"), "status": {"state": state}, "metadata": {"workspace_id": interaction.get("workspace_id")}}
+    result: dict[str, object] = {
+        "id": interaction.get("interaction_id"),
+        "contextId": interaction.get("context_id") or interaction.get("workspace_id") or "default",
+        "status": {"state": state},
+        "metadata": {"workspace_id": interaction.get("workspace_id")},
+    }
     if text:
         result["artifacts"] = [{"parts": [{"kind": "text", "text": text}]}]
     if interaction.get("error"):
         result["status"] = {"state": "failed", "message": {"messageId": interaction.get("interaction_id"), "parts": [{"kind": "text", "text": str(interaction["error"])}]}}
     return result
+
+
+def _jsonrpc_result(request_id: object, result: object) -> dict[str, object]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _jsonrpc_error(request_id: object, code: int, message: str, data: object | None = None) -> dict[str, object]:
+    error: dict[str, object] = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    return {"jsonrpc": "2.0", "id": request_id, "error": error}
 
 
 __all__ = ["AgentGateway", "AgentTurn"]

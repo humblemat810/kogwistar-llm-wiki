@@ -20,8 +20,9 @@ second accounting or graph store.
 ## Decision
 
 llm-wiki exposes one app-owned `AgentGateway` over the existing `WorkbenchApi`.
-It provides OpenAI-compatible Responses and Chat Completions adapters, A2A-
-style agent card/message/task routes, and an app-level MCP tool bridge for
+It provides OpenAI-compatible Responses and Chat Completions adapters, a
+standards-aligned A2A JSON-RPC binding plus HTTP+JSON compatibility routes, and
+an app-level MCP tool bridge for
 the following small semantic capability surface:
 
 - Primary reads: `query`, `search`.
@@ -57,6 +58,15 @@ answer payload, lens metadata, citations, and proposal state. Background Codex
 interactions use the existing durable workbench interaction store; A2A task IDs
 map to those interaction IDs.
 
+The preferred A2A endpoint is `POST /a2a`. It accepts JSON-RPC 2.0 methods
+`message/send`, `message/stream`, and `tasks/get`, preserves request IDs, and
+returns JSON-RPC error objects. Streaming responses are SSE where each
+`data` field contains a JSON-RPC response. `/.well-known/agent.json` declares
+protocol version `0.2.6`, the JSON-RPC endpoint, the HTTP+JSON compatibility
+interface, supported skills, bearer authentication when configured, and that
+push notifications are unsupported. The existing `/a2a/v1/...` routes are
+retained for clients using the HTTP+JSON binding.
+
 No protocol writes graph truth directly. A proposal may be validated, and only
 an explicit confirmation may apply it through the existing patch service. A
 valid result may contain no proposed changes.
@@ -86,6 +96,10 @@ compatible agents can use `skills/llm-wiki-knowledge/`.
   mutation boundary.
 - History and graph events remain the source of truth; OTel is diagnostic.
 - Protocol adapters cannot bypass proposal validation or confirmation.
+- A2A JSON-RPC responses are correlated to the client request ID and never
+  mix `result` and `error` members.
+- A2A streams return HTTP 200 with ordered SSE data events containing complete
+  JSON-RPC responses.
 - Deterministic and Codex cockpit modes remain distinct.
 - Disabling OTel cannot change workflow behavior.
 - Disabling the agent API cannot change the local workbench contract.

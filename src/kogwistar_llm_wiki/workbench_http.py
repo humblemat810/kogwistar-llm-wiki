@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 import os
 
-from .agent_gateway import AgentGateway
+from .agent_gateway import AgentGateway, _jsonrpc_error, _jsonrpc_result
 from .workbench_api import WorkbenchApi
 
 API_VERSION = "v1"
@@ -36,7 +36,8 @@ def build_workbench_handler(
             try:
                 if parsed.path in {"/.well-known/agent.json", "/.well-known/agent-card.json", "/a2a/.well-known/agent-card"}:
                     self._require_agent_api()
-                    body = _agent_card(gateway.mcp_tool_names())
+                    base_url = os.getenv("LLM_WIKI_PUBLIC_BASE_URL", "").rstrip("/") or f"http://{self.headers.get('host', '127.0.0.1')}"
+                    body = _agent_card(gateway.mcp_tool_names(), base_url=base_url, requires_auth=bool(api_token or auth_required))
                 elif parsed.path == "/healthz":
                     body = {"ok": True, "service": "kogwistar-llm-wiki", "workspace_id": _first(query, "workspace_id", "default")}
                 elif parsed.path == "/readyz":
@@ -105,22 +106,41 @@ def build_workbench_handler(
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            agent_paths = {"/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
+            agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
             if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
+                size = int(self.headers.get("content-length", "0"))
+                payload = json.loads(self.rfile.read(size))
+                if not isinstance(payload, dict):
+                    raise ValueError("request body must be a JSON object")
                 if parsed.path in agent_paths:
                     self._require_agent_api()
-                    if parsed.path != "/mcp/tools/call":
+                    if parsed.path == "/a2a":
+                        method = payload.get("method") if isinstance(payload, dict) else None
+                        self._require_scope("read" if method == "tasks/get" else "write")
+                    elif parsed.path != "/mcp/tools/call":
                         self._require_scope("write" if parsed.path in {"/a2a/v1/message:send", "/a2a/v1/message:stream"} else "read")
                 elif parsed.path in {"/api/ask", "/api/proposal/validate"}:
                     self._require_scope("read")
                 else:
                     self._require_scope("write")
-                size = int(self.headers.get("content-length", "0"))
-                payload = json.loads(self.rfile.read(size))
-                if parsed.path == "/v1/responses":
+                if parsed.path == "/a2a":
+                    rpc = gateway.a2a_jsonrpc(payload)
+                    if payload.get("method") == "message/stream" and "result" in rpc:
+                        self._write_a2a_stream(
+                            rpc["result"],
+                            payload.get("params") if isinstance(payload.get("params"), dict) else {},
+                            gateway,
+                            status=200,
+                            jsonrpc_id=payload.get("id"),
+                            standard=True,
+                        )
+                        return
+                    body = rpc
+                    status = 200 if "result" in rpc else 400
+                elif parsed.path == "/v1/responses":
                     body = gateway.responses(payload)
                     status = 200
                 elif parsed.path == "/v1/chat/completions":
@@ -206,6 +226,8 @@ def build_workbench_handler(
             gateway: AgentGateway,
             *,
             status: int,
+            jsonrpc_id: object | None = None,
+            standard: bool = False,
         ) -> None:
             """Stream durable task state until completion or bounded timeout."""
             self.send_response(status)
@@ -215,11 +237,12 @@ def build_workbench_handler(
             self.end_headers()
 
             def emit(body: object) -> None:
-                self.wfile.write(_sse_bytes("task", body))
+                value = _jsonrpc_result(jsonrpc_id, body) if standard else body
+                self.wfile.write(_sse_bytes("message" if standard else "task", value))
                 self.wfile.flush()
 
             emit(initial)
-            if initial.get("status", {}).get("state") != "working":
+            if initial.get("status", {}).get("state") not in {"submitted", "working"}:
                 return
             metadata = payload.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
@@ -234,7 +257,16 @@ def build_workbench_handler(
             previous = json.dumps(initial, sort_keys=True, default=str)
             while time.monotonic() < deadline:
                 time.sleep(interval)
-                current = gateway.a2a_task(workspace_id=workspace_id, task_id=task_id)
+                if standard:
+                    response = gateway.a2a_jsonrpc({
+                        "jsonrpc": "2.0",
+                        "id": jsonrpc_id,
+                        "method": "tasks/get",
+                        "params": {"id": task_id, "metadata": {"workspace_id": workspace_id}},
+                    })
+                    current = response.get("result") if isinstance(response.get("result"), dict) else None
+                else:
+                    current = gateway.a2a_task(workspace_id=workspace_id, task_id=task_id)
                 if current is None:
                     emit({"id": task_id, "status": {"state": "failed", "message": "task_not_found"}})
                     return
@@ -242,10 +274,11 @@ def build_workbench_handler(
                 if encoded != previous:
                     emit(current)
                     previous = encoded
-                if current.get("status", {}).get("state") != "working":
+                if current.get("status", {}).get("state") not in {"submitted", "working"}:
                     return
             emit({
                 "id": task_id,
+                "contextId": workspace_id,
                 "status": {"state": "working"},
                 "metadata": {"workspace_id": workspace_id, "stream_timeout": True},
             })
@@ -280,15 +313,43 @@ def _sse_bytes(event: str, body: object) -> bytes:
     ).encode("utf-8")
 
 
-def _agent_card(mcp_tools: tuple[str, ...]) -> dict[str, object]:
-    return {
+def _agent_card(
+    mcp_tools: tuple[str, ...],
+    *,
+    base_url: str = "",
+    requires_auth: bool = False,
+) -> dict[str, object]:
+    endpoint = f"{base_url}/a2a" if base_url else "/a2a"
+    skills = [
+        {
+            "id": tool,
+            "name": tool.replace("_", " ").title(),
+            "description": f"LLM-Wiki {tool.replace('_', ' ')} capability.",
+            "tags": ["knowledge-management", tool],
+            "inputModes": ["text", "application/json"],
+            "outputModes": ["text", "application/json"],
+        }
+        for tool in mcp_tools
+    ]
+    card: dict[str, object] = {
+        "protocolVersion": "0.2.6",
         "name": "llm-wiki",
         "description": "Grounded knowledge management with explicit proposal workflow",
+        "url": endpoint,
+        "preferredTransport": "JSONRPC",
+        "additionalInterfaces": [{"url": f"{base_url}/a2a/v1/message:send" if base_url else "/a2a/v1/message:send", "transport": "HTTP+JSON"}],
         "version": API_VERSION,
-        "url": "/a2a/v1/message:send",
-        "capabilities": {"streaming": True, "pushNotifications": False, "mcp_tools": list(mcp_tools)},
-        "defaultInputModes": ["text"],
+        "capabilities": {"streaming": True, "pushNotifications": False, "stateTransitionHistory": False},
+        "defaultInputModes": ["text", "application/json"],
         "defaultOutputModes": ["text", "application/json"],
+        "skills": skills,
+    }
+    if requires_auth:
+        card["securitySchemes"] = {"bearerAuth": {"type": "http", "scheme": "bearer"}}
+        card["security"] = [{"bearerAuth": []}]
+    return {
+        **card,
+        "llm_wiki": {"mcp_tools": list(mcp_tools)},
     }
 
 

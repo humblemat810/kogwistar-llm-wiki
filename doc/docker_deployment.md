@@ -74,6 +74,25 @@ or `.env`. For Ollama on the host, the default URL uses
 model, endpoint, and API-key environment variables without putting secrets in
 the image.
 
+Embedding configuration is independent from parser/maintenance LLM
+configuration. The fast deterministic embedder is used when no embedding
+variables are set. For a real model, configure the application-owned names,
+for example:
+
+```bash
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_PROVIDER=ollama
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_MODEL=qwen3-embedding:0.6b
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_BASE_URL=http://host.docker.internal:11434
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_DIMENSION=1024
+```
+
+Use `CONVERSATION`, `WORKFLOW`, or `WISDOM` in place of `KNOWLEDGE` to scope
+another graph space. A space-specific setting overrides the global
+`KOGWISTAR_LLM_WIKI_EMBED_*` setting, which overrides `KOGWISTAR_EMBED_*` and
+the parser-compatible `KG_DOC_EMBED_*` setting. Postgres requires the real
+model output dimension to be declared; it will reject an ambiguous real-model
+configuration rather than create an incompatible vector index.
+
 ## Host Cockpit Callback
 
 The container does not include Codex or Claude Code. To let a host-side agent

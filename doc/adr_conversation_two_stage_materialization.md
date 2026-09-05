@@ -21,6 +21,22 @@ single-stage unless a future, separately approved product policy opts them in.
 This keeps immediately searchable knowledge entries unchanged while removing
 embedding-provider latency from the conversation write hot path.
 
+Embedding selection is a separate application concern from persistence stage.
+Each graph space may use its own embedding provider, model, and vector
+dimension: conversation for interaction history, workflow for runtime and
+maintenance state, knowledge for durable KG retrieval, and wisdom for
+distilled operational knowledge. An unset space inherits the application-wide
+embedding configuration. `derived_knowledge` intentionally inherits the
+knowledge embedder. The default remains the deterministic tiny-style embedder
+for demos and tests.
+
+The application-owned `KOGWISTAR_LLM_WIKI_<SPACE>_EMBED_*` settings override
+global `KOGWISTAR_LLM_WIKI_EMBED_*`, `KOGWISTAR_EMBED_*`, and parser-compatible
+`KG_DOC_EMBED_*` settings. Different vector dimensions are valid because the
+spaces have separate indexes, but a query must be embedded with the model for
+the target space. A persistent space must not silently change model or
+dimension; operators use a separate store or an intentional migration.
+
 ## Ownership
 
 Kogwistar core owns canonical events, stage-1/stage-2 correctness, job leases,
@@ -68,3 +84,5 @@ cost, and does not impose a production-SLO threshold in unit tests.
   history.
 - Enabling conversation two-stage persistence does not change the default
   single-stage behavior of other graph namespaces.
+- Embedding configuration is explicit and space-scoped; no vector index is
+  created with an undeclared real-model dimension.

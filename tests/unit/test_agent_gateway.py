@@ -320,3 +320,58 @@ def test_a2a_stream_polls_background_task_until_terminal(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_a2a_jsonrpc_binding_and_agent_card_contract(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN", "secret")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        headers = {
+            "authorization": "Bearer secret",
+            "content-type": "application/json",
+        }
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "message/send",
+                "params": {
+                    "message": {"role": "user", "parts": [{"kind": "text", "text": "hello"}]},
+                    "metadata": {"workspace_id": "w"},
+                    "configuration": {"blocking": True},
+                },
+            }
+        ).encode()
+        headers["content-length"] = str(len(body))
+        connection.request("POST", "/a2a", body=body, headers=headers)
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["jsonrpc"] == "2.0"
+        assert payload["id"] == 7
+        assert payload["result"]["status"]["state"] == "completed"
+
+        connection.request("GET", "/.well-known/agent.json", headers={"authorization": "Bearer secret"})
+        response = connection.getresponse()
+        card = json.loads(response.read())
+        assert card["protocolVersion"] == "0.2.6"
+        assert card["preferredTransport"] == "JSONRPC"
+        assert card["url"].endswith("/a2a")
+        assert card["securitySchemes"]["bearerAuth"]["scheme"] == "bearer"
+        assert {skill["id"] for skill in card["skills"]} >= {"query", "ingest", "confirm"}
+
+        body = json.dumps({"jsonrpc": "2.0", "id": 8, "method": "not/a/method", "params": {}}).encode()
+        headers["content-length"] = str(len(body))
+        connection.request("POST", "/a2a", body=body, headers=headers)
+        response = connection.getresponse()
+        error = json.loads(response.read())
+        assert response.status == 400
+        assert error["error"]["code"] == -32601
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
