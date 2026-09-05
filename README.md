@@ -156,9 +156,10 @@ namespace builders. For application-owned deployments, prefer the
 `KOGWISTAR_LLM_WIKI_EMBED_*` names; they override `KOGWISTAR_EMBED_*`, which in
 turn overrides the parser compatibility names above. Code callers can instead
 pass `embedding_config` or the explicit `embedding_provider`,
-`embedding_model`, and `embedding_dimension` arguments. For Postgres, a real
-provider without a declared dimension is rejected rather than silently
-creating an incompatible 2D vector index. Changing the model or dimension for
+`embedding_model`, and `embedding_dimension` arguments. For every backend, a
+real provider without a declared dimension is rejected before engine
+initialization rather than silently creating an incompatible 2D vector index;
+Postgres additionally uses the dimension for its typed vector columns. Changing the model or dimension for
 an existing persistent store requires a separate store or an intentional
 migration.
 
@@ -174,10 +175,15 @@ KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_DIMENSION=1024
 KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_PROVIDER=fake
 ```
 
-The spaces are `conversation` (history and interaction), `workflow` (runtime
-and maintenance state), `knowledge` (durable KG), and `wisdom`. An unset space
-inherits the global app setting. `derived_knowledge` uses the knowledge
-embedder by design.
+The spaces are `conversation` (all foreground/background interaction history),
+`workflow` (runtime and maintenance state), `knowledge` (durable KG), and
+`wisdom`. An unset space inherits the global app setting.
+`derived_knowledge` uses the knowledge embedder by design. The maintenance
+worker's chat model is independently configured with `KOGWISTAR_MAINTENANCE_*`,
+but its conversation replies still use the shared `conversation` embedding
+space. A separate maintenance-self conversation embedder is not currently a
+supported configuration; adding one would require a new physical graph space
+and persistence contract.
 
 Azure OpenAI example using GPT-4o:
 

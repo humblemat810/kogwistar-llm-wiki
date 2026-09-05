@@ -23,12 +23,19 @@ embedding-provider latency from the conversation write hot path.
 
 Embedding selection is a separate application concern from persistence stage.
 Each graph space may use its own embedding provider, model, and vector
-dimension: conversation for interaction history, workflow for runtime and
-maintenance state, knowledge for durable KG retrieval, and wisdom for
-distilled operational knowledge. An unset space inherits the application-wide
-embedding configuration. `derived_knowledge` intentionally inherits the
-knowledge embedder. The default remains the deterministic tiny-style embedder
-for demos and tests.
+dimension: conversation for all foreground/background interaction history,
+workflow for runtime and maintenance state, knowledge for durable KG
+retrieval, and wisdom for distilled operational knowledge. An unset space
+inherits the application-wide embedding configuration. `derived_knowledge`
+intentionally inherits the knowledge embedder. The default remains the
+deterministic tiny-style embedder for demos and tests.
+
+The maintenance worker's chat provider/model is a separate concern from vector
+materialization. Maintenance replies use the shared conversation/history
+engine, while maintenance runtime artifacts use the workflow engine and
+knowledge changes use the knowledge engine. A per-maintenance-worker
+conversation embedder is not supported: introducing one requires a separate
+physical graph space, queue/history routing, and persistence contract.
 
 The application-owned `KOGWISTAR_LLM_WIKI_<SPACE>_EMBED_*` settings override
 global `KOGWISTAR_LLM_WIKI_EMBED_*`, `KOGWISTAR_EMBED_*`, and parser-compatible

@@ -197,6 +197,18 @@ def _resolve_embedding_functions(
     take precedence, allowing conversation/history, workflow/runtime, durable
     knowledge, and wisdom to use different vector models and dimensions.
     """
+    scoped_prefix = "KOGWISTAR_LLM_WIKI_"
+    supported_scopes = {value.upper() for value in _EMBEDDING_SPACES} | {"EMBED"}
+    for env_name in os.environ:
+        if not env_name.startswith(scoped_prefix) or "_EMBED_" not in env_name:
+            continue
+        scope = env_name[len(scoped_prefix):].split("_EMBED_", 1)[0]
+        if scope not in supported_scopes:
+            raise ValueError(
+                f"unsupported llm-wiki embedding scope {scope.lower()!r}; "
+                "use conversation, workflow, knowledge, or wisdom"
+            )
+
     if embedding_functions and embedding_function is not None:
         raise ValueError("pass either embedding_function or embedding_functions, not both")
     if embedding_configs and embedding_config is not None:
@@ -244,6 +256,27 @@ def _resolve_embedding_functions(
         )
         functions[space] = resolved_function
         configs[space] = resolved_config
+    for space, config in configs.items():
+        space_prefix = f"KOGWISTAR_LLM_WIKI_{space.upper()}_EMBED_"
+        has_declared_dimension = (
+            embedding_dimension is not None
+            or embedding_config is not None
+            or space in (embedding_configs or {})
+            or any(
+                os.getenv(prefix + "DIMENSION") not in {None, ""}
+                for prefix in (
+                    space_prefix,
+                    "KOGWISTAR_LLM_WIKI_EMBED_",
+                    "KOGWISTAR_EMBED_",
+                    "KG_DOC_EMBED_",
+                )
+            )
+        )
+        if config.provider != "fake" and not has_declared_dimension:
+            raise ValueError(
+                f"embedding dimension is required for the real {space} provider; "
+                "set the scoped dimension or a global embedding dimension"
+            )
     return functions, configs
 
 
@@ -323,7 +356,6 @@ def build_persistent_namespace_engines(
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
 ) -> NamespaceEngines:
     root = Path(base_dir)
-    root.mkdir(parents=True, exist_ok=True)
     embeddings, _ = _resolve_embedding_functions(
         embedding_function=embedding_function,
         embedding_config=embedding_config,
@@ -369,7 +401,6 @@ def build_postgres_namespace_engines(
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
 ) -> NamespaceEngines:
     root = Path(base_dir)
-    root.mkdir(parents=True, exist_ok=True)
     embeddings, resolved_embedding_configs = _resolve_embedding_functions(
         embedding_function=embedding_function,
         embedding_config=embedding_config,
@@ -377,36 +408,29 @@ def build_postgres_namespace_engines(
         embedding_configs=embedding_configs,
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
-        embedding_dimension=embedding_dimension,
+        embedding_dimension=embedding_dimension or embedding_dim,
         embedding_base_url=embedding_base_url,
         embedding_api_key_env=embedding_api_key_env,
     )
-    resolved_embedding_config = resolved_embedding_configs["knowledge"]
-    effective_embedding_dim = embedding_dim or resolved_embedding_config.dimension
-    has_configured_dimension = (
-        embedding_dim is not None
-        or embedding_dimension is not None
-        or embedding_config is not None
-        or any(
-            os.getenv(prefix + "DIMENSION") not in {None, ""}
-            for prefix in (
-                "KOGWISTAR_LLM_WIKI_EMBED_",
-                "KOGWISTAR_EMBED_",
-                "KG_DOC_EMBED_",
-            )
+    # Each physical engine owns its own vector column/index contract. A legacy
+    # global ``embedding_dim`` remains a fallback, but scoped configurations
+    # retain their dimensions instead of forcing the knowledge dimension onto
+    # conversation or workflow state.
+    embedding_dimensions = {
+        space: (
+            (embedding_configs or {}).get(space).dimension
+            if (embedding_configs or {}).get(space) is not None
+            else embedding_dim or resolved_embedding_configs[space].dimension
         )
-    )
-    if resolved_embedding_config.provider != "fake" and not has_configured_dimension:
-        raise ValueError(
-            "embedding_dim is required for a real Postgres embedding provider; "
-            "set embedding_dim or KG_DOC_EMBED_DIMENSION to the model output dimension"
-        )
+        for space in _EMBEDDING_SPACES
+    }
+    root.mkdir(parents=True, exist_ok=True)
     derived_engine = _build_postgres_engine(
         root / "derived_knowledge",
         kg_graph_type="derived_knowledge",
         embedding_function=embeddings["knowledge"],
         dsn=dsn,
-        embedding_dim=effective_embedding_dim,
+        embedding_dim=embedding_dimensions["knowledge"],
         schema=schema,
     ) if split_derived_knowledge else None
     return NamespaceEngines(
@@ -415,7 +439,7 @@ def build_postgres_namespace_engines(
             kg_graph_type="conversation",
             embedding_function=embeddings["conversation"],
             dsn=dsn,
-            embedding_dim=effective_embedding_dim,
+            embedding_dim=embedding_dimensions["conversation"],
             schema=schema,
             persistence_mode=conversation_persistence_mode,
         ),
@@ -424,7 +448,7 @@ def build_postgres_namespace_engines(
             kg_graph_type="workflow",
             embedding_function=embeddings["workflow"],
             dsn=dsn,
-            embedding_dim=effective_embedding_dim,
+            embedding_dim=embedding_dimensions["workflow"],
             schema=schema,
         ),
         kg=_build_postgres_engine(
@@ -432,7 +456,7 @@ def build_postgres_namespace_engines(
             kg_graph_type="knowledge",
             embedding_function=embeddings["knowledge"],
             dsn=dsn,
-            embedding_dim=effective_embedding_dim,
+            embedding_dim=embedding_dimensions["knowledge"],
             schema=schema,
         ),
         wisdom=_build_postgres_engine(
@@ -440,7 +464,7 @@ def build_postgres_namespace_engines(
             kg_graph_type="wisdom",
             embedding_function=embeddings["wisdom"],
             dsn=dsn,
-            embedding_dim=effective_embedding_dim,
+            embedding_dim=embedding_dimensions["wisdom"],
             schema=schema,
         ),
         derived_knowledge=derived_engine,
@@ -498,7 +522,7 @@ def _build_postgres_engine(
     backend, _ = build_postgres_backend(
         EnginePostgresConfig(
             dsn=dsn,
-            embedding_dim=effective_embedding_dim,
+            embedding_dim=embedding_dim,
             schema=schema,
             application_name=f"kogwistar-llm-wiki-{kg_graph_type}",
         )

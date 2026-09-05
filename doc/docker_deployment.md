@@ -91,7 +91,17 @@ another graph space. A space-specific setting overrides the global
 `KOGWISTAR_LLM_WIKI_EMBED_*` setting, which overrides `KOGWISTAR_EMBED_*` and
 the parser-compatible `KG_DOC_EMBED_*` setting. Postgres requires the real
 model output dimension to be declared; it will reject an ambiguous real-model
-configuration rather than create an incompatible vector index.
+configuration rather than create an incompatible vector index. This contract
+is backend-independent; Postgres additionally needs the dimension for its
+typed vector columns, while Chroma validates the dimension when its collection
+is opened or written.
+Both the REST and MCP containers construct all graph-space engines before
+serving requests, so this validation happens during container startup. A
+Compose configuration can therefore fail fast at startup instead of running
+with only some vector spaces configured. `docker compose config --quiet`
+still validates Compose interpolation; it cannot validate a model's actual
+output dimension, so that dimension check remains an application startup
+check.
 
 ## Host Cockpit Callback
 

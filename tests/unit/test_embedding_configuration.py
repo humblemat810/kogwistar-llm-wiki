@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
 from kogwistar_llm_wiki import ingest_pipeline
+from kogwistar_llm_wiki.worker import MaintenanceWorker
 
 
 def test_namespace_builders_keep_tiny_embedding_as_default() -> None:
@@ -111,11 +113,127 @@ def test_embedding_configs_are_independent_per_graph_space() -> None:
     assert resolved["wisdom"].model == "kogwistar-llm-wiki-embedding-v1"
 
 
-def test_postgres_real_embedding_requires_dimension() -> None:
-    with pytest.raises(ValueError, match="embedding_dim is required"):
+def test_postgres_real_embedding_requires_dimension(tmp_path: Path) -> None:
+    data_dir = tmp_path / "missing-dimension"
+    with pytest.raises(ValueError, match="embedding dimension is required"):
         ingest_pipeline.build_postgres_namespace_engines(
-            base_dir="unused",
+            base_dir=data_dir,
             dsn="postgresql://localhost/example",
             embedding_provider="ollama",
             embedding_model="qwen3-embedding:0.6b",
         )
+    assert not data_dir.exists()
+
+
+def test_unsupported_embedding_scope_fails_before_postgres_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "must-not-initialize"
+    monkeypatch.setenv(
+        "KOGWISTAR_LLM_WIKI_MAINTENANCE_EMBED_PROVIDER", "ollama"
+    )
+
+    with pytest.raises(ValueError, match="unsupported llm-wiki embedding scope"):
+        ingest_pipeline.build_postgres_namespace_engines(
+            base_dir=data_dir,
+            dsn="postgresql://localhost/example",
+        )
+
+    assert not data_dir.exists()
+
+
+def test_non_postgres_builder_also_rejects_real_provider_without_dimension(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "missing-dimension-chroma"
+
+    with pytest.raises(ValueError, match="embedding dimension is required"):
+        ingest_pipeline.build_persistent_namespace_engines(
+            base_dir=data_dir,
+            embedding_provider="ollama",
+            embedding_model="qwen3-embedding:0.6b",
+        )
+
+    assert not data_dir.exists()
+
+
+def test_postgres_uses_each_space_dimension(monkeypatch: pytest.MonkeyPatch) -> None:
+    dimensions: dict[str, int] = {}
+
+    def fake_postgres_engine(*args: object, **kwargs: object) -> object:
+        dimensions[str(kwargs["kg_graph_type"])] = int(kwargs["embedding_dim"])
+        return object()
+
+    monkeypatch.setattr(ingest_pipeline, "_build_postgres_engine", fake_postgres_engine)
+    ingest_pipeline.build_postgres_namespace_engines(
+        base_dir="unused",
+        dsn="postgresql://localhost/example",
+        embedding_configs={
+            "conversation": EmbeddingProviderConfig(provider="fake", dimension=3),
+            "workflow": EmbeddingProviderConfig(provider="fake", dimension=4),
+            "knowledge": EmbeddingProviderConfig(provider="fake", dimension=5),
+            "wisdom": EmbeddingProviderConfig(provider="fake", dimension=6),
+        },
+    )
+
+    assert dimensions == {
+        "conversation": 3,
+        "workflow": 4,
+        "knowledge": 5,
+        "wisdom": 6,
+    }
+
+
+def test_postgres_engine_passes_dimension_to_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: list[int] = []
+
+    class FakeConfig:
+        def __init__(self, **kwargs: object) -> None:
+            captured.append(int(kwargs["embedding_dim"]))
+
+    monkeypatch.setattr(
+        "kogwistar.engine_core.engine_postgres.EnginePostgresConfig", FakeConfig
+    )
+    monkeypatch.setattr(
+        "kogwistar.engine_core.engine_postgres.build_postgres_backend",
+        lambda config: (object(), object()),
+    )
+    monkeypatch.setattr(ingest_pipeline, "GraphKnowledgeEngine", lambda **kwargs: kwargs)
+
+    ingest_pipeline._build_postgres_engine(
+        tmp_path,
+        kg_graph_type="knowledge",
+        embedding_function=lambda values: [[0.0] for _ in values],
+        dsn="postgresql://localhost/example",
+        embedding_dim=7,
+        schema="public",
+    )
+
+    assert captured == [7]
+
+
+def test_frontend_knowledge_and_maintenance_use_their_declared_spaces() -> None:
+    engines = ingest_pipeline.build_in_memory_namespace_engines(
+        embedding_configs={
+            "conversation": EmbeddingProviderConfig(provider="fake", dimension=2),
+            "workflow": EmbeddingProviderConfig(provider="fake", dimension=4),
+            "knowledge": EmbeddingProviderConfig(provider="fake", dimension=3),
+            "wisdom": EmbeddingProviderConfig(provider="fake", dimension=5),
+        }
+    )
+    try:
+        assert len(engines.conversation.embedding_function(["frontend"])[0]) == 2
+        assert len(engines.kg.embedding_function(["knowledge"])[0]) == 3
+        assert len(engines.workflow.embedding_function(["maintenance-state"])[0]) == 4
+
+        worker = MaintenanceWorker(engines)
+        # Maintenance state is 4D, but the worker's conversation replies use
+        # the shared conversation/history engine and therefore remain 2D.
+        assert worker.runtime.conversation_engine is engines.conversation
+        assert len(worker.runtime.conversation_engine.embedding_function(["reply"])[0]) == 2
+    finally:
+        engines.close()
