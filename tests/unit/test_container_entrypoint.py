@@ -80,6 +80,14 @@ def test_real_module_entrypoint_reports_invalid_environment_before_exec():
     assert "--force-recreate" in result.stderr
 
 
+def test_global_embedding_environment_passes_startup_validation(monkeypatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_EMBED_PROVIDER", "fake")
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_EMBED_MODEL", "global-model")
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_EMBED_DIMENSION", "6")
+
+    container_entrypoint._resolve_embedding_functions()
+
+
 def test_container_contract_keeps_entrypoint_and_compose_commands():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     compose = (ROOT / "compose.yml").read_text(encoding="utf-8")

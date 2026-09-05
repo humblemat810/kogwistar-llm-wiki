@@ -32,6 +32,9 @@ omitted, it falls back to `LLM_WIKI_API_TOKEN`; `LLM_WIKI_MCP_TOKEN_SCOPES`
 falls back to `LLM_WIKI_API_TOKEN_SCOPES`. Static tokens are intended for local
 or private development deployments; use a terminating proxy or an OAuth-aware
 FastMCP provider for production identity management.
+The application agent extra pins the tested FastMCP release, and the Docker
+image installs that extra from `pyproject.toml` so the Dockerfile does not carry
+a second FastMCP version declaration.
 For any non-local bind or production deployment, require authentication, TLS,
 rate limiting, and network policy in front of both services.
 

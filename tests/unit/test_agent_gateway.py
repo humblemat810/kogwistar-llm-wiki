@@ -174,6 +174,19 @@ def test_native_mcp_accepts_explicit_token(monkeypatch):
     assert mcp.auth is not None
 
 
+def test_native_mcp_shared_auth_is_used_when_mcp_overrides_are_empty(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN", "shared-secret")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN_SCOPES", "read")
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN_SCOPES", "")
+
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+
+    assert mcp.auth is not None
+
+
 def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     tools = asyncio.run(mcp.list_tools())

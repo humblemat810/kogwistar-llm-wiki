@@ -202,7 +202,8 @@ def _resolve_embedding_functions(
     for env_name in os.environ:
         if not env_name.startswith(scoped_prefix) or "_EMBED_" not in env_name:
             continue
-        scope = env_name[len(scoped_prefix):].split("_EMBED_", 1)[0]
+        rest = env_name[len(scoped_prefix):]
+        scope = "EMBED" if rest.startswith("EMBED_") else rest.split("_EMBED_", 1)[0]
         if scope not in supported_scopes:
             raise ValueError(
                 f"unsupported llm-wiki embedding scope {scope.lower()!r}; "

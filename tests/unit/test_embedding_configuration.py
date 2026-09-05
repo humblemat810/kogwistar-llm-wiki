@@ -87,6 +87,17 @@ def test_llm_wiki_embedding_environment_overrides_parser_environment(
     assert config.dimension == 7
 
 
+def test_global_llm_wiki_embedding_scope_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_EMBED_PROVIDER", "fake")
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_EMBED_MODEL", "global-model")
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_EMBED_DIMENSION", "6")
+
+    _, configs = ingest_pipeline._resolve_embedding_functions()
+
+    assert configs["knowledge"].model == "global-model"
+    assert configs["knowledge"].dimension == 6
+
+
 def test_embedding_configs_are_independent_per_graph_space() -> None:
     configs = {
         "conversation": EmbeddingProviderConfig(

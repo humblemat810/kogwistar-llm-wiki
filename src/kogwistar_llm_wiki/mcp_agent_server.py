@@ -8,6 +8,11 @@ import os
 from .agent_gateway import AgentGateway
 
 
+def _env_value(name: str, fallback_name: str, default: str = "") -> str:
+    value = os.getenv(name, "").strip()
+    return value or os.getenv(fallback_name, default).strip()
+
+
 def build_agent_mcp(gateway: AgentGateway) -> Any:
     try:
         from fastmcp import FastMCP
@@ -15,8 +20,8 @@ def build_agent_mcp(gateway: AgentGateway) -> Any:
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Install the optional 'agent' extra to serve MCP: pip install -e '.[agent]'") from exc
 
-    token = os.getenv("LLM_WIKI_MCP_TOKEN", os.getenv("LLM_WIKI_API_TOKEN", "")).strip()
-    auth_required = os.getenv("LLM_WIKI_MCP_AUTH_REQUIRED", os.getenv("LLM_WIKI_AUTH_REQUIRED", "")).lower() in {
+    token = _env_value("LLM_WIKI_MCP_TOKEN", "LLM_WIKI_API_TOKEN")
+    auth_required = _env_value("LLM_WIKI_MCP_AUTH_REQUIRED", "LLM_WIKI_AUTH_REQUIRED").lower() in {
         "1",
         "true",
         "yes",
@@ -31,7 +36,9 @@ def build_agent_mcp(gateway: AgentGateway) -> Any:
     if token:
         scopes = [
             item.strip()
-            for item in os.getenv("LLM_WIKI_MCP_TOKEN_SCOPES", os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write")).split(",")
+            for item in _env_value(
+                "LLM_WIKI_MCP_TOKEN_SCOPES", "LLM_WIKI_API_TOKEN_SCOPES", "read,write"
+            ).split(",")
             if item.strip()
         ]
         auth = StaticTokenVerifier(

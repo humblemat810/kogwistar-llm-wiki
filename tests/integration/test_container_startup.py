@@ -8,7 +8,12 @@ import uuid
 import pytest
 
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.ci_full,
+    pytest.mark.slow,
+]
 
 
 def _docker_e2e_enabled() -> bool:
@@ -20,7 +25,7 @@ def _docker_e2e_enabled() -> bool:
     }
 
 
-def _run(*args: str) -> subprocess.CompletedProcess[str]:
+def _run(*args: str, timeout_seconds: float = 1800) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["docker", *args],
         capture_output=True,
@@ -28,10 +33,10 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
         errors="replace",
         text=True,
         check=False,
+        timeout=timeout_seconds,
     )
 
 
-@pytest.mark.manual
 def test_built_container_enforces_startup_configuration():
     """Exercise the real image entrypoint; opt in because it builds the image."""
     if not _docker_e2e_enabled():
@@ -41,7 +46,7 @@ def test_built_container_enforces_startup_configuration():
 
     probe = _run("info")
     if probe.returncode != 0:
-        pytest.skip(f"Docker daemon unavailable: {probe.stderr.strip()}")
+        pytest.fail(f"Docker daemon unavailable: {probe.stderr.strip()}")
 
     tag = f"kogwistar-llm-wiki-startup-e2e:{uuid.uuid4().hex[:12]}"
     try:
@@ -64,6 +69,7 @@ def test_built_container_enforces_startup_configuration():
         )
         assert invalid.returncode == 78
         assert "configuration invalid" in invalid.stderr
+        assert "invalid literal" in invalid.stderr or "dimension" in invalid.stderr
         assert "force-recreate" in invalid.stderr
         assert "command should not execute" not in invalid.stderr
 
@@ -77,5 +83,22 @@ def test_built_container_enforces_startup_configuration():
         )
         assert valid.returncode == 0, valid.stdout + valid.stderr
         assert "startup command reached" in valid.stdout
+
+        global_embedding = _run(
+            "run",
+            "--rm",
+            "--env",
+            "KOGWISTAR_LLM_WIKI_EMBED_PROVIDER=fake",
+            "--env",
+            "KOGWISTAR_LLM_WIKI_EMBED_MODEL=global-model",
+            "--env",
+            "KOGWISTAR_LLM_WIKI_EMBED_DIMENSION=6",
+            tag,
+            "python",
+            "-c",
+            "print('global embedding startup reached')",
+        )
+        assert global_embedding.returncode == 0, global_embedding.stdout + global_embedding.stderr
+        assert "global embedding startup reached" in global_embedding.stdout
     finally:
         _run("image", "rm", "--force", tag)

@@ -26,10 +26,10 @@ COPY src ./src
        && python -m pip install --no-cache-dir -e "./kogwistar[full]" \
        && python -m pip install --no-cache-dir -e ./kg-doc-parser \
        && python -m pip install --no-cache-dir -e ./kogwistar-obsidian-sink \
-       && python -m pip install --no-cache-dir fastmcp "chromadb>=0.6" \
+       && python -m pip install --no-cache-dir "chromadb>=0.6" \
           opentelemetry-api "opentelemetry-sdk>=1.25" \
           "opentelemetry-exporter-otlp-proto-http>=1.25" \
-       && python -m pip install --no-cache-dir --no-deps -e .
+       && python -m pip install --no-cache-dir --no-deps -e ".[agent]"
 
 RUN useradd --create-home --uid 10001 llmwiki \
     && mkdir -p /var/lib/llm-wiki \
