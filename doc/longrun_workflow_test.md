@@ -71,6 +71,29 @@ For `pgvector`, the experiment launch configs now share one container per test s
 
 Resume compatibility is intentionally worker-agnostic too: a `continue` run can pick up a prior checkpoint even if the old manifest was created with a different parser worker count. That keeps parallelism tunable without forcing a fresh rebuild.
 
+### Parser LLM cache safety
+
+Parser LLM responses use a staged cache when the layerwise parser is run
+inside an ingestion or maintenance transaction. A response is first held in
+memory, then promoted to the configured parser cache only after parser
+validation and canonical graph persistence succeed. Failed persistence,
+validation, cancellation, or a lost maintenance lease discards the staged
+entries, so the next attempt calls the provider again.
+
+The cache is configured with `KG_DOC_PARSER_JOBLIB_CACHE_DIR` and is scoped by
+the parser/provider configuration and requested model names. The cache revision
+can be advanced with `KG_DOC_PARSER_LLM_CACHE_REVISION` after a semantic prompt
+or output-contract change. `call_llm_structured` and `max_rounds` are execution
+callbacks/attempt controls and do not fragment an otherwise identical result;
+model names remain part of the identity.
+
+`correct_level_children_with_iterative_pipeline` is cached as one completed
+level only when `pending_fix_children` is empty. A partial result is useful
+diagnostic progress, but it is not currently a resumable checkpoint; caching it
+would replay the same unresolved children. Maintenance-first initially seeds a
+source map, then its maintenance worker invokes the parser and uses the same
+promotion boundary without holding a database transaction over the LLM call.
+
 Database lifecycle is explicit:
 
 - `fresh` + fingerprint mode on a managed `testcontainer` or `persistent` dev container drops and recreates only that fingerprinted database before the run. This is the development reset operation; it does not drop the whole PostgreSQL server or other experiment databases.

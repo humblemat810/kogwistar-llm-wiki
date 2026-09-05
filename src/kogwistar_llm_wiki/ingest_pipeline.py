@@ -33,6 +33,7 @@ from kogwistar.logical_refs import (
 from kogwistar.policy import PromotionDecision
 from kogwistar.runtime.budget import budget_event_from_dict
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
+from kg_doc_parser.semantic_document_splitting_layerwise_edits import parser_llm_cache_transaction
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from kg_doc_parser.workflow_ingest.providers import (
@@ -643,27 +644,37 @@ class IngestPipeline:
                 operation_mode=operation_mode,
                 graph_status="seeded",
             )
-        parse_started_at = time.perf_counter()
-        parse_result = self.parse_source(
-            request=request,
+        # Parser LLM outputs stay transaction-local until the canonical graph
+        # write succeeds. A rejected tree or failed persistence must be retried.
+        with parser_llm_cache_transaction() as parser_cache_transaction:
+            parse_started_at = time.perf_counter()
+            parse_result = self.parse_source(
+                request=request,
+                source_document_id=source_document_id,
+            )
+            parse_runtime_ms = max(0, int((time.perf_counter() - parse_started_at) * 1000))
+            self.create_parse_retry_history(
+                request=request,
+                source_document_id=source_document_id,
+                parse_result=parse_result,
+                namespace=ns.conv_bg,
+            )
+            graph_extraction = self.translate_parse_result(
+                parse_result=parse_result,
+                source_document_id=source_document_id,
+            )
+            self.ingest_parse_result(
+                request=request,
+                source_document_id=source_document_id,
+                graph_extraction=graph_extraction,
+                namespace=ns.conv_fg,
+            )
+            promoted_cache_entries = parser_cache_transaction.promote()
+        self._trace_event(
+            "parser_llm_cache_promoted",
+            workspace_id=request.workspace_id,
             source_document_id=source_document_id,
-        )
-        parse_runtime_ms = max(0, int((time.perf_counter() - parse_started_at) * 1000))
-        self.create_parse_retry_history(
-            request=request,
-            source_document_id=source_document_id,
-            parse_result=parse_result,
-            namespace=ns.conv_bg,
-        )
-        graph_extraction = self.translate_parse_result(
-            parse_result=parse_result,
-            source_document_id=source_document_id,
-        )
-        self.ingest_parse_result(
-            request=request,
-            source_document_id=source_document_id,
-            graph_extraction=graph_extraction,
-            namespace=ns.conv_fg,
+            entry_count=promoted_cache_entries,
         )
         self.record_source_readiness(
             request=request,

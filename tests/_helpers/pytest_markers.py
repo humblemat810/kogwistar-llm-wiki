@@ -4,7 +4,14 @@ from collections.abc import Iterable
 
 import pytest
 
-_DEFAULT_CI_BLOCKERS = {"ci_full", "manual", "longrun", "requires_ollama", "slow"}
+_DEFAULT_CI_BLOCKERS = {
+    "ci_full",
+    "llm_real",
+    "manual",
+    "longrun",
+    "requires_ollama",
+    "slow",
+}
 
 
 def is_default_ci_item(item: pytest.Item) -> bool:

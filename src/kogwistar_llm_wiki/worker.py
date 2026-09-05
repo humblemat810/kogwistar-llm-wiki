@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 
 from kogwistar.engine_core.jobs import JobQueueItem
+from kg_doc_parser.semantic_document_splitting_layerwise_edits import parser_llm_cache_transaction
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
@@ -539,34 +540,38 @@ class MaintenanceWorker(BaseWorker):
             llm_model=(str(metadata["llm_model"]) if metadata.get("llm_model") else None),
         )
         pipeline = IngestPipeline(self.engines)
-        parse_result = pipeline.parse_source(
-            request=request,
-            source_document_id=source_document_id,
-        )
-        if getattr(self, "_claim_lost", threading.Event()).is_set():
-            return {
-                "node_count": 0,
-                "edge_count": 0,
-                "llm_call_count": int(dict(getattr(parse_result, "usage_summary", {}) or {}).get("llm_call_count") or 0),
-                "stale_claim": True,
-                "comparison_result": {"parse_completed": True},
-            }
-        pipeline.create_parse_retry_history(
-            request=request,
-            source_document_id=source_document_id,
-            parse_result=parse_result,
-            namespace=ns.conv_bg,
-        )
-        extraction = pipeline.translate_parse_result(
-            parse_result=parse_result,
-            source_document_id=source_document_id,
-        )
-        pipeline.ingest_parse_result(
-            request=request,
-            source_document_id=source_document_id,
-            graph_extraction=extraction,
-            namespace=ns.conv_fg,
-        )
+        # This is an in-memory parser-cache transaction, not a database
+        # transaction: the long LLM call never holds a graph connection open.
+        with parser_llm_cache_transaction() as parser_cache_transaction:
+            parse_result = pipeline.parse_source(
+                request=request,
+                source_document_id=source_document_id,
+            )
+            if getattr(self, "_claim_lost", threading.Event()).is_set():
+                return {
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "llm_call_count": int(dict(getattr(parse_result, "usage_summary", {}) or {}).get("llm_call_count") or 0),
+                    "stale_claim": True,
+                    "comparison_result": {"parse_completed": True},
+                }
+            pipeline.create_parse_retry_history(
+                request=request,
+                source_document_id=source_document_id,
+                parse_result=parse_result,
+                namespace=ns.conv_bg,
+            )
+            extraction = pipeline.translate_parse_result(
+                parse_result=parse_result,
+                source_document_id=source_document_id,
+            )
+            pipeline.ingest_parse_result(
+                request=request,
+                source_document_id=source_document_id,
+                graph_extraction=extraction,
+                namespace=ns.conv_fg,
+            )
+            parser_cache_transaction.promote()
         pipeline.record_source_readiness(
             request=request,
             source_document_id=source_document_id,

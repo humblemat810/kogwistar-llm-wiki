@@ -4,7 +4,10 @@ import logging
 import json
 from types import SimpleNamespace
 
+from joblib import Memory
+import pytest
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
+import kg_doc_parser.semantic_document_splitting_layerwise_edits as layerwise_edits
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from kogwistar_llm_wiki.debug_run import (
@@ -251,6 +254,7 @@ def test_debug_run_traces_capture_ingest_progress(namespace_engines, tmp_path):
     assert "ingest_parse_result_persisted_source" in stages
     assert "ingest_parse_result_persisted_compatibility" in stages
     assert "ingest_parse_result_complete" in stages
+    assert "parser_llm_cache_promoted" in stages
     assert "create_maintenance_request_start" in stages
     assert "create_maintenance_request_complete" in stages
     assert "create_candidate_link_start" in stages
@@ -259,6 +263,55 @@ def test_debug_run_traces_capture_ingest_progress(namespace_engines, tmp_path):
     assert "create_promotion_candidate_complete" in stages
     assert "parse_statistics_recorded" in stages
     assert "ingest_run_complete" in stages
+
+
+def test_ingest_discards_staged_parser_cache_when_canonical_persistence_fails(
+    namespace_engines,
+    tmp_path,
+    monkeypatch,
+):
+    """A graph-write failure must not turn a model response into a future hit."""
+
+    monkeypatch.setattr(layerwise_edits, "memory", Memory(tmp_path / "parser-cache"))
+    calls = 0
+
+    @layerwise_edits.parser_llm_cache
+    def fake_llm_operation(raw_text: str) -> str:
+        nonlocal calls
+        calls += 1
+        return f"parsed:{calls}:{raw_text}"
+
+    def fake_parser(**kwargs):
+        fake_llm_operation(kwargs["raw_text"])
+        kwargs.pop("mode", None)
+        kwargs.pop("llm_provider", None)
+        kwargs.pop("model", None)
+        kwargs.pop("provider_settings", None)
+        return parse_page_index_document(mode="heuristic", **kwargs)
+
+    request = IngestPipelineRequest(
+        workspace_id="cache-transaction",
+        source_uri="file:///cache-transaction.md",
+        title="Cache transaction",
+        raw_text="# Cache transaction\n\nThe raw payload is stable.",
+        parser_mode="heuristic",
+        parser_lane="page_index",
+        promotion_mode="pending",
+    )
+    failing_pipeline = IngestPipeline(namespace_engines, parser=fake_parser)
+    monkeypatch.setattr(
+        failing_pipeline,
+        "ingest_parse_result",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("canonical graph write failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="canonical graph write failed"):
+        failing_pipeline.run(request)
+    assert calls == 1
+
+    successful_pipeline = IngestPipeline(namespace_engines, parser=fake_parser)
+    successful_pipeline.run(request)
+    assert calls == 2
 
 
 def test_debug_run_live_trace_mirrors_ingest_progress(namespace_engines, tmp_path, capsys):
