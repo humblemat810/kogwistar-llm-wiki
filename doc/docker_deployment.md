@@ -173,3 +173,40 @@ server-backed store when process isolation is required.
 `docker compose down` stops containers but preserves named volumes.
 `docker compose down -v` removes the database and app-data volumes and is the
 explicit destructive reset. Export or inspect the graph before using it.
+
+## Archive And Recovery
+
+LLM-Wiki has an operator-only portable archive command. It captures the
+authoritative Kogwistar event history by per-namespace sequence watermark and
+can rebuild Chroma vectors and other derived indexes after restore. It is not
+exposed through MCP or REST.
+
+Stop or drain application writers before capture. Never copy an actively
+written Chroma directory. Run the archive command as a one-off process with
+the data volume mounted:
+
+```powershell
+docker compose stop llm-wiki
+docker compose run --rm llm-wiki python -m kogwistar_llm_wiki `
+  --data-dir /var/lib/llm-wiki --backend chroma `
+  archive create --workspace demo --output /var/lib/llm-wiki-archives/demo.tar.gz `
+  --include-backend-snapshot
+```
+
+Verify before storing or transferring the archive:
+
+```powershell
+docker compose run --rm llm-wiki python -m kogwistar_llm_wiki `
+  archive verify --archive /var/lib/llm-wiki-archives/demo.tar.gz
+```
+
+Restore is dry-run by default and must target a fresh isolated data directory.
+Use `--apply` only after validation. Omitting `--target-workspace` performs an
+exact restore of the original workspace ID into that isolated datastore;
+specifying it performs a typed workspace remap and rebuilds derived vectors and
+indexes. Portable event archives are the migration format. Backend snapshots
+are optional exact-recovery accelerators and require matching backend and
+embedding fingerprints; use `--use-backend-snapshot` only for a compatible
+quiescent base archive. Archive files can contain source text and history, so
+protect them with the deployment's filesystem, backup, transport, or KMS
+encryption controls.

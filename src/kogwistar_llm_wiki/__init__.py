@@ -56,6 +56,16 @@ from .graph_seed_bundle import (
     load_seed_bundle,
     seed_graph_bundle,
 )
+from .archive import (
+    ARCHIVE_FORMAT_VERSION,
+    ArchiveError,
+    RestoreReport,
+    create_archive,
+    inspect_archive,
+    restore_archive,
+    restore_backend_snapshot,
+    verify_archive,
+)
 
 __all__ = [
     "IngestPipeline",
@@ -119,4 +129,12 @@ __all__ = [
     "export_graph_seed_bundle",
     "load_seed_bundle",
     "seed_graph_bundle",
+    "ARCHIVE_FORMAT_VERSION",
+    "ArchiveError",
+    "RestoreReport",
+    "create_archive",
+    "inspect_archive",
+    "restore_archive",
+    "restore_backend_snapshot",
+    "verify_archive",
 ]

@@ -210,3 +210,71 @@ The repository includes
 `data/seed_bundles/rl_llm_agent_tool_use_v1.json`, covering RLHF, WebGPT,
 ReAct, Toolformer, GRPO, DeepSeek-R1, Kimi k1.5, Kimi K2, and host-executed
 tool calling with ordinary edges and first-class multi-endpoint hyperedges.
+
+## `llm-wiki archive`
+
+Create and validate operator-only portable event archives. Archives include
+lossless Kogwistar event envelopes and per-namespace sequence watermarks. They
+are suitable for Chroma, SQLite, and PostgreSQL-backed workspaces. The archive
+timestamp is informational; restore correctness is defined by the recorded
+watermarks.
+
+Capture must be performed with LLM-Wiki writers stopped or drained. Known
+pending or doing durable index jobs cause capture to fail. Do not copy a live
+Chroma persistence directory.
+
+```powershell
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend chroma `
+  archive create `
+  --workspace demo `
+  --output .\archives\demo-base.tar.gz `
+  --include-backend-snapshot
+
+python -m kogwistar_llm_wiki archive verify `
+  --archive .\archives\demo-base.tar.gz
+
+# Safe dry-run (the default):
+python -m kogwistar_llm_wiki `
+  --data-dir .\restore-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz
+
+# Apply an exact restore to a fresh isolated datastore. The source workspace ID
+# is retained when --target-workspace is omitted:
+python -m kogwistar_llm_wiki `
+  --data-dir .\restore-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz `
+  --apply
+
+# Or remap the workspace ID while rebuilding derived vectors/indexes:
+python -m kogwistar_llm_wiki `
+  --data-dir .\restore-copy-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz `
+  --target-workspace demo-copy `
+  --apply
+
+# Optional fast exact snapshot restore (requires the manifest fingerprint):
+python -m kogwistar_llm_wiki `
+  --data-dir .\snapshot-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz `
+  --use-backend-snapshot `
+  --embedding-fingerprint <manifest-embedding-fingerprint>
+```
+
+An incremental archive is created with `--parent` and restored by supplying
+the parent archive path with `--parent`. `archive catalog --directory` lists
+verified archives and can filter by `--before-ms`; this selects a completed
+watermark archive rather than slicing events at an arbitrary timestamp.
+
+`seed-bundle` and report dumps remain teaching/diagnostic exports. They are not
+substitutes for `archive create`. Backend snapshots are only exact accelerators;
+portable event restore is the migration and recovery fallback.
