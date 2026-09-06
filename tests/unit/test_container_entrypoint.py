@@ -96,3 +96,12 @@ def test_container_contract_keeps_entrypoint_and_compose_commands():
     assert "      - llm-wiki\n" in compose
     assert "      - workbench\n" in compose
     assert "      - mcp\n" in compose
+
+
+def test_dockerfile_pins_and_build_checks_fastmcp_imports():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    parser_pyproject = (ROOT / "kg-doc-parser" / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"fastmcp==3.0.0"' in dockerfile
+    assert 'fastmcp = "3.0.0"' in parser_pyproject
+    assert "from fastmcp import FastMCP" in dockerfile
+    assert "from fastmcp.server.auth import StaticTokenVerifier, require_scopes" in dockerfile

@@ -22,14 +22,22 @@ COPY kg-doc-parser ./kg-doc-parser
 COPY kogwistar-obsidian-sink ./kogwistar-obsidian-sink
 COPY src ./src
 
-   RUN python -m pip install --upgrade pip \
+# The parser checkout currently asks for a newer FastMCP range. The
+# application/core MCP contract is tested against 3.0.0, so apply the final
+# image pin after all sibling packages have been installed.
+RUN python -m pip install --upgrade pip \
        && python -m pip install --no-cache-dir -e "./kogwistar[full]" \
        && python -m pip install --no-cache-dir -e ./kg-doc-parser \
        && python -m pip install --no-cache-dir -e ./kogwistar-obsidian-sink \
+       && python -m pip install --no-cache-dir --force-reinstall --no-deps "fastmcp==3.0.0" \
        && python -m pip install --no-cache-dir "chromadb>=0.6" \
           opentelemetry-api "opentelemetry-sdk>=1.25" \
           "opentelemetry-exporter-otlp-proto-http>=1.25" \
        && python -m pip install --no-cache-dir --no-deps -e ".[agent]"
+
+# Catch namespace-package/split-install failures while building, not after the
+# MCP container has entered a restart loop.
+RUN python -c "from fastmcp import FastMCP; from fastmcp.server.auth import StaticTokenVerifier, require_scopes; FastMCP('build-import-check'); print('FastMCP import check passed')"
 
 RUN useradd --create-home --uid 10001 llmwiki \
     && mkdir -p /var/lib/llm-wiki \
