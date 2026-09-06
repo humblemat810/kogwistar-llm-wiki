@@ -32,3 +32,8 @@ reviewed interaction and proposal.
 
 When available, prefer the structured `llm_wiki` response extension over plain
 answer text because it carries lens scope and grounding metadata.
+
+For a trusted local personal deployment, `LLM_WIKI_AUTH_MODE=disabled` is the
+explicit no-identity mode. Do not treat it as a named default user or use it
+for a shared service. Always provide the intended workspace even in this mode;
+authentication and workspace scoping are separate concerns.

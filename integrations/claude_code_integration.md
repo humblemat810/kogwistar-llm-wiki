@@ -29,6 +29,12 @@ project `.mcp.json` shape is:
 }
 ```
 
+For a trusted local single-user server, authentication can be disabled
+explicitly with `LLM_WIKI_AUTH_MODE=disabled`; omit the Authorization header in
+that case. This is no-identity mode, not a default account, and every tool
+still needs the intended `workspace_id`. Use static-token or JWT mode before
+sharing the server or binding it beyond localhost.
+
 Use the `query` and `search` tools for grounded reads. Treat
 `propose` as a review operation and call `confirm` only after
 the user explicitly approves the proposal. A proposal may validly contain no

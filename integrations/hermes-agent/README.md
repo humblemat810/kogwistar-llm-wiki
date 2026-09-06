@@ -16,6 +16,11 @@ HTTP agent flag is needed for this integration. For HTTP MCP, start
 `LLM_WIKI_API_TOKEN` when the remote server requires bearer authentication.
 Keep shared deployments behind authentication.
 
+For a trusted local personal deployment, set `LLM_WIKI_AUTH_MODE=disabled` and
+do not configure a token. This selects the explicit no-identity mode; it does
+not create a default user, and the MCP tools still operate within the selected
+workspace. Use static-token or JWT mode before sharing the server.
+
 The server exposes the semantic tools `query`, `search`, `ingest`, `source`,
 `reingest`, `maintain`, `status`, `hypergraph_search`, `history`, `propose`,
 and `confirm`. Use `query`/`search` for grounded reads, `ingest`/`source`/

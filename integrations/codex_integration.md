@@ -22,3 +22,9 @@ The semantic MCP tools are `query`, `search`, `ingest`, `source`, `reingest`,
 Use `propose` followed by explicit `confirm`; there is no direct graph-write
 tool. Configure `LLM_WIKI_MCP_TOKEN` and `LLM_WIKI_MCP_TOKEN_SCOPES` for the
 remote MCP transport.
+
+For a trusted local personal deployment, set `LLM_WIKI_AUTH_MODE=disabled` and
+omit the bearer token. The server then has no authenticated principal or ACL
+requirement, but the configured workspace remains the data boundary. This mode
+is not suitable for a shared host; use static-token or JWT mode when another
+user or network can reach the service.
