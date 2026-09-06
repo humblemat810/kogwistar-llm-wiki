@@ -161,9 +161,36 @@ Responsibilities:
 
 ---
 
-### 2.5 Application UI
+### 2.5 Interactive Knowledge Workbench
 
-simple CLI, if ui later added, first draft is a tkinter click button representing the command as a short cut. Probably as a visual cheatsheet of cli.
+The application UI is an interactive knowledge-workbench, not only a graph
+viewer. Viewing is the read-only subset of a larger loop:
+
+```text
+query -> retrieve -> inspect -> reason -> propose edit -> validate -> commit -> refresh
+```
+
+The workbench owns user interaction and bounded semantic-lens projection. It
+may ask questions, show evidence, compare candidates, and submit typed graph
+commands. It does not write graph storage directly. Accepted edits flow through
+Kogwistar's append-only event and tombstone semantics, then the workbench
+refreshes its lens from the authoritative snapshot.
+
+The workbench has two deliberately different orchestration modes:
+
+- **Codex-agent mode (bounded cockpit)**: a session-aware agent handles a
+  bounded sequence of meaningful interaction actions: lens resolution,
+  visible-evidence inspection, session-history query, answer/clarification,
+  or a grounded node/edge patch proposal. The app validates the proposal
+  against its lens watermark and requires explicit confirmation before the
+  existing append-only command path applies it. Codex has no graph writer.
+- **Deterministic workflow mode**: the host chooses fixed transitions for
+  retrieval, answer generation, patch proposal, validation, and commit. It is
+  not an agent that decides its own next action.
+
+The graph explorer ADR defines the bounded lens, smooth interaction, and
+frontend projection contract. Obsidian remains a durable document projection;
+the interactive workbench is a separate application projection.
 
 ---
 

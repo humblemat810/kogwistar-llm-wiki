@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import multiprocessing
 import os
+import queue
 import re
 import shutil
 import time
+import threading
 import sys
 import traceback
 import zipfile
@@ -17,7 +21,17 @@ from pathlib import Path
 from typing import Any
 from types import SimpleNamespace
 
+if os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1" or os.getenv("KOGWISTAR_LONGRUN_LIVE_TRACE") == "1":
+    print(
+        "[longrun.boot] test module import started "
+        f"pid={os.getpid()} argv={sys.argv!r}",
+        file=sys.stderr,
+        flush=True,
+    )
+
 import pytest
+
+pytestmark = [pytest.mark.slow, pytest.mark.ci_full]
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
@@ -30,7 +44,7 @@ from kg_doc_parser.workflow_ingest.providers import (
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime import MappingStepResolver
 from kogwistar.runtime.models import RunSuccess, RunSuspended, WorkflowEdge, WorkflowNode
-from kogwistar.runtime.runtime import WorkflowRuntime
+from kogwistar.runtime.runtime import RunResult, WorkflowRuntime
 from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.engine_core import RecoverySurface
 
@@ -41,6 +55,7 @@ from kogwistar_llm_wiki.ingest_pipeline import (
     build_postgres_namespace_engines,
 )
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
+from kogwistar_llm_wiki.debug_run import LiveTracePrinter, aggregate_stage_timings, env_flag_enabled
 from kogwistar_llm_wiki.longrun_parser_worker import (
     _basic_sense_eval_from_graph_payload,
     run_longrun_parser_child,
@@ -52,6 +67,7 @@ from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
+from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
 
 
 STATUSES = {
@@ -118,22 +134,41 @@ SYSTEMIC_FAILURES = {
 logger = logging.getLogger(__name__)
 
 
+_PARSER_PARENT_POLL_LOG_INTERVAL_SECONDS = 30.0
+
+
 class LongRunDocumentError(RuntimeError):
     """Document-scoped failure raised from a workflow step."""
 
-    def __init__(self, code: str, message: str, *, phase: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        phase: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.phase = phase
+        self.details = dict(details or {})
 
 
 class LongRunSystemicError(RuntimeError):
     """Abort-class failure raised when infrastructure or invariants look broken."""
 
-    def __init__(self, code: str, message: str, *, phase: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        phase: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.phase = phase
+        self.details = dict(details or {})
 
 
 @dataclass(frozen=True)
@@ -141,6 +176,9 @@ class LongRunConfig:
     enabled: bool
     mode: str
     doc_count: int
+    doc_limit: int | None = None
+    recovery_doc_limit: int | None = None
+    recovery_attempts_per_doc: int = 1
     operation_mode: str = "parse_first"
     pg_database_mode: str = "fingerprint"
     parser_provider: str = "ollama"
@@ -155,9 +193,15 @@ class LongRunConfig:
     ollama_base_url: str = "http://localhost:11434"
     max_repeated_systemic_errors: int = 3
     max_post_doc_maintenance_steps: int = 100
+    maintenance_schedule_mode: str = "drain"
+    maintenance_workers: int = 1
+    maintenance_steps_per_slice: int = 2
+    maintenance_llm_calls_per_slice: int = 0
+    maintenance_seconds_per_slice: int = 0
     max_llm_calls: int = 100
     backend: str = "chroma"
     parser_lane: str = "workflow_layered"
+    conversation_persistence_mode: str = "single_stage"
     parse_timeout_seconds: int = 1200
     max_runtime_seconds: int = 3600
     dsn: str | None = None
@@ -168,7 +212,11 @@ class LongRunConfig:
     workspace_id: str = "longrun"
     checkpoint_run_dir: str | None = None
     doc_profile: str = "medium"
+    corpus_profile: str = "watershed_stress"
     skip_maintenance_invariant: bool = False
+    live_trace: bool = False
+    parser_workers: int = 1
+    experiment_run: str = ""
     corpus_fingerprint: str = ""
 
     def __post_init__(self) -> None:
@@ -176,23 +224,62 @@ class LongRunConfig:
             raise ValueError("max_llm_calls must be positive")
         if self.max_runtime_seconds <= 0:
             raise ValueError("max_runtime_seconds must be positive")
+        if not 1 <= self.parser_workers <= 16:
+            raise ValueError("parser_workers must be between 1 and 16")
+        if not 1 <= self.maintenance_workers <= 16:
+            raise ValueError("maintenance_workers must be between 1 and 16")
+        if self.parser_workers > 1 and self.backend == "chroma":
+            raise ValueError(
+                "parser_workers > 1 requires postgres/pgvector; Chroma persistence is single-writer"
+            )
+        if self.maintenance_workers > 1 and self.backend == "chroma":
+            raise ValueError(
+                "maintenance_workers > 1 requires postgres/pgvector; Chroma persistence is single-writer"
+            )
+        if self.doc_limit is not None and not 1 <= self.doc_limit <= self.doc_count:
+            raise ValueError("doc_limit must be between 1 and doc_count")
+        if self.recovery_doc_limit is not None and not 1 <= self.recovery_doc_limit <= self.doc_count:
+            raise ValueError("recovery_doc_limit must be between 1 and doc_count")
+        if self.recovery_attempts_per_doc <= 0:
+            raise ValueError("recovery_attempts_per_doc must be positive")
+        if self.mode not in {"fresh", "continue", "auto", "retry_failed"}:
+            raise ValueError("mode must be one of: fresh, continue, auto, retry_failed")
         if self.operation_mode not in {"parse_first", "maintenance_first", "hybrid"}:
             raise ValueError("operation_mode must be one of: parse_first, maintenance_first, hybrid")
+        if self.maintenance_schedule_mode not in {"drain", "fair_slices"}:
+            raise ValueError("maintenance_schedule_mode must be one of: drain, fair_slices")
+        if self.maintenance_steps_per_slice <= 0:
+            raise ValueError("maintenance_steps_per_slice must be positive")
+        if self.maintenance_llm_calls_per_slice < 0:
+            raise ValueError("maintenance_llm_calls_per_slice must be >= 0")
+        if self.maintenance_seconds_per_slice < 0:
+            raise ValueError("maintenance_seconds_per_slice must be >= 0")
         if self.pg_database_mode not in {"fingerprint", "shared"}:
             raise ValueError("pg_database_mode must be one of: fingerprint, shared")
         if self.parser_proposal_mode not in {"children", "boundaries"}:
             raise ValueError("parser_proposal_mode must be one of: children, boundaries")
+        if self.conversation_persistence_mode not in {"single_stage", "two_stage"}:
+            raise ValueError(
+                "conversation_persistence_mode must be one of: single_stage, two_stage"
+            )
+        if self.corpus_profile not in {"watershed_stress", "daily_life"}:
+            raise ValueError("corpus_profile must be one of: watershed_stress, daily_life")
+        if any(char in self.experiment_run for char in '\\/:*?"<>|'):
+            raise ValueError("experiment_run must be a simple label without path separators")
         if not self.corpus_fingerprint:
             object.__setattr__(self, "corpus_fingerprint", str(self._compute_corpus_fingerprint()))
 
     def _compute_corpus_fingerprint(self) -> str:
-        return str(
-            stable_id(
-            "llm_wiki.longrun.corpus",
+        parts: list[object] = [
             self.workspace_id,
             self.backend,
             self.operation_mode,
+            self.maintenance_schedule_mode,
+            self.maintenance_steps_per_slice,
+            self.maintenance_llm_calls_per_slice,
+            self.maintenance_seconds_per_slice,
             self.pg_database_mode,
+            self.corpus_profile,
             self.doc_count,
             self.doc_profile,
             self.parser_lane,
@@ -201,10 +288,104 @@ class LongRunConfig:
             self.parser_proposal_mode,
             self.token_min,
             self.token_max,
-            self.resume_probe_enabled,
             self.skip_maintenance_invariant,
+        ]
+        if self.conversation_persistence_mode == "two_stage":
+            parts.extend(["conversation_persistence_mode", self.conversation_persistence_mode])
+        if self.experiment_run.strip():
+            parts.append(self.experiment_run.strip())
+        return str(stable_id("llm_wiki.longrun.corpus", *parts))
+
+    def _legacy_corpus_fingerprint(self, *, resume_probe_enabled: bool) -> str:
+        """Return the pre-migration fingerprint that included resume probing."""
+        return str(
+            stable_id(
+                "llm_wiki.longrun.corpus",
+                self.workspace_id,
+                self.backend,
+                self.operation_mode,
+                self.pg_database_mode,
+                self.corpus_profile,
+                self.doc_count,
+                self.doc_profile,
+                self.parser_lane,
+                self.parser_provider,
+                self.parser_model,
+                self.parser_proposal_mode,
+                self.token_min,
+                self.token_max,
+                resume_probe_enabled,
+                self.skip_maintenance_invariant,
+            )
         )
+
+    def _legacy_worker_sensitive_corpus_fingerprint(
+        self,
+        *,
+        parser_workers: int,
+        resume_probe_enabled: bool,
+    ) -> str:
+        """Return the older fingerprint that also included parser worker count."""
+        return str(
+            stable_id(
+                "llm_wiki.longrun.corpus",
+                self.workspace_id,
+                self.backend,
+                self.operation_mode,
+                self.pg_database_mode,
+                self.corpus_profile,
+                self.doc_count,
+                self.doc_profile,
+                self.parser_lane,
+                self.parser_provider,
+                self.parser_model,
+                self.parser_proposal_mode,
+                parser_workers,
+                self.token_min,
+                self.token_max,
+                resume_probe_enabled,
+                self.skip_maintenance_invariant,
+            )
         )
+
+    def _historical_corpus_fingerprint(self) -> str:
+        """Accept the checkpoint schema used before run-control fields existed."""
+        return str(
+            stable_id(
+                "llm_wiki.longrun.corpus",
+                self.workspace_id,
+                self.backend,
+                self.operation_mode,
+                self.pg_database_mode,
+                self.corpus_profile,
+                self.doc_count,
+                self.doc_profile,
+                self.parser_lane,
+                self.parser_provider,
+                self.parser_model,
+                self.parser_proposal_mode,
+                self.token_min,
+                self.token_max,
+                self.skip_maintenance_invariant,
+            )
+        )
+
+    def checkpoint_accepted_corpus_fingerprints(self) -> set[str]:
+        accepted_fingerprints = {
+            self.corpus_fingerprint,
+            self._legacy_corpus_fingerprint(resume_probe_enabled=False),
+            self._legacy_corpus_fingerprint(resume_probe_enabled=True),
+            self._historical_corpus_fingerprint(),
+        }
+        accepted_fingerprints.update(
+            self._legacy_worker_sensitive_corpus_fingerprint(
+                parser_workers=parser_workers,
+                resume_probe_enabled=resume_probe_enabled,
+            )
+            for parser_workers in range(1, 17)
+            for resume_probe_enabled in (False, True)
+        )
+        return accepted_fingerprints
 
     @classmethod
     def from_env(cls) -> "LongRunConfig":
@@ -214,11 +395,24 @@ class LongRunConfig:
                 "KOGWISTAR_LONGRUN_DOC_COUNT must be at least 20 unless "
                 "KOGWISTAR_LONGRUN_ALLOW_SMALL=1 is set"
             )
+        doc_limit_raw = os.getenv("KOGWISTAR_LONGRUN_DOC_LIMIT", "0").strip()
+        doc_limit = int(doc_limit_raw) if doc_limit_raw else 0
+        if doc_limit < 0 or doc_limit > doc_count:
+            raise ValueError("KOGWISTAR_LONGRUN_DOC_LIMIT must be 0 or between 1 and doc_count")
         doc_profile = os.getenv("KOGWISTAR_LONGRUN_DOC_PROFILE", "medium").strip().lower() or "medium"
         if doc_profile not in {"tiny", "small", "medium"}:
             raise ValueError(
                 "KOGWISTAR_LONGRUN_DOC_PROFILE must be one of {'tiny', 'small', 'medium'}; "
                 f"got {doc_profile!r}"
+            )
+        corpus_profile = (
+            os.getenv("KOGWISTAR_LONGRUN_CORPUS_PROFILE", "watershed_stress").strip().lower()
+            or "watershed_stress"
+        )
+        if corpus_profile not in {"watershed_stress", "daily_life"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_CORPUS_PROFILE must be one of {'watershed_stress', 'daily_life'}; "
+                f"got {corpus_profile!r}"
             )
         profile_token_min, profile_token_max = _longrun_doc_profile_token_bounds(doc_profile)
         token_min = int(os.getenv("KOGWISTAR_LONGRUN_TOKEN_MIN", str(profile_token_min)))
@@ -240,9 +434,31 @@ class LongRunConfig:
                 "KOGWISTAR_LONGRUN_PARSER must be one of {'workflow_layered', 'page_index'}; "
                 f"got {parser_lane!r}"
             )
+        conversation_persistence_mode = (
+            os.getenv("KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE", "single_stage")
+            .strip()
+            .lower()
+            or "single_stage"
+        )
+        if conversation_persistence_mode not in {"single_stage", "two_stage"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE must be one of: "
+                "single_stage, two_stage"
+            )
         parse_timeout_seconds = int(os.getenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "1200"))
         if parse_timeout_seconds <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS must be positive")
+        recovery_limit_raw = os.getenv("KOGWISTAR_LONGRUN_RECOVERY_DOC_LIMIT", "0").strip()
+        recovery_doc_limit = int(recovery_limit_raw) if recovery_limit_raw else 0
+        if recovery_doc_limit < 0 or recovery_doc_limit > doc_count:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_RECOVERY_DOC_LIMIT must be 0 or between 1 and doc_count"
+            )
+        recovery_attempts_per_doc = int(
+            os.getenv("KOGWISTAR_LONGRUN_RECOVERY_ATTEMPTS_PER_DOC", "1")
+        )
+        if recovery_attempts_per_doc <= 0:
+            raise ValueError("KOGWISTAR_LONGRUN_RECOVERY_ATTEMPTS_PER_DOC must be positive")
         operation_mode = os.getenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "parse_first").strip().lower() or "parse_first"
         if operation_mode not in {"parse_first", "maintenance_first", "hybrid"}:
             raise ValueError(
@@ -254,25 +470,45 @@ class LongRunConfig:
         max_llm_calls = int(os.getenv("KOGWISTAR_LONGRUN_MAX_LLM_CALLS", "100"))
         if max_llm_calls <= 0:
             raise ValueError("KOGWISTAR_LONGRUN_MAX_LLM_CALLS must be positive")
+        maintenance_schedule_mode = (
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE", "drain").strip().lower()
+            or "drain"
+        )
+        if maintenance_schedule_mode not in {"drain", "fair_slices"}:
+            raise ValueError(
+                "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE must be one of: drain, fair_slices"
+            )
+        maintenance_workers = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS", "1")
+        )
+        maintenance_steps_per_slice = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE", "2")
+        )
+        maintenance_llm_calls_per_slice = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE", "0")
+        )
+        maintenance_seconds_per_slice = int(
+            os.getenv("KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE", "0")
+        )
         pg_database_mode = os.getenv("KOGWISTAR_LONGRUN_PG_DATABASE_MODE", "fingerprint").strip().lower() or "fingerprint"
         if pg_database_mode not in {"fingerprint", "shared"}:
             raise ValueError("KOGWISTAR_LONGRUN_PG_DATABASE_MODE must be one of: fingerprint, shared")
         pg_source = os.getenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer").strip().lower() or "testcontainer"
-        if pg_source not in {"testcontainer", "custom"}:
+        if pg_source not in {"testcontainer", "custom", "persistent"}:
             raise ValueError(
-                "KOGWISTAR_LONGRUN_PG_SOURCE must be one of {'testcontainer', 'custom'}; "
+                "KOGWISTAR_LONGRUN_PG_SOURCE must be one of {'testcontainer', 'custom', 'persistent'}; "
                 f"got {pg_source!r}"
             )
         dsn = _resolve_longrun_dsn()
         if backend in {"postgres", "pgvector"} and not dsn and not (
-            backend == "pgvector" and pg_source == "testcontainer"
+            backend == "pgvector" and pg_source in {"testcontainer", "persistent"}
         ):
             raise ValueError(
                 "KOGWISTAR_LONGRUN_BACKEND=postgres/pgvector requires a DSN; set "
                 "KOGWISTAR_LONGRUN_DSN or KOGWISTAR_LLM_WIKI_TEST_PG_DSN "
                 "(or PG_DSN/DATABASE_URL). For `pgvector`, the repo's pytest "
-                "session fixture can start a disposable testcontainers-backed "
-                "database automatically when Docker is available."
+                "session fixture can start either a disposable testcontainers-backed "
+                "database or a persistent dev container automatically when Docker is available."
             )
         parser_provider = normalize_provider_name(
             os.getenv("KOGWISTAR_LONGRUN_PARSER_PROVIDER")
@@ -335,7 +571,11 @@ class LongRunConfig:
             ),
             mode=os.getenv("KOGWISTAR_LONGRUN_MODE", "auto").strip().lower() or "auto",
             doc_count=doc_count,
+            doc_limit=doc_limit or None,
+            recovery_doc_limit=recovery_doc_limit or None,
+            recovery_attempts_per_doc=recovery_attempts_per_doc,
             doc_profile=doc_profile,
+            corpus_profile=corpus_profile,
             parser_provider=parser_spec.provider,
             parser_model=parser_spec.model,
             parser_proposal_mode=resolved_parser_settings.proposal_mode,
@@ -346,8 +586,14 @@ class LongRunConfig:
             parser_max_retries=parser_spec.max_retries,
             backend=backend,
             parser_lane=parser_lane,
+            conversation_persistence_mode=conversation_persistence_mode,
             parse_timeout_seconds=parse_timeout_seconds,
             operation_mode=operation_mode,
+            maintenance_schedule_mode=maintenance_schedule_mode,
+            maintenance_workers=maintenance_workers,
+            maintenance_steps_per_slice=maintenance_steps_per_slice,
+            maintenance_llm_calls_per_slice=maintenance_llm_calls_per_slice,
+            maintenance_seconds_per_slice=maintenance_seconds_per_slice,
             pg_database_mode=pg_database_mode,
             max_runtime_seconds=max_runtime_seconds,
             max_llm_calls=max_llm_calls,
@@ -365,6 +611,13 @@ class LongRunConfig:
             checkpoint_run_dir=os.getenv("KOGWISTAR_LONGRUN_RUN_DIR"),
             resume_probe_enabled=os.getenv("KOGWISTAR_LONGRUN_RESUME_PROBE") == "1",
             skip_maintenance_invariant=os.getenv("KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT") == "1",
+            live_trace=env_flag_enabled(
+                "KOGWISTAR_LONGRUN_LIVE_TRACE",
+                "KOGWISTAR_LLM_WIKI_LIVE_TRACE",
+                default=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
+            ),
+            parser_workers=int(os.getenv("KOGWISTAR_LONGRUN_PARSER_WORKERS", "1")),
+            experiment_run=os.getenv("KOGWISTAR_LONGRUN_EXPERIMENT_RUN", "").strip(),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -372,7 +625,11 @@ class LongRunConfig:
             "enabled": self.enabled,
             "mode": self.mode,
             "doc_count": self.doc_count,
+            "doc_limit": self.doc_limit,
+            "recovery_doc_limit": self.recovery_doc_limit,
+            "recovery_attempts_per_doc": self.recovery_attempts_per_doc,
             "doc_profile": self.doc_profile,
+            "corpus_profile": self.corpus_profile,
             "parser_provider": self.parser_provider,
             "parser_model": self.parser_model,
             "parser_proposal_mode": self.parser_proposal_mode,
@@ -383,7 +640,13 @@ class LongRunConfig:
             "parser_max_retries": self.parser_max_retries,
             "backend": self.backend,
             "parser_lane": self.parser_lane,
+            "conversation_persistence_mode": self.conversation_persistence_mode,
             "operation_mode": self.operation_mode,
+            "maintenance_schedule_mode": self.maintenance_schedule_mode,
+            "maintenance_workers": self.maintenance_workers,
+            "maintenance_steps_per_slice": self.maintenance_steps_per_slice,
+            "maintenance_llm_calls_per_slice": self.maintenance_llm_calls_per_slice,
+            "maintenance_seconds_per_slice": self.maintenance_seconds_per_slice,
             "pg_database_mode": self.pg_database_mode,
             "parse_timeout_seconds": self.parse_timeout_seconds,
             "max_runtime_seconds": self.max_runtime_seconds,
@@ -403,6 +666,9 @@ class LongRunConfig:
             "checkpoint_run_dir": self.checkpoint_run_dir,
             "corpus_fingerprint": self.corpus_fingerprint,
             "skip_maintenance_invariant": self.skip_maintenance_invariant,
+            "live_trace": self.live_trace,
+            "parser_workers": self.parser_workers,
+            "experiment_run": self.experiment_run,
         }
 
 
@@ -418,6 +684,8 @@ class DocumentRecord:
     ended_at_ms: int | None = None
     token_count: int | None = None
     run_id: str | None = None
+    parser_workflow_run_id: str | None = None
+    parser_resume_requested: bool = False
     source_document_id: str | None = None
     maintenance_job_id: str | None = None
     candidate_link_id: str | None = None
@@ -431,6 +699,8 @@ class DocumentRecord:
     resume_suspended_node_id: str | None = None
     resume_suspended_token_id: str | None = None
     resumed_from_checkpoint: bool = False
+    recovery_attempt_count: int = 0
+    recovery_selected: bool = False
     last_step_name: str | None = None
     last_step_at_ms: int | None = None
     parse_result: Any | None = field(default=None, repr=False)
@@ -448,6 +718,7 @@ class FailureRecord:
     message: str
     fingerprint: str
     timestamp_ms: int
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 def _resolve_longrun_dsn() -> str | None:
@@ -468,6 +739,51 @@ def _append_trace_line(path: Path, message: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(f"{_now_ms()} | {message}\n")
+    if env_flag_enabled(
+        "KOGWISTAR_LONGRUN_LIVE_TRACE",
+        "KOGWISTAR_LLM_WIKI_LIVE_TRACE",
+        default=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
+    ):
+        LiveTracePrinter(prefix="longrun.parser").emit({"stage": "parser_trace", "message": message})
+
+
+def _read_text_tail(path: Path | None, *, max_lines: int = 80, max_chars: int = 12_000) -> list[str]:
+    """Read a bounded diagnostic tail without making failure reporting fail."""
+    if path is None:
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError, UnicodeError):
+        return []
+    if max_lines > 0:
+        lines = lines[-max_lines:]
+    if max_chars <= 0:
+        return lines
+    remaining = max_chars
+    bounded: list[str] = []
+    for line in reversed(lines):
+        if remaining <= 0:
+            break
+        bounded.append(line[:remaining])
+        remaining -= len(line) + 1
+    return list(reversed(bounded))
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _emit_longrun_live(stage: str, **fields: object) -> None:
+    if env_flag_enabled(
+        "KOGWISTAR_LONGRUN_LIVE_TRACE",
+        "KOGWISTAR_LLM_WIKI_LIVE_TRACE",
+        default=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
+    ):
+        LiveTracePrinter(prefix="longrun").emit({"stage": stage, **fields})
 
 
 def _write_json_file(path: Path, payload: Any) -> None:
@@ -476,7 +792,7 @@ def _write_json_file(path: Path, payload: Any) -> None:
 
 
 class ErrorCircuitBreaker:
-    """Tracks normalized systemic failures across unrelated documents."""
+    """Stops a run when infrastructure or one identical parser failure repeats."""
 
     def __init__(self, threshold: int) -> None:
         self.threshold = threshold
@@ -484,7 +800,11 @@ class ErrorCircuitBreaker:
         self._counts: Counter[str] = Counter()
 
     def record(self, failure: FailureRecord) -> bool:
-        if failure.scope != "systemic":
+        # A parser failure is normally document-local. The exact same normalized
+        # parser failure across unrelated documents is a configuration or provider
+        # problem, so it must not consume the whole corpus budget.
+        should_track = failure.scope == "systemic" or failure.code == "document_parse_failed"
+        if not should_track:
             return False
         self._counts[failure.fingerprint] += 1
         if failure.doc_id:
@@ -496,6 +816,7 @@ class ErrorCircuitBreaker:
         return {
             "threshold": self.threshold,
             "counts": dict(self._counts),
+            "tracked_failure_codes": ["document_parse_failed", *sorted(SYSTEMIC_FAILURES)],
             "documents_by_fingerprint": {
                 key: sorted(value) for key, value in self._docs_by_fingerprint.items()
             },
@@ -525,19 +846,31 @@ class DiagnosticDumper:
         self._write_json("graph_export.json", self.harness.graph_export())
         self._write_json("projection_summary.json", self.harness.projection_summary())
         self._write_json("maintenance_summary.json", self.harness.maintenance_summary())
+        self._write_json(
+            "maintenance_statistics.json",
+            self.harness.maintenance_statistics(),
+        )
         self._write_json("llm_calls_summary.json", self.harness.llm_summary())
-        parser_trace = self.harness.run_dir / "parser_runs" / "doc-001" / "trace.log"
-        if parser_trace.exists():
+        parser_trace_tails: dict[str, list[str]] = {}
+        for parser_trace in sorted((self.harness.run_dir / "parser_runs").glob("*/trace.log")):
             try:
-                self._write_json(
-                    "parser_trace_tail.json",
-                    parser_trace.read_text(encoding="utf-8").splitlines()[-200:],
+                parser_trace_tails[parser_trace.parent.name] = (
+                    parser_trace.read_text(encoding="utf-8").splitlines()[-200:]
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                parser_trace_tails[parser_trace.parent.name] = [
+                    f"trace unavailable: {type(exc).__name__}: {exc}"
+                ]
+        self._write_json("parser_trace_tails.json", parser_trace_tails)
+        # Preserve the original single-document artifact for existing inspection tools.
+        if "doc-001" in parser_trace_tails:
+            self._write_json("parser_trace_tail.json", parser_trace_tails["doc-001"])
         self._write_jsonl("sampled_prompts_and_responses.jsonl", [])
         self._copy_raw_documents()
-        self._write_report(reason=reason)
+        if final:
+            self._write_report(reason=reason)
+        else:
+            self._write_report(reason=reason, filename="interim_report.md")
         if final:
             zip_path = self.run_dir / "longrun-dump.zip"
             with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -547,17 +880,65 @@ class DiagnosticDumper:
             self._write_json("dump_package.json", {"zip_path": str(zip_path)})
         return self.dump_dir
 
+    def prepare_final_report(self, *, reason: str) -> Path:
+        """Freeze report text before resource close without publishing it yet."""
+        path = self.dump_dir / "final_report.pending.md"
+        self._write_report(reason=reason, filename=path.name)
+        return path
+
+    def commit_final_report(self, *, reason: str, report_path: Path) -> Path:
+        """Publish the frozen report only after runtime resources are closed."""
+        final_path = self.dump_dir / "final_report.md"
+        report_path.replace(final_path)
+        terminal = {
+            "status": self.harness.lifecycle_status,
+            "completed_at_ms": _now_ms(),
+            "report_path": str(final_path),
+            "reason": reason,
+            "run_id": self.harness.run_id,
+        }
+        self._write_json("run_terminal.json", terminal)
+        zip_path = self.run_dir / "longrun-dump.zip"
+        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in self.dump_dir.rglob("*"):
+                if path.is_file():
+                    archive.write(path, path.relative_to(self.dump_dir))
+        self._write_json("dump_package.json", {"zip_path": str(zip_path)})
+        return final_path
+
     def _write_json(self, name: str, payload: Any) -> None:
-        (self.dump_dir / name).write_text(
+        path = self.dump_dir / name
+        temporary = path.with_name(f".{path.name}.tmp")
+        temporary.write_text(
             json.dumps(_jsonable(payload), indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        temporary.replace(path)
+
+    def write_parser_layer_log(self, *, doc_id: str, layer_log: list[object]) -> Path:
+        """Persist one parser layer log without letting documents overwrite each other."""
+        path = self.dump_dir / "parser_layer_logs" / f"{doc_id}.json"
+        _write_json_file(path, _jsonable(layer_log))
+        if doc_id == "doc-001":
+            self._write_json("parser_layer_log.json", layer_log)
+        return path
 
     def _write_jsonl(self, name: str, rows: list[dict[str, Any]]) -> None:
         path = self.dump_dir / name
         with path.open("w", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(_jsonable(row), sort_keys=True) + "\n")
+
+    def append_failure_event(self, failure: FailureRecord) -> None:
+        """Durably capture failures even when the run never reaches its final dump."""
+        row = {
+            "event_type": "longrun_failure_recorded",
+            "recorded_at_ms": _now_ms(),
+            **failure.__dict__,
+        }
+        path = self.dump_dir / "failure_events.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(_jsonable(row), sort_keys=True) + "\n")
 
     def _copy_raw_documents(self) -> None:
         target = self.dump_dir / "raw_documents"
@@ -568,7 +949,7 @@ class DiagnosticDumper:
             if record.current_path.exists():
                 shutil.copy2(record.current_path, target / record.current_path.name)
 
-    def _write_report(self, *, reason: str) -> None:
+    def _write_report(self, *, reason: str, filename: str = "final_report.md") -> None:
         counts = Counter(record.status for record in self.harness.records)
         progress = self.harness.progress_summary()
         recovery = self.harness.recovery_summary()
@@ -639,9 +1020,15 @@ class DiagnosticDumper:
                 f"- Average basic sense score: `{parser_eval['average_basic_sense_score'] if parser_eval['average_basic_sense_score'] is not None else 'n/a'}`",
                 f"- Evaluated documents: `{parser_eval['evaluated_count']}/{parser_eval['document_count']}`",
                 f"- Total input tokens: `{parser_eval['usage_totals']['input_tokens']}`",
+                f"- Cached input tokens: `{parser_eval['usage_totals']['cached_input_tokens']}`",
                 f"- Total output tokens: `{parser_eval['usage_totals']['output_tokens']}`",
                 f"- Total tokens: `{parser_eval['usage_totals']['total_tokens']}`",
                 f"- Total cost: `{parser_eval['usage_totals']['total_cost']}`",
+                f"- Cost status: `{parser_eval['usage_totals']['cost_status']}`",
+                f"- Slowest parser stage: `{parser_eval['timing_summary']['dominant_stage'] or 'n/a'}`",
+                f"- Slowest stage total ms: `{parser_eval['timing_summary']['dominant_stage_total_ms']}`",
+                f"- Slowest operation stage: `{parser_eval['timing_summary']['dominant_operation_stage'] or 'n/a'}`",
+                f"- Slowest operation total ms: `{parser_eval['timing_summary']['dominant_operation_stage_total_ms']}`",
                 "",
                 f"```json\n{parser_eval_json}\n```",
                 "",
@@ -654,16 +1041,17 @@ class DiagnosticDumper:
                 f"```json\n{json.dumps(_jsonable(self.harness.promotion_provenance_summary()), indent=2, sort_keys=True)}\n```",
             ]
         )
-        (self.dump_dir / "final_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (self.dump_dir / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 class LongRunHarness:
     """Single-daemon-style test harness around runtime workflow ingestion."""
 
     def __init__(self, *, run_dir: Path, config: LongRunConfig) -> None:
-        self.run_dir = run_dir
+        self.requested_run_dir = run_dir
         self.config = config
-        self.run_id = f"longrun-{stable_id('llm_wiki.longrun', str(run_dir), config.corpus_fingerprint)}"
+        self.run_dir = self._resolve_experiment_run_dir(run_dir, config)
+        self.run_id = f"longrun-{stable_id('llm_wiki.longrun', str(self.run_dir), config.corpus_fingerprint)}"
         self.records: list[DocumentRecord] = []
         self.contexts: dict[str, DocumentRecord] = {}
         self.status_transitions: list[dict[str, Any]] = []
@@ -674,9 +1062,12 @@ class LongRunHarness:
         self.llm_call_count = 0
         self.aborted = False
         self.abort_reason: str | None = None
+        self.abort_preserves_pending = False
+        self.early_stop_reason: str | None = None
         self._engines: Any | None = None
+        self._engines_closed = False
         self._pipeline: IngestPipeline | None = None
-        self._maintenance_worker: MaintenanceWorker | None = None
+        self._maintenance_workers: list[MaintenanceWorker] = []
         self._projection_worker: ProjectionWorker | None = None
         self.active_document_id: str | None = None
         self.active_step_name: str | None = None
@@ -686,7 +1077,66 @@ class LongRunHarness:
         self.checkpoint_loaded = False
         self.checkpoint_manifest_path: Path | None = None
         self.resume_gate_consumed = False
+        self.recovery_skipped_document_ids: list[str] = []
+        self.recovery_missing_payload_document_ids: list[str] = []
+        self.live_trace_printer = LiveTracePrinter(prefix="longrun") if config.live_trace else None
+        self.run_started_monotonic: float | None = None
+        self.lifecycle_status = "running"
+        self.lifecycle_events: list[dict[str, Any]] = []
+        self.maintenance_health: dict[str, Any] = {
+            "active_worker_ids": [], "active_job_id": None,
+            "active_document_id": None, "current_maintenance_kind": None,
+            "phase_started_at_ms": None, "last_trace_timestamp_ms": None,
+            "lease_age_seconds": None, "queue_pending_count": None,
+            "queue_doing_count": None, "queue_failed_count": None,
+            "last_error": None,
+        }
+        self._pending_final_report: tuple[str, Path] | None = None
+        self._state_lock = threading.RLock()
+        self._maintenance_trace_lock = threading.Lock()
         self.dumper = DiagnosticDumper(self.run_dir, self)
+
+    @staticmethod
+    def _resolve_experiment_run_dir(run_dir: Path, config: LongRunConfig) -> Path:
+        """Keep different fingerprints from sharing a resettable dump folder.
+
+        Existing same-fingerprint directories remain compatible with the old
+        launch configuration, so continue/retry runs do not need a migration.
+        A fresh run with a different fingerprint is placed under
+        ``experiments/<fingerprint>`` below the requested directory.
+        """
+        run_dir = run_dir.expanduser().resolve()
+        config_path = run_dir / "dump" / "run_config.json"
+        existing_fingerprint: str | None = None
+        if config_path.exists():
+            try:
+                payload = json.loads(config_path.read_text(encoding="utf-8"))
+                value = payload.get("corpus_fingerprint")
+                existing_fingerprint = str(value) if value else None
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                existing_fingerprint = None
+
+        same_fingerprint = existing_fingerprint == config.corpus_fingerprint
+        if same_fingerprint:
+            return run_dir
+
+        # Older checkpoints predate run_config.json.  Resume modes must still
+        # inspect those artifacts in place; otherwise the compatibility
+        # resolver would move the manifest away before _load_checkpoint_state
+        # can validate its document rows.
+        legacy_manifest = run_dir / "dump" / "manifest.jsonl"
+        if config.mode in {"continue", "retry_failed"} and legacy_manifest.exists():
+            return run_dir
+
+        has_existing_artifacts = run_dir.exists() and any(run_dir.iterdir())
+        if not has_existing_artifacts:
+            return run_dir
+
+        # Unknown or mismatched content is never reset in place. This also
+        # protects artifacts from older harness versions without run_config.
+        isolated = run_dir / "experiments" / config.corpus_fingerprint
+        isolated.mkdir(parents=True, exist_ok=True)
+        return isolated
 
     @property
     def engines(self) -> Any:
@@ -703,10 +1153,10 @@ class LongRunHarness:
 
     @property
     def maintenance_worker(self) -> MaintenanceWorker:
-        if self._maintenance_worker is None:
+        if not self._maintenance_workers:
             self._rebuild_runtime_objects()
-        assert self._maintenance_worker is not None
-        return self._maintenance_worker
+        assert self._maintenance_workers
+        return self._maintenance_workers[0]
 
     @property
     def projection_worker(self) -> ProjectionWorker:
@@ -738,59 +1188,239 @@ class LongRunHarness:
         )
 
     def _rebuild_runtime_objects(self) -> None:
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(
+                {
+                    "stage": "rebuild_runtime_objects_start",
+                    "run_id": self.run_id,
+                    "backend": self.config.backend,
+                    "live_trace": self.config.live_trace,
+                }
+            )
+        if self._engines is not None and not self._engines_closed:
+            self._close_runtime_objects(reason="runtime_rebuild")
         engines = self._build_namespace_engines()
         self._engines = engines
-        self._pipeline = IngestPipeline(engines)
+        self._engines_closed = False
+        self._pipeline = IngestPipeline(engines, live_trace=self.config.live_trace)
         self._pipeline.parser = self._build_parser()
-        self._maintenance_worker = MaintenanceWorker(engines)
+        fair_maintenance = (
+            self.config.operation_mode == "maintenance_first"
+            and self.config.maintenance_schedule_mode == "fair_slices"
+        )
+        self._maintenance_workers = [
+            MaintenanceWorker(
+                engines,
+                fair_scheduling=fair_maintenance,
+                maintenance_steps_per_slice=self.config.maintenance_steps_per_slice,
+                maintenance_llm_calls_per_slice=self.config.maintenance_llm_calls_per_slice,
+                maintenance_seconds_per_slice=self.config.maintenance_seconds_per_slice,
+                worker_id=f"maintenance-{index + 1}",
+                trace_sink=self._emit_maintenance_trace,
+                document_parser=self._maintenance_parse_document,
+            )
+            for index in range(self.config.maintenance_workers)
+        ]
         self._projection_worker = ProjectionWorker(engines)
         self.dumper = DiagnosticDumper(self.run_dir, self)
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit({"stage": "rebuild_runtime_objects_complete", "run_id": self.run_id})
+
+    def _maintenance_parse_document(self, ctx: Any) -> dict[str, object]:
+        """Parse a seeded source as one planner-owned maintenance phase.
+
+        The parser runs outside graph transactions. Only the resulting graph
+        extraction is persisted, so the durable maintenance job can safely be
+        retried or advanced to the next phase.
+        """
+        pipeline = self.pipeline
+        workspace_id = str(ctx.workspace_id)
+        source_document_id = str(ctx.payload.get("source_document_id") or "")
+        ns = WorkspaceNamespaces(workspace_id)
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            document = self.engines.kg.read.get_document(source_document_id)
+        metadata = dict(document.metadata or {})
+        request = IngestPipelineRequest(
+            workspace_id=workspace_id,
+            source_uri=str(metadata.get("source_uri") or source_document_id),
+            title=str(metadata.get("title") or source_document_id),
+            raw_text=str(document.content or ""),
+            source_format=str(metadata.get("source_format") or "text"),
+            operation_mode="parse_first",
+            parser_mode=str(metadata.get("parser_mode") or "heuristic"),
+            parser_lane=str(metadata.get("parser_lane") or "page_index"),
+            promotion_mode=str(metadata.get("promotion_mode") or "pending"),
+            llm_provider=(str(metadata["llm_provider"]) if metadata.get("llm_provider") else None),
+            llm_model=(str(metadata["llm_model"]) if metadata.get("llm_model") else None),
+        )
+        parse_result = pipeline.parse_source(
+            request=request,
+            source_document_id=source_document_id,
+        )
+        pipeline.create_parse_retry_history(
+            request=request,
+            source_document_id=source_document_id,
+            parse_result=parse_result,
+            namespace=ns.conv_bg,
+        )
+        extraction = pipeline.translate_parse_result(
+            parse_result=parse_result,
+            source_document_id=source_document_id,
+        )
+        pipeline.ingest_parse_result(
+            request=request,
+            source_document_id=source_document_id,
+            graph_extraction=extraction,
+            namespace=ns.conv_fg,
+        )
+        pipeline.record_source_readiness(
+            request=request,
+            source_document_id=source_document_id,
+            stage="parsed_graph_persisted",
+        )
+        return {
+            "node_count": len(extraction.nodes or []),
+            "edge_count": len(extraction.edges or []),
+            "llm_call_count": int(
+                dict(getattr(parse_result, "usage_summary", {}) or {}).get("llm_call_count") or 0
+            ),
+        }
 
     def _build_runtime_event_sink(self, *, downstream_sink: Any | None = None) -> LongRunJsonlTraceSink:
         return LongRunJsonlTraceSink(
             jsonl_path=self.dumper.dump_dir / "runtime_events.jsonl",
             downstream_sink=downstream_sink,
+            enrich_event=self._enrich_runtime_event,
+            live_trace=self.config.live_trace,
         )
 
+    def _workflow_node_labels(self) -> dict[str, str]:
+        workflow_id = self._workflow_id()
+        labels = {"start": "start", "run": "workflow_run"}
+        for step_name in self._workflow_steps():
+            labels[str(stable_id("wf_node", workflow_id, step_name))] = step_name
+        labels[str(stable_id("wf_node", workflow_id, "done"))] = "done"
+        return labels
+
+    def _enrich_runtime_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        enriched = dict(event)
+        node_id = enriched.get("node_id")
+        if node_id is not None:
+            step_name = self._workflow_node_labels().get(str(node_id))
+            if step_name is not None:
+                enriched.setdefault("step_name", step_name)
+        return enriched
+
     def prepare(self) -> None:
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(
+                {
+                    "stage": "prepare_start",
+                    "run_id": self.run_id,
+                    "mode": self.config.mode,
+                    "backend": self.config.backend,
+                    "doc_count": self.config.doc_count,
+                    "run_dir": str(self.run_dir),
+                }
+            )
         self._prepare_run_directory()
         loaded = False
         if self.config.mode == "continue":
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_load_checkpoint_start", "run_id": self.run_id})
             loaded = self._load_checkpoint_state(strict=True)
             if not loaded:
                 raise AssertionError(
                     "continue mode requires a checkpoint manifest matching the configured "
                     f"doc_count={self.config.doc_count} in {self.dumper.dump_dir}"
                 )
+        elif self.config.mode == "retry_failed":
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_load_checkpoint_start", "run_id": self.run_id})
+            loaded = self._load_checkpoint_state(strict=True)
+            if not loaded:
+                raise AssertionError(
+                    "retry_failed mode requires a checkpoint manifest matching the configured "
+                    f"doc_count={self.config.doc_count} in {self.dumper.dump_dir}"
+                )
         elif self.config.mode == "auto":
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_load_checkpoint_start", "run_id": self.run_id})
             loaded = self._load_checkpoint_state(strict=False)
         elif self.config.mode != "fresh":
             raise ValueError(
-                f"unsupported KOGWISTAR_LONGRUN_MODE={self.config.mode!r}; expected fresh, continue, or auto"
+                f"unsupported KOGWISTAR_LONGRUN_MODE={self.config.mode!r}; "
+                "expected fresh, continue, auto, or retry_failed"
             )
         if not loaded:
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_reset_run_directory_start", "run_id": self.run_id})
+            # Fresh preparation owns the requested run root.  When a
+            # fingerprint mismatch caused this harness to resolve into an
+            # experiment subdirectory, clear the old root before building any
+            # engines as well; otherwise stale root-level engine state can
+            # survive beside the isolated run and be observed by setup hooks.
+            if self.config.mode == "fresh" and self.requested_run_dir != self.run_dir:
+                self._reset_directory(self.requested_run_dir)
             self._reset_run_directory()
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_reset_run_directory_complete", "run_id": self.run_id})
         self._rebuild_runtime_objects()
         self._prepare_run_directory()
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit({"stage": "prepare_materialize_designs_start", "run_id": self.run_id})
         materialize_maintenance_designs(self.engines.workflow)
         self._materialize_workflow_design()
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit({"stage": "prepare_materialize_designs_complete", "run_id": self.run_id})
         if not loaded:
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_generate_corpus_start", "run_id": self.run_id})
             self._generate_corpus()
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_generate_corpus_complete", "run_id": self.run_id})
         else:
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_restore_checkpoint_start", "run_id": self.run_id})
             self._restore_checkpoint_history()
+            self._normalize_recovery_attempt_counts()
             self._restore_missing_documents_from_dump()
             self._restore_progress_from_records()
+            if self.config.mode == "retry_failed":
+                self._prepare_failed_document_recovery()
+            if self.live_trace_printer is not None:
+                self.live_trace_printer.emit({"stage": "prepare_restore_checkpoint_complete", "run_id": self.run_id})
         self.dumper.dump(reason="prepared")
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit({"stage": "prepare_complete", "run_id": self.run_id})
 
     def run(self) -> None:
         started = time.monotonic()
+        self.run_started_monotonic = started
         idle_loops = 0
+        self._lifecycle("run_started", status="running", started_at_ms=_now_ms())
         self.dumper.dump(reason="run_started")
         self._log_heartbeat(phase="run_started", started=started)
+        if self.config.parser_workers > 1:
+            self._run_parallel_documents(started=started)
+            return
+        processed_documents = 0
         for record in self.records:
             if record.status in TERMINAL_STATES:
                 continue
+            if self.config.mode == "retry_failed" and not record.recovery_selected:
+                continue
             if self.aborted:
+                break
+            if self.config.doc_limit is not None and processed_documents >= self.config.doc_limit:
+                self._stop_early(
+                    f"document limit reached ({self.config.doc_limit}/{self.config.doc_count})"
+                )
+                break
+            processed_documents += 1
+            budget_stop_reason = self._budget_stop_reason(started=started)
+            if budget_stop_reason is not None:
+                self._abort(budget_stop_reason, preserve_pending=True)
                 break
             previous_state = self._state_signature()
             outcome = "succeeded"
@@ -799,10 +1429,12 @@ class LongRunHarness:
             except Exception as exc:  # noqa: BLE001
                 failure = self._classify_exception(exc, doc_id=record.doc_id, phase="runtime")
                 self._record_failure(failure)
-                if failure.scope == "systemic" and self.circuit_breaker.record(failure):
+                self._move_failed_or_quarantine(record, failure)
+                self._log_heartbeat(phase=f"failed_{record.doc_id}", started=started)
+                self._safe_failure_dump(reason=f"failure_{record.doc_id}")
+                if self.circuit_breaker.record(failure):
                     self._abort(f"circuit breaker tripped: {failure.fingerprint}")
                     break
-                self._move_failed_or_quarantine(record, failure)
                 continue
             if outcome == "suspended":
                 self.dumper.dump(reason=f"suspended_{record.doc_id}", final=True)
@@ -815,29 +1447,217 @@ class LongRunHarness:
                     break
             else:
                 idle_loops = 0
-            if self.llm_call_count >= self.config.max_llm_calls:
-                self._abort(
-                    "runtime_worker_stuck: llm call budget exceeded "
-                    f"({self.llm_call_count}/{self.config.max_llm_calls})"
-                )
-                break
-            if time.monotonic() - started > self.config.max_runtime_seconds:
-                self._abort("runtime_worker_stuck: max runtime exceeded")
+            budget_stop_reason = self._budget_stop_reason(started=started)
+            if budget_stop_reason is not None:
+                self._abort(budget_stop_reason, preserve_pending=True)
                 break
             self._mark_document_progress(record, step_name="document_complete")
             self._log_heartbeat(phase=f"checkpoint_{record.doc_id}", started=started)
             self.dumper.dump(reason=f"checkpoint_{record.doc_id}")
 
-        if self.aborted:
-            self.dumper.dump(reason="abort_snapshot")
-            self._quarantine_processing_docs()
-            self.dumper.dump(reason="abort_finalized", final=True)
-            raise AssertionError(self.abort_reason or "long-run workflow aborted")
+        self._finalize_run(started=started)
 
-        self._drain_maintenance_after_documents()
-        self._poll_projection_once()
-        self._verify_run_invariants()
-        self.dumper.dump(reason="success", final=True)
+    def _run_parallel_documents(self, *, started: float) -> None:
+        """Run independent document workflows with serialized maintenance polling.
+
+        Document workflows own their source revision and checkpoint. The
+        foreground harness remains the only caller that polls maintenance and
+        writes run-level terminal reports.
+        """
+        candidates = [
+            record
+            for record in self.records
+            if record.status not in TERMINAL_STATES
+            and (self.config.mode != "retry_failed" or record.recovery_selected)
+        ]
+        if self.config.doc_limit is not None:
+            candidates = candidates[: self.config.doc_limit]
+            if len(candidates) < len([
+                record for record in self.records
+                if record.status not in TERMINAL_STATES
+                and (self.config.mode != "retry_failed" or record.recovery_selected)
+            ]):
+                self._stop_early(
+                    f"document limit reached ({self.config.doc_limit}/{self.config.doc_count})"
+                )
+        if not candidates:
+            self._finalize_run(started=started)
+            return
+
+        self._emit_live_progress(
+            "parser_pool_start",
+            parser_workers=self.config.parser_workers,
+            document_ids=[record.doc_id for record in candidates],
+        )
+        with ThreadPoolExecutor(
+            max_workers=self.config.parser_workers,
+            thread_name_prefix="llm-wiki-parser",
+        ) as executor:
+            futures = {
+                executor.submit(self._run_document_workflow, record): record
+                for record in candidates
+            }
+            for future in as_completed(futures):
+                record = futures[future]
+                try:
+                    outcome = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    failure = self._classify_exception(exc, doc_id=record.doc_id, phase="runtime")
+                    self._record_failure(failure)
+                    self._move_failed_or_quarantine(record, failure)
+                    self._log_heartbeat(phase=f"failed_{record.doc_id}", started=started)
+                    self._safe_failure_dump(reason=f"failure_{record.doc_id}")
+                    if self.circuit_breaker.record(failure):
+                        self._abort(f"circuit breaker tripped: {failure.fingerprint}")
+                        for pending in futures:
+                            if not pending.done():
+                                pending.cancel()
+                        break
+                    continue
+                if outcome == "suspended":
+                    self._abort(
+                        "parallel parser workflow suspended at the run-level resume gate",
+                        preserve_pending=True,
+                    )
+                    break
+                self._poll_maintenance_once(phase="parallel_document_complete")
+                self._mark_document_progress(record, step_name="document_complete")
+                self._log_heartbeat(phase=f"checkpoint_{record.doc_id}", started=started)
+                self.dumper.dump(reason=f"checkpoint_{record.doc_id}")
+                budget_stop_reason = self._budget_stop_reason(started=started)
+                if budget_stop_reason is not None:
+                    self._abort(budget_stop_reason, preserve_pending=True)
+                    for pending in futures:
+                        if not pending.done():
+                            pending.cancel()
+                    break
+        self._emit_live_progress(
+            "parser_pool_complete",
+            parser_workers=self.config.parser_workers,
+            completed_document_ids=[
+                record.doc_id for record in candidates if record.status == "COMPLETED"
+            ],
+        )
+        self._finalize_run(started=started)
+
+    async def run_async(self) -> None:
+        """Async entry point using the same bounded durable document scheduler."""
+        await asyncio.to_thread(self.run)
+
+    def _finalize_run(self, *, started: float) -> None:
+        try:
+            if self.early_stop_reason is not None:
+                self._lifecycle("maintenance_drain_completed", status="incomplete", reason=self.early_stop_reason)
+                self._log_heartbeat(phase="document_limit_reached", started=started)
+                self.dumper.dump(reason="document_limit_reached")
+                self._pending_final_report = (
+                    "document_limit_reached",
+                    self.dumper.prepare_final_report(reason="document_limit_reached"),
+                )
+                return
+            if self.aborted:
+                self.dumper.dump(reason="abort_snapshot")
+                if not self.abort_preserves_pending:
+                    self._quarantine_processing_docs()
+                self.lifecycle_status = "incomplete"
+                self.dumper.dump(reason="abort_finalized")
+                self._pending_final_report = (
+                    "abort_finalized",
+                    self.dumper.prepare_final_report(reason="abort_finalized"),
+                )
+                raise AssertionError(self.abort_reason or "long-run workflow aborted")
+            try:
+                finalize_started = time.monotonic()
+                self._lifecycle("maintenance_drain_started", status="draining_maintenance")
+                self._emit_live_progress("finalize_start")
+                maintenance_started = time.monotonic()
+                self._emit_live_progress("finalize_maintenance_drain_start")
+                self._drain_maintenance_after_documents()
+                self._lifecycle("maintenance_drain_completed", status="finalizing")
+                self._emit_live_progress(
+                    "finalize_maintenance_drain_complete",
+                    duration_ms=round((time.monotonic() - maintenance_started) * 1000),
+                )
+                projection_started = time.monotonic()
+                self._emit_live_progress("finalize_projection_start")
+                self._poll_projection_once()
+                self._emit_live_progress(
+                    "finalize_projection_complete",
+                    duration_ms=round((time.monotonic() - projection_started) * 1000),
+                )
+                invariant_started = time.monotonic()
+                self._emit_live_progress("finalize_invariants_start")
+                self._verify_run_invariants()
+                self._emit_live_progress(
+                    "finalize_invariants_complete",
+                    duration_ms=round((time.monotonic() - invariant_started) * 1000),
+                    total_finalize_duration_ms=round((time.monotonic() - finalize_started) * 1000),
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._emit_live_failure(
+                    stage="run_invariant_failure",
+                    message=f"{type(exc).__name__}: {exc}",
+                    details={"failed_document_count": sum(record.status == "FAILED" for record in self.records)},
+                )
+                self._log_heartbeat(phase="invariant_failure", started=started)
+                self.lifecycle_status = "failed"
+                self._safe_failure_dump(reason="invariant_failure")
+                try:
+                    self._pending_final_report = (
+                        "invariant_failure",
+                        self.dumper.prepare_final_report(reason="invariant_failure"),
+                    )
+                except Exception:
+                    logger.exception("Could not freeze invariant failure report")
+                raise
+            dump_started = time.monotonic()
+            self._lifecycle("finalization_started", status="finalizing")
+            self._emit_live_progress("finalize_success_dump_start")
+            self.dumper.dump(reason="success")
+            self.lifecycle_status = "completed"
+            self._pending_final_report = (
+                "success",
+                self.dumper.prepare_final_report(reason="success"),
+            )
+            self._emit_live_progress(
+                "finalize_success_dump_complete",
+                duration_ms=round((time.monotonic() - dump_started) * 1000),
+            )
+        finally:
+            if self._pending_final_report is not None:
+                self._lifecycle("resource_close_started")
+            self._close_runtime_objects(reason="run_finally")
+            if self._pending_final_report is not None:
+                reason, report_path = self._pending_final_report
+                self._lifecycle("resource_close_completed")
+                self.dumper.commit_final_report(reason=reason, report_path=report_path)
+                self._lifecycle("final_report_written")
+                self._lifecycle("run_terminal", status=self.lifecycle_status)
+                self._pending_final_report = None
+
+    def _close_runtime_objects(self, *, reason: str) -> None:
+        """Release pooled engines after the durable snapshot is written."""
+        if self._engines is None or self._engines_closed:
+            return
+        try:
+            close_started = time.monotonic()
+            self._emit_live_progress("runtime_engines_close_start", reason=reason)
+            close = getattr(self._engines, "close", None)
+            if callable(close):
+                close()
+            self._engines_closed = True
+            self._emit_live_progress(
+                "runtime_engines_closed",
+                reason=reason,
+                duration_ms=round((time.monotonic() - close_started) * 1000),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._emit_live_failure(
+                stage="runtime_cleanup_failure",
+                message=f"{type(exc).__name__}: {exc}",
+                details={"reason": reason},
+            )
+            raise
 
     def manifest_row(self, record: DocumentRecord) -> dict[str, Any]:
         elapsed_ms = None
@@ -846,6 +1666,8 @@ class LongRunHarness:
             elapsed_ms = max(0, int(end_ms - record.started_at_ms))
         return {
             "run_id": record.run_id or self.run_id,
+            "parser_workflow_run_id": record.parser_workflow_run_id,
+            "parser_resume_requested": record.parser_resume_requested,
             "corpus_fingerprint": self.config.corpus_fingerprint,
             "doc_id": record.doc_id,
             "title": record.title,
@@ -868,6 +1690,8 @@ class LongRunHarness:
             "resume_suspended_node_id": record.resume_suspended_node_id,
             "resume_suspended_token_id": record.resume_suspended_token_id,
             "resumed_from_checkpoint": record.resumed_from_checkpoint,
+            "recovery_attempt_count": record.recovery_attempt_count,
+            "recovery_selected": record.recovery_selected,
             "last_step_name": record.last_step_name,
             "last_step_at_ms": record.last_step_at_ms,
             "llm_quality_failures": list(record.llm_quality_failures),
@@ -949,7 +1773,15 @@ class LongRunHarness:
             "run_id": self.run_id,
             "workspace_id": self.config.workspace_id,
             "backend": self.config.backend,
+            "parser_provider": self.config.parser_provider,
+            "parser_model": self.config.parser_model,
             "parser_lane": self.config.parser_lane,
+            "parser_workers": self.config.parser_workers,
+            "maintenance_schedule_mode": self.config.maintenance_schedule_mode,
+            "maintenance_workers": self.config.maintenance_workers,
+            "maintenance_steps_per_slice": self.config.maintenance_steps_per_slice,
+            "maintenance_llm_calls_per_slice": self.config.maintenance_llm_calls_per_slice,
+            "maintenance_seconds_per_slice": self.config.maintenance_seconds_per_slice,
             "doc_profile": self.config.doc_profile,
             "corpus_fingerprint": self.config.corpus_fingerprint,
             "resume_probe_enabled": self.config.resume_probe_enabled,
@@ -963,6 +1795,17 @@ class LongRunHarness:
             "failed_count": counts.get("FAILED", 0),
             "quarantined_count": counts.get("QUARANTINED", 0),
             "suspended_count": counts.get("SUSPENDED", 0),
+            "doc_limit": self.config.doc_limit,
+            "recovery_doc_limit": self.config.recovery_doc_limit,
+            "recovery_attempts_per_doc": self.config.recovery_attempts_per_doc,
+            "recovery_attempted_document_ids": sorted(
+                record.doc_id for record in self.records if record.recovery_attempt_count > 0
+            ),
+            "recovery_skipped_document_ids": sorted(self.recovery_skipped_document_ids),
+            "recovery_missing_payload_document_ids": sorted(
+                self.recovery_missing_payload_document_ids
+            ),
+            "early_stop_reason": self.early_stop_reason,
             "current_document_id": self.active_document_id or (active.doc_id if active else None),
             "current_step": self.active_step_name,
             "last_completed_step": self.last_completed_step_name,
@@ -978,7 +1821,20 @@ class LongRunHarness:
             "parser_eval": self.parser_eval_summary(),
             "llm_call_count": self.llm_call_count,
             "llm_call_budget": self.config.max_llm_calls,
+            "lifecycle_status": self.lifecycle_status,
+            "selected_nonterminal_document_ids": [
+                record.doc_id for record in self.records
+                if record.status not in TERMINAL_STATES
+                and (self.config.mode != "retry_failed" or record.recovery_selected)
+            ],
+            "maintenance_health": dict(self.maintenance_health),
+            "lifecycle_event_count": len(self.lifecycle_events),
         }
+
+    def maintenance_statistics(self) -> dict[str, Any]:
+        path = self.dumper.dump_dir / "maintenance_worker_trace.jsonl"
+        rows = self._load_jsonl_rows(path) if path.exists() else []
+        return build_maintenance_statistics(rows)
 
     def maintenance_summary(self) -> dict[str, Any]:
         ns = WorkspaceNamespaces(self.config.workspace_id)
@@ -1034,6 +1890,7 @@ class LongRunHarness:
             "maintenance_workflow_step_ids": [str(row["id"]) for row in maintenance_steps],
             "derived_artifact_count": len(derived_rows),
             "derived_artifact_ids": [str(row["id"]) for row in derived_rows],
+            "statistics": self.maintenance_statistics(),
         }
 
     def projection_summary(self) -> dict[str, Any]:
@@ -1063,6 +1920,7 @@ class LongRunHarness:
         }
 
     def llm_summary(self) -> dict[str, Any]:
+        usage_totals = self.parser_eval_summary()["usage_totals"]
         return {
             "provider": self.config.parser_provider,
             "model": self.config.parser_model,
@@ -1077,8 +1935,16 @@ class LongRunHarness:
             "parse_timeout_seconds": self.config.parse_timeout_seconds,
             "max_runtime_seconds": self.config.max_runtime_seconds,
             "max_llm_calls": self.config.max_llm_calls,
+            "doc_limit": self.config.doc_limit,
             "corpus_fingerprint": self.config.corpus_fingerprint,
             "call_count": self.llm_call_count,
+            "input_tokens": usage_totals["input_tokens"],
+            "cached_input_tokens": usage_totals["cached_input_tokens"],
+            "output_tokens": usage_totals["output_tokens"],
+            "total_tokens": usage_totals["total_tokens"],
+            "total_cost": usage_totals["total_cost"],
+            "cost_status": usage_totals["cost_status"],
+            "time_ms": usage_totals["time_ms"],
             "sampled_prompts_available": False,
             "quality_failures": [
                 {"doc_id": record.doc_id, "failures": record.llm_quality_failures}
@@ -1092,6 +1958,7 @@ class LongRunHarness:
         verdict_counts: Counter[str] = Counter()
         scores: list[float] = []
         usage_documents: list[dict[str, Any]] = []
+        timing_summaries: list[dict[str, Any]] = []
         for record in self.records:
             parse_result = record.parse_result
             evaluation = getattr(parse_result, "evaluation", None) if parse_result is not None else None
@@ -1102,6 +1969,9 @@ class LongRunHarness:
             if isinstance(usage_summary, dict):
                 entry["usage_summary"] = usage_summary
                 usage_documents.append({"doc_id": record.doc_id, "title": record.title, **usage_summary})
+                timing_summary = usage_summary.get("timing_summary")
+                if isinstance(timing_summary, dict):
+                    timing_summaries.append(timing_summary)
             documents.append(entry)
             verdict = str(evaluation.get("basic_sense_verdict") or "").strip()
             if verdict:
@@ -1118,11 +1988,31 @@ class LongRunHarness:
             composite_verdict = "mixed"
         else:
             composite_verdict = "weak"
+        known_costs = [
+            float(item["total_cost"])
+            for item in usage_documents
+            if isinstance(item.get("total_cost"), (int, float))
+        ]
+        cost_statuses = {
+            str(item.get("cost_status"))
+            for item in usage_documents
+            if item.get("cost_status")
+        }
         usage_totals = {
             "input_tokens": sum(int(item.get("input_tokens") or 0) for item in usage_documents),
+            "cached_input_tokens": sum(int(item.get("cached_input_tokens") or 0) for item in usage_documents),
             "output_tokens": sum(int(item.get("output_tokens") or 0) for item in usage_documents),
             "total_tokens": sum(int(item.get("total_tokens") or 0) for item in usage_documents),
-            "total_cost": round(sum(float(item.get("total_cost") or 0.0) for item in usage_documents), 6),
+            "total_cost": round(sum(known_costs), 6) if known_costs else None,
+            "cost_status": (
+                "unavailable"
+                if not cost_statuses
+                else "estimated_partial"
+                if "estimated_partial" in cost_statuses or len(known_costs) < len(usage_documents)
+                else "estimated"
+                if "estimated" in cost_statuses
+                else "observed"
+            ),
             "time_ms": sum(int(item.get("time_ms") or 0) for item in usage_documents),
             "event_count": sum(int(item.get("event_count") or 0) for item in usage_documents),
         }
@@ -1136,14 +2026,61 @@ class LongRunHarness:
             "documents": documents,
             "usage_documents": usage_documents,
             "usage_totals": usage_totals,
+            "timing_summary": aggregate_stage_timings(timing_summaries),
         }
+
+    def _workflow_failure_exception(
+        self,
+        *,
+        record: DocumentRecord,
+        result: RunResult,
+        run_id: str,
+    ) -> LongRunDocumentError | LongRunSystemicError:
+        workflow_errors = [str(error) for error in result.errors]
+        error_text = "\n".join(workflow_errors).strip()
+        failed_phase = record.last_step_name or "runtime"
+        failure_message = f"workflow returned {result.status}"
+        if error_text:
+            failure_message = f"{failure_message}: {error_text[:2_000]}"
+        failure_details = {
+            "workflow_run_id": run_id,
+            "workflow_status": result.status,
+            "failed_step": failed_phase,
+            "workflow_errors": [error[-4_000:] for error in workflow_errors],
+            "parser_provider": self.config.parser_provider,
+            "parser_model": self.config.parser_model,
+        }
+        failure_code = (
+            classify_exception(RuntimeError(error_text), phase=failed_phase)
+            if error_text
+            else "document_parse_failed"
+        )
+        error_type = (
+            LongRunSystemicError
+            if failure_code in SYSTEMIC_FAILURES
+            else LongRunDocumentError
+        )
+        return error_type(
+            failure_code,
+            failure_message,
+            phase=failed_phase,
+            details=failure_details,
+        )
 
     def _run_document_workflow(self, record: DocumentRecord) -> str:
         self._mark_document_progress(record, step_name="workflow_start")
         if record.started_at_ms is None:
             record.started_at_ms = _now_ms()
+        workflow_started = time.monotonic()
         if record.resume_suspended_token_id and record.resume_suspended_node_id:
             self._resume_document_workflow(record)
+            self._emit_live_progress(
+                "document_workflow_completed",
+                doc_id=record.doc_id,
+                duration_ms=round((time.monotonic() - workflow_started) * 1000),
+                workflow_run_id=record.run_id,
+                workflow_status="resumed",
+            )
             return "succeeded"
         if record.status == "SUSPENDED":
             raise LongRunSystemicError(
@@ -1176,6 +2113,11 @@ class LongRunHarness:
             run_id=run_id,
         )
         if result.status == "suspended":
+            self._emit_live_progress(
+                "document_workflow_suspended",
+                doc_id=record.doc_id,
+                duration_ms=round((time.monotonic() - workflow_started) * 1000),
+            )
             resume_checkpoint_step_seq = 10_000_000 + len(self.status_transitions)
             runtime._persist_checkpoint(
                 conversation_id=f"longrun:{self.config.workspace_id}",
@@ -1189,13 +2131,20 @@ class LongRunHarness:
             record.run_id = run_id
             return "suspended"
         if result.status != "succeeded":
-            raise LongRunDocumentError(
-                "document_parse_failed",
-                f"workflow returned {result.status}",
-                phase="runtime",
+            raise self._workflow_failure_exception(
+                record=record,
+                result=result,
+                run_id=run_id,
             )
         record.ended_at_ms = _now_ms()
         self._mark_document_progress(record, step_name="workflow_done")
+        self._emit_live_progress(
+            "document_workflow_completed",
+            doc_id=record.doc_id,
+            duration_ms=round((time.monotonic() - workflow_started) * 1000),
+            workflow_run_id=run_id,
+            workflow_status=result.status,
+        )
         return "succeeded"
 
     def _prepare_run_directory(self) -> None:
@@ -1213,9 +2162,13 @@ class LongRunHarness:
             (self.run_dir / name).mkdir(parents=True, exist_ok=True)
 
     def _reset_run_directory(self) -> None:
-        if not self.run_dir.exists():
+        self._reset_directory(self.run_dir)
+
+    @staticmethod
+    def _reset_directory(directory: Path) -> None:
+        if not directory.exists():
             return
-        for child in self.run_dir.iterdir():
+        for child in directory.iterdir():
             if child.is_dir():
                 shutil.rmtree(child, ignore_errors=True)
             else:
@@ -1287,6 +2240,8 @@ class LongRunHarness:
                     ended_at_ms=row.get("ended_at_ms"),
                     token_count=row.get("token_count"),
                     run_id=str(row.get("run_id") or self.run_id),
+                    parser_workflow_run_id=row.get("parser_workflow_run_id"),
+                    parser_resume_requested=bool(row.get("parser_resume_requested", False)),
                     source_document_id=row.get("source_document_id"),
                     maintenance_job_id=row.get("maintenance_job_id"),
                     candidate_link_id=row.get("candidate_link_id"),
@@ -1300,6 +2255,14 @@ class LongRunHarness:
                     resume_suspended_node_id=row.get("resume_suspended_node_id"),
                     resume_suspended_token_id=row.get("resume_suspended_token_id"),
                     resumed_from_checkpoint=bool(row.get("resumed_from_checkpoint", False)),
+                    recovery_attempt_count=int(row.get("recovery_attempt_count") or 0),
+                    recovery_selected=bool(
+                        row.get("recovery_selected", False)
+                        or (
+                            str(row.get("status")) == "PENDING"
+                            and str(row.get("last_step_name")) == "recovery_reopen"
+                        )
+                    ),
                     last_step_name=row.get("last_step_name"),
                     last_step_at_ms=row.get("last_step_at_ms"),
                     llm_quality_failures=list(row.get("llm_quality_failures") or []),
@@ -1321,7 +2284,8 @@ class LongRunHarness:
             for row in self._load_jsonl_rows(manifest)
             if str(row.get("corpus_fingerprint") or "").strip()
         }
-        if manifest_fingerprints and manifest_fingerprints != {self.config.corpus_fingerprint}:
+        accepted_fingerprints = self.config.checkpoint_accepted_corpus_fingerprints()
+        if manifest_fingerprints and not manifest_fingerprints.issubset(accepted_fingerprints):
             if strict:
                 raise AssertionError(
                     "checkpoint manifest corpus fingerprint does not match the configured long-run corpus fingerprint "
@@ -1401,7 +2365,8 @@ class LongRunHarness:
         record.resume_checkpoint_namespace = str(latest.get("namespace") or "")
         record.resume_suspended_node_id = str(suspended_node_id)
         record.resume_suspended_token_id = str(suspended_token_id)
-        self.resume_gate_consumed = True
+        with self._state_lock:
+            self.resume_gate_consumed = True
 
     def _hydrate_record_artifacts(self, record: DocumentRecord) -> None:
         if record.parse_result is None:
@@ -1487,6 +2452,153 @@ class LongRunHarness:
                 self.active_document_id = latest.doc_id
                 self.active_step_name = latest.last_step_name
 
+    def _normalize_recovery_attempt_counts(self) -> None:
+        """Migrate old checkpoints that counted reopenings as attempts."""
+        for record in self.records:
+            if record.recovery_attempt_count <= 0 or not record.recovery_selected:
+                continue
+            reopened_at = max(
+                (
+                    int(row.get("timestamp_ms") or 0)
+                    for row in self.status_transitions
+                    if row.get("doc_id") == record.doc_id
+                    and row.get("phase") == "recovery_reopen"
+                ),
+                default=0,
+            )
+            recovery_claims = sum(
+                1
+                for row in self.status_transitions
+                if row.get("doc_id") == record.doc_id
+                and row.get("phase") == "claim_document"
+                and int(row.get("timestamp_ms") or 0) > reopened_at
+            )
+            if recovery_claims < record.recovery_attempt_count:
+                record.recovery_attempt_count = recovery_claims
+
+    def _prepare_failed_document_recovery(self) -> None:
+        """Reopen a bounded set of terminal failures without erasing history."""
+        durable_document_ids = {
+            str(row.get("doc_id"))
+            for row in self.status_transitions
+            if row.get("status") in {
+                "PERSISTED",
+                "SOURCE_SEEDED",
+                "MAINTENANCE_ENQUEUED",
+                "MAINTENANCE_OBSERVED",
+                "COMPLETED",
+            }
+            and row.get("doc_id")
+        }
+        pending_selected = any(
+            record.recovery_selected and record.status not in TERMINAL_STATES
+            for record in self.records
+        )
+        candidates = [] if pending_selected else [
+            record
+            for record in self.records
+            if record.status in {"FAILED", "QUARANTINED"}
+            and record.recovery_attempt_count < self.config.recovery_attempts_per_doc
+            and record.doc_id not in durable_document_ids
+        ]
+        self.recovery_skipped_document_ids = [
+            record.doc_id
+            for record in self.records
+            if record.status in {"FAILED", "QUARANTINED"}
+            and record.doc_id in durable_document_ids
+        ]
+        for doc_id in self.recovery_skipped_document_ids:
+            _emit_longrun_live(
+                "document_recovery_skipped",
+                doc_id=doc_id,
+                reason="historical_durable_stage_exists",
+            )
+        self.recovery_missing_payload_document_ids = []
+        recoverable_candidates: list[tuple[DocumentRecord, Path, str]] = []
+        for record in candidates:
+            source = record.current_path
+            source_kind = "current"
+            if not source.exists():
+                backup = self.dumper.dump_dir / "raw_documents" / record.current_path.name
+                if backup.exists():
+                    source = backup
+                    source_kind = "raw_documents"
+            if not source.exists():
+                source = record.input_path
+                source_kind = "input"
+            if source.exists():
+                recoverable_candidates.append((record, source, source_kind))
+                continue
+            self.recovery_missing_payload_document_ids.append(record.doc_id)
+            _emit_longrun_live(
+                "document_recovery_skipped",
+                doc_id=record.doc_id,
+                reason="recovery_payload_missing",
+                current_path=str(record.current_path),
+                raw_documents_path=str(self.dumper.dump_dir / "raw_documents"),
+                input_path=str(record.input_path),
+            )
+        if self.config.recovery_doc_limit is not None:
+            recoverable_candidates = recoverable_candidates[: self.config.recovery_doc_limit]
+        for record, source, source_kind in recoverable_candidates:
+            previous_status = record.status
+            target = self.run_dir / "processing" / record.input_path.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source != target:
+                if target.exists():
+                    target.unlink()
+                shutil.move(str(source), str(target))
+            record.current_path = target
+            record.recovery_selected = True
+            record.status = "PENDING"
+            record.started_at_ms = None
+            record.ended_at_ms = None
+            record.token_count = None
+            record.run_id = None
+            record.maintenance_job_id = None
+            record.candidate_link_id = None
+            record.promotion_evidence_pack_id = None
+            record.promotion_candidate_id = None
+            record.promoted_entity_id = None
+            record.parsed_node_ids = []
+            record.parsed_edge_ids = []
+            record.resume_checkpoint_step_seq = None
+            record.resume_checkpoint_namespace = None
+            record.resume_suspended_node_id = None
+            record.resume_suspended_token_id = None
+            record.resumed_from_checkpoint = False
+            record.parse_result = None
+            record.graph_extraction = None
+            record.last_step_name = "recovery_reopen"
+            record.last_step_at_ms = _now_ms()
+            self.status_transitions.append(
+                {
+                    "run_id": self.run_id,
+                    "doc_id": record.doc_id,
+                    "phase": "recovery_reopen",
+                    "status": "PENDING",
+                    "previous_status": previous_status,
+                    "recovery_attempt": record.recovery_attempt_count + 1,
+                    "timestamp_ms": record.last_step_at_ms,
+                }
+            )
+            if self.active_document_id is None:
+                self.active_document_id = record.doc_id
+                self.active_step_name = "recovery_reopen"
+            _emit_longrun_live(
+                "document_recovery_reopened",
+                doc_id=record.doc_id,
+                previous_status=previous_status,
+                recovery_attempt=record.recovery_attempt_count,
+                recovery_source=source_kind,
+            )
+        if not recoverable_candidates and not pending_selected:
+            self.early_stop_reason = (
+                "no recoverable failed or quarantined documents remain below the configured "
+                "recovery attempt limit"
+            )
+        self.last_progress_at_ms = _now_ms()
+
     def _build_resolver(self) -> MappingStepResolver:
         resolver = MappingStepResolver()
 
@@ -1499,11 +2611,14 @@ class LongRunHarness:
         @resolver.register("claim_document")
         def _claim(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
+            was_pending = record.status == "PENDING"
             self._mark_document_progress(record, step_name="claim_document")
             target = self.run_dir / "processing" / record.input_path.name
             if record.current_path != target:
                 shutil.move(str(record.current_path), str(target))
                 record.current_path = target
+            if self.config.mode == "retry_failed" and record.recovery_selected and was_pending:
+                record.recovery_attempt_count += 1
             self._transition(record, "CLAIMED", phase="claim_document")
             return RunSuccess(state_update=[("u", {"claimed_path": str(target)})])
 
@@ -1535,14 +2650,53 @@ class LongRunHarness:
                     request=request,
                     source_document_id=source_document_id,
                 )
-                self.llm_call_count += 1
-            except LongRunDocumentError:
+                usage_summary = getattr(record.parse_result, "usage_summary", {})
+                actual_call_count = int(usage_summary.get("llm_call_count") or 0)
+                self.llm_call_count += actual_call_count or 1
+                record.parser_resume_requested = False
+            except (LongRunDocumentError, LongRunSystemicError) as exc:
+                self.llm_call_count += int(exc.details.get("llm_call_count") or 0)
+                if exc.details.get("failure_kind") in {"parser_timeout", "parser_child_failure"}:
+                    record.parser_resume_requested = True
+                failure_usage_events = list(exc.details.get("usage_events") or [])
+                failure_usage_events.extend(exc.details.get("usage_event_file_events") or [])
+                if failure_usage_events:
+                    unique_events = {
+                        str(event.get("event_id")): event
+                        for event in failure_usage_events
+                        if isinstance(event, dict) and event.get("event_id")
+                    }
+                    self.pipeline._persist_parser_usage_events(  # noqa: SLF001 - parent owns attribution
+                        request=request,
+                        source_document_id=source_document_id,
+                        provider=self.config.parser_provider,
+                        model=self.config.parser_model,
+                        attempt_id=str(record.run_id or f"{self.run_id}:{record.doc_id}:failure"),
+                        usage_events=list(unique_events.values()) or failure_usage_events,
+                    )
                 raise
             except Exception as exc:  # noqa: BLE001
                 code = classify_exception(exc, phase="parse_document")
                 if code in RECOVERABLE_LLM_QUALITY_FAILURES:
                     code = "document_parse_failed"
-                raise LongRunDocumentError(code, str(exc), phase="parse_document") from exc
+                details = {
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:2_000],
+                    "traceback": traceback.format_exc()[-8_000:],
+                }
+                if code in SYSTEMIC_FAILURES:
+                    raise LongRunSystemicError(
+                        code,
+                        str(exc),
+                        phase="parse_document",
+                        details=details,
+                    ) from exc
+                raise LongRunDocumentError(
+                    code,
+                    str(exc),
+                    phase="parse_document",
+                    details=details,
+                ) from exc
             record.source_document_id = source_document_id
             self._transition(record, "PARSED", phase="parse_document")
             return RunSuccess(
@@ -1587,6 +2741,21 @@ class LongRunHarness:
                     source_document_id=source_document_id,
                     graph_extraction=record.graph_extraction,
                     namespace=ns.conv_fg,
+                )
+                usage_events = list(getattr(record.parse_result, "usage_events", []) or [])
+                if usage_events:
+                    self.pipeline._persist_parser_usage_events(  # noqa: SLF001 - parent owns attribution
+                        request=request,
+                        source_document_id=source_document_id,
+                        provider=self.config.parser_provider,
+                        model=self.config.parser_model,
+                        attempt_id=str(record.run_id or f"{self.run_id}:{record.doc_id}"),
+                        usage_events=usage_events,
+                    )
+                self.pipeline.record_source_readiness(
+                    request=request,
+                    source_document_id=source_document_id,
+                    stage="parsed_graph_persisted",
                 )
             except Exception as exc:  # noqa: BLE001
                 raise LongRunDocumentError(
@@ -1640,9 +2809,12 @@ class LongRunHarness:
         def _await_resume(ctx):
             record = self.contexts[str(ctx.state_view["doc_id"])]
             self._mark_document_progress(record, step_name="await_resume")
-            if not self.config.resume_probe_enabled or self.resume_gate_consumed:
-                return RunSuccess(state_update=[("u", {"resume_gate_skipped": True})])
-            self.resume_gate_consumed = True
+            with self._state_lock:
+                if not self.config.resume_probe_enabled or self.resume_gate_consumed:
+                    return RunSuccess(state_update=[("u", {"resume_gate_skipped": True})])
+                # This is one run-level gate. Claim it atomically so parallel
+                # document workers cannot suspend multiple documents.
+                self.resume_gate_consumed = True
             self._transition(
                 record,
                 "SUSPENDED",
@@ -1748,7 +2920,14 @@ class LongRunHarness:
             record = self.contexts[str(ctx.state_view["doc_id"])]
             self._mark_document_progress(record, step_name="observe_background_maintenance")
             try:
-                self._poll_maintenance_once(phase="observe_background_maintenance")
+                if self.config.parser_workers == 1:
+                    self._poll_maintenance_once(phase="observe_background_maintenance")
+                else:
+                    self._emit_live_progress(
+                        "maintenance_poll_deferred",
+                        doc_id=record.doc_id,
+                        reason="single_foreground_maintenance_worker",
+                    )
             except Exception as exc:  # noqa: BLE001
                 code = classify_exception(exc, phase="observe_background_maintenance")
                 if code in RECOVERABLE_LLM_QUALITY_FAILURES:
@@ -1805,28 +2984,66 @@ class LongRunHarness:
         )
 
     def _transition(self, record: DocumentRecord, status: str, *, phase: str, **extra: Any) -> None:
-        if status not in STATUSES:
-            raise ValueError(f"unknown long-run status {status!r}")
-        record.status = status
-        record.last_step_name = phase
-        record.last_step_at_ms = _now_ms()
-        if status in TERMINAL_STATES and record.ended_at_ms is None:
-            record.ended_at_ms = record.last_step_at_ms
-        self.last_completed_step_name = phase
-        self.last_progress_at_ms = record.last_step_at_ms
-        self.status_transitions.append(
-            {
-                "run_id": record.run_id or self.run_id,
-                "doc_id": record.doc_id,
-                "phase": phase,
-                "status": status,
-                "timestamp_ms": _now_ms(),
-                **extra,
-            }
-        )
+        with self._state_lock:
+            if status not in STATUSES:
+                raise ValueError(f"unknown long-run status {status!r}")
+            record.status = status
+            record.last_step_name = phase
+            record.last_step_at_ms = _now_ms()
+            if status in TERMINAL_STATES and record.ended_at_ms is None:
+                record.ended_at_ms = record.last_step_at_ms
+            self.last_completed_step_name = phase
+            self.last_progress_at_ms = record.last_step_at_ms
+            self.status_transitions.append(
+                {
+                    "run_id": record.run_id or self.run_id,
+                    "doc_id": record.doc_id,
+                    "phase": phase,
+                    "status": status,
+                    "timestamp_ms": _now_ms(),
+                    **extra,
+                }
+            )
 
     def _record_failure(self, failure: FailureRecord) -> None:
         self.failure_records.append(failure)
+        self.dumper.append_failure_event(failure)
+        self._emit_live_failure(
+            stage="document_failure_recorded",
+            message=failure.message,
+            details={
+                "code": failure.code,
+                "scope": failure.scope,
+                "fingerprint": failure.fingerprint,
+                **failure.details,
+            },
+            doc_id=failure.doc_id,
+            phase=failure.phase,
+        )
+        logger.error(
+            "Longrun failure recorded run_id=%s doc_id=%s phase=%s code=%s scope=%s "
+            "fingerprint=%s details=%s message=%s",
+            failure.run_id,
+            failure.doc_id,
+            failure.phase,
+            failure.code,
+            failure.scope,
+            failure.fingerprint,
+            _jsonable(failure.details),
+            failure.message,
+        )
+
+    def _safe_failure_dump(self, *, reason: str, final: bool = False) -> None:
+        """Best-effort snapshotting must not hide the already-recorded root failure."""
+        try:
+            self.dumper.dump(reason=reason, final=final)
+        except Exception as exc:  # noqa: BLE001
+            self._emit_live_failure(
+                stage="diagnostic_dump_failure",
+                message=f"{type(exc).__name__}: {exc}",
+                details={"reason": reason, "final": final},
+            )
+            logger.exception("Longrun diagnostic dump failed reason=%s final=%s", reason, final)
 
     def _failure_record(
         self,
@@ -1836,6 +3053,7 @@ class LongRunHarness:
         code: str,
         scope: str,
         message: str,
+        details: dict[str, Any] | None = None,
     ) -> FailureRecord:
         return FailureRecord(
             run_id=self.run_id,
@@ -1846,6 +3064,7 @@ class LongRunHarness:
             message=message,
             fingerprint=normalized_fingerprint(code=code, phase=phase, message=message),
             timestamp_ms=_now_ms(),
+            details=dict(details or {}),
         )
 
     def _classify_exception(self, exc: Exception, *, doc_id: str | None, phase: str) -> FailureRecord:
@@ -1863,33 +3082,145 @@ class LongRunHarness:
             code=str(code),
             scope=scope,
             message=f"{type(exc).__name__}: {exc}",
+            details=dict(getattr(exc, "details", {}) or {}),
         )
+
+    def _emit_live_failure(
+        self,
+        *,
+        stage: str,
+        message: str,
+        details: dict[str, Any],
+        doc_id: str | None = None,
+        phase: str | None = None,
+    ) -> None:
+        payload = {
+            "stage": stage,
+            "run_id": self.run_id,
+            "doc_id": doc_id,
+            "phase": phase,
+            "message": message[:1_000],
+            "details": _jsonable(details),
+        }
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(payload)
+
+    def _emit_live_progress(self, stage: str, **details: Any) -> None:
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(
+                {
+                    "stage": stage,
+                    "run_id": self.run_id,
+                    "details": _jsonable(details),
+                }
+            )
+
+    def _lifecycle(self, event: str, *, status: str | None = None, **details: Any) -> None:
+        if status is not None:
+            self.lifecycle_status = status
+        row = {
+            "event": event,
+            "status": self.lifecycle_status,
+            "run_id": self.run_id,
+            "timestamp_ms": _now_ms(),
+            **_jsonable(details),
+        }
+        self.lifecycle_events.append(row)
+        with (self.dumper.dump_dir / "lifecycle_events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+        self.dumper._write_json("run_lifecycle.json", {"status": self.lifecycle_status, "last_event": row})
+        self.dumper._write_json("maintenance_health.json", self.maintenance_health)
+        self._emit_live_progress(event, lifecycle_status=self.lifecycle_status, **details)
+
+    def _emit_maintenance_trace(self, payload: dict[str, object]) -> None:
+        """Persist and optionally stream worker-level queue diagnostics."""
+        record = {
+            "stage": "maintenance_worker_trace",
+            "run_id": self.run_id,
+            **payload,
+        }
+        path = self.dumper.dump_dir / "maintenance_worker_trace.jsonl"
+        with self._maintenance_trace_lock:
+            if payload.get("event") == "maintenance_parse_complete":
+                self.llm_call_count += int(payload.get("llm_call_count") or 0)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True, default=str))
+                handle.write("\n")
+            self.maintenance_health.update(
+                {
+                    "active_worker_ids": [payload.get("worker_id")] if payload.get("worker_id") else [],
+                    "active_job_id": payload.get("job_id"),
+                    "active_document_id": payload.get("doc_id"),
+                    "current_maintenance_kind": payload.get("kind") or payload.get("maintenance_kind"),
+                    "last_trace_timestamp_ms": _now_ms(),
+                    "last_error": payload.get("error") or payload.get("last_error"),
+                }
+            )
+            self.dumper._write_json("maintenance_health.json", self.maintenance_health)
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(record)
 
     def _move_failed_or_quarantine(self, record: DocumentRecord, failure: FailureRecord) -> None:
         target_dir = "quarantine" if failure.scope == "systemic" else "failed"
         status = "QUARANTINED" if failure.scope == "systemic" else "FAILED"
         target = self.run_dir / target_dir / record.current_path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
         if record.current_path.exists() and record.current_path != target:
             shutil.move(str(record.current_path), str(target))
             record.current_path = target
         self._transition(record, status, phase="move_failed_or_quarantine", failure_code=failure.code)
 
-    def _abort(self, reason: str) -> None:
+    def _budget_stop_reason(self, *, started: float) -> str | None:
+        if self.llm_call_count >= self.config.max_llm_calls:
+            return (
+                "runtime_worker_stuck: llm call budget exceeded "
+                f"({self.llm_call_count}/{self.config.max_llm_calls})"
+            )
+        if time.monotonic() - started >= self.config.max_runtime_seconds:
+            return "runtime_worker_stuck: max runtime exceeded"
+        return None
+
+    def _abort(self, reason: str, *, preserve_pending: bool = False) -> None:
         self.aborted = True
         self.abort_reason = reason
+        self.abort_preserves_pending = preserve_pending
         self._log_heartbeat(phase="abort", started=None)
+
+    def _stop_early(self, reason: str) -> None:
+        self.early_stop_reason = reason
+        self._log_heartbeat(phase="early_stop", started=None)
 
     def _log_heartbeat(self, *, phase: str, started: float | None) -> None:
         summary = self.progress_summary()
         elapsed_s = None if started is None else max(0.0, time.monotonic() - started)
+        live_payload = {
+            "stage": "heartbeat",
+            "phase": phase,
+            "run_id": summary["run_id"],
+            "parser_provider": summary["parser_provider"],
+            "parser_model": summary["parser_model"],
+            "doc_id": summary["current_document_id"],
+            "current_step": summary["current_step"],
+            "completed": summary["completed_count"],
+            "failed": summary["failed_count"],
+            "quarantined": summary["quarantined_count"],
+            "suspended": summary["suspended_count"],
+            "llm_calls": summary["llm_call_count"],
+            "llm_call_budget": summary["llm_call_budget"],
+            "elapsed_s": None if elapsed_s is None else round(elapsed_s, 2),
+        }
+        if self.live_trace_printer is not None:
+            self.live_trace_printer.emit(live_payload)
         logger.info(
             (
-                "Longrun heartbeat phase=%s run_id=%s doc=%s step=%s "
+                "Longrun heartbeat phase=%s run_id=%s parser=%s/%s doc=%s step=%s "
                 "completed=%s failed=%s quarantined=%s suspended=%s "
                 "llm_calls=%s/%s elapsed_s=%s checkpoint_loaded=%s"
             ),
             phase,
             summary["run_id"],
+            summary["parser_provider"],
+            summary["parser_model"],
             summary["current_document_id"],
             summary["current_step"],
             summary["completed_count"],
@@ -1913,11 +3244,41 @@ class LongRunHarness:
     def _poll_maintenance_once(self, *, phase: str) -> None:
         del phase
         self.maintenance_poll_count += 1
-        self.maintenance_worker.process_pending_jobs(self.config.workspace_id)
+        workers = self._maintenance_workers or [self.maintenance_worker]
+        if len(workers) == 1:
+            workers[0].process_pending_jobs(self.config.workspace_id)
+            return
+        with ThreadPoolExecutor(
+            max_workers=len(workers),
+            thread_name_prefix="llm-wiki-maintenance",
+        ) as executor:
+            futures = [
+                executor.submit(worker.process_pending_jobs, self.config.workspace_id)
+                for worker in workers
+            ]
+            for future in futures:
+                future.result()
 
     def _drain_maintenance_after_documents(self) -> None:
         ns = WorkspaceNamespaces(self.config.workspace_id)
         for _ in range(self.config.max_post_doc_maintenance_steps):
+            budget_stop_reason = self._budget_stop_reason(
+                started=(self.run_started_monotonic or time.monotonic())
+            )
+            if budget_stop_reason is not None:
+                self.early_stop_reason = budget_stop_reason
+                self._emit_live_progress(
+                    "maintenance_drain_stopped",
+                    reason=budget_stop_reason,
+                    pending_jobs=len(
+                        self.engines.conversation.meta_sqlite.list_index_jobs(
+                            namespace=ns.maintenance_jobs,
+                            status="PENDING",
+                            limit=10_000,
+                        )
+                    ),
+                )
+                return
             pending_before = self.engines.conversation.meta_sqlite.list_index_jobs(
                 namespace=ns.maintenance_jobs,
                 status="PENDING",
@@ -1931,6 +3292,43 @@ class LongRunHarness:
         self.projection_poll_count += 1
         vault_root = self.run_dir / "projection_vault"
         self.projection_worker.process_pending_projections(self.config.workspace_id, str(vault_root))
+
+    def _remaining_runtime_seconds(self) -> float | None:
+        if self.run_started_monotonic is None:
+            return None
+        elapsed = time.monotonic() - self.run_started_monotonic
+        return max(0.0, float(self.config.max_runtime_seconds) - elapsed)
+
+    def _parser_child_failure_message(
+        self,
+        *,
+        record: DocumentRecord,
+        process: multiprocessing.Process,
+        process_pid: int | None = None,
+        process_exitcode: int | None = None,
+        failure: dict[str, Any],
+        trace_path: Path,
+        failure_path: Path,
+    ) -> str:
+        # Keep this formatter usable with process-shaped test doubles as well as
+        # multiprocessing.Process instances.  The exit code is the useful
+        # diagnostic; a PID is optional when a child never exposed one.
+        pid = process_pid if process_pid is not None else getattr(process, "pid", None)
+        exitcode = (
+            process_exitcode
+            if process_exitcode is not None
+            else getattr(process, "exitcode", None)
+        )
+        if failure:
+            return (
+                f"parser lane {self.config.parser_lane!r} failed for {record.doc_id}: "
+                f"{failure.get('error_type', 'unknown')}: {failure.get('message', 'no result written')} "
+                f"(exitcode={exitcode}, pid={pid}, trace_path={trace_path}, failure_path={failure_path})"
+            )
+        return (
+            f"parser lane {self.config.parser_lane!r} exited without result for {record.doc_id} "
+            f"(exitcode={exitcode}, pid={pid}, trace_path={trace_path}, failure_path={failure_path})"
+        )
 
     def _workflow_id(self) -> str:
         return f"{WORKFLOW_ID}.{self.config.operation_mode}"
@@ -1958,9 +3356,10 @@ class LongRunHarness:
         return rows
 
     def _mark_document_progress(self, record: DocumentRecord, *, step_name: str) -> None:
-        self.active_document_id = record.doc_id
-        self.active_step_name = step_name
-        self.last_progress_at_ms = _now_ms()
+        with self._state_lock:
+            self.active_document_id = record.doc_id
+            self.active_step_name = step_name
+            self.last_progress_at_ms = _now_ms()
 
     def _active_document_id(self) -> str | None:
         return self.active_document_id
@@ -2146,11 +3545,27 @@ class LongRunHarness:
         }
 
     def _verify_run_invariants(self) -> None:
-        if any(record.status not in TERMINAL_STATES for record in self.records):
-            raise AssertionError("every document must end in completed, failed, or quarantine")
+        # A bounded retry intentionally leaves unrelated corpus documents pending.
+        # They belong to a later continue run, so only the selected retry batch
+        # must satisfy the terminal-state invariant here.
+        scoped_records = [
+            record
+            for record in self.records
+            if self.config.mode != "retry_failed" or record.recovery_selected
+        ]
+        non_terminal_ids = [
+            f"{record.doc_id}:{record.status}"
+            for record in scoped_records
+            if record.status not in TERMINAL_STATES
+        ]
+        if non_terminal_ids:
+            raise AssertionError(
+                "every active document must end in completed, failed, or quarantine; "
+                f"non_terminal={non_terminal_ids}"
+            )
         if list((self.run_dir / "processing").glob("*")):
             raise AssertionError("no document may remain in processing")
-        for record in self.records:
+        for record in scoped_records:
             if record.status == "COMPLETED":
                 if self.config.operation_mode == "maintenance_first":
                     self._verify_seeded_source_map(record)
@@ -2160,6 +3575,8 @@ class LongRunHarness:
                 failure.doc_id == record.doc_id for failure in self.failure_records
             ):
                 raise AssertionError(f"{record.doc_id} is terminal failure without failure record")
+        if not any(record.status == "COMPLETED" for record in scoped_records):
+            raise AssertionError(self._no_completed_documents_failure_message())
         provenance = self.promotion_provenance_summary()
         if provenance["missing_count"] > 0:
             raise AssertionError(
@@ -2173,7 +3590,7 @@ class LongRunHarness:
             or bool(maintenance["foreground_replies"])
         )
         if not useful_maintenance and not self.config.skip_maintenance_invariant:
-            raise AssertionError("background maintenance did not produce persisted evidence")
+            raise AssertionError(self._maintenance_invariant_failure_message(maintenance))
         self._verify_runtime_events_have_run_ids()
         self._verify_derived_nodes_have_provenance()
         projection = self.projection_summary()
@@ -2182,6 +3599,56 @@ class LongRunHarness:
         progress = self.progress_summary()
         if progress["doc_count"] != len(self.records):
             raise AssertionError("progress summary doc count mismatch")
+
+    def _no_completed_documents_failure_message(self) -> str:
+        grouped: dict[str, dict[str, Any]] = {}
+        for failure in self.failure_records:
+            bucket = grouped.setdefault(
+                failure.fingerprint,
+                {
+                    "code": failure.code,
+                    "phase": failure.phase,
+                    "scope": failure.scope,
+                    "count": 0,
+                    "document_ids": [],
+                    "message": failure.message[:1_000],
+                    "details": failure.details,
+                },
+            )
+            bucket["count"] += 1
+            if failure.doc_id:
+                bucket["document_ids"].append(failure.doc_id)
+        root_failures = sorted(grouped.values(), key=lambda item: item["count"], reverse=True)
+        return (
+            "no documents completed; maintenance was not expected because parse/persist never "
+            "produced an eligible document; root_failures="
+            f"{json.dumps(root_failures, sort_keys=True)}"
+        )
+
+    def _maintenance_invariant_failure_message(self, maintenance: dict[str, Any]) -> str:
+        diagnostic = {
+            "operation_mode": self.config.operation_mode,
+            "backend": self.config.backend,
+            "maintenance_poll_count": maintenance.get("maintenance_poll_count"),
+            "max_post_doc_maintenance_steps": self.config.max_post_doc_maintenance_steps,
+            "job_status_counts": maintenance.get("job_status_counts"),
+            "maintenance_job_ids": maintenance.get("maintenance_job_ids"),
+            "maintenance_source_document_ids": maintenance.get("maintenance_source_document_ids"),
+            "maintenance_workflow_step_count": maintenance.get("maintenance_workflow_step_count"),
+            "derived_artifact_count": maintenance.get("derived_artifact_count"),
+            "foreground_reply_count": len(list(maintenance.get("foreground_replies") or [])),
+            "lane_message_count": len(list(maintenance.get("maintenance_lane_messages") or [])),
+            "completed_document_ids": [
+                record.doc_id for record in self.records if record.status == "COMPLETED"
+            ],
+            "failed_document_ids": [
+                record.doc_id for record in self.records if record.status in {"FAILED", "QUARANTINED"}
+            ],
+        }
+        return (
+            "background maintenance did not produce persisted evidence; "
+            f"diagnostic={json.dumps(diagnostic, sort_keys=True)}"
+        )
 
     def promotion_provenance_summary(self) -> dict[str, Any]:
         verified: list[dict[str, Any]] = []
@@ -2278,19 +3745,37 @@ class LongRunHarness:
         parser_run_dir.mkdir(parents=True, exist_ok=True)
         result_path = parser_run_dir / "result.json"
         failure_path = parser_run_dir / "failure.json"
+        failure_payload_path = parser_run_dir / "failure_payload.json"
+        usage_event_path = parser_run_dir / "usage_events.jsonl"
         heartbeat_path = self.dumper.dump_dir / "parser_heartbeat.json"
         trace_path = parser_run_dir / "trace.log"
         dump_trace_path = self.dumper.dump_dir / "parser_trace.log"
-        for path in (result_path, failure_path):
+        remaining_runtime_seconds = self._remaining_runtime_seconds()
+        effective_timeout_seconds = float(self.config.parse_timeout_seconds)
+        parser_provider = self.config.parser_provider
+        parser_model = self.config.parser_model
+        if remaining_runtime_seconds is not None:
+            effective_timeout_seconds = min(effective_timeout_seconds, remaining_runtime_seconds)
+        if effective_timeout_seconds <= 0:
+            raise LongRunSystemicError(
+                "runtime_worker_stuck",
+                f"runtime budget exhausted before parser start for {record.doc_id}",
+                phase="parse_document",
+            )
+        record.parser_workflow_run_id = str(
+            record.parser_workflow_run_id or f"parser:{source_document_id}"
+        )
+        for path in (result_path, failure_path, failure_payload_path):
             try:
                 path.unlink()
             except FileNotFoundError:
                 pass
-        for path in (trace_path, dump_trace_path):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
+        if not record.parser_resume_requested:
+            for path in (trace_path, dump_trace_path):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
         payload = {
             "parser_lane": self.config.parser_lane,
             "child_mode": "sleep" if self.config.parse_timeout_seconds <= 1 else "parse",
@@ -2307,10 +3792,32 @@ class LongRunHarness:
             "parser_run_dir": str(parser_run_dir),
             "result_path": str(result_path),
             "failure_path": str(failure_path),
+            "failure_payload_path": str(failure_payload_path),
+            "usage_event_path": str(usage_event_path),
+            "parser_workflow_run_id": str(
+                record.parser_workflow_run_id or f"parser:{source_document_id}"
+            ),
+            "resume_from_checkpoint": bool(record.parser_resume_requested),
             "heartbeat_path": str(heartbeat_path),
             "trace_path": str(trace_path),
+            "dump_trace_path": str(dump_trace_path),
+            "live_trace": self.config.live_trace,
+            "parser_provider": parser_provider,
+            "parser_model": parser_model,
+            "conversation_persistence_mode": self.config.conversation_persistence_mode,
         }
-        _append_trace_line(dump_trace_path, f"parent_spawn_start doc={record.doc_id} lane={self.config.parser_lane}")
+        _append_trace_line(
+            dump_trace_path,
+            (
+                f"parent_spawn_start doc={record.doc_id} lane={self.config.parser_lane} "
+                f"parser={parser_provider}/{parser_model} "
+                f"parser_workflow_run_id={payload['parser_workflow_run_id']} "
+                f"resume_from_checkpoint={payload['resume_from_checkpoint']} "
+                f"effective_timeout={effective_timeout_seconds:.2f}s "
+                f"configured_parse_timeout={self.config.parse_timeout_seconds}s "
+                f"remaining_runtime={None if remaining_runtime_seconds is None else round(remaining_runtime_seconds, 2)}s"
+            ),
+        )
         started_ms = _now_ms()
         started_monotonic = time.monotonic()
         self._write_parser_heartbeat(
@@ -2318,47 +3825,96 @@ class LongRunHarness:
                 "phase": "parent_waiting",
                 "timestamp_ms": started_ms,
                 "parser_lane": self.config.parser_lane,
+                "parser_provider": parser_provider,
+                "parser_model": parser_model,
                 "doc_id": record.doc_id,
-                "timeout_seconds": self.config.parse_timeout_seconds,
+                "timeout_seconds": effective_timeout_seconds,
+                "configured_parse_timeout_seconds": self.config.parse_timeout_seconds,
+                "remaining_runtime_seconds": remaining_runtime_seconds,
                 "result_path": str(result_path),
                 "failure_path": str(failure_path),
+                "parser_workflow_run_id": payload["parser_workflow_run_id"],
+                "resume_from_checkpoint": payload["resume_from_checkpoint"],
             }
         )
         context = multiprocessing.get_context("spawn")
-        process = context.Process(target=run_longrun_parser_child, args=(payload,))
+        process = context.Process(
+            name=f"llm-wiki-parser-{record.doc_id}",
+            target=run_longrun_parser_child,
+            args=(payload,),
+        )
         process.start()
+        process_pid = process.pid
         _append_trace_line(
             dump_trace_path,
-            f"parent_spawned pid={process.pid} alive={process.is_alive()} doc={record.doc_id}",
+            (
+                f"parent_spawned pid={process.pid} name={process.name} "
+                f"parent_pid={os.getpid()} thread={threading.current_thread().name} "
+                f"alive={process.is_alive()} doc={record.doc_id}"
+            ),
         )
+        last_poll_log_seconds = -_PARSER_PARENT_POLL_LOG_INTERVAL_SECONDS
         while process.is_alive():
             elapsed_seconds = time.monotonic() - started_monotonic
-            _append_trace_line(
-                dump_trace_path,
-                f"parent_poll pid={process.pid} elapsed={elapsed_seconds:.2f}s alive={process.is_alive()}",
-            )
-            if elapsed_seconds > self.config.parse_timeout_seconds:
-                _append_trace_line(dump_trace_path, f"parent_timeout pid={process.pid}")
+            if elapsed_seconds - last_poll_log_seconds >= _PARSER_PARENT_POLL_LOG_INTERVAL_SECONDS:
+                _append_trace_line(
+                    dump_trace_path,
+                    (
+                        f"parent_poll pid={process.pid} elapsed={elapsed_seconds:.2f}s "
+                        f"alive={process.is_alive()} interval={_PARSER_PARENT_POLL_LOG_INTERVAL_SECONDS:.0f}s"
+                    ),
+                )
+                last_poll_log_seconds = elapsed_seconds
+            if elapsed_seconds > effective_timeout_seconds:
+                _append_trace_line(
+                    dump_trace_path,
+                    (
+                        f"parent_timeout pid={process.pid} elapsed={elapsed_seconds:.2f}s "
+                        f"effective_timeout={effective_timeout_seconds:.2f}s"
+                    ),
+                )
                 self._terminate_parser_child(process)
+                self._close_parser_child(process)
+                record.parser_resume_requested = True
                 self._write_parser_heartbeat(
                     {
                         "phase": "timeout",
                         "timestamp_ms": _now_ms(),
                         "parser_lane": self.config.parser_lane,
                         "doc_id": record.doc_id,
-                        "pid": process.pid,
-                        "timeout_seconds": self.config.parse_timeout_seconds,
+                        "pid": process_pid,
+                        "timeout_seconds": effective_timeout_seconds,
+                        "configured_parse_timeout_seconds": self.config.parse_timeout_seconds,
+                        "remaining_runtime_seconds": remaining_runtime_seconds,
                         "result_path": str(result_path),
                         "failure_path": str(failure_path),
+                        "parser_workflow_run_id": payload["parser_workflow_run_id"],
+                        "resume_from_checkpoint": payload["resume_from_checkpoint"],
                     }
                 )
                 raise LongRunDocumentError(
                     "document_parse_failed",
                     (
-                        f"parser lane {self.config.parser_lane!r} timed out after "
-                        f"{self.config.parse_timeout_seconds}s for {record.doc_id}"
+                        f"parser lane {self.config.parser_lane!r} timed out after effective "
+                        f"{effective_timeout_seconds:.2f}s for {record.doc_id}"
                     ),
                     phase="parse_document",
+                    details={
+                        "failure_kind": "parser_timeout",
+                        "parser_lane": self.config.parser_lane,
+                        "effective_timeout_seconds": effective_timeout_seconds,
+                        "configured_parse_timeout_seconds": self.config.parse_timeout_seconds,
+                        "remaining_runtime_seconds": remaining_runtime_seconds,
+                        "parser_trace_path": str(trace_path),
+                        "parser_failure_path": str(failure_path),
+                        "parser_failure_payload_path": str(failure_payload_path),
+                        "parser_workflow_run_id": payload["parser_workflow_run_id"],
+                        "resume_from_checkpoint": payload["resume_from_checkpoint"],
+                        "usage_events": self._read_usage_event_file(usage_event_path),
+                        "parser_heartbeat": dict(self.parser_heartbeat or {}),
+                        "parser_trace_tail": _read_text_tail(trace_path),
+                        "dump_trace_tail": _read_text_tail(dump_trace_path),
+                    },
                 )
             self._write_parser_heartbeat(
                 {
@@ -2367,39 +3923,105 @@ class LongRunHarness:
                     "parser_lane": self.config.parser_lane,
                     "doc_id": record.doc_id,
                     "pid": process.pid,
-                    "timeout_seconds": self.config.parse_timeout_seconds,
+                    "timeout_seconds": effective_timeout_seconds,
+                    "configured_parse_timeout_seconds": self.config.parse_timeout_seconds,
+                    "remaining_runtime_seconds": remaining_runtime_seconds,
                     "result_path": str(result_path),
                     "failure_path": str(failure_path),
+                    "parser_workflow_run_id": payload["parser_workflow_run_id"],
+                    "resume_from_checkpoint": payload["resume_from_checkpoint"],
                 }
             )
             try:
                 process.join(timeout=1.0)
             except KeyboardInterrupt:
-                _append_trace_line(dump_trace_path, f"parent_keyboard_interrupt pid={process.pid}")
+                _append_trace_line(dump_trace_path, f"parent_keyboard_interrupt pid={process_pid}")
                 self._terminate_parser_child(process)
+                self._close_parser_child(process)
+                record.parser_resume_requested = True
                 self._write_parser_heartbeat(
                     {
                         "phase": "interrupted",
                         "timestamp_ms": _now_ms(),
                         "parser_lane": self.config.parser_lane,
                         "doc_id": record.doc_id,
-                        "pid": process.pid,
+                        "pid": process_pid,
                         "result_path": str(result_path),
                         "failure_path": str(failure_path),
+                        "parser_workflow_run_id": payload["parser_workflow_run_id"],
+                        "resume_from_checkpoint": payload["resume_from_checkpoint"],
                     }
                 )
+                # Persist the stable parser identity and resume intent before
+                # allowing Ctrl+C to unwind the caller.
+                self.dumper.dump(reason=f"parser_interrupted_{record.doc_id}")
                 raise
         process.join(timeout=1.0)
+        process_exitcode = process.exitcode
         _append_trace_line(
             dump_trace_path,
-            f"parent_join_complete pid={process.pid} exitcode={process.exitcode}",
+            f"parent_join_complete pid={process_pid} exitcode={process_exitcode}",
         )
         if result_path.exists():
             _append_trace_line(dump_trace_path, "parent_read_result_json")
-            payload = json.loads(result_path.read_text(encoding="utf-8"))
-            layer_log = payload.get("layer_log")
+            result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+            parser_workflow_run_id = str(
+                payload.get("parser_workflow_run_id") or f"parser:{source_document_id}"
+            )
+            resume_from_checkpoint = bool(payload.get("resume_from_checkpoint"))
+            layer_log = result_payload.get("layer_log")
             if isinstance(layer_log, list):
-                self._write_json("parser_layer_log.json", layer_log)
+                layer_log_dump_path = self.dumper.write_parser_layer_log(
+                    doc_id=record.doc_id,
+                    layer_log=layer_log,
+                )
+                _append_trace_line(
+                    dump_trace_path,
+                    f"parent_layer_log_persisted path={layer_log_dump_path}",
+                )
+            if result_payload.get("ok") is not True:
+                workflow_status = str(result_payload.get("workflow_status") or "failure")
+                usage_summary = dict(result_payload.get("usage_summary") or {})
+                _append_trace_line(
+                    dump_trace_path,
+                    f"parent_rejected_result workflow_status={workflow_status} "
+                    f"parser_workflow_run_id={parser_workflow_run_id}",
+                )
+                self._write_parser_heartbeat(
+                    {
+                        "phase": "failed",
+                        "timestamp_ms": _now_ms(),
+                        "parser_lane": payload.get("parser_lane", self.config.parser_lane),
+                        "doc_id": record.doc_id,
+                        "pid": process.pid,
+                        "result_path": str(result_path),
+                        "failure_path": str(failure_path),
+                        "parser_workflow_run_id": parser_workflow_run_id,
+                        "resume_from_checkpoint": resume_from_checkpoint,
+                        "workflow_status": workflow_status,
+                        "diagnostics": result_payload.get("diagnostics") or {},
+                    }
+                )
+                self._close_parser_child(process)
+                raise LongRunDocumentError(
+                    "document_parse_failed",
+                    f"parser workflow returned non-success status {workflow_status!r} for {record.doc_id}",
+                    phase="parse_document",
+                    details={
+                        "failure_kind": "parser_workflow_failure",
+                        "parser_lane": self.config.parser_lane,
+                        "workflow_status": workflow_status,
+                        "parser_workflow_run_id": parser_workflow_run_id,
+                        "resume_from_checkpoint": resume_from_checkpoint,
+                        "llm_call_count": int(usage_summary.get("llm_call_count") or 0),
+                        "usage_summary": usage_summary,
+                        "usage_events": list(result_payload.get("usage_events") or []),
+                        "parser_trace_path": str(trace_path),
+                        "parser_failure_path": str(failure_path),
+                        "parser_trace_tail": _read_text_tail(trace_path),
+                        "dump_trace_tail": _read_text_tail(dump_trace_path),
+                    },
+                )
             self._write_parser_heartbeat(
                 {
                     "phase": "completed",
@@ -2409,22 +4031,93 @@ class LongRunHarness:
                     "pid": process.pid,
                     "result_path": str(result_path),
                     "failure_path": str(failure_path),
-                    "diagnostics": payload.get("diagnostics") or {},
+                    "parser_workflow_run_id": parser_workflow_run_id,
+                    "resume_from_checkpoint": resume_from_checkpoint,
+                    "diagnostics": result_payload.get("diagnostics") or {},
                 }
             )
-            return self._parse_result_from_payload(payload)
+            self._close_parser_child(process)
+            return self._parse_result_from_payload(result_payload)
         failure: dict[str, Any] = {}
         if failure_path.exists():
             _append_trace_line(dump_trace_path, "parent_read_failure_json")
-            failure = json.loads(failure_path.read_text(encoding="utf-8"))
+            failure = _read_json_object(failure_path)
+        child_trace_tail = _read_text_tail(trace_path)
+        dump_trace_tail = _read_text_tail(dump_trace_path)
+        self._write_parser_heartbeat(
+            {
+                "phase": "failed",
+                "timestamp_ms": _now_ms(),
+                "parser_lane": self.config.parser_lane,
+                "doc_id": record.doc_id,
+                "pid": process_pid,
+                "trace_path": str(trace_path),
+                "result_path": str(result_path),
+                "failure_path": str(failure_path),
+                "parser_workflow_run_id": payload["parser_workflow_run_id"],
+                "resume_from_checkpoint": payload["resume_from_checkpoint"],
+                "failure": failure,
+                "trace_tail": child_trace_tail,
+            }
+        )
+        self._close_parser_child(process)
         raise LongRunDocumentError(
             "document_parse_failed",
-            (
-                f"parser lane {self.config.parser_lane!r} failed for {record.doc_id}: "
-                f"{failure.get('error_type', 'unknown')}: {failure.get('message', 'no result written')}"
+            self._parser_child_failure_message(
+                record=record,
+                process=process,
+                process_pid=process_pid,
+                process_exitcode=process_exitcode,
+                failure=failure,
+                trace_path=trace_path,
+                failure_path=failure_path,
             ),
             phase="parse_document",
+            details={
+                "failure_kind": "parser_child_failure",
+                "parser_lane": self.config.parser_lane,
+                "child_exitcode": process_exitcode,
+                "parser_trace_path": str(trace_path),
+                "parser_failure_path": str(failure_path),
+                "parser_failure_payload_path": str(failure_payload_path),
+                "child_error_type": failure.get("error_type"),
+                "child_error_message": str(failure.get("message") or "")[:1_000],
+                "llm_call_count": int(failure.get("llm_call_count") or 0),
+                "usage_events": list(failure.get("usage_events") or []),
+                "usage_event_file_events": self._read_usage_event_file(usage_event_path),
+                "parser_workflow_run_id": payload["parser_workflow_run_id"],
+                "resume_from_checkpoint": payload["resume_from_checkpoint"],
+                "child_failure_payload_path": failure.get("payload_path"),
+                "child_failure": {
+                    "error_type": failure.get("error_type"),
+                    "message": str(failure.get("message") or "")[:1_000],
+                    "traceback": str(failure.get("traceback") or "")[-4_000:],
+                },
+                "parser_trace_tail": child_trace_tail,
+                "dump_trace_tail": dump_trace_tail,
+            },
         )
+
+    @staticmethod
+    def _read_usage_event_file(path: Path) -> list[dict[str, Any]]:
+        """Read flushed child usage events without making recovery brittle."""
+        if not path.exists():
+            return []
+        events: list[dict[str, Any]] = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            return []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                events.append(value)
+        return events
 
     def _terminate_parser_child(self, process: multiprocessing.Process) -> None:
         if not process.is_alive():
@@ -2434,6 +4127,15 @@ class LongRunHarness:
         if process.is_alive() and hasattr(process, "kill"):
             process.kill()
             process.join(timeout=5.0)
+        self._close_parser_child(process)
+
+    def _close_parser_child(self, process: multiprocessing.Process) -> None:
+        close = getattr(process, "close", None)
+        if callable(close):
+            try:
+                close()
+            except (OSError, ValueError):
+                pass
 
     def _write_parser_heartbeat(self, payload: dict[str, Any]) -> None:
         self.parser_heartbeat = dict(payload)
@@ -2447,20 +4149,23 @@ class LongRunHarness:
             diagnostics=dict(payload.get("diagnostics") or {}),
             evaluation=dict(payload.get("evaluation") or {}),
             usage_summary=dict(payload.get("usage_summary") or {}),
+            usage_events=list(payload.get("usage_events") or []),
             layer_log=list(payload.get("layer_log") or []),
         )
 
     def _generate_corpus(self) -> None:
-        topic = "urban watershed resilience and stormwater infrastructure"
         for index in range(1, self.config.doc_count + 1):
             doc_id = f"doc-{index:03d}"
-            title = f"Watershed Resilience Brief {index:03d}"
+            title = _longrun_document_title(
+                index=index,
+                corpus_profile=self.config.corpus_profile,
+            )
             path = self.run_dir / "input" / f"{doc_id}.md"
             text = generate_longrun_document(
                 index=index,
                 title=title,
-                topic=topic,
                 profile=self.config.doc_profile,
+                corpus_profile=self.config.corpus_profile,
             )
             token_count = _count_tokens(text)
             if not (self.config.token_min <= token_count <= self.config.token_max):
@@ -2583,7 +4288,18 @@ def classify_exception(exc: Exception, *, phase: str) -> str:
     text = f"{type(exc).__name__}: {exc}".lower()
     if "ollama" in text and any(token in text for token in ("unavailable", "connection", "refused", "timeout")):
         return "ollama_unavailable_repeatedly"
-    if phase == "parse_document" and any(token in text for token in ("json", "structured", "validation")):
+    structured_output_failure = any(
+        token in text
+        for token in (
+            "invalid json",
+            "jsondecode",
+            "structured output",
+            "schema validation",
+            "validation error",
+            "validationerror",
+        )
+    )
+    if phase == "parse_document" and structured_output_failure:
         return "document_parse_failed"
     if any(token in text for token in ("invalid json", "jsondecode", "structured output")):
         return "llm_invalid_json"
@@ -2601,7 +4317,7 @@ def classify_exception(exc: Exception, *, phase: str) -> str:
         return "projection_repair_failure"
     if "invariant" in text or "orphan" in text:
         return "graph_invariant_violation"
-    if "stuck" in text or "timeout" in text:
+    if "stuck" in text or "timeout" in text or "runtime budget exhausted" in text:
         return "runtime_worker_stuck"
     if phase == "persist_document":
         return "document_persist_failed_after_retries"
@@ -2619,8 +4335,37 @@ def normalized_fingerprint(*, code: str, phase: str, message: str) -> str:
     return f"{code}|{phase}|{normalized}"
 
 
-def generate_longrun_document(*, index: int, title: str, topic: str, profile: str = "medium") -> str:
+def _longrun_document_title(*, index: int, corpus_profile: str) -> str:
+    if corpus_profile == "daily_life":
+        subjects = [
+            "Apartment Move Checklist",
+            "Weekly Meal Plan",
+            "Garden Maintenance Notes",
+            "Family Trip Itinerary",
+            "Home Office Setup",
+            "Pet Care Routine",
+            "Neighborhood Book Club",
+            "Car Service Log",
+            "Birthday Party Plan",
+            "Monthly Household Budget",
+        ]
+        return f"{subjects[(index - 1) % len(subjects)]} {index:03d}"
+    return f"Watershed Resilience Brief {index:03d}"
+
+
+def generate_longrun_document(
+    *,
+    index: int,
+    title: str,
+    topic: str | None = None,
+    profile: str = "medium",
+    corpus_profile: str = "watershed_stress",
+) -> str:
     profile = str(profile or "medium").strip().lower()
+    corpus_profile = str(corpus_profile or "watershed_stress").strip().lower()
+    if corpus_profile == "daily_life":
+        return _generate_daily_life_longrun_document(index=index, title=title, profile=profile)
+    topic = topic or "urban watershed resilience and stormwater infrastructure"
     section_counts = {
         "tiny": 2,
         "small": 4,
@@ -2684,6 +4429,94 @@ def generate_longrun_document(*, index: int, title: str, topic: str, profile: st
     return "\n".join(sections)
 
 
+def _generate_daily_life_longrun_document(*, index: int, title: str, profile: str) -> str:
+    section_counts = {
+        "tiny": 2,
+        "small": 4,
+        "medium": 7,
+    }
+    subject = [
+        "moving boxes and utility transfers",
+        "weekday dinners and grocery shopping",
+        "balcony herbs and shared garden chores",
+        "train tickets, hotel check-in, and museum reservations",
+        "desk lighting, cable labels, and backup routines",
+        "feeding times, vet reminders, and dog-walking coverage",
+        "reading notes, discussion snacks, and library pickups",
+        "oil changes, tire pressure, and registration reminders",
+        "guest list planning, decorations, and cake pickup",
+        "rent, subscriptions, savings goals, and repair funds",
+    ][(index - 1) % 10]
+    location = [
+        "Oak Street",
+        "Maple Court",
+        "Riverside Station",
+        "North Market",
+        "Cedar Building",
+        "Elm Park",
+        "Hillview Library",
+        "Lakeside Garage",
+        "Sunset Hall",
+        "Pine Avenue",
+    ][(index - 1) % 10]
+    helper = [
+        "Maya",
+        "Jon",
+        "Priya",
+        "Alex",
+        "Nora",
+        "Sam",
+        "Lena",
+        "Diego",
+        "Iris",
+        "Owen",
+    ][(index - 1) % 10]
+    section_count = section_counts.get(profile, section_counts["medium"])
+    sections = [
+        f"# {title}",
+        "",
+        (
+            f"This everyday note tracks {subject} for the household around {location}. "
+            f"{helper} keeps the checklist practical, with dates, owners, and small follow-up items "
+            "that should be easy to parse without needing domain-specific background knowledge."
+        ),
+        "",
+    ]
+    short_body = (
+        f"The note for {location} records who owns each task, what evidence confirms completion, "
+        "and what should be checked again later. The goal is not to prove a technical claim; it is "
+        "to keep normal life organized with clear headings and modest cross-links to related notes."
+    )
+    medium_body = (
+        f"At {location}, {helper} reviews {subject} and writes down the next concrete action. "
+        "The plan names the person responsible, the expected date, and the small source of truth, "
+        "such as a receipt, calendar invite, appliance manual, email confirmation, or checklist photo. "
+        "Related notes may mention the same person, place, or household item, but the wording is varied "
+        "enough that a parser should not confuse every document with every other document. If something "
+        "changes, the note says whether to update the calendar, ask a neighbor, file a receipt, or move "
+        "the item into a later maintenance queue. This gives the graph useful linkable content while still "
+        "feeling like ordinary user data instead of an adversarial benchmark."
+    )
+    for section in range(1, section_count + 1):
+        sections.append(f"## Step {section}: {['Plan', 'Gather', 'Confirm', 'Follow Up', 'Archive', 'Share', 'Review'][(section - 1) % 7]}")
+        sections.append("")
+        if profile == "tiny":
+            sections.append(
+                f"{helper} records one action about {subject}. The item stays linked to {location} and has a clear owner."
+            )
+        elif profile == "small":
+            sections.append(
+                f"{short_body} For step {section}, {helper} checks whether the task is done, blocked, or waiting."
+            )
+        else:
+            sections.append(
+                f"{medium_body} For step {section}, the expected outcome is written in plain language so a later "
+                "maintenance worker can add links without inventing facts."
+            )
+        sections.append("")
+    return "\n".join(sections)
+
+
 def _longrun_doc_profile_token_bounds(profile: str) -> tuple[int, int]:
     profile = str(profile or "medium").strip().lower()
     bounds = {
@@ -2711,6 +4544,48 @@ def test_generate_longrun_document_profiles_scale_by_size():
     assert tiny.count("## Finding") == 2
     assert small.count("## Finding") == 4
     assert medium.count("## Finding") == 7
+
+
+def test_generate_longrun_document_daily_life_profile_is_realistic_and_varied():
+    first = generate_longrun_document(
+        index=1,
+        title=_longrun_document_title(index=1, corpus_profile="daily_life"),
+        profile="medium",
+        corpus_profile="daily_life",
+    )
+    second = generate_longrun_document(
+        index=2,
+        title=_longrun_document_title(index=2, corpus_profile="daily_life"),
+        profile="medium",
+        corpus_profile="daily_life",
+    )
+
+    assert "Watershed" not in first
+    assert "ordinary user data" in first
+    assert "Apartment Move Checklist" in first
+    assert "Weekly Meal Plan" in second
+    assert first != second
+    assert 500 <= _count_tokens(first) <= 2000
+    assert first.count("## Step") == 7
+
+
+def test_generate_daily_life_twenty_doc_corpus_has_varied_titles_and_valid_token_bounds():
+    docs = [
+        generate_longrun_document(
+            index=index,
+            title=_longrun_document_title(index=index, corpus_profile="daily_life"),
+            profile="medium",
+            corpus_profile="daily_life",
+        )
+        for index in range(1, 21)
+    ]
+    titles = [doc.splitlines()[0] for doc in docs]
+    token_counts = [_count_tokens(doc) for doc in docs]
+
+    assert len(docs) == 20
+    assert len(set(titles)) == 20
+    assert all("Watershed" not in doc for doc in docs)
+    assert all(500 <= token_count <= 2000 for token_count in token_counts)
 
 
 def test_longrun_doc_profile_token_bounds_are_applied_by_default():
@@ -2860,10 +4735,140 @@ def test_longrun_failure_classifier_and_circuit_breaker_are_bounded():
     assert breaker.record(systemic_records[0]) is False
     assert breaker.record(systemic_records[1]) is False
     assert breaker.record(systemic_records[2]) is True
+
+    repeated_parser_failures = [
+        FailureRecord(
+            run_id="run",
+            doc_id=f"doc-{index:03d}",
+            phase="parse_document",
+            code="document_parse_failed",
+            scope="document",
+            message="parser child exited without result exitcode=1",
+            fingerprint=normalized_fingerprint(
+                code="document_parse_failed",
+                phase="parse_document",
+                message="parser child exited without result exitcode=1",
+            ),
+            timestamp_ms=_now_ms(),
+        )
+        for index in range(1, 4)
+    ]
+    assert breaker.record(repeated_parser_failures[0]) is False
+    assert breaker.record(repeated_parser_failures[1]) is False
+    assert breaker.record(repeated_parser_failures[2]) is True
     assert classify_exception(ValueError("invalid json structured output"), phase="observe") == "llm_invalid_json"
     assert classify_exception(RuntimeError("sqlite database write failed"), phase="persist_document") == (
         "database_write_repeated_failure"
     )
+
+
+def test_workflow_failure_preserves_captured_harness_exception(tmp_path: Path):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "captured-harness-failure",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Captured failure",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+        last_step_name="parse_document",
+    )
+    result = RunResult(
+        run_id="run-doc-001",
+        final_state={},
+        mq=queue.Queue(),
+        status="failure",
+        errors=[
+            "'LongRunHarness' object has no attribute '_write_json'",
+            "Traceback: AttributeError: 'LongRunHarness' object has no attribute '_write_json'",
+        ],
+    )
+
+    error = harness._workflow_failure_exception(
+        record=record,
+        result=result,
+        run_id=result.run_id,
+    )
+    failure = harness._classify_exception(error, doc_id=record.doc_id, phase="runtime")
+
+    assert isinstance(error, LongRunSystemicError)
+    assert "_write_json" in str(error)
+    assert error.details["failed_step"] == "parse_document"
+    assert error.details["workflow_errors"] == result.errors
+    assert failure.scope == "systemic"
+    assert failure.details["workflow_run_id"] == result.run_id
+    assert "_write_json" in failure.fingerprint
+
+
+def test_longrun_failure_is_streamed_and_persisted_immediately(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "failure-observability",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1, live_trace=True),
+    )
+    failure = harness._failure_record(
+        doc_id="doc-001",
+        phase="parse_document",
+        code="document_parse_failed",
+        scope="document",
+        message="parser child exited without result",
+        details={
+            "parser_trace_path": "C:/runs/doc-001/trace.log",
+            "parser_failure_path": "C:/runs/doc-001/failure.json",
+            "child_exitcode": 1,
+        },
+    )
+
+    harness._record_failure(failure)
+
+    event_path = harness.dumper.dump_dir / "failure_events.jsonl"
+    assert event_path.exists()
+    event = json.loads(event_path.read_text(encoding="utf-8").strip())
+    assert event["event_type"] == "longrun_failure_recorded"
+    assert event["code"] == "document_parse_failed"
+    assert event["details"]["child_exitcode"] == 1
+    assert event["details"]["parser_failure_path"].endswith("failure.json")
+    assert "[longrun] document_failure_recorded" in capsys.readouterr().err
+
+
+def test_longrun_all_failed_invariant_reports_root_failures_not_maintenance(
+    tmp_path: Path,
+):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "all-failed",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Failure fixture",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "input.md",
+        current_path=tmp_path / "failed.md",
+        status="FAILED",
+    )
+    harness.records.append(record)
+    harness._record_failure(
+        harness._failure_record(
+            doc_id=record.doc_id,
+            phase="parse_document",
+            code="document_parse_failed",
+            scope="document",
+            message="parser child timed out",
+            details={"parser_trace_path": "C:/runs/doc-001/trace.log"},
+        )
+    )
+
+    with pytest.raises(AssertionError, match="no documents completed") as exc_info:
+        harness._verify_run_invariants()
+
+    message = str(exc_info.value)
+    assert "background maintenance did not produce persisted evidence" not in message
+    assert "document_parse_failed" in message
+    assert "parser_trace_path" in message
 
 
 def test_longrun_checkpoint_state_is_loaded_across_reruns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -3058,8 +5063,14 @@ def test_longrun_run_invariant_fails_without_maintenance_evidence(tmp_path: Path
         },
     )
     try:
-        with pytest.raises(AssertionError, match="background maintenance did not produce persisted evidence"):
+        with pytest.raises(AssertionError) as exc_info:
             harness._verify_run_invariants()
+        message = str(exc_info.value)
+        assert "background maintenance did not produce persisted evidence" in message
+        assert '"operation_mode": "parse_first"' in message
+        assert '"job_status_counts": {}' in message
+        assert '"derived_artifact_count": 0' in message
+        assert '"completed_document_ids": ["doc-001"]' in message
     finally:
         monkeypatch.undo()
 
@@ -3107,6 +5118,57 @@ def test_longrun_run_invariant_passes_with_maintenance_evidence(tmp_path: Path):
         monkeypatch.undo()
 
 
+def test_longrun_retry_invariant_scopes_validation_to_selected_batch(tmp_path: Path):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "retry-invariant-scope",
+        config=LongRunConfig(
+            enabled=False,
+            mode="retry_failed",
+            doc_count=2,
+            ollama_model="gemma4:e2b",
+            ollama_base_url="http://localhost:11434",
+            max_repeated_systemic_errors=3,
+            max_post_doc_maintenance_steps=1,
+        ),
+    )
+    selected = DocumentRecord(
+        doc_id="doc-001",
+        title="Recovered document",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "completed" / "doc-001.md",
+        status="COMPLETED",
+        recovery_selected=True,
+    )
+    untouched = DocumentRecord(
+        doc_id="doc-002",
+        title="Deferred document",
+        source_uri="file:///doc-002.md",
+        input_path=tmp_path / "doc-002.md",
+        current_path=tmp_path / "input" / "doc-002.md",
+        status="PENDING",
+    )
+    harness.records = [selected, untouched]
+    harness.contexts = {record.doc_id: record for record in harness.records}
+    monkeypatch = _stub_longrun_invariant_dependencies(
+        harness,
+        maintenance_summary={
+            "derived_artifact_count": 0,
+            "maintenance_workflow_step_count": 0,
+            "job_status_counts": {"DONE": 1},
+            "foreground_replies": [],
+            "maintenance_job_ids": ["job-1"],
+            "maintenance_source_document_ids": ["source-doc-1"],
+            "jobs": [{"job_id": "job-1"}],
+            "maintenance_lane_messages": [],
+        },
+    )
+    try:
+        harness._verify_run_invariants()
+    finally:
+        monkeypatch.undo()
+
+
 @pytest.mark.parametrize("backend", ["postgres", "pgvector"])
 def test_longrun_config_from_env_accepts_backend_selection(
     monkeypatch: pytest.MonkeyPatch,
@@ -3122,6 +5184,136 @@ def test_longrun_config_from_env_accepts_backend_selection(
     config = LongRunConfig.from_env()
     assert config.backend == backend
     assert config.dsn == "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
+
+
+def test_longrun_fair_maintenance_slice_config_is_fingerprinted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "chroma")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_OPERATION_MODE", "maintenance_first")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE", "fair_slices")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE", "3")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE", "12")
+
+    fair = LongRunConfig.from_env()
+    drain = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="maintenance_first",
+    )
+
+    assert fair.maintenance_schedule_mode == "fair_slices"
+    assert fair.maintenance_steps_per_slice == 3
+    assert fair.maintenance_llm_calls_per_slice == 1
+    assert fair.maintenance_seconds_per_slice == 12
+    assert fair.corpus_fingerprint != drain.corpus_fingerprint
+
+
+def test_longrun_maintenance_workers_are_execution_config_not_fingerprint() -> None:
+    base = dict(
+        enabled=False,
+        mode="fresh",
+        backend="postgres",
+        operation_mode="maintenance_first",
+        maintenance_schedule_mode="fair_slices",
+        maintenance_steps_per_slice=2,
+        doc_count=2,
+    )
+    one = LongRunConfig(maintenance_workers=1, **base)
+    two = LongRunConfig(maintenance_workers=2, **base)
+
+    assert one.maintenance_workers == 1
+    assert two.maintenance_workers == 2
+    assert one.corpus_fingerprint == two.corpus_fingerprint
+    assert two.as_dict()["maintenance_workers"] == 2
+
+
+def test_longrun_maintenance_workers_require_multi_writer_backend() -> None:
+    with pytest.raises(ValueError, match="maintenance_workers > 1"):
+        LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            backend="chroma",
+            doc_count=1,
+            maintenance_workers=2,
+        )
+
+
+def test_maintenance_statistics_group_by_document_operation_and_failure() -> None:
+    stats = build_maintenance_statistics(
+        [
+            {
+                "event": "maintenance_poll_start",
+                "worker_id": "maintenance-1",
+            },
+            {
+                "event": "maintenance_runtime_attempt_start",
+                "worker_id": "maintenance-1",
+                "source_document_id": "doc-1",
+                "maintenance_kind": "distill",
+            },
+            {
+                "event": "maintenance_graph_effect",
+                "worker_id": "maintenance-1",
+                "source_document_id": "doc-1",
+                "maintenance_kind": "distill",
+                "source_node_count": 3,
+                "derived_node_count": 1,
+            },
+            {
+                "event": "maintenance_runtime_attempt_complete",
+                "worker_id": "maintenance-1",
+                "source_document_id": "doc-1",
+                "maintenance_kind": "distill",
+                "runtime_status": "suspended",
+                "duration_ms": 1200,
+            },
+            {
+                "event": "maintenance_runtime_attempt_failed",
+                "worker_id": "maintenance-2",
+                "source_document_id": "doc-2",
+                "maintenance_kind": "crosslink",
+                "error_type": "ValidationError",
+            },
+        ]
+    )
+
+    assert stats["documents"]["doc-1"]["average_duration_ms"] == 1200
+    assert stats["document_count"] == 2
+    assert stats["documents"]["doc-1"]["suspended_count"] == 1
+    assert stats["documents"]["doc-1"]["derived_node_count"] == 1
+    assert stats["documents"]["doc-1"]["operation_categories"]["distillation"] == 2
+    assert stats["documents"]["doc-2"]["operation_categories"]["linking"] == 1
+    assert stats["failure_hotspots"]["failed:ValidationError"] == 1
+
+
+def test_maintenance_statistics_include_planner_parse_effects() -> None:
+    stats = build_maintenance_statistics(
+        [
+            {
+                "event": "maintenance_parse_complete",
+                "source_document_id": "doc-parse",
+                "maintenance_kind": "document_parse_graph",
+                "duration_ms": 1234,
+                "node_count": 4,
+                "edge_count": 2,
+                "llm_call_count": 3,
+            },
+        ]
+    )
+
+    document = stats["documents"]["doc-parse"]
+    assert document["parse_count"] == 1
+    assert document["parsed_node_count"] == 4
+    assert document["parsed_edge_count"] == 2
+    assert document["llm_call_count"] == 3
+    assert document["operation_categories"]["breakdown"] == 1
 
 
 @pytest.mark.parametrize("backend", ["postgres", "pgvector"])
@@ -3165,6 +5357,7 @@ def test_longrun_config_from_env_accepts_parser_selection(monkeypatch: pytest.Mo
     monkeypatch.setenv("KOGWISTAR_LONGRUN_PARSE_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS", "42")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MAX_LLM_CALLS", "9")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_LIMIT", "1")
 
     config = LongRunConfig.from_env()
 
@@ -3174,6 +5367,7 @@ def test_longrun_config_from_env_accepts_parser_selection(monkeypatch: pytest.Mo
     assert config.parse_timeout_seconds == 7
     assert config.max_runtime_seconds == 42
     assert config.max_llm_calls == 9
+    assert config.doc_limit == 1
 
 
 def test_longrun_config_from_env_accepts_parser_provider_and_model(monkeypatch: pytest.MonkeyPatch):
@@ -3249,9 +5443,54 @@ def test_longrun_config_from_env_supports_one_doc_no_resume_probe(monkeypatch: p
     assert config.parser_lane == "page_index"
     assert config.resume_probe_enabled is False
     assert config.doc_profile == "tiny"
+    assert config.corpus_profile == "watershed_stress"
     assert (config.token_min, config.token_max) == _longrun_doc_profile_token_bounds("tiny")
     assert config.skip_maintenance_invariant is True
     assert config.corpus_fingerprint
+
+
+def test_longrun_config_from_env_supports_daily_life_corpus_profile(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "20")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_CORPUS_PROFILE", "daily_life")
+
+    config = LongRunConfig.from_env()
+
+    assert config.corpus_profile == "daily_life"
+    assert config.corpus_fingerprint
+
+
+def test_longrun_config_from_env_supports_two_stage_conversation_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOGWISTAR_LLM_WIKI_LONGRUN", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv(
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE", "two_stage"
+    )
+
+    config = LongRunConfig.from_env()
+
+    assert config.conversation_persistence_mode == "two_stage"
+    assert config.as_dict()["conversation_persistence_mode"] == "two_stage"
+    assert config.corpus_fingerprint != LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+    ).corpus_fingerprint
+
+
+def test_longrun_config_rejects_invalid_conversation_persistence_mode() -> None:
+    with pytest.raises(ValueError, match="conversation_persistence_mode"):
+        LongRunConfig(
+            enabled=False,
+            mode="fresh",
+            doc_count=1,
+            conversation_persistence_mode="invalid",
+        )
 
 
 def test_longrun_corpus_fingerprint_changes_across_operation_modes() -> None:
@@ -3290,6 +5529,24 @@ def test_longrun_corpus_fingerprint_changes_across_proposal_modes() -> None:
     assert children.corpus_fingerprint != boundaries.corpus_fingerprint
 
 
+def test_longrun_corpus_fingerprint_changes_across_corpus_profiles() -> None:
+    base = dict(
+        enabled=False,
+        mode="auto",
+        doc_count=20,
+        operation_mode="parse_first",
+        parser_lane="workflow_layered",
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    stress = LongRunConfig(corpus_profile="watershed_stress", **base)
+    daily_life = LongRunConfig(corpus_profile="daily_life", **base)
+
+    assert stress.corpus_fingerprint != daily_life.corpus_fingerprint
+
+
 def test_longrun_corpus_fingerprint_ignores_run_mode_and_budgets() -> None:
     base = dict(
         enabled=False,
@@ -3306,6 +5563,324 @@ def test_longrun_corpus_fingerprint_ignores_run_mode_and_budgets() -> None:
     auto = LongRunConfig(mode="auto", max_llm_calls=500, max_runtime_seconds=3600, **base)
 
     assert fresh.corpus_fingerprint == continue_run.corpus_fingerprint == auto.corpus_fingerprint
+
+
+def test_longrun_corpus_fingerprint_ignores_document_limit() -> None:
+    base = dict(
+        enabled=False,
+        mode="auto",
+        doc_count=20,
+        operation_mode="parse_first",
+        parser_lane="workflow_layered",
+        parser_provider="azure",
+        parser_model="gpt-5-mini",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    limited = LongRunConfig(doc_limit=2, **base)
+    complete = LongRunConfig(doc_limit=None, **base)
+
+    assert limited.corpus_fingerprint == complete.corpus_fingerprint
+
+
+def test_longrun_corpus_fingerprint_ignores_resume_probe() -> None:
+    base = dict(
+        enabled=False,
+        mode="auto",
+        doc_count=20,
+        operation_mode="parse_first",
+        parser_lane="workflow_layered",
+        parser_provider="azure",
+        parser_model="gpt-5-mini",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    normal = LongRunConfig(resume_probe_enabled=False, **base)
+    probe = LongRunConfig(resume_probe_enabled=True, **base)
+
+    assert normal.corpus_fingerprint == probe.corpus_fingerprint
+
+
+def test_longrun_accepts_historical_fingerprint_without_run_control_fields() -> None:
+    config = LongRunConfig(
+        enabled=False,
+        mode="continue",
+        doc_count=20,
+        backend="pgvector",
+        operation_mode="parse_first",
+        pg_database_mode="fingerprint",
+        corpus_profile="daily_life",
+        parser_lane="workflow_layered",
+        parser_provider="azure",
+        parser_model="gpt-5-mini",
+        parser_proposal_mode="boundaries",
+    )
+
+    assert config._historical_corpus_fingerprint() == "7478c448-16f3-5f53-aabb-519a2033c72e"
+
+
+def test_longrun_parser_workers_are_bounded_but_do_not_change_fingerprint() -> None:
+    base = dict(
+        enabled=False,
+        mode="fresh",
+        doc_count=3,
+        backend="pgvector",
+        dsn="postgresql://user:pass@localhost/db",
+    )
+    one = LongRunConfig(parser_workers=1, **base)
+    two = LongRunConfig(parser_workers=2, **base)
+
+    assert one.parser_workers == 1
+    assert two.parser_workers == 2
+    assert one.corpus_fingerprint == two.corpus_fingerprint
+    assert two.as_dict()["parser_workers"] == 2
+
+
+def test_longrun_different_fingerprint_isolated_from_existing_run_dir(tmp_path: Path):
+    base = tmp_path / "experiment"
+    (base / "dump").mkdir(parents=True)
+    (base / "dump" / "run_config.json").write_text(
+        json.dumps({"corpus_fingerprint": "old-fingerprint"}),
+        encoding="utf-8",
+    )
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=20,
+        corpus_profile="daily_life",
+        parser_model="gpt-5-mini",
+        parser_provider="azure",
+        parser_proposal_mode="boundaries",
+        ollama_model="gpt-5-mini",
+        ollama_base_url="http://localhost:11434",
+    )
+
+    harness = LongRunHarness(run_dir=base, config=config)
+
+    assert harness.run_dir != base
+    assert harness.run_dir == base / "experiments" / config.corpus_fingerprint
+    assert json.loads((base / "dump" / "run_config.json").read_text(encoding="utf-8"))[
+        "corpus_fingerprint"
+    ] == "old-fingerprint"
+
+
+def test_longrun_experiment_run_changes_fingerprint_for_repeat_comparison():
+    base = dict(
+        enabled=False,
+        mode="fresh",
+        doc_count=20,
+        backend="pgvector",
+        dsn="postgresql://user:pass@localhost/db",
+        parser_provider="azure",
+        parser_model="gpt-5-mini",
+        parser_proposal_mode="boundaries",
+    )
+    run_one = LongRunConfig(experiment_run="1", **base)
+    run_two = LongRunConfig(experiment_run="2", **base)
+
+    assert run_one.corpus_fingerprint != run_two.corpus_fingerprint
+    assert run_one.as_dict()["experiment_run"] == "1"
+
+
+def test_longrun_parser_workers_reject_unsafe_storage_but_allow_resume_gate() -> None:
+    with pytest.raises(ValueError, match="requires postgres/pgvector"):
+        LongRunConfig(enabled=False, mode="fresh", doc_count=2, parser_workers=2)
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=2,
+        backend="pgvector",
+        dsn="postgresql://user:pass@localhost/db",
+        parser_workers=2,
+        resume_probe_enabled=True,
+    )
+    assert config.parser_workers == 2
+    assert config.resume_probe_enabled is True
+    assert config.corpus_fingerprint == LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=2,
+        backend="pgvector",
+        dsn="postgresql://user:pass@localhost/db",
+        parser_workers=1,
+        resume_probe_enabled=True,
+    ).corpus_fingerprint
+
+
+def test_longrun_parallel_parser_scheduler_bounds_document_workflows(tmp_path: Path) -> None:
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=3,
+        backend="pgvector",
+        dsn="postgresql://user:pass@localhost/db",
+        parser_workers=2,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parallel", config=config)
+    harness.records = [
+        DocumentRecord(
+            doc_id=f"doc-{index}",
+            title=f"Document {index}",
+            source_uri=f"doc-{index}.md",
+            input_path=tmp_path / f"doc-{index}.md",
+            current_path=tmp_path / f"doc-{index}.md",
+        )
+        for index in range(3)
+    ]
+
+    active = 0
+    maximum_active = 0
+    active_lock = threading.Lock()
+
+    def fake_workflow(record: DocumentRecord) -> str:
+        nonlocal active, maximum_active
+        with active_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.02)
+        record.status = "COMPLETED"
+        with active_lock:
+            active -= 1
+        return "succeeded"
+
+    harness._run_document_workflow = fake_workflow  # type: ignore[method-assign]
+    harness._poll_maintenance_once = lambda **_: None  # type: ignore[method-assign]
+    harness._log_heartbeat = lambda **_: None  # type: ignore[method-assign]
+    harness.dumper.dump = lambda **_: None  # type: ignore[method-assign]
+    harness._finalize_run = lambda **_: None  # type: ignore[method-assign]
+
+    harness._run_parallel_documents(started=time.monotonic())
+
+    assert maximum_active == 2
+    assert all(record.status == "COMPLETED" for record in harness.records)
+
+
+def test_longrun_async_entrypoint_uses_same_terminal_scheduler(tmp_path: Path) -> None:
+    config = LongRunConfig(enabled=False, mode="fresh", doc_count=1)
+    harness = LongRunHarness(run_dir=tmp_path / "async", config=config)
+    called = False
+
+    def fake_run() -> None:
+        nonlocal called
+        called = True
+
+    harness.run = fake_run  # type: ignore[method-assign]
+    asyncio.run(harness.run_async())
+
+    assert called is True
+
+
+def test_longrun_parallel_parser_isolates_document_failure_and_keeps_maintenance_foreground(
+    tmp_path: Path,
+) -> None:
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=3,
+        backend="pgvector",
+        dsn="postgresql://user:pass@localhost/db",
+        parser_workers=2,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parallel-failure", config=config)
+    records = [
+        DocumentRecord(
+            doc_id=f"doc-{index}",
+            title=f"Document {index}",
+            source_uri=f"doc-{index}.md",
+            input_path=tmp_path / f"doc-{index}.md",
+            current_path=tmp_path / f"doc-{index}.md",
+        )
+        for index in range(3)
+    ]
+    for record in records:
+        record.current_path.write_text(record.doc_id, encoding="utf-8")
+    harness.records = records
+    maintenance_polls: list[str] = []
+    completed_calls: list[str] = []
+
+    def fake_workflow(record: DocumentRecord) -> str:
+        if record.doc_id == "doc-1":
+            raise LongRunDocumentError(
+                "document_parse_failed",
+                "synthetic parser failure",
+                phase="parse_document",
+            )
+        record.status = "COMPLETED"
+        completed_calls.append(record.doc_id)
+        return "succeeded"
+
+    harness._run_document_workflow = fake_workflow  # type: ignore[method-assign]
+    harness._poll_maintenance_once = lambda *, phase: maintenance_polls.append(phase)  # type: ignore[method-assign]
+    harness._log_heartbeat = lambda **_: None  # type: ignore[method-assign]
+    harness._safe_failure_dump = lambda **_: None  # type: ignore[method-assign]
+    harness.dumper.dump = lambda **_: None  # type: ignore[method-assign]
+    harness._finalize_run = lambda **_: None  # type: ignore[method-assign]
+
+    harness._run_parallel_documents(started=time.monotonic())
+
+    assert completed_calls == ["doc-0", "doc-2"] or completed_calls == ["doc-2", "doc-0"]
+    assert records[1].status == "FAILED"
+    assert {record.status for record in records if record.doc_id != "doc-1"} == {"COMPLETED"}
+    assert len(maintenance_polls) == 2
+    assert [failure.doc_id for failure in harness.failure_records] == ["doc-1"]
+
+
+def test_longrun_finalization_trace_reports_slow_phases(tmp_path: Path) -> None:
+    harness = LongRunHarness(
+        run_dir=tmp_path / "finalization-trace",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+    events: list[dict[str, Any]] = []
+    harness.live_trace_printer = SimpleNamespace(emit=events.append)
+    harness._drain_maintenance_after_documents = lambda: None  # type: ignore[method-assign]
+    harness._poll_projection_once = lambda: None  # type: ignore[method-assign]
+    harness._verify_run_invariants = lambda: None  # type: ignore[method-assign]
+    harness.dumper.dump = lambda **_: None  # type: ignore[method-assign]
+    harness.recovery_summary = lambda: {}  # type: ignore[method-assign]
+    harness.maintenance_summary = lambda: {}  # type: ignore[method-assign]
+    harness.projection_summary = lambda: {}  # type: ignore[method-assign]
+    harness._engines = SimpleNamespace(close=lambda: None)
+
+    harness._finalize_run(started=time.monotonic())
+
+    stages = [event["stage"] for event in events]
+    assert stages.index("finalize_maintenance_drain_start") < stages.index(
+        "finalize_maintenance_drain_complete"
+    )
+    assert stages.index("finalize_projection_start") < stages.index(
+        "finalize_projection_complete"
+    )
+    assert stages.index("finalize_invariants_start") < stages.index(
+        "finalize_invariants_complete"
+    )
+    assert stages.index("finalize_success_dump_start") < stages.index(
+        "finalize_success_dump_complete"
+    )
+    assert stages.index("runtime_engines_close_start") < stages.index(
+        "runtime_engines_closed"
+    )
+    timed_stages = {
+        "finalize_maintenance_drain_complete",
+        "finalize_projection_complete",
+        "finalize_invariants_complete",
+        "finalize_success_dump_complete",
+        "runtime_engines_closed",
+    }
+    assert all(isinstance(event["details"]["duration_ms"], int) for event in events if event["stage"] in timed_stages)
+
+
+def test_longrun_async_entrypoint_propagates_scheduler_failure(tmp_path: Path) -> None:
+    harness = LongRunHarness(
+        run_dir=tmp_path / "async-failure",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+
+    def failing_run() -> None:
+        raise LongRunSystemicError("scheduler_failed", "synthetic scheduler failure", phase="scheduler")
+
+    harness.run = failing_run  # type: ignore[method-assign]
+    with pytest.raises(LongRunSystemicError, match="synthetic scheduler failure"):
+        asyncio.run(harness.run_async())
 
 
 def test_longrun_harness_reports_call_budget_and_corpus_fingerprint(tmp_path: Path):
@@ -3409,6 +5984,8 @@ def test_longrun_provider_settings_preserve_proposal_mode(tmp_path: Path):
 
     assert settings.proposal_mode == "boundaries"
     assert harness.llm_summary()["proposal_mode"] == "boundaries"
+    assert "total_cost" in harness.llm_summary()
+    assert "cost_status" in harness.llm_summary()
 
 
 def test_longrun_workflow_steps_are_operation_mode_specific(tmp_path: Path):
@@ -3477,6 +6054,155 @@ def test_longrun_maintenance_first_skips_parser_and_seeds_source_map(
     assert "seed_source_map" in phases
     assert "parse_document" not in phases
     assert "persist_document" not in phases
+
+
+def test_longrun_retry_failed_reopens_bounded_terminal_documents(tmp_path: Path):
+    run_dir = tmp_path / "retry-failed"
+    config = LongRunConfig(
+        enabled=False,
+        mode="retry_failed",
+        doc_count=3,
+        recovery_doc_limit=1,
+        recovery_attempts_per_doc=1,
+    )
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness._prepare_run_directory()
+    records: list[DocumentRecord] = []
+    for index in range(1, 4):
+        doc_id = f"doc-{index:03d}"
+        path = run_dir / "quarantine" / f"{doc_id}.md"
+        path.write_text(f"payload {doc_id}", encoding="utf-8")
+        records.append(
+            DocumentRecord(
+                doc_id=doc_id,
+                title=doc_id,
+                source_uri=f"doc://{doc_id}",
+                input_path=run_dir / "input" / path.name,
+                current_path=path,
+                status="QUARANTINED",
+            )
+        )
+    harness.records = records
+    harness.contexts = {record.doc_id: record for record in records}
+    harness.status_transitions.append(
+        {"doc_id": "doc-002", "status": "PERSISTED", "phase": "persist_document"}
+    )
+
+    harness._prepare_failed_document_recovery()
+
+    assert records[0].status == "PENDING"
+    assert records[0].current_path == run_dir / "processing" / "doc-001.md"
+    assert records[0].recovery_attempt_count == 0
+    assert records[0].recovery_selected is True
+    assert [record.status for record in records[1:]] == ["QUARANTINED", "QUARANTINED"]
+    assert harness.recovery_skipped_document_ids == ["doc-002"]
+    assert any(row["phase"] == "recovery_reopen" for row in harness.status_transitions)
+
+
+def test_longrun_retry_failed_does_not_exceed_attempt_limit(tmp_path: Path):
+    run_dir = tmp_path / "retry-failed-attempt-limit"
+    config = LongRunConfig(
+        enabled=False,
+        mode="retry_failed",
+        doc_count=1,
+        recovery_attempts_per_doc=1,
+    )
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness._prepare_run_directory()
+    path = run_dir / "quarantine" / "doc-001.md"
+    path.write_text("payload", encoding="utf-8")
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="doc-001",
+        source_uri="doc://doc-001",
+        input_path=run_dir / "input" / path.name,
+        current_path=path,
+        status="QUARANTINED",
+        recovery_attempt_count=1,
+    )
+    harness.records = [record]
+    harness.contexts = {record.doc_id: record}
+
+    harness._prepare_failed_document_recovery()
+
+    assert record.status == "QUARANTINED"
+    assert record.current_path == path
+    assert "attempt limit" in (harness.early_stop_reason or "")
+
+
+def test_longrun_retry_failed_falls_back_to_input_payload(tmp_path: Path):
+    run_dir = tmp_path / "retry-failed-missing-payload"
+    config = LongRunConfig(
+        enabled=False,
+        mode="retry_failed",
+        doc_count=1,
+        recovery_attempts_per_doc=1,
+    )
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness._prepare_run_directory()
+    input_path = run_dir / "input" / "doc-001.md"
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_text("input payload", encoding="utf-8")
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="doc-001",
+        source_uri="doc://doc-001",
+        input_path=input_path,
+        current_path=run_dir / "quarantine" / "doc-001.md",
+        status="QUARANTINED",
+    )
+    harness.records = [record]
+    harness.contexts = {record.doc_id: record}
+
+    harness._prepare_failed_document_recovery()
+
+    assert record.status == "PENDING"
+    assert record.recovery_selected is True
+    assert record.current_path == run_dir / "processing" / "doc-001.md"
+    assert record.current_path.read_text(encoding="utf-8") == "input payload"
+    assert harness.recovery_missing_payload_document_ids == []
+    assert "no recoverable" not in (harness.early_stop_reason or "")
+
+
+def test_longrun_retry_failed_finishes_interrupted_batch_before_selecting_more(
+    tmp_path: Path,
+):
+    run_dir = tmp_path / "retry-failed-batch"
+    config = LongRunConfig(
+        enabled=False,
+        mode="retry_failed",
+        doc_count=2,
+        recovery_doc_limit=1,
+    )
+    harness = LongRunHarness(run_dir=run_dir, config=config)
+    harness._prepare_run_directory()
+    terminal_path = run_dir / "quarantine" / "doc-002.md"
+    terminal_path.write_text("payload", encoding="utf-8")
+    interrupted = DocumentRecord(
+        doc_id="doc-001",
+        title="doc-001",
+        source_uri="doc://doc-001",
+        input_path=run_dir / "input" / "doc-001.md",
+        current_path=run_dir / "processing" / "doc-001.md",
+        status="PENDING",
+        recovery_selected=True,
+    )
+    new_failure = DocumentRecord(
+        doc_id="doc-002",
+        title="doc-002",
+        source_uri="doc://doc-002",
+        input_path=run_dir / "input" / terminal_path.name,
+        current_path=terminal_path,
+        status="QUARANTINED",
+    )
+    harness.records = [interrupted, new_failure]
+    harness.contexts = {record.doc_id: record for record in harness.records}
+
+    harness._prepare_failed_document_recovery()
+
+    assert interrupted.status == "PENDING"
+    assert new_failure.status == "QUARANTINED"
+    assert new_failure.recovery_selected is False
 
 
 def test_longrun_restore_llm_usage_counts_parse_transitions_not_seeded_records(tmp_path: Path):
@@ -3550,7 +6276,14 @@ def test_longrun_run_aborts_when_llm_call_budget_is_exceeded(
     harness = LongRunHarness(run_dir=tmp_path / "budget-abort", config=config)
     harness.prepare()
     harness.llm_call_count = 1
-    monkeypatch.setattr(harness, "_run_document_workflow", lambda record: "succeeded")
+    workflow_called = False
+
+    def _unexpected_workflow(record: DocumentRecord) -> str:
+        nonlocal workflow_called
+        workflow_called = True
+        return "succeeded"
+
+    monkeypatch.setattr(harness, "_run_document_workflow", _unexpected_workflow)
     monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
 
     with pytest.raises(AssertionError, match="llm call budget exceeded"):
@@ -3558,6 +6291,50 @@ def test_longrun_run_aborts_when_llm_call_budget_is_exceeded(
 
     assert harness.aborted is True
     assert harness.abort_reason and "llm call budget exceeded" in harness.abort_reason
+    assert workflow_called is False
+    assert harness.records[0].status == "PENDING"
+    assert harness.records[0].current_path.parent == harness.run_dir / "input"
+
+
+def test_longrun_doc_limit_stops_cleanly_without_full_corpus_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=20,
+        doc_limit=2,
+        max_llm_calls=100,
+        max_runtime_seconds=120,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "document-limit", config=config)
+    harness.prepare()
+    called: list[str] = []
+
+    def _workflow(record: DocumentRecord) -> str:
+        called.append(record.doc_id)
+        return "succeeded"
+
+    monkeypatch.setattr(harness, "_run_document_workflow", _workflow)
+    monkeypatch.setattr(harness, "_poll_maintenance_once", lambda **kwargs: None)
+    monkeypatch.setattr(harness, "_drain_maintenance_after_documents", lambda: None)
+    monkeypatch.setattr(harness, "_poll_projection_once", lambda: None)
+    monkeypatch.setattr(harness, "_verify_run_invariants", lambda: None)
+
+    harness.run()
+
+    assert called == ["doc-001", "doc-002"]
+    assert (harness.dumper.dump_dir / "interim_report.md").exists()
+    assert (harness.dumper.dump_dir / "final_report.md").exists()
+    terminal = json.loads((harness.dumper.dump_dir / "run_terminal.json").read_text(encoding="utf-8"))
+    assert terminal["status"] == "incomplete"
+    assert harness.aborted is False
+    assert harness.early_stop_reason == "document limit reached (2/20)"
+    assert (harness.dumper.dump_dir / "final_report.md").exists()
 
 
 def test_longrun_run_aborts_when_runtime_budget_is_exceeded(
@@ -3588,15 +6365,48 @@ def test_longrun_run_aborts_when_runtime_budget_is_exceeded(
 
     assert harness.aborted is True
     assert harness.abort_reason and "max runtime exceeded" in harness.abort_reason
+    assert harness.records[0].status == "PENDING"
+    assert harness.records[0].current_path.parent == harness.run_dir / "input"
 
 
 def test_longrun_config_from_env_auto_enables_pgvector_testcontainer_probe(monkeypatch: pytest.MonkeyPatch):
+    for env_name in (
+        "KOGWISTAR_LONGRUN_DSN",
+        "KOGWISTAR_LLM_WIKI_TEST_PG_DSN",
+        "GKE_PG_DSN",
+        "PG_DSN",
+        "DATABASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
     monkeypatch.delenv("KOGWISTAR_LLM_WIKI_LONGRUN", raising=False)
     monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "pgvector")
     monkeypatch.setenv("KOGWISTAR_LONGRUN_PG_SOURCE", "testcontainer")
+
+    config = LongRunConfig.from_env()
+
+    assert config.enabled is True
+    assert config.backend == "pgvector"
+    assert config.dsn is None
+
+
+def test_longrun_config_from_env_auto_enables_pgvector_persistent_probe(monkeypatch: pytest.MonkeyPatch):
+    for env_name in (
+        "KOGWISTAR_LONGRUN_DSN",
+        "KOGWISTAR_LLM_WIKI_TEST_PG_DSN",
+        "GKE_PG_DSN",
+        "PG_DSN",
+        "DATABASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.delenv("KOGWISTAR_LLM_WIKI_LONGRUN", raising=False)
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_MODE", "fresh")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_DOC_COUNT", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_ALLOW_SMALL", "1")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_BACKEND", "pgvector")
+    monkeypatch.setenv("KOGWISTAR_LONGRUN_PG_SOURCE", "persistent")
 
     config = LongRunConfig.from_env()
 
@@ -3670,6 +6480,176 @@ def test_longrun_runtime_event_sink_writes_jsonl(tmp_path: Path):
     assert isinstance(row["observed_at_ms"], int)
 
 
+def test_longrun_runtime_event_sink_live_trace_mirrors_to_console(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    event_path = tmp_path / "dump" / "runtime_events.jsonl"
+    sink = LongRunJsonlTraceSink(jsonl_path=event_path, live_trace=True)
+
+    sink.emit(
+        {
+            "event_id": "evt-test",
+            "type": "workflow_step_started",
+            "run_id": "run-test",
+            "step": "parse_document",
+        }
+    )
+
+    captured = capsys.readouterr()
+    assert "[longrun.runtime] workflow_step_started" in captured.err
+    assert "run_id=run-test" in captured.err
+    assert "step=parse_document" in captured.err
+    assert event_path.exists()
+
+
+def test_longrun_runtime_event_sink_enriches_step_name(tmp_path: Path):
+    event_path = tmp_path / "dump" / "runtime_events.jsonl"
+    sink = LongRunJsonlTraceSink(
+        jsonl_path=event_path,
+        enrich_event=lambda event: {**event, "step_name": "parse_document"},
+    )
+
+    sink.emit(
+        {
+            "event_id": "evt-test",
+            "type": "step_attempt_completed",
+            "run_id": "run-test",
+            "node_id": "wf-node-1",
+            "step_seq": 2,
+        }
+    )
+
+    row = json.loads(event_path.read_text(encoding="utf-8").splitlines()[0])
+    assert row["node_id"] == "wf-node-1"
+    assert row["step_name"] == "parse_document"
+    assert row["step_seq"] == 2
+
+
+def test_longrun_harness_rebuilds_pipeline_with_live_trace_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    captured: dict[str, Any] = {}
+    module = sys.modules[__name__]
+
+    class FakePipeline:
+        def __init__(self, engines: Any, *, live_trace: bool | None = None) -> None:
+            captured["live_trace"] = live_trace
+            self.parser = None
+
+    class FakeWorker:
+        def __init__(self, engines: Any, **kwargs: Any) -> None:
+            self.engines = engines
+            if kwargs:
+                captured["worker_kwargs"] = kwargs
+
+    class FakeDumper:
+        def __init__(self, run_dir: Path, harness: Any) -> None:
+            self.dump_dir = run_dir / "dump"
+            self.dump_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "IngestPipeline", FakePipeline)
+    monkeypatch.setattr(module, "MaintenanceWorker", FakeWorker)
+    monkeypatch.setattr(module, "ProjectionWorker", FakeWorker)
+    monkeypatch.setattr(module, "DiagnosticDumper", FakeDumper)
+    monkeypatch.setattr(
+        LongRunHarness,
+        "_build_namespace_engines",
+        lambda self: SimpleNamespace(conversation=None, workflow=None, kg=None, wisdom=None, derived_knowledge=None),
+    )
+
+    config = LongRunConfig(
+        enabled=True,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="parse_first",
+        pg_database_mode="fingerprint",
+        parser_provider="ollama",
+        parser_model="gemma4:e2b",
+        parser_proposal_mode="children",
+        parser_temperature=0.1,
+        parser_base_url="http://localhost:11434",
+        parser_api_key_env=None,
+        parser_api_version=None,
+        parser_max_retries=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        max_llm_calls=1,
+        backend="chroma",
+        parser_lane="workflow_layered",
+        parse_timeout_seconds=1,
+        max_runtime_seconds=1,
+        dsn=None,
+        resume_probe_enabled=False,
+        max_idle_loops=1,
+        token_min=1,
+        token_max=2,
+        workspace_id="demo",
+        checkpoint_run_dir=str(tmp_path / "run"),
+        doc_profile="small",
+        skip_maintenance_invariant=False,
+        live_trace=True,
+        corpus_fingerprint="fingerprint",
+    )
+
+    harness = LongRunHarness(run_dir=tmp_path / "run", config=config)
+    harness._rebuild_runtime_objects()
+
+    assert captured["live_trace"] is True
+    assert captured["worker_kwargs"]["fair_scheduling"] is False
+    assert captured["worker_kwargs"]["worker_id"] == "maintenance-1"
+    assert callable(captured["worker_kwargs"]["trace_sink"])
+
+
+def test_longrun_harness_enrich_runtime_event_adds_step_name(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="parse_first",
+        pg_database_mode="fingerprint",
+        parser_provider="ollama",
+        parser_model="gemma4:e2b",
+        parser_proposal_mode="children",
+        parser_temperature=0.1,
+        parser_base_url="http://localhost:11434",
+        parser_api_key_env=None,
+        parser_api_version=None,
+        parser_max_retries=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        max_llm_calls=1,
+        backend="chroma",
+        parser_lane="page_index",
+        parse_timeout_seconds=30,
+        max_runtime_seconds=30,
+        dsn=None,
+        resume_probe_enabled=False,
+        max_idle_loops=1,
+        token_min=1,
+        token_max=2,
+        workspace_id="demo",
+        checkpoint_run_dir=str(tmp_path / "run"),
+        doc_profile="small",
+        skip_maintenance_invariant=False,
+        live_trace=False,
+        corpus_fingerprint="fingerprint",
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "run", config=config)
+
+    parse_node_id = str(stable_id("wf_node", harness._workflow_id(), "parse_document"))
+    enriched = harness._enrich_runtime_event(
+        {
+            "event_id": "evt-test",
+            "type": "step_attempt_completed",
+            "run_id": "run-test",
+            "node_id": parse_node_id,
+            "step_seq": 2,
+        }
+    )
+
+    assert enriched["step_name"] == "parse_document"
+
+
 def _fake_provider_settings_payload() -> dict[str, Any]:
     return WorkflowProviderSettings(
         parser=ProviderEndpointConfig(provider="fake", model="fake-parser"),
@@ -3681,6 +6661,10 @@ def _parser_child_payload(tmp_path: Path, *, parser_lane: str) -> dict[str, Any]
     run_dir = tmp_path / f"parser-{parser_lane}"
     return {
         "parser_lane": parser_lane,
+        "conversation_persistence_mode": "single_stage",
+        "parser_provider": "fake",
+        "parser_model": "fake-parser",
+        "parser_workflow_run_id": "parser:source-doc-001",
         "doc_id": "doc-001",
         "source_document_id": "source-doc-001",
         "title": "Parser Dispatch",
@@ -3693,6 +6677,8 @@ def _parser_child_payload(tmp_path: Path, *, parser_lane: str) -> dict[str, Any]
         "failure_path": str(run_dir / "failure.json"),
         "heartbeat_path": str(run_dir / "heartbeat.json"),
         "trace_path": str(run_dir / "trace.log"),
+        "dump_trace_path": str(run_dir / "dump-trace.log"),
+        "live_trace": False,
     }
 
 
@@ -3894,6 +6880,7 @@ def test_longrun_final_report_renders_parser_eval_summary(
     assert "## Parser Evaluation" in report
     assert "Composite verdict" in report
     assert "Average basic sense score" in report
+    assert "Slowest parser stage" in report
 
 
 def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
@@ -3903,6 +6890,7 @@ def test_longrun_page_index_parser_lane_writes_graph_payload(tmp_path: Path):
 
     result = json.loads(Path(payload["result_path"]).read_text(encoding="utf-8"))
     assert result["ok"] is True
+    assert result["parser_workflow_run_id"] == "parser:source-doc-001"
     assert result["parser_lane"] == "page_index"
     assert result["diagnostics"]["parser_lane"] == "page_index"
     assert result["diagnostics"]["page_index"]["assignment_mode"] in {
@@ -3944,6 +6932,7 @@ def test_longrun_workflow_layered_parser_lane_uses_workflow_mode(tmp_path: Path)
 
     result = json.loads(Path(payload["result_path"]).read_text(encoding="utf-8"))
     assert result["ok"] is True
+    assert result["parser_workflow_run_id"] == "parser:source-doc-001"
     assert result["parser_lane"] == "workflow_layered"
     assert result["diagnostics"]["parse_session_mode"] == "workflow_layered"
     assert result["usage_summary"]["provider"] == "fake"
@@ -3962,6 +6951,213 @@ def test_longrun_workflow_layered_parser_lane_uses_workflow_mode(tmp_path: Path)
         "fallback_used",
     }
     assert result["graph_payload"]["nodes"]
+
+
+def test_longrun_workflow_child_marks_explicit_workflow_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _parser_child_payload(tmp_path, parser_lane="workflow_layered")
+    failed_result = SimpleNamespace(
+        graph_payload={"nodes": [], "edges": []},
+        evaluation={},
+        usage_summary={"llm_call_count": 1},
+        diagnostics={"workflow_status": "failure"},
+        layer_log=[],
+        usage_events=[],
+        semantic_tree=SimpleNamespace(title="Failed workflow"),
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.longrun_parser_worker.run_workflow_layered_parse",
+        lambda **kwargs: failed_result,
+    )
+
+    run_longrun_parser_child(payload)
+
+    result = json.loads(Path(payload["result_path"]).read_text(encoding="utf-8"))
+    assert result["ok"] is False
+    assert result["workflow_status"] == "failure"
+    assert result["parser_workflow_run_id"] == "parser:source-doc-001"
+
+
+def test_longrun_parent_preserves_child_usage_events(tmp_path: Path):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "usage-payload",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+    event = {
+        "event_id": "provider-event-1",
+        "run_id": "parser:source-doc-1",
+        "source": "langchain-provider",
+        "kind": "token",
+        "amount": 12,
+        "unit": "input_tokens",
+        "scope": "run",
+        "ts_ms": 1,
+        "meta": {"provider_run_id": "provider-run-1"},
+    }
+
+    result = harness._parse_result_from_payload({"usage_events": [event]})
+
+    assert result.usage_events == [event]
+
+
+def test_longrun_parent_persists_per_document_usage_attribution(tmp_path: Path):
+    harness = LongRunHarness(
+        run_dir=tmp_path / "usage-persistence",
+        config=LongRunConfig(enabled=False, mode="fresh", doc_count=1),
+    )
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Usage document",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+    )
+    record.current_path.write_text("usage test document", encoding="utf-8")
+    request = harness._request_for(record)
+    event = {
+        "event_id": "provider-event-1",
+        "run_id": "parser:source-doc-1",
+        "source": "langchain-provider",
+        "kind": "token",
+        "amount": 12,
+        "unit": "input_tokens",
+        "scope": "run",
+        "ts_ms": 1,
+        "meta": {"provider_run_id": "provider-run-1"},
+    }
+
+    harness.pipeline._persist_parser_usage_events(  # noqa: SLF001 - regression of parent handoff
+        request=request,
+        source_document_id="source-doc-1",
+        provider="fake",
+        model="fake-model",
+        attempt_id="longrun:doc-001",
+        usage_events=[event],
+    )
+
+    namespace = harness.pipeline.namespaces_for(request.workspace_id).usage_events
+    rows = list(
+        harness.engines.conversation.meta_sqlite.iter_entity_events(
+            namespace=namespace,
+            from_seq=1,
+        )
+    )
+    assert len(rows) == 1
+    payload = json.loads(rows[0][4])
+    assert payload["attribution"]["source_document_id"] == "source-doc-1"
+    assert payload["attribution"]["operation_kind"] == "parser"
+    assert payload["attribution"]["provider"] == "fake"
+
+
+def test_longrun_parser_child_failure_writes_failure_json_and_mirrors_trace(tmp_path: Path):
+    payload = _parser_child_payload(tmp_path, parser_lane="page_index")
+    payload["parser_lane"] = "unsupported_lane"
+
+    with pytest.raises(ValueError, match="unsupported long-run parser lane"):
+        run_longrun_parser_child(payload)
+
+    failure_path = Path(str(payload["failure_path"]))
+    failure_payload_path = Path(
+        str(payload.get("failure_payload_path") or failure_path.with_name("failure_payload.json"))
+    )
+    dump_trace_path = Path(str(payload["dump_trace_path"]))
+
+    assert failure_path.exists()
+    failure = json.loads(failure_path.read_text(encoding="utf-8"))
+    assert failure["ok"] is False
+    assert failure["error_type"]
+    assert failure["payload_path"] == str(failure_payload_path)
+    assert failure_payload_path.exists()
+    failure_payload = json.loads(failure_payload_path.read_text(encoding="utf-8"))
+    assert failure_payload["doc_id"] == payload["doc_id"]
+    assert failure_payload["parser_lane"] == "unsupported_lane"
+    assert failure_payload["raw_text"] == payload["raw_text"]
+    assert dump_trace_path.exists()
+    trace_text = dump_trace_path.read_text(encoding="utf-8")
+    assert "child::child_loading_provider_settings" in trace_text
+    assert "child::child_exception" in trace_text
+
+
+def test_longrun_parser_child_live_trace_emits_semantic_child_progress(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    payload = _parser_child_payload(tmp_path, parser_lane="page_index")
+    payload["parser_lane"] = "unsupported_lane"
+    payload["live_trace"] = True
+
+    with pytest.raises(ValueError, match="unsupported long-run parser lane"):
+        run_longrun_parser_child(payload)
+
+    captured = capsys.readouterr()
+    assert "[longrun.parser] parser_trace" in captured.err
+    assert "message=child::child_loading_provider_settings" in captured.err
+    assert "message=child::child_exception ValueError" in captured.err
+    assert "provider=fake" in captured.err
+    assert "model=fake-parser" in captured.err
+    assert "parser_workflow_run_id=parser:source-doc-001" in captured.err
+
+
+def test_longrun_parser_child_failure_message_includes_exitcode_and_paths(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        operation_mode="parse_first",
+        pg_database_mode="fingerprint",
+        parser_provider="ollama",
+        parser_model="gemma4:e2b",
+        parser_proposal_mode="children",
+        parser_temperature=0.1,
+        parser_base_url="http://localhost:11434",
+        parser_api_key_env=None,
+        parser_api_version=None,
+        parser_max_retries=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        max_llm_calls=1,
+        backend="chroma",
+        parser_lane="page_index",
+        parse_timeout_seconds=30,
+        max_runtime_seconds=30,
+        dsn=None,
+        resume_probe_enabled=False,
+        max_idle_loops=1,
+        token_min=1,
+        token_max=2,
+        workspace_id="demo",
+        checkpoint_run_dir=str(tmp_path / "run"),
+        doc_profile="small",
+        skip_maintenance_invariant=False,
+        live_trace=False,
+        corpus_fingerprint="fingerprint",
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "run", config=config)
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Demo",
+        source_uri="file:///demo.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+    )
+
+    process = SimpleNamespace(exitcode=17)
+    message = harness._parser_child_failure_message(
+        record=record,
+        process=process,
+        failure={},
+        trace_path=tmp_path / "trace.log",
+        failure_path=tmp_path / "failure.json",
+    )
+
+    assert "exited without result" in message
+    assert "exitcode=17" in message
+    assert "trace.log" in message
+    assert "failure.json" in message
 
 
 def test_longrun_parser_subprocess_timeout_records_heartbeat(tmp_path: Path):
@@ -3994,7 +7190,7 @@ def test_longrun_parser_subprocess_timeout_records_heartbeat(tmp_path: Path):
         parser_mode="heuristic",
     )
 
-    with pytest.raises(LongRunDocumentError, match="timed out"):
+    with pytest.raises(LongRunDocumentError, match="timed out") as exc_info:
         harness._run_parse_with_subprocess(
             record=record,
             request=request,
@@ -4005,6 +7201,425 @@ def test_longrun_parser_subprocess_timeout_records_heartbeat(tmp_path: Path):
     assert harness.parser_heartbeat["phase"] == "timeout"
     heartbeat_path = harness.dumper.dump_dir / "parser_heartbeat.json"
     assert heartbeat_path.exists()
+    assert exc_info.value.details["parser_trace_path"].endswith("trace.log")
+    assert exc_info.value.details["parser_failure_payload_path"].endswith("failure_payload.json")
+    assert exc_info.value.details["failure_kind"] == "parser_timeout"
+    assert isinstance(exc_info.value.details["parser_heartbeat"], dict)
+    assert isinstance(exc_info.value.details["parser_trace_tail"], list)
+    assert any(
+        "parent_timeout" in line
+        for line in exc_info.value.details["dump_trace_tail"]
+    )
+
+
+def test_longrun_parser_subprocess_parent_poll_trace_is_throttled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        parser_lane="workflow_layered",
+        parse_timeout_seconds=1200,
+        live_trace=False,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parser-poll-throttle", config=config)
+    harness._prepare_run_directory()
+    monkeypatch.setattr(harness, "_parse_result_from_payload", lambda payload: payload)
+
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Parser Poll Throttle",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+    )
+    request = IngestPipelineRequest(
+        workspace_id=config.workspace_id,
+        source_uri=record.source_uri,
+        title=record.title,
+        raw_text="# Parser Poll\n\nAlpha",
+        source_format="markdown",
+        parser_mode="heuristic",
+    )
+
+    monotonic_values = iter([0.0, 5.0, 10.0, 20.0, 35.0, 50.0])
+
+    def _fake_monotonic() -> float:
+        return next(monotonic_values)
+
+    monkeypatch.setattr(time, "monotonic", _fake_monotonic)
+
+    class _FakeProcess:
+        def __init__(self, result_path: Path) -> None:
+            self.pid = 4242
+            self.name = "fake-parser-process"
+            self.exitcode = 0
+            self._alive = True
+            self._join_count = 0
+            self._result_path = result_path
+
+        def start(self) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return self._alive
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+            self._join_count += 1
+            if self._join_count >= 5:
+                self._alive = False
+                _write_json_file(
+                    self._result_path,
+                    {
+                        "ok": True,
+                        "parser_lane": "workflow_layered",
+                        "title": "Parser Poll Throttle",
+                        "graph_payload": {"nodes": [], "edges": []},
+                        "evaluation": {},
+                        "usage_summary": {},
+                        "diagnostics": {},
+                        "layer_log": [
+                            {
+                                "stage": "workflow_layered_parse_complete",
+                                "source_document_id": "source-doc-001",
+                            }
+                        ],
+                    },
+                )
+
+    class _FakeContext:
+        def __init__(self, result_path: Path) -> None:
+            self._result_path = result_path
+
+        def Process(
+            self,
+            target: object,
+            args: tuple[object, ...],
+            **kwargs: object,
+        ) -> _FakeProcess:
+            del target, args, kwargs
+            return _FakeProcess(self._result_path)
+
+    result_path = harness.run_dir / "parser_runs" / record.doc_id / "result.json"
+    monkeypatch.setattr(multiprocessing, "get_context", lambda method: _FakeContext(result_path))
+
+    harness._run_parse_with_subprocess(
+        record=record,
+        request=request,
+        source_document_id="source-doc-001",
+    )
+
+    dump_trace_path = harness.dumper.dump_dir / "parser_trace.log"
+    trace_text = dump_trace_path.read_text(encoding="utf-8")
+    assert trace_text.count("parent_poll") == 2
+    assert "elapsed=5.00s" in trace_text
+    assert "elapsed=35.00s" in trace_text
+    assert "elapsed=10.00s" not in trace_text
+    assert "elapsed=20.00s" not in trace_text
+    assert "elapsed=50.00s" not in trace_text
+    persisted_layer_log = json.loads(
+        (harness.dumper.dump_dir / "parser_layer_logs" / "doc-001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert persisted_layer_log == [
+        {
+            "source_document_id": "source-doc-001",
+            "stage": "workflow_layered_parse_complete",
+        }
+    ]
+    assert "parent_layer_log_persisted" in trace_text
+
+
+def test_longrun_parser_subprocess_closes_process_handle_on_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        parser_lane="workflow_layered",
+        parse_timeout_seconds=1200,
+        live_trace=False,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parser-close-success", config=config)
+    harness._prepare_run_directory()
+    monkeypatch.setattr(harness, "_parse_result_from_payload", lambda payload: payload)
+
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Parser Close Success",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+    )
+    request = IngestPipelineRequest(
+        workspace_id=config.workspace_id,
+        source_uri=record.source_uri,
+        title=record.title,
+        raw_text="# Parser Close Success\n\nAlpha",
+        source_format="markdown",
+        parser_mode="heuristic",
+    )
+
+    class _FakeProcess:
+        def __init__(self, result_path: Path) -> None:
+            self.pid = 4243
+            self.name = "fake-parser-process"
+            self.exitcode = 0
+            self._alive = True
+            self.closed = False
+            self.terminated = False
+            self.killed = False
+            self._result_path = result_path
+            self._join_count = 0
+
+        def start(self) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return self._alive
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+            self._join_count += 1
+            if self._join_count == 1:
+                _write_json_file(
+                    self._result_path,
+                    {
+                        "ok": True,
+                        "parser_lane": "workflow_layered",
+                        "title": "Parser Close Success",
+                        "graph_payload": {"nodes": [], "edges": []},
+                        "evaluation": {},
+                        "usage_summary": {},
+                        "diagnostics": {},
+                        "layer_log": [
+                            {
+                                "stage": "workflow_layered_parse_complete",
+                                "source_document_id": "source-doc-001",
+                            }
+                        ],
+                    },
+                )
+                self._alive = False
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self._alive = False
+
+        def kill(self) -> None:
+            self.killed = True
+            self._alive = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _FakeContext:
+        def __init__(self, result_path: Path) -> None:
+            self._result_path = result_path
+            self.process: _FakeProcess | None = None
+
+        def Process(
+            self,
+            target: object,
+            args: tuple[object, ...],
+            **kwargs: object,
+        ) -> _FakeProcess:
+            del target, args, kwargs
+            self.process = _FakeProcess(self._result_path)
+            return self.process
+
+    result_path = harness.run_dir / "parser_runs" / record.doc_id / "result.json"
+    fake_context = _FakeContext(result_path)
+    monkeypatch.setattr(multiprocessing, "get_context", lambda method: fake_context)
+
+    harness._run_parse_with_subprocess(
+        record=record,
+        request=request,
+        source_document_id="source-doc-001",
+    )
+
+    assert fake_context.process is not None
+    assert fake_context.process.closed is True
+    assert fake_context.process.terminated is False
+    assert fake_context.process.killed is False
+
+
+def test_longrun_parser_subprocess_timeout_closes_process_and_preserves_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        parser_lane="workflow_layered",
+        parse_timeout_seconds=1,
+        live_trace=False,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parser-close-timeout", config=config)
+    harness._prepare_run_directory()
+
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Parser Close Timeout",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+    )
+    request = IngestPipelineRequest(
+        workspace_id=config.workspace_id,
+        source_uri=record.source_uri,
+        title=record.title,
+        raw_text="# Parser Close Timeout\n\nAlpha",
+        source_format="markdown",
+        parser_mode="heuristic",
+    )
+
+    # The child remains alive long enough to exercise the parent's timeout
+    # branch, without starting a real process or making the test sleep.
+    monotonic_values = iter([0.0, 2.0])
+    monkeypatch.setattr(time, "monotonic", lambda: next(monotonic_values))
+
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.pid = 4244
+            self.name = "fake-parser-timeout-process"
+            self.exitcode = None
+            self._alive = True
+            self.closed = False
+            self.terminated = False
+            self.killed = False
+
+        def start(self) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return self._alive
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.exitcode = -15
+            self._alive = False
+
+        def kill(self) -> None:
+            self.killed = True
+            self.exitcode = -9
+            self._alive = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _FakeContext:
+        def __init__(self) -> None:
+            self.process: _FakeProcess | None = None
+            self.payload: dict[str, Any] | None = None
+
+        def Process(
+            self,
+            target: object,
+            args: tuple[object, ...],
+            **kwargs: object,
+        ) -> _FakeProcess:
+            del target, kwargs
+            self.payload = dict(args[0])
+            self.process = _FakeProcess()
+            return self.process
+
+    fake_context = _FakeContext()
+    monkeypatch.setattr(multiprocessing, "get_context", lambda method: fake_context)
+
+    with pytest.raises(LongRunDocumentError, match="timed out"):
+        harness._run_parse_with_subprocess(
+            record=record,
+            request=request,
+            source_document_id="source-doc-001",
+        )
+
+    assert fake_context.process is not None
+    assert fake_context.process.terminated is True
+    assert fake_context.process.killed is False
+    assert fake_context.process.closed is True
+    assert fake_context.payload is not None
+    assert fake_context.payload["doc_id"] == "doc-001"
+    assert fake_context.payload["source_document_id"] == "source-doc-001"
+    assert fake_context.payload["raw_text"] == request.raw_text
+    assert fake_context.payload["parser_workflow_run_id"] == "parser:source-doc-001"
+    assert fake_context.payload["resume_from_checkpoint"] is False
+    assert fake_context.payload["parser_provider"] == config.parser_provider
+    assert fake_context.payload["parser_model"] == config.parser_model
+    assert record.parser_resume_requested is True
+    assert harness.parser_heartbeat is not None
+    assert harness.parser_heartbeat["phase"] == "timeout"
+    assert harness.parser_heartbeat["pid"] == 4244
+    assert harness.parser_heartbeat["resume_from_checkpoint"] is False
+
+
+def test_longrun_parser_subprocess_timeout_respects_remaining_runtime_budget(tmp_path: Path):
+    config = LongRunConfig(
+        enabled=False,
+        mode="fresh",
+        doc_count=1,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        parser_lane="workflow_layered",
+        parse_timeout_seconds=1200,
+        max_runtime_seconds=1,
+    )
+    harness = LongRunHarness(run_dir=tmp_path / "parser-runtime-budget-timeout", config=config)
+    harness._prepare_run_directory()
+    harness.run_started_monotonic = time.monotonic()
+    record = DocumentRecord(
+        doc_id="doc-001",
+        title="Parser Runtime Budget Timeout",
+        source_uri="file:///doc-001.md",
+        input_path=tmp_path / "doc-001.md",
+        current_path=tmp_path / "doc-001.md",
+    )
+    request = IngestPipelineRequest(
+        workspace_id=config.workspace_id,
+        source_uri=record.source_uri,
+        title=record.title,
+        raw_text="# Parser Runtime Budget Timeout\n\nAlpha",
+        source_format="markdown",
+        parser_mode="heuristic",
+    )
+
+    started = time.monotonic()
+    with pytest.raises(LongRunDocumentError, match="timed out after effective"):
+        harness._run_parse_with_subprocess(
+            record=record,
+            request=request,
+            source_document_id="source-doc-001",
+        )
+
+    assert time.monotonic() - started < 10
+    assert harness.parser_heartbeat is not None
+    assert harness.parser_heartbeat["phase"] == "timeout"
+    assert harness.parser_heartbeat["timeout_seconds"] < config.parse_timeout_seconds
+    assert harness.parser_heartbeat["configured_parse_timeout_seconds"] == config.parse_timeout_seconds
 
 
 @pytest.mark.parametrize(
@@ -4194,7 +7809,33 @@ def test_longrun_auto_checkpoint_corpus_fingerprint_mismatch_falls_back_to_fresh
     assert harness.checkpoint_loaded is False
     assert len(harness.records) == 1
     assert harness.records[0].doc_id == "doc-001"
-    assert harness.records[0].status == "PENDING"
+
+
+def test_longrun_checkpoint_accepted_fingerprints_ignore_parser_workers() -> None:
+    config = LongRunConfig(
+        enabled=False,
+        mode="continue",
+        doc_count=1,
+        backend="pgvector",
+        dsn="postgresql://user:pass@localhost/db",
+        doc_profile="small",
+        token_min=150,
+        token_max=800,
+        ollama_model="gemma4:e2b",
+        ollama_base_url="http://localhost:11434",
+        max_repeated_systemic_errors=3,
+        max_post_doc_maintenance_steps=1,
+        parser_workers=4,
+    )
+
+    accepted = config.checkpoint_accepted_corpus_fingerprints()
+    legacy_worker_sensitive = config._legacy_worker_sensitive_corpus_fingerprint(
+        parser_workers=1,
+        resume_probe_enabled=False,
+    )
+
+    assert config.corpus_fingerprint in accepted
+    assert legacy_worker_sensitive in accepted
 
 
 def test_longrun_harness_writes_promotion_evidence_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -4437,15 +8078,34 @@ def test_longrun_promoted_node_without_promotion_pack_fails_invariant(tmp_path: 
 @pytest.mark.integration
 @pytest.mark.longrun
 def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
+    _emit_longrun_live("test_entry", argv=repr(sys.argv), tmp_path=str(tmp_path))
+    _emit_longrun_live("config_from_env_start")
     config = LongRunConfig.from_env()
-    if not config.enabled and config.backend != "pgvector":
-        pytest.skip("set KOGWISTAR_LLM_WIKI_LONGRUN=1 to run the long-run workflow ingestion test")
-
+    _emit_longrun_live(
+        "config_from_env_complete",
+        enabled=config.enabled,
+        backend=config.backend,
+        mode=config.mode,
+        operation_mode=config.operation_mode,
+        parser_provider=config.parser_provider,
+        parser_model=config.parser_model,
+        parser_lane=config.parser_lane,
+        live_trace=config.live_trace,
+    )
     run_dir = Path(config.checkpoint_run_dir).expanduser() if config.checkpoint_run_dir else tmp_path / "longrun-workflow"
+    _emit_longrun_live("harness_construct_start", run_dir=str(run_dir))
     harness = LongRunHarness(run_dir=run_dir, config=config)
+    _emit_longrun_live("harness_construct_complete", run_id=harness.run_id)
+    _emit_longrun_live("harness_prepare_start", run_id=harness.run_id)
     harness.prepare()
+    _emit_longrun_live("harness_prepare_complete", run_id=harness.run_id)
 
     if _longrun_requires_ollama(config):
+        _emit_longrun_live(
+            "ollama_healthcheck_start",
+            base_url=config.ollama_base_url,
+            model=config.ollama_model,
+        )
         try:
             __import__("langchain_ollama")
         except Exception as exc:  # noqa: BLE001
@@ -4461,6 +8121,7 @@ def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
             pytest.fail(f"langchain_ollama is required; diagnostic dump written to {harness.dumper.dump_dir}")
 
         ok, reason = _check_ollama_available(config)
+        _emit_longrun_live("ollama_healthcheck_complete", ok=ok, reason=reason)
         if not ok:
             failure = harness._failure_record(
                 doc_id=None,
@@ -4473,4 +8134,6 @@ def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
             harness.dumper.dump(reason="ollama_unavailable", final=True)
             pytest.fail(f"{reason}; diagnostic dump written to {harness.dumper.dump_dir}")
 
+    _emit_longrun_live("harness_run_start", run_id=harness.run_id)
     harness.run()
+    _emit_longrun_live("harness_run_complete", run_id=harness.run_id)

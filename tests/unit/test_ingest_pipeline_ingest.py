@@ -73,6 +73,53 @@ def test_run_invokes_kogwistar_ingest(pipeline, ingest_request, monkeypatch):
     assert artifacts.graph_status == "stable"
 
 
+def test_ingest_repairs_boundary_span_before_both_persistence_paths(
+    pipeline, ingest_request
+):
+    source_document_id = pipeline._source_document_id(ingest_request)
+    pipeline.register_source(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        namespace=WorkspaceNamespaces(ingest_request.workspace_id).conv_fg,
+    )
+    parsed = parse_page_index_document(
+        document_id=source_document_id,
+        title=ingest_request.title,
+        raw_text=ingest_request.raw_text,
+        source_format=ingest_request.source_format,
+        mode="heuristic",
+    )
+    graph = pipeline.translate_parse_result(
+        parse_result=parsed,
+        source_document_id=source_document_id,
+    )
+    original_span = graph.nodes[0].mentions[0].spans[0]
+    graph.nodes[0].mentions[0].spans[0] = original_span.model_copy(
+        update={
+            "start_char": original_span.start_char + 1,
+            "end_char": original_span.end_char + 1,
+        }
+    )
+
+    pipeline.ingest_parse_result(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        graph_extraction=graph,
+        namespace=WorkspaceNamespaces(ingest_request.workspace_id).conv_fg,
+    )
+
+    # The write succeeded through both source and compatibility persistence;
+    # the same repair helper is also directly asserted below because the
+    # pipeline intentionally repairs a defensive source copy.
+    pipeline._repair_graph_extraction_spans(
+        graph_extraction=graph,
+        source_document_id=source_document_id,
+        request=ingest_request,
+    )
+    assert graph.nodes[0].mentions[0].spans[0].start_char == original_span.start_char
+    assert graph.nodes[0].mentions[0].spans[0].end_char == original_span.end_char
+
+
 def test_run_maintenance_first_seeds_source_map_without_parsing(pipeline, ingest_request, monkeypatch):
     parser_called = False
 

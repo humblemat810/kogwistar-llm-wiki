@@ -330,6 +330,74 @@ def test_apply_maintenance_patch_is_idempotent_for_retry() -> None:
     assert engine.edge_add_calls.count("ws:demo:edge:new") == 1
 
 
+def test_apply_maintenance_patch_rejects_invalid_character_source_pointer() -> None:
+    engine = _FakeEngine()
+    patch = MaintenancePatch(
+        patch_id="patch-bad-pointer",
+        intent=MaintenanceIntent.SEED_DOCUMENT,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-node",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="ws:demo:node:new",
+                label="New",
+                provenance=MaintenanceProvenance(
+                    source_document_id="doc-1",
+                    source_pointers=[
+                        {
+                            "doc_id": "doc-1",
+                            "start_char": 20,
+                            "end_char": 5,
+                            "excerpt": "bad",
+                        }
+                    ],
+                    maintenance_run_id="run-1",
+                    confidence=0.8,
+                ),
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch(engine, patch, namespace_prefix="ws:demo:", emit_artifact=False)
+
+    assert result.status == "rejected"
+    assert any(issue.code == "invalid_source_pointer" for issue in result.validation.issues)
+    assert engine.node_add_calls == []
+
+
+def test_apply_maintenance_patch_keeps_document_only_provenance_unverified() -> None:
+    engine = _FakeEngine()
+    patch = MaintenancePatch(
+        patch_id="patch-doc-only",
+        intent=MaintenanceIntent.SEED_DOCUMENT,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-node",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="ws:demo:node:new",
+                label="New",
+                provenance=MaintenanceProvenance(
+                    source_document_id="doc-1",
+                    source_pointers=[{"doc_id": "doc-1"}],
+                    maintenance_run_id="run-1",
+                    confidence=0.8,
+                ),
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch(engine, patch, namespace_prefix="ws:demo:")
+
+    assert result.status == "applied"
+    span = engine.nodes["ws:demo:node:new"].mentions[0].spans[0]
+    assert span.doc_id == "doc-1"
+    assert span.start_char == 0
+    assert span.end_char == 1
+    assert span.verification.is_verified is False
+
+
 def test_apply_maintenance_patch_tombstones_superseded_edge() -> None:
     engine = _FakeEngine()
     seed = MaintenancePatch(

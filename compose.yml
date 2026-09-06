@@ -1,0 +1,156 @@
+name: ${COMPOSE_PROJECT_NAME:-llm-wiki}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-llm_wiki}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_wiki}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}
+      KOGWISTAR_POSTGRES_DSN: postgresql://${POSTGRES_USER:-llm_wiki}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}@postgres:5432/${POSTGRES_DB:-llm_wiki}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  rest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &app_environment
+      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki
+      KOGWISTAR_POSTGRES_DSN: postgresql://${POSTGRES_USER:-llm_wiki}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}@postgres:5432/${POSTGRES_DB:-llm_wiki}
+      LLM_WIKI_AGENT_API_ENABLED: ${LLM_WIKI_AGENT_API_ENABLED:-false}
+      LLM_WIKI_AUTH_REQUIRED: ${LLM_WIKI_AUTH_REQUIRED:-false}
+      LLM_WIKI_API_TOKEN: ${LLM_WIKI_API_TOKEN:-}
+      LLM_WIKI_API_TOKEN_SCOPES: ${LLM_WIKI_API_TOKEN_SCOPES:-read,write}
+      LLM_WIKI_MCP_AUTH_REQUIRED: ${LLM_WIKI_MCP_AUTH_REQUIRED:-${LLM_WIKI_AUTH_REQUIRED:-false}}
+      LLM_WIKI_MCP_TOKEN: ${LLM_WIKI_MCP_TOKEN:-${LLM_WIKI_API_TOKEN:-}}
+      LLM_WIKI_MCP_TOKEN_SCOPES: ${LLM_WIKI_MCP_TOKEN_SCOPES:-${LLM_WIKI_API_TOKEN_SCOPES:-read,write}}
+      LLM_WIKI_COCKPIT_CALLBACK_URL: ${LLM_WIKI_COCKPIT_CALLBACK_URL:-}
+      LLM_WIKI_COCKPIT_CALLBACK_ALLOWED_HOSTS: ${LLM_WIKI_COCKPIT_CALLBACK_ALLOWED_HOSTS:-host.docker.internal,localhost,127.0.0.1}
+      LLM_WIKI_COCKPIT_CALLBACK_TOKEN: ${LLM_WIKI_COCKPIT_CALLBACK_TOKEN:-}
+      LLM_WIKI_COCKPIT_CALLBACK_TIMEOUT_SECONDS: ${LLM_WIKI_COCKPIT_CALLBACK_TIMEOUT_SECONDS:-300}
+      KOGWISTAR_PARSER_PROVIDER: ${KOGWISTAR_PARSER_PROVIDER:-ollama}
+      KOGWISTAR_PARSER_MODEL: ${KOGWISTAR_PARSER_MODEL:-gemma4:e2b}
+      KOGWISTAR_PARSER_API_KEY_ENV: ${KOGWISTAR_PARSER_API_KEY_ENV:-}
+      KOGWISTAR_PARSER_API_VERSION: ${KOGWISTAR_PARSER_API_VERSION:-}
+      KOGWISTAR_PARSER_BASE_URL: ${KOGWISTAR_PARSER_BASE_URL:-http://host.docker.internal:11434}
+      KOGWISTAR_MAINTENANCE_PROVIDER: ${KOGWISTAR_MAINTENANCE_PROVIDER:-ollama}
+      KOGWISTAR_MAINTENANCE_MODEL: ${KOGWISTAR_MAINTENANCE_MODEL:-gemma4:e2b}
+      KOGWISTAR_MAINTENANCE_API_KEY_ENV: ${KOGWISTAR_MAINTENANCE_API_KEY_ENV:-}
+      KOGWISTAR_MAINTENANCE_API_VERSION: ${KOGWISTAR_MAINTENANCE_API_VERSION:-}
+      KOGWISTAR_MAINTENANCE_BASE_URL: ${KOGWISTAR_MAINTENANCE_BASE_URL:-http://host.docker.internal:11434}
+      KOGWISTAR_LLM_WIKI_EMBED_PROVIDER: ${KOGWISTAR_LLM_WIKI_EMBED_PROVIDER:-}
+      KOGWISTAR_LLM_WIKI_EMBED_MODEL: ${KOGWISTAR_LLM_WIKI_EMBED_MODEL:-}
+      KOGWISTAR_LLM_WIKI_EMBED_DIMENSION: ${KOGWISTAR_LLM_WIKI_EMBED_DIMENSION:-}
+      KOGWISTAR_LLM_WIKI_EMBED_BASE_URL: ${KOGWISTAR_LLM_WIKI_EMBED_BASE_URL:-}
+      KOGWISTAR_LLM_WIKI_EMBED_API_KEY_ENV: ${KOGWISTAR_LLM_WIKI_EMBED_API_KEY_ENV:-}
+      KOGWISTAR_EMBED_PROVIDER: ${KOGWISTAR_EMBED_PROVIDER:-}
+      KOGWISTAR_EMBED_MODEL: ${KOGWISTAR_EMBED_MODEL:-}
+      KOGWISTAR_EMBED_DIMENSION: ${KOGWISTAR_EMBED_DIMENSION:-}
+      KOGWISTAR_EMBED_BASE_URL: ${KOGWISTAR_EMBED_BASE_URL:-}
+      KOGWISTAR_EMBED_API_KEY_ENV: ${KOGWISTAR_EMBED_API_KEY_ENV:-}
+      KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_PROVIDER: ${KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_PROVIDER:-}
+      KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_MODEL: ${KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_MODEL:-}
+      KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_DIMENSION: ${KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_DIMENSION:-}
+      KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_BASE_URL: ${KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_BASE_URL:-}
+      KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_API_KEY_ENV: ${KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_API_KEY_ENV:-}
+      KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_PROVIDER: ${KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_PROVIDER:-}
+      KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_MODEL: ${KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_MODEL:-}
+      KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_DIMENSION: ${KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_DIMENSION:-}
+      KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_BASE_URL: ${KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_BASE_URL:-}
+      KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_API_KEY_ENV: ${KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_API_KEY_ENV:-}
+      KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_PROVIDER: ${KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_PROVIDER:-}
+      KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_MODEL: ${KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_MODEL:-}
+      KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_DIMENSION: ${KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_DIMENSION:-}
+      KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_BASE_URL: ${KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_BASE_URL:-}
+      KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_API_KEY_ENV: ${KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_API_KEY_ENV:-}
+      KOGWISTAR_LLM_WIKI_WISDOM_EMBED_PROVIDER: ${KOGWISTAR_LLM_WIKI_WISDOM_EMBED_PROVIDER:-}
+      KOGWISTAR_LLM_WIKI_WISDOM_EMBED_MODEL: ${KOGWISTAR_LLM_WIKI_WISDOM_EMBED_MODEL:-}
+      KOGWISTAR_LLM_WIKI_WISDOM_EMBED_DIMENSION: ${KOGWISTAR_LLM_WIKI_WISDOM_EMBED_DIMENSION:-}
+      KOGWISTAR_LLM_WIKI_WISDOM_EMBED_BASE_URL: ${KOGWISTAR_LLM_WIKI_WISDOM_EMBED_BASE_URL:-}
+      KOGWISTAR_LLM_WIKI_WISDOM_EMBED_API_KEY_ENV: ${KOGWISTAR_LLM_WIKI_WISDOM_EMBED_API_KEY_ENV:-}
+      KG_DOC_EMBED_PROVIDER: ${KG_DOC_EMBED_PROVIDER:-}
+      KG_DOC_EMBED_MODEL: ${KG_DOC_EMBED_MODEL:-}
+      KG_DOC_EMBED_DIMENSION: ${KG_DOC_EMBED_DIMENSION:-}
+      KG_DOC_EMBED_BASE_URL: ${KG_DOC_EMBED_BASE_URL:-}
+      KG_DOC_EMBED_API_KEY_ENV: ${KG_DOC_EMBED_API_KEY_ENV:-}
+      POSTGRES_DB: ${POSTGRES_DB:-llm_wiki}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_wiki}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}
+    command:
+      - llm-wiki
+      - --data-dir
+      - /var/lib/llm-wiki
+      - --backend
+      - postgres
+      - workbench
+      - --workspace
+      - ${LLM_WIKI_WORKSPACE:-default}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+    volumes:
+      - app_data:/var/lib/llm-wiki
+    ports:
+      - "127.0.0.1:${LLM_WIKI_REST_PORT:-8765}:8765"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *app_environment
+    command:
+      - llm-wiki
+      - --data-dir
+      - /var/lib/llm-wiki
+      - --backend
+      - postgres
+      - mcp
+      - --workspace
+      - ${LLM_WIKI_WORKSPACE:-default}
+      - --transport
+      - streamable-http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8780"
+      - --path
+      - /mcp
+    volumes:
+      - app_data:/var/lib/llm-wiki
+    ports:
+      - "127.0.0.1:${LLM_WIKI_MCP_PORT:-8780}:8780"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8780), 3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  app_data:

@@ -1,0 +1,7 @@
+{
+  "manifest_version": "1.0.0",
+  "name": "llm-wiki",
+  "display_name": "llm-wiki Grounded Knowledge",
+  "description": "Grounded graph investigation, history, and explicit proposal review for Hermes.",
+  "version": "0.1.0"
+}

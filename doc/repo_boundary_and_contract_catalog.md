@@ -9,6 +9,10 @@ This document defines the explicit boundaries, dependency rules, and contract su
 - `kogwistar-obsidian-sink`
 - `kogwistar-llm-wiki`
 
+For the implementation-port release gate that keeps these consumer contracts
+working while `kogwistar` core moves to Rust, see
+[`kogwistar_rust_port_compatibility_reminder.md`](kogwistar_rust_port_compatibility_reminder.md).
+
 It is aligned with:
 
 - provenance-first Kogwistar entities
@@ -128,12 +132,22 @@ Examples:
 - workflow invocation payload
 - maintenance request/result
 - projection request/result
+- semantic-lens request/snapshot/delta
+- interactive answer with evidence and selection explanations
+- typed graph-command proposal and command acknowledgement
+- queryable investigation-history event
 
 ### Layer D — materialized projections
 
 - Obsidian vault
 - UI representations
 - review queue views
+- interactive knowledge-workbench lenses and evidence panels
+
+The workbench is not a second authority. A browser mutation remains a proposal
+until Kogwistar acknowledges the corresponding authoritative event. Lens
+snapshots are bounded and may be partial; their source watermark is the
+correctness boundary.
 
 ---
 

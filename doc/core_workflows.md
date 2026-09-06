@@ -34,6 +34,10 @@ User adds a file and the system turns it into grounded graph artifacts.
 9. `kogwistar` emits `entity.created` / `entity.updated`
 10. `kogwistar-llm-wiki` schedules ingest-followup maintenance in the background lane
 
+The same product graph is also available through the interactive knowledge
+workbench. Its viewing behavior is a bounded projection over these authoritative
+artifacts, not a separate graph database.
+
 ### 2.3 Repos involved
 
 - `kogwistar-llm-wiki`
@@ -309,7 +313,87 @@ Allow human curation of risky or important maintenance outcomes.
 
 ---
 
-## 10. Open Workflow Questions
+## 10. Workflow 9 - Interactive Knowledge Investigation
+
+### 10.1 Goal
+
+Allow a user to investigate a question through a bounded graph lens, receive a
+cited answer, and optionally improve the graph through an explicit validated
+command.
+
+### 10.2 Shared sequence
+
+1. user enters a question, selects anchors, or clicks an existing entity
+2. the workbench requests a scoped semantic lens from the current graph
+   watermark
+3. the system retrieves, traverses, scores, and bounds nodes, edges, and
+   hyperedges
+4. the workbench shows the result with evidence and selection explanations
+5. the user asks a follow-up question or requests an investigation action
+6. the selected orchestration mode creates an answer and, when implemented for
+   that mode, a typed graph-mutation proposal or an explicit `no_change`
+   outcome
+7. validation checks provenance, policy, graph revision, and conflicts
+8. the user or policy accepts, rejects, or defers the proposal
+9. accepted commands flow through `kogwistar` append-only events/tombstones
+10. the workbench refreshes the lens from the new authoritative snapshot
+
+The investigation history is queryable by workspace, session/conversation,
+lens, source watermark, and correlation ID. It records meaningful questions,
+selected entities, answer outcomes, proposals, decisions, and refreshes;
+transient keystrokes and pointer movement remain client telemetry unless
+explicitly saved.
+
+An answer, proposed patch, or browser-local edit is not graph truth by itself.
+Stale proposals are rejected or returned to review rather than overwriting
+newer graph state.
+
+### 10.3 Orchestration modes
+
+- `codex_agent` target: the cockpit steward reacts to meaningful user actions,
+  chooses bounded tools, can ask clarifying questions, and may propose a
+  grounded multi-step investigation or graph patch through the shared command
+  gate. It never writes graph state directly.
+- `codex_agent` current: durable bounded cockpit worker. It can select
+  read-only lens/evidence/history actions and emit a grounded node/edge patch
+  proposal. The host validates and confirms separately; it has no direct graph
+  writer and no first-class hyperedge command yet.
+- `deterministic_workflow`: fixed host-selected transitions control retrieval,
+  answer generation, proposal validation, and commit. It does not allow a
+  model to bypass or choose the workflow state machine.
+
+### 10.3.1 Implemented Codex execution lifecycle
+
+The current Codex slice runs as an app-owned background central reasoner:
+
+1. the browser appends an interaction request and receives `202 pending`
+2. a durable job is claimed with a token and 150-second lease
+3. the worker resolves the same bounded semantic lens used by deterministic mode
+4. the read-only ephemeral Codex CLI answers from that lens while streamed
+   activity provides progress heartbeats
+5. the worker verifies lease ownership before appending the first terminal
+   result and acknowledging the job
+6. the browser polls the interaction artifact and ignores stale superseded UI
+   requests
+
+Process interruption leaves the request/job recoverable. A worker that becomes
+silent stops renewing; if another worker later owns the job, the old result is
+discarded. This slice answers or emits `no_change`; autonomous tool choice and
+graph-command execution are not yet implemented.
+
+### 10.4 Repos involved
+
+- `kogwistar-llm-wiki`: workbench policy, lens orchestration, interaction,
+  review/confirmation, and product commands
+- `kogwistar`: authoritative query primitives, graph commands, events,
+  revisions, provenance, and tombstone behavior
+- `kg-doc-parser`: optional grounded extraction for newly supplied documents
+- `kogwistar-obsidian-sink`: existing optional durable markdown projection;
+  unchanged by this workflow unless a separate sink bug is reproduced
+
+---
+
+## 11. Open Workflow Questions
 
 - exact graph kind placement for review queue records
 - whether maintenance artifacts are canonical graph objects or product-only app records

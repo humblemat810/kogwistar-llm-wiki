@@ -14,6 +14,7 @@ from .maintenance_policy import normalize_maintenance_kind
 
 JOB_KIND_INTENTS: dict[str, MaintenanceIntent] = {
     "document_seed_graph": MaintenanceIntent.SEED_DOCUMENT,
+    "document_parse_graph": MaintenanceIntent.SPLIT_NODE,
     "document_expand_parse_children": MaintenanceIntent.SPLIT_NODE,
     "document_correct_parse_children": MaintenanceIntent.CORRECT_FACT,
     "document_summarize_units": MaintenanceIntent.DERIVE_SUMMARY,

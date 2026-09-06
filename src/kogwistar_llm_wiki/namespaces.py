@@ -131,12 +131,24 @@ class WorkspaceNamespaces:
         return f"ws:{self.workspace_id}:maintenance_jobs"
 
     @property
+    def workbench_jobs(self) -> str:
+        return f"ws:{self.workspace_id}:workbench_jobs"
+
+    @property
     def projection_state(self) -> str:
         return f"ws:{self.workspace_id}:projection_state"
 
     @property
     def projection_manifest(self) -> str:
         return f"ws:{self.workspace_id}:projection_manifest"
+
+    @property
+    def usage_events(self) -> str:
+        return f"ws:{self.workspace_id}:usage_events"
+
+    @property
+    def usage_projection(self) -> str:
+        return f"ws:{self.workspace_id}:usage_projection"
 
 
 def namespace_matches_graph_space_metadata(namespace: str, metadata: Mapping[str, object]) -> bool:

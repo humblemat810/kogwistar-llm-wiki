@@ -14,6 +14,12 @@ resume probe. The important distinction is:
   dump
 - true runtime checkpoint continuation is wired for the deliberate
   `await_resume` suspension point after parsed graph persistence
+- parser-child continuation is also wired through a stable
+  `parser:<source-document-id>` run ID, per-step Kogwistar checkpoints, and an
+  explicit `resume_from_latest_checkpoint` call after parser timeout, child
+  failure, or Ctrl+C while waiting
+- flushed parser usage events are handed off through append-only JSONL before
+  failure returns, so recovery does not lose completed provider accounting
 - promotion evidence-pack provenance is now wired through the long-run harness
   as well as production ingest
 - maintenance proof is now keyed to maintenance-specific signals instead of

@@ -97,8 +97,19 @@ llm-wiki demo --workspace demo --source logs/llm_wiki_demo/my_document.md --vaul
 
 Then open `logs/llm_wiki_demo/vault` in Obsidian.
 
+For the agent gateway and optional OpenTelemetry contract, see
+[`doc/adr_agent_gateway_and_otel.md`](doc/adr_agent_gateway_and_otel.md).
+Agent protocol routes are opt-in with `LLM_WIKI_AGENT_API_ENABLED=true`; keep
+them behind authentication when binding beyond localhost. Install optional
+support with `pip install -e ".[agent,otel]"`.
+
 To try the iterative layerwise parser path, add `--parser-lane workflow_layered`
 to the same command and keep the same provider/model settings.
+
+For isolated REST and MCP serving in containers, see
+[`doc/docker_deployment.md`](doc/docker_deployment.md). The Compose stack runs
+separate REST and MCP containers against Postgres/pgvector with persistent
+named volumes and workspace isolation.
 
 If you use VS Code, the launch presets already read `.env` and only prompt for
 the parser lane:
@@ -124,6 +135,55 @@ KOGWISTAR_MAINTENANCE_PROVIDER=ollama
 KOGWISTAR_MAINTENANCE_MODEL=gemma4:e2b
 KOGWISTAR_MAINTENANCE_BASE_URL=http://localhost:11434
 ```
+
+### Embedding settings
+
+The llm-wiki engine builders use a small deterministic `tiny`-style embedder
+when no embedding settings are present. This is intentional for demos and
+tests. To use a real embedding model, configure the shared parser provider
+factory with `KG_DOC_EMBED_*` settings before starting the app:
+
+```bash
+KG_DOC_EMBED_PROVIDER=ollama
+KG_DOC_EMBED_MODEL=qwen3-embedding:0.6b
+KG_DOC_EMBED_BASE_URL=http://localhost:11434
+# Set this to the model's actual output dimension, especially for Postgres.
+KG_DOC_EMBED_DIMENSION=1024
+```
+
+The same settings are honored by the in-memory, persistent, and Postgres
+namespace builders. For application-owned deployments, prefer the
+`KOGWISTAR_LLM_WIKI_EMBED_*` names; they override `KOGWISTAR_EMBED_*`, which in
+turn overrides the parser compatibility names above. Code callers can instead
+pass `embedding_config` or the explicit `embedding_provider`,
+`embedding_model`, and `embedding_dimension` arguments. For every backend, a
+real provider without a declared dimension is rejected before engine
+initialization rather than silently creating an incompatible 2D vector index;
+Postgres additionally uses the dimension for its typed vector columns. Changing the model or dimension for
+an existing persistent store requires a separate store or an intentional
+migration.
+
+Embedding settings may also be scoped to a graph space by inserting the space
+name before `EMBED`, for example:
+
+```bash
+KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_PROVIDER=ollama
+KOGWISTAR_LLM_WIKI_CONVERSATION_EMBED_MODEL=nomic-embed-text
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_PROVIDER=ollama
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_MODEL=qwen3-embedding:0.6b
+KOGWISTAR_LLM_WIKI_KNOWLEDGE_EMBED_DIMENSION=1024
+KOGWISTAR_LLM_WIKI_WORKFLOW_EMBED_PROVIDER=fake
+```
+
+The spaces are `conversation` (all foreground/background interaction history),
+`workflow` (runtime and maintenance state), `knowledge` (durable KG), and
+`wisdom`. An unset space inherits the global app setting.
+`derived_knowledge` uses the knowledge embedder by design. The maintenance
+worker's chat model is independently configured with `KOGWISTAR_MAINTENANCE_*`,
+but its conversation replies still use the shared `conversation` embedding
+space. A separate maintenance-self conversation embedder is not currently a
+supported configuration; adding one would require a new physical graph space
+and persistence contract.
 
 Azure OpenAI example using GPT-4o:
 
@@ -196,6 +256,11 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/diagrams.md](doc/diagrams.md) | CLI spider map, pipeline, algorithm & data-flow diagrams |
 | [doc/architecture.md](doc/architecture.md) | System design |
 | [doc/core_workflows.md](doc/core_workflows.md) | Workflow graph designs |
+| [doc/adr_conversation_two_stage_materialization.md](doc/adr_conversation_two_stage_materialization.md) | Optional two-stage conversation materialization, ownership boundaries, and benchmark contract |
+| [doc/agent_gateway_quickstart.md](doc/agent_gateway_quickstart.md) | Agent integration quickstart for OpenAI-shaped, A2A, MCP, and OTel usage |
+| [doc/adr_agent_gateway_and_otel.md](doc/adr_agent_gateway_and_otel.md) | Agent gateway architecture, safety boundaries, and optional OpenTelemetry |
+| [skills/llm-wiki-knowledge/SKILL.md](skills/llm-wiki-knowledge/SKILL.md) | Portable grounded knowledge-management and proposal-review instructions for compatible agents |
+| [doc/implementation_plan_observability_staged_materialization_goal_mode.md](doc/implementation_plan_observability_staged_materialization_goal_mode.md) | Historical dependency-order reference and remaining goal-mode delivery gates |
 | [doc/testing_guide.md](doc/testing_guide.md) | Local test-running pitfalls and pytest cache guidance |
 | [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
 | [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |

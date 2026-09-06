@@ -88,6 +88,78 @@ flowchart LR
 
 ---
 
+## Agent Protocol Boundary
+
+All agent-facing protocols enter through the same application-owned gateway.
+MCP exposes semantic tools; OpenAI and A2A expose request/response adapters.
+None of these paths bypass grounding, provenance, or proposal confirmation.
+
+```mermaid
+flowchart LR
+    CLIENTS["External agents\nHermes / Pi / Claude / Codex"]
+    MCP["MCP\n11 semantic tools"]
+    OPENAI["OpenAI-compatible\nResponses / Chat"]
+    A2A["A2A\nJSON-RPC /a2a"]
+    LEGACY["A2A HTTP+JSON\n/a2a/v1/* compatibility"]
+    GATEWAY["AgentGateway\nshared normalization + auth boundary"]
+    API["WorkbenchApi\ngrounded lens + history + proposals"]
+    PIPE["IngestPipeline\nsource lifecycle + provenance"]
+    JOBS["Durable interactions +\nmaintenance workers"]
+    GRAPH["Scoped knowledge graph"]
+
+    CLIENTS --> MCP --> GATEWAY
+    CLIENTS --> OPENAI --> GATEWAY
+    CLIENTS --> A2A --> GATEWAY
+    CLIENTS --> LEGACY --> GATEWAY
+    GATEWAY --> API
+    GATEWAY --> PIPE
+    GATEWAY --> JOBS
+    API --> GRAPH
+    PIPE --> GRAPH
+    JOBS --> GRAPH
+```
+
+---
+
+## A2A JSON-RPC Lifecycle
+
+The preferred A2A endpoint is `POST /a2a`. A background request returns a
+durable task, while streaming emits ordered JSON-RPC responses inside SSE
+events. `tasks/get` reads the same durable interaction instead of a second task
+store.
+
+```mermaid
+sequenceDiagram
+    participant A as A2A client
+    participant C as Agent Card
+    participant H as /a2a JSON-RPC
+    participant G as AgentGateway
+    participant W as Workbench interaction store
+
+    A->>C: GET /.well-known/agent.json
+    C-->>A: protocolVersion, endpoint, skills, auth
+    A->>H: message/send(id, params.message)
+    H->>G: validate JSON-RPC + authorize
+    G->>W: submit durable interaction
+    W-->>G: interaction_id
+    G-->>H: JSON-RPC result(Task: submitted/working)
+    H-->>A: same request id
+    loop until terminal
+        A->>H: tasks/get(id)
+        H->>W: read interaction status
+        W-->>H: task + artifacts or error
+        H-->>A: JSON-RPC result(Task)
+    end
+    A->>H: message/stream(id, params.message)
+    H-->>A: SSE data: JSON-RPC result(status/artifact)
+```
+
+The server advertises streaming but does not advertise push notifications. The
+legacy `/a2a/v1/...` routes remain available for clients using the HTTP+JSON
+binding.
+
+---
+
 ## Maintenance Worker — Distillation Algorithm
 
 ```mermaid
@@ -505,6 +577,15 @@ flowchart TD
     C --> D["processing/"]
     D --> E["token_check"]
     E --> F["parse_document"]
+    subgraph PARSER["inner parser workflow: stable parser:<source-document-id>"]
+        F1["prepare layer frontier"] --> F2["proposal/review"]
+        F2 --> F3["commit completed layer checkpoint"]
+        F3 --> F4{"more layers?"}
+        F4 -->|yes| F1
+        F4 -->|no| F5["return parse result"]
+    end
+    F -. invokes .-> F1
+    F5 --> G["persist_document"]
     F --> G["persist_document"]
     G --> H["enqueue_background_maintenance"]
     H --> I["observe_background_maintenance"]
@@ -525,6 +606,16 @@ flowchart TD
     R --> B
     R --> S["abort snapshot"]
     S --> Q
+    F --> X["parser timeout / child failure"]
+    X --> Y["flush usage_events.jsonl\nmark parser resume requested"]
+    Y --> Q
+    F --> Z["Ctrl+C while waiting"]
+    Z --> ZA["terminate child\nwrite interrupted manifest"]
+    ZA --> Q
+    Q -. next run: Retry Failed .-> RB["reuse parser checkpoint\nretry only in-flight step"]
+    RB -.-> F
+    R -. next run: Continue/Auto .-> RC["reload outer checkpoint\nprocess pending documents"]
+    RC -.-> B
 
     L --> T["post-doc maintenance drain\nmax 100 steps"]
     T --> U["projection/read checks"]
@@ -542,6 +633,15 @@ stateDiagram-v2
     MAINTENANCE_ENQUEUED --> MAINTENANCE_OBSERVED
     MAINTENANCE_OBSERVED --> COMPLETED
 
+    state "Inner parser checkpoint" as INNER {
+        [*] --> LayerInFlight
+        LayerInFlight --> LayerCheckpointed: layer step committed
+        LayerCheckpointed --> LayerInFlight: more layers
+        LayerCheckpointed --> ParseReturned: no more layers
+    }
+    CLAIMED --> INNER: parse_document
+    INNER --> PARSED: parse returned
+
     TOKEN_CHECKED --> FAILED: token_count_out_of_range
     CLAIMED --> FAILED: document-specific failure
     PARSED --> FAILED: persist failed after retries
@@ -551,4 +651,38 @@ stateDiagram-v2
     TOKEN_CHECKED --> QUARANTINED: suspicious repeated failure
     PARSED --> QUARANTINED: graph invariant corruption
     PERSISTED --> QUARANTINED: runtime worker stuck
+    CLAIMED --> INTERRUPTED: Ctrl+C / process stop
+    INTERRUPTED --> RETRY_FAILED: next run
+    FAILED --> RETRY_FAILED: Retry Failed
+    RETRY_FAILED --> CLAIMED: reuse latest parser checkpoint
 ```
+
+## Interactive Knowledge Workbench
+
+```mermaid
+flowchart LR
+    USER["user question or selection"] --> MODE{"orchestration mode"}
+    MODE --> CODEX["Codex cockpit mode (target)"]
+    MODE --> FLOW["deterministic workflow mode"]
+    CODEX --> QUEUE["durable interaction job\nclaim token + lease"]
+    QUEUE --> LENS["semantic lens query\nscoped snapshot + watermark"]
+    FLOW --> LENS
+    LENS --> INSPECT["bounded subgraph\nevidence + explanations"]
+    INSPECT --> ANSWER["cited answer or no_change\n(current Codex capability)"]
+    INSPECT -. target Codex tool loop .-> TOOLS["inspect evidence/history\nexpand lens / ask follow-up"]
+    TOOLS -.-> INSPECT
+    TOOLS -. target proposal .-> PROPOSE["grounded typed command proposal"]
+    FLOW --> PROPOSE
+    PROPOSE --> VALIDATE["provenance + policy +\ngraph revision validation"]
+    VALIDATE -->|accepted| EVENTS["Kogwistar authoritative\nappend-only event/tombstone"]
+    VALIDATE -->|rejected or stale| REVIEW["review history / retry"]
+    EVENTS --> REFRESH["refresh lens"]
+    REFRESH --> INSPECT
+    USER -.-> HISTORY["queryable investigation history"]
+    LENS -.-> HISTORY
+    ANSWER -.-> HISTORY
+    PROPOSE -.-> HISTORY
+```
+
+The workbench is an additional application projection. It does not alter the
+Obsidian projection path.

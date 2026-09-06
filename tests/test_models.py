@@ -1,4 +1,4 @@
-from kogwistar_llm_wiki import IngestPipelineArtifacts, IngestPipelineRequest
+from kogwistar_llm_wiki import IngestPipelineArtifacts, IngestPipelineRequest, NamespaceEngines
 
 
 def test_package_root_import_smoke():
@@ -48,3 +48,27 @@ def test_artifacts_capture_promotion_state():
         promoted_entity_id="kg:1",
     )
     assert artifacts.promoted_entity_id == "kg:1"
+
+
+def test_namespace_engines_close_shared_engine_once():
+    class CloseProbe:
+        def __init__(self):
+            self.close_count = 0
+
+        def close(self):
+            self.close_count += 1
+
+    shared = CloseProbe()
+    other = CloseProbe()
+    engines = NamespaceEngines(
+        conversation=shared,
+        workflow=other,
+        kg=shared,
+        wisdom=other,
+    )
+
+    engines.close()
+    engines.close()
+
+    assert shared.close_count == 1
+    assert other.close_count == 1

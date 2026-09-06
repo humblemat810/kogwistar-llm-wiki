@@ -236,7 +236,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -251,8 +253,12 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -265,7 +271,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -280,8 +288,12 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -294,7 +306,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -309,9 +323,13 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -323,7 +341,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -341,8 +361,12 @@
         "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -357,7 +381,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -375,8 +401,12 @@
         "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -391,7 +421,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -409,8 +441,12 @@
         "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -425,7 +461,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -440,9 +478,12 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -455,7 +496,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -470,9 +513,12 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -485,7 +531,8 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
-        
+        "--kogwistar-longrun",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -500,9 +547,12 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -515,7 +565,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -530,9 +582,12 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -545,7 +600,8 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
-        // "-q",
+        "--kogwistar-longrun",
+        "-s",
         "-p", 
         "no:cacheprovider"
       ],
@@ -560,11 +616,14 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
         "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-chroma-probe",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -578,7 +637,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "--kogwistar-longrun-probe=pgvector-testcontainer",
+        "-s",
         "-p", 
         "no:cacheprovider"
       ],
@@ -595,11 +656,14 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
         "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-probe",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -612,6 +676,8 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -628,12 +694,55 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
         "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-custom-probe",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Probe: PgVector Persistent Dev Container (1 doc, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunProbeParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_DOC_PROFILE": "${input:longrunProbeDocProfile}",
+        "KOGWISTAR_LONGRUN_SKIP_MAINTENANCE_INVARIANT": "1",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-probe",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -645,7 +754,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -662,9 +773,52 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: PgVector Persistent Fresh (20 docs, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -676,7 +830,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -693,9 +849,52 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: PgVector Persistent Continue (20 docs, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "continue",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -707,7 +906,47 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "auto",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-large",
+        "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: PgVector Persistent Auto Resume or Fresh (20 docs, fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -719,14 +958,20 @@
         "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
-        "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_CONTAINER_NAME": "${input:longrunPersistentPgContainerName}",
+        "KOGWISTAR_LONGRUN_PERSISTENT_PG_PORT": "${input:longrunPersistentPgPort}",
         "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-large",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-persistent-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -738,7 +983,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -756,10 +1003,15 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
-        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -774,7 +1026,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -785,17 +1039,69 @@
         "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
         "KOGWISTAR_LONGRUN_MODE": "continue",
         "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "parse_first",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "boundaries",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_PARSER": "workflow_layered",
+        "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_LONGRUN_PARSER_MODEL": "gpt-5-mini",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "daily_life",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
+        "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
+        "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
+        "KOGWISTAR_MAINTENANCE_MODEL": "${input:longrunAzureModel}"
+      }
+    },
+    {
+      "name": "Longrun: PgVector Azure OpenAI Retry Failed (fingerprint DB)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}\\.env",
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "retry_failed",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PG_SOURCE": "testcontainer",
         "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
-        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "0",
+        "KOGWISTAR_LONGRUN_RECOVERY_DOC_LIMIT": "${input:longrunRecoveryDocLimit}",
+        "KOGWISTAR_LONGRUN_RECOVERY_ATTEMPTS_PER_DOC": "${input:longrunRecoveryAttemptsPerDoc}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -810,7 +1116,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -828,10 +1136,15 @@
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
-        "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
+        "KOGWISTAR_LONGRUN_RESUME_PROBE": "0",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_EXPERIMENT_RUN": "${input:longrunExperimentRun}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-azure-large",
         "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
         "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
@@ -846,7 +1159,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -857,13 +1172,18 @@
         "KOGWISTAR_LONGRUN_MODE": "fresh",
         "KOGWISTAR_LONGRUN_BACKEND": "postgres",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -876,7 +1196,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -887,13 +1209,18 @@
         "KOGWISTAR_LONGRUN_MODE": "continue",
         "KOGWISTAR_LONGRUN_BACKEND": "postgres",
         "KOGWISTAR_LONGRUN_OPERATION_MODE": "${input:longrunOperationMode}",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
         "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
         "KOGWISTAR_LONGRUN_PARSER": "${input:longrunParser}",
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "20",
+        "KOGWISTAR_LONGRUN_DOC_LIMIT": "${input:longrunDocLimit}",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
         "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-large",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
@@ -906,7 +1233,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -922,10 +1251,13 @@
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -937,7 +1269,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -953,10 +1287,13 @@
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-medium",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -968,7 +1305,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -984,10 +1323,13 @@
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
       }
@@ -999,7 +1341,9 @@
       "module": "pytest",
       "args": [
         "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
         "-q",
+        "-s",
         "-p",
         "no:cacheprovider"
       ],
@@ -1015,12 +1359,103 @@
         "KOGWISTAR_LONGRUN_RESUME_PROBE": "1",
         "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
         "KOGWISTAR_LONGRUN_DOC_COUNT": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
         "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
         "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
         "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
-        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
+       "KOGWISTAR_LONGRUN_PARSER_WORKERS": "${input:longrunParserWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+       "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-postgres-small",
         "KOGWISTAR_OLLAMA_MODEL": "${input:longrunOllamaModel}",
         "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: PgVector Fair Maintenance First — Ollama (3 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "maintenance_first",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE": "fair_slices",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE": "${input:longrunMaintenanceStepsPerSlice}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE": "${input:longrunMaintenanceCallsPerSlice}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE": "${input:longrunMaintenanceSecondsPerSlice}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PARSER": "workflow_layered",
+        "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "ollama",
+        "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunOllamaModel}",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-fair-maintenance",
+        "KOGWISTAR_OLLAMA_BASE_URL": "http://localhost:11434"
+      }
+    },
+    {
+      "name": "Longrun: PgVector Fair Maintenance First — Azure OpenAI (3 docs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/integration/test_longrun_workflow_ingestion.py::test_longrun_runtime_workflow_ingestion",
+        "--kogwistar-longrun",
+        "-q",
+        "-s",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}\\.env",
+      "env": {
+        "KOGWISTAR_LLM_WIKI_LONGRUN": "1",
+        "KOGWISTAR_LONGRUN_MODE": "fresh",
+        "KOGWISTAR_LONGRUN_BACKEND": "pgvector",
+        "KOGWISTAR_LONGRUN_PG_SOURCE": "persistent",
+        "KOGWISTAR_LONGRUN_PG_DATABASE_MODE": "fingerprint",
+        "KOGWISTAR_LONGRUN_OPERATION_MODE": "maintenance_first",
+        "KOGWISTAR_LONGRUN_CONVERSATION_PERSISTENCE_MODE": "${input:longrunConversationPersistenceMode}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_SCHEDULE": "fair_slices",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_WORKERS": "${input:longrunMaintenanceWorkers}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_STEPS_PER_SLICE": "${input:longrunMaintenanceStepsPerSlice}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_LLM_CALLS_PER_SLICE": "${input:longrunMaintenanceCallsPerSlice}",
+        "KOGWISTAR_LONGRUN_MAINTENANCE_SECONDS_PER_SLICE": "${input:longrunMaintenanceSecondsPerSlice}",
+        "KOGWISTAR_LONGRUN_PARSER_PROPOSAL_MODE": "${input:longrunProposalMode}",
+        "KOGWISTAR_LONGRUN_PARSER": "workflow_layered",
+        "KOGWISTAR_LONGRUN_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_LONGRUN_PARSER_MODEL": "${input:longrunAzureModel}",
+        "KOGWISTAR_LONGRUN_DSN": "${input:longrunPgDsn}",
+        "KOGWISTAR_LONGRUN_DOC_COUNT": "3",
+        "KOGWISTAR_LONGRUN_ALLOW_SMALL": "1",
+        "KOGWISTAR_LONGRUN_CORPUS_PROFILE": "${input:longrunCorpusProfile}",
+        "KOGWISTAR_LONGRUN_MAX_RUNTIME_SECONDS": "${input:longrunMaxRuntimeSeconds}",
+        "KOGWISTAR_LONGRUN_MAX_LLM_CALLS": "${input:longrunMaxLlmCalls}",
+        "KOGWISTAR_LONGRUN_RUN_DIR": "${workspaceFolder}\\tests\\_tmp\\longrun-vscode-pgvector-fair-maintenance-azure",
+        "KOGWISTAR_PARSER_PROVIDER": "azure_openai",
+        "KOGWISTAR_PARSER_MODEL": "${input:longrunAzureModel}",
+        "KOGWISTAR_MAINTENANCE_PROVIDER": "azure_openai",
+        "KOGWISTAR_MAINTENANCE_MODEL": "${input:longrunAzureModel}"
       }
     }
   ],
@@ -1118,6 +1553,26 @@
       ]
     },
     {
+      "id": "longrunConversationPersistenceMode",
+      "type": "pickString",
+      "description": "Parser conversation graph persistence",
+      "default": "single_stage",
+      "options": [
+        "single_stage",
+        "two_stage"
+      ]
+    },
+    {
+      "id": "longrunCorpusProfile",
+      "type": "pickString",
+      "description": "Long-run generated corpus profile",
+      "default": "daily_life",
+      "options": [
+        "daily_life",
+        "watershed_stress"
+      ]
+    },
+    {
       "id": "longrunProbeParser",
       "type": "pickString",
       "description": "One-doc probe parser lane",
@@ -1168,13 +1623,25 @@
       "id": "longrunPgCustomDsn",
       "type": "promptString",
       "description": "Custom PgVector DSN (used when PgVector probe DSN source is custom)",
-      "default": "postgresql+psycopg://user:pass@localhost:5432/dbname"
+      "default": "postgresql+psycopg://postgres:postgres@127.0.0.1:35432/postgres"
+    },
+    {
+      "id": "longrunPersistentPgContainerName",
+      "type": "promptString",
+      "description": "Persistent PgVector dev container name",
+      "default": "kogwistar-llm-wiki-pgvector-dev"
+    },
+    {
+      "id": "longrunPersistentPgPort",
+      "type": "promptString",
+      "description": "Persistent PgVector dev host port",
+      "default": "35432"
     },
     {
       "id": "longrunPgDsn",
       "type": "promptString",
       "description": "Long-run Postgres/PgVector DSN",
-      "default": "postgresql+psycopg://user:pass@localhost:5432/dbname"
+      "default": "postgresql+psycopg://postgres:postgres@127.0.0.1:35432/postgres"
     },
     {
       "id": "longrunMaxRuntimeSeconds",
@@ -1187,6 +1654,78 @@
       "type": "promptString",
       "description": "Long-run max LLM call budget",
       "default": "100"
+    },
+    {
+      "id": "longrunMaintenanceWorkers",
+      "type": "promptString",
+      "description": "Concurrent maintenance workers (1 = sequential; >1 requires Postgres/PgVector)",
+      "default": "1"
+    },
+    {
+      "id": "longrunMaintenanceStepsPerSlice",
+      "type": "promptString",
+      "description": "Fair maintenance steps per document slice",
+      "default": "2"
+    },
+    {
+      "id": "longrunMaintenanceCallsPerSlice",
+      "type": "promptString",
+      "description": "Fair maintenance LLM calls per slice (0 = no call limit)",
+      "default": "0"
+    },
+    {
+      "id": "longrunMaintenanceSecondsPerSlice",
+      "type": "promptString",
+      "description": "Fair maintenance seconds per slice (0 = no time limit)",
+      "default": "0"
+    },
+    {
+      "id": "longrunMaintenanceParserProvider",
+      "type": "pickString",
+      "description": "Fair maintenance parser provider",
+      "default": "ollama",
+      "options": [
+        "ollama",
+        "azure",
+        "openai"
+      ]
+    },
+    {
+      "id": "longrunMaintenanceParserModel",
+      "type": "promptString",
+      "description": "Fair maintenance parser model or Azure deployment",
+      "default": "gemma4:e2b"
+    },
+    {
+      "id": "longrunParserWorkers",
+      "type": "promptString",
+      "description": "Concurrent parser document workers (1 = sequential; >1 requires Postgres/PgVector)",
+      "default": "1"
+    },
+    {
+      "id": "longrunExperimentRun",
+      "type": "promptString",
+      "description": "Optional experiment run label (same label resumes; change it for a new isolated comparison run)",
+      "default": ""
+    },
+    {
+      "id": "longrunDocLimit",
+      "type": "promptString",
+      "description": "Long-run documents to process this invocation (0 = all corpus documents)",
+      "default": "0"
+    },
+    {
+      "id": "longrunRecoveryDocLimit",
+      "type": "promptString",
+      "description": "Failed documents to recover this invocation (0 = all eligible failures)",
+      "default": "4"
+    },
+    {
+      "id": "longrunRecoveryAttemptsPerDoc",
+      "type": "promptString",
+      "description": "Maximum recovery attempts per failed document",
+      "default": "1"
     }
   ]
 }
+

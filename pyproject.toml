@@ -30,12 +30,20 @@ dependencies = [
 
 [project.optional-dependencies]
 chromadb = ["chromadb>=0.6"]
+otel = [
+    "opentelemetry-api>=1.25",
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
+]
+agent = [
+    "fastmcp==3.0.0",
+]
 test = [
     "pytest>=8.0",
     "pytest-anyio",
 ]
 dev = [
-    "kogwistar-llm-wiki[test,chromadb]",
+    "kogwistar-llm-wiki[test,chromadb,otel,agent]",
 ]
 
 [project.scripts]

@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
+import threading
 import time
 import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
+from typing import Callable, Literal
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.layerwise_llm import LayerwiseCallback, build_layerwise_llm_callbacks
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.budget_adapters import summarize_budget_events
-from kogwistar.runtime.budget import StateBackedBudgetLedger
+from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
 
+from .debug_run import LiveTracePrinter, env_flag_enabled, summarize_stage_timings
+from .llm_usage import ProviderUsageCallback, resolve_token_pricing
 from .provider_config import provider_config_summary
 
 
@@ -33,6 +37,20 @@ def _append_trace_line(path: Path, message: str) -> None:
         handle.write(f"{_now_ms()} | {message}\n")
 
 
+def _close_resources_quietly(*resources: object) -> None:
+    """Close child-owned backend resources without masking the parse result."""
+
+    for resource in resources:
+        close = getattr(resource, "close", None)
+        if not callable(close):
+            continue
+        try:
+            close()
+        except Exception:
+            # Shutdown cleanup must not replace a provider or parser error.
+            continue
+
+
 def _dump_model(value: object) -> object:
     if hasattr(value, "model_dump"):
         try:
@@ -48,7 +66,7 @@ def _dump_model(value: object) -> object:
 
 def _summarize_budget_events(events: list[object], *, provider_settings: WorkflowProviderSettings) -> dict[str, object]:
     provider_summary = provider_config_summary(provider_settings)
-    return {
+    summary = {
         "provider": provider_summary.get("provider"),
         "model": provider_summary.get("model"),
         "temperature": provider_summary.get("temperature"),
@@ -58,6 +76,38 @@ def _summarize_budget_events(events: list[object], *, provider_settings: Workflo
         "location": provider_summary.get("location"),
         "max_retries": provider_summary.get("max_retries"),
     } | summarize_budget_events(events)
+    provider_run_ids = {
+        str(getattr(event, "meta", {}).get("provider_run_id"))
+        for event in events
+        if getattr(event, "meta", {}).get("provider_run_id")
+    }
+    summary["llm_call_count"] = len(provider_run_ids)
+    cost_events = [
+        event for event in events
+        if getattr(event, "kind", None) == "cost" or getattr(event, "unit", None) == "total_cost"
+    ]
+    statuses = {
+        str(getattr(event, "meta", {}).get("cost_status"))
+        for event in cost_events
+        if getattr(event, "meta", {}).get("cost_status")
+    }
+    if not cost_events or statuses == {"unavailable_missing_tokens"}:
+        summary["total_cost"] = None
+        summary["cost_status"] = "unavailable_missing_tokens"
+        summary["cost_source"] = None
+    elif statuses:
+        summary["cost_status"] = "+".join(sorted(statuses))
+        summary["cost_source"] = sorted(
+            {
+                str(getattr(event, "meta", {}).get("cost_source"))
+                for event in cost_events
+                if getattr(event, "meta", {}).get("cost_source")
+            }
+        )
+    else:
+        summary["cost_status"] = "provider_reported"
+        summary["cost_source"] = "provider"
+    return summary
 
 
 def _proposal_mode_summary(final_state: dict[str, object]) -> dict[str, object]:
@@ -70,6 +120,7 @@ def _proposal_mode_summary(final_state: dict[str, object]) -> dict[str, object]:
         "proposal_source": metadata.get("proposal_source"),
         "proposal_failure_reason": metadata.get("proposal_failure_reason"),
         "boundary_proposed_count": metadata.get("boundary_proposed_count"),
+        "boundary_dropped_count": metadata.get("boundary_dropped_count"),
         "boundary_accepted_count": metadata.get("boundary_accepted_count"),
         "boundary_shifted_count": metadata.get("boundary_shifted_count"),
         "boundary_rejected_count": metadata.get("boundary_rejected_count"),
@@ -89,7 +140,7 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
     nodes = list(graph_payload.get("nodes") or [])
     node_count = len(nodes)
     node_types: set[str] = set()
-    excerpt_counts: Counter[str] = Counter()
+    excerpt_spans_by_cluster: dict[str, dict[str, list[tuple[int, int]]]] = defaultdict(lambda: defaultdict(list))
     cluster_intervals: dict[str, list[tuple[int, int]]] = defaultdict(list)
     max_depth = 0
 
@@ -104,8 +155,6 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
         for mention in node.get("mentions") or []:
             for span in mention.get("spans") or []:
                 excerpt = _normalize_excerpt(span.get("excerpt"))
-                if excerpt and excerpt != " ":
-                    excerpt_counts[excerpt] += 1
                 source_cluster_id = span.get("source_cluster_id")
                 start_char = span.get("start_char")
                 end_char = span.get("end_char")
@@ -113,7 +162,11 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
                     continue
                 if end_char <= start_char:
                     continue
-                cluster_intervals[str(source_cluster_id)].append((max(0, start_char), max(0, end_char)))
+                cluster_id = str(source_cluster_id)
+                interval = (max(0, start_char), max(0, end_char))
+                cluster_intervals[cluster_id].append(interval)
+                if excerpt and excerpt != " ":
+                    excerpt_spans_by_cluster[cluster_id][excerpt].append(interval)
 
     covered_total = 0
     source_total = 0
@@ -134,7 +187,22 @@ def _basic_sense_eval_from_graph_payload(*, graph_payload: dict[str, object], di
         source_total += max(end_char for _, end_char in merged)
 
     coverage_ratio = covered_total / source_total if source_total else 0.0
-    duplicate_excerpt_hits = sum(count - 1 for count in excerpt_counts.values() if count > 1)
+    duplicate_excerpt_hits = 0
+    for excerpt_groups in excerpt_spans_by_cluster.values():
+        for intervals in excerpt_groups.values():
+            if len(intervals) <= 1:
+                continue
+            intervals.sort()
+            merged_span_count = 0
+            cur_start, cur_end = intervals[0]
+            for start_char, end_char in intervals[1:]:
+                if start_char <= cur_end:
+                    cur_end = max(cur_end, end_char)
+                else:
+                    merged_span_count += 1
+                    cur_start, cur_end = start_char, end_char
+            merged_span_count += 1
+            duplicate_excerpt_hits += max(0, len(intervals) - merged_span_count)
     page_index_diag = dict(diagnostics.get("page_index") or {})
     assignment_mode = str(page_index_diag.get("assignment_mode") or diagnostics.get("assignment_mode") or "")
     fallback_used = bool(
@@ -176,8 +244,33 @@ def _build_provider_layer_callbacks(
     provider_settings: WorkflowProviderSettings,
     *,
     layer_event: Callable[..., None] | None = None,
+    budget_ledger: StateBackedBudgetLedger | None = None,
+    run_id: str = "",
+    source_document_id: str = "",
+    usage_event_sink: Callable[[object], None] | None = None,
 ) -> dict[str, LayerwiseCallback | int | bool]:
-    return build_layerwise_llm_callbacks(provider_settings, event_sink=layer_event)
+    model_callbacks: list[object] = []
+    if budget_ledger is not None:
+        parser = provider_settings.parser
+        model_callbacks.append(
+            ProviderUsageCallback(
+                ledger=budget_ledger,
+                run_id=run_id or f"parser:{source_document_id}",
+                source_document_id=source_document_id,
+                provider=parser.provider,
+                model=parser.model,
+                pricing=resolve_token_pricing(
+                    provider=parser.provider,
+                    model=parser.model,
+                ),
+                event_sink=usage_event_sink,
+            )
+        )
+    return build_layerwise_llm_callbacks(
+        provider_settings,
+        event_sink=layer_event,
+        model_callbacks=model_callbacks,
+    )
 
 
 def run_workflow_layered_parse(
@@ -190,9 +283,18 @@ def run_workflow_layered_parse(
     budget_ledger: StateBackedBudgetLedger | None = None,
     trace: Callable[[str], None] | None = None,
     heartbeat: Callable[[str], None] | None = None,
+    run_id: str | None = None,
+    resume_from_checkpoint: bool = False,
+    usage_event_path: Path | None = None,
+    conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> SimpleNamespace:
     from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput, WorkflowExportBundle
     from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
+
+    if conversation_persistence_mode not in {"single_stage", "two_stage"}:
+        raise ValueError(
+            "conversation_persistence_mode must be one of: single_stage, two_stage"
+        )
 
     layer_log: list[dict[str, object]] = []
 
@@ -214,41 +316,89 @@ def run_workflow_layered_parse(
             "budget_kind": "token",
         }
     )
+    usage_event_sink: Callable[[object], None] | None = None
+    if usage_event_path is not None:
+        usage_event_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _append_usage_event(event: object) -> None:
+            with usage_event_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(budget_event_to_dict(event), sort_keys=True) + "\n")
+                handle.flush()
+
+        usage_event_sink = _append_usage_event
     engine_dir = Path(engine_dir)
     _layer_event(
         "workflow_layered_provider_settings_loaded",
         provider=provider_settings.parser.provider,
         model=provider_settings.parser.model,
         proposal_mode=provider_settings.proposal_mode,
+        conversation_persistence_mode=conversation_persistence_mode,
+        workflow_run_id=str(run_id or f"parser:{source_document_id}"),
+        resume_from_checkpoint=resume_from_checkpoint,
     )
     _layer_event("workflow_layered_engines_build_start", engine_dir=str(engine_dir))
+    engine_kwargs: dict[str, object] = {"provider_settings": provider_settings}
+    # Do not add a new keyword on the historical default path. This keeps
+    # parser-service wrappers compatible while making the opt-in explicit.
+    if conversation_persistence_mode != "single_stage":
+        engine_kwargs["conversation_persistence_mode"] = conversation_persistence_mode
     workflow_engine, conversation_engine, knowledge_engine = build_default_engines(
         engine_dir,
-        provider_settings=provider_settings,
+        **engine_kwargs,
     )
-    _layer_event("workflow_layered_engines_build_done")
-    deps = _build_provider_layer_callbacks(provider_settings, layer_event=_layer_event)
+    _layer_event(
+        "workflow_layered_engines_build_done",
+        conversation_persistence_mode=conversation_persistence_mode,
+    )
+    deps = _build_provider_layer_callbacks(
+        provider_settings,
+        layer_event=_layer_event,
+        budget_ledger=budget_ledger,
+        run_id=str(run_id or f"parser:{source_document_id}"),
+        source_document_id=source_document_id,
+        usage_event_sink=usage_event_sink,
+    )
     inp = WorkflowIngestInput.from_text(
         document_id=source_document_id,
         text=str(raw_text),
         title=str(title),
     )
     _layer_event("workflow_layered_parse_start")
+    if resume_from_checkpoint:
+        _layer_event(
+            "workflow_layered_resume_requested",
+            workflow_run_id=str(run_id or f"parser:{source_document_id}"),
+            engine_dir=str(engine_dir),
+        )
     if heartbeat is not None:
         heartbeat("workflow_layered_parse_start")
-    run_result, bundle = run_ingest_workflow(
-        inp=inp,
-        workflow_engine=workflow_engine,
-        conversation_engine=conversation_engine,
-        knowledge_engine=knowledge_engine,
-        deps={**deps, "budget_ledger": budget_ledger},
-    )
+    try:
+        run_result, bundle = run_ingest_workflow(
+            inp=inp,
+            workflow_engine=workflow_engine,
+            conversation_engine=conversation_engine,
+            knowledge_engine=knowledge_engine,
+            deps={**deps, "budget_ledger": budget_ledger},
+            run_id=run_id,
+            resume_from_checkpoint=resume_from_checkpoint,
+        )
+    finally:
+        _close_resources_quietly(workflow_engine, conversation_engine, knowledge_engine)
+        _layer_event("workflow_layered_engines_closed")
     _layer_event(
         "workflow_layered_parse_returned",
         workflow_status=getattr(run_result, "status", None),
         workflow_run_id=getattr(run_result, "run_id", None),
     )
     final_state = dict(getattr(run_result, "final_state", {}) or {})
+    _layer_event(
+        "workflow_layered_postparse_state_snapshot",
+        workflow_status=getattr(run_result, "status", None),
+        has_semantic_tree="semantic_tree" in final_state,
+        has_validation_report="validation_report" in final_state,
+        has_export_bundle="export_bundle" in final_state,
+        workflow_error_count=len(list(final_state.get("workflow_errors") or [])),
+    )
     parse_session = final_state.get("parse_session") or {}
     proposal_summary = _proposal_mode_summary(final_state)
     _layer_event(
@@ -262,10 +412,50 @@ def run_workflow_layered_parse(
         unresolved_interval_count=proposal_summary.get("unresolved_interval_count"),
         provider_child_count=proposal_summary.get("provider_child_count"),
     )
+    bundle_source = "result"
     if not bundle and final_state.get("export_bundle"):
         bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
+        bundle_source = "final_state_export_bundle"
+    if not bundle and final_state.get("semantic_tree"):
+        from kg_doc_parser.workflow_ingest.models import WorkflowExportBundle as _WorkflowExportBundle
+        from kg_doc_parser.workflow_ingest.semantics import SemanticNode, semantic_tree_to_kge_payload
+
+        semantic_tree = SemanticNode.model_validate(final_state["semantic_tree"])
+        graph_payload = semantic_tree_to_kge_payload(semantic_tree, doc_id=source_document_id)
+        bundle = _WorkflowExportBundle(
+            graph_payload=graph_payload,
+            authoritative_source_map=final_state.get("authoritative_source_map") or {},
+            embedding_spaces=list(final_state.get("embedding_spaces") or []),
+            consolidation_candidates=[],
+            retrieval_metadata=dict(final_state.get("retrieval_metadata") or {}),
+            persistence_mode="local_debug",
+            kg_authority="local",
+            canonical_write_confirmed=False,
+            parser_owner="local",
+            server_parser_used=False,
+            persisted_to_knowledge_engine=False,
+        )
+        bundle_source = "synthesized_from_semantic_tree"
+        _layer_event(
+            "workflow_layered_export_bundle_synthesized",
+            workflow_status=getattr(run_result, "status", None),
+            graph_node_count=len(graph_payload.get("nodes", []) or []),
+            graph_edge_count=len(graph_payload.get("edges", []) or []),
+        )
     if not bundle:
+        _layer_event(
+            "workflow_layered_export_bundle_missing",
+            workflow_status=getattr(run_result, "status", None),
+            final_state_keys=sorted(final_state.keys()),
+        )
         raise RuntimeError("workflow-layered parser completed without an export bundle")
+    _layer_event(
+        "workflow_layered_export_bundle_ready",
+        workflow_status=getattr(run_result, "status", None),
+        bundle_source=bundle_source,
+        graph_node_count=len(bundle.graph_payload.get("nodes", []) or []),
+        graph_edge_count=len(bundle.graph_payload.get("edges", []) or []),
+    )
 
     graph_payload = _dump_model(bundle.graph_payload)
     evaluation = _basic_sense_eval_from_graph_payload(
@@ -290,6 +480,8 @@ def run_workflow_layered_parse(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
     )
+    timing_summary = summarize_stage_timings(layer_log)
+    usage_summary["timing_summary"] = timing_summary
     if proposal_summary:
         usage_summary["proposal_summary"] = proposal_summary
         if proposal_summary.get("proposal_mode") is not None:
@@ -309,6 +501,7 @@ def run_workflow_layered_parse(
         "workflow_run_id": getattr(run_result, "run_id", None),
         "layer_log": layer_log,
         "proposal_summary": proposal_summary,
+        "timing_summary": timing_summary,
     }
     if diagnostics["parse_session_mode"] != "workflow_layered":
         raise RuntimeError(
@@ -328,6 +521,7 @@ def run_workflow_layered_parse(
         evaluation=evaluation,
         diagnostics=diagnostics,
         usage_summary=usage_summary,
+        usage_events=[budget_event_to_dict(event) for event in budget_ledger.events],
         layer_log=layer_log,
         parse_session=parse_session,
         workflow_status=getattr(run_result, "status", None),
@@ -339,7 +533,25 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
     heartbeat_path = Path(payload["heartbeat_path"])
     result_path = Path(payload["result_path"])
     failure_path = Path(payload["failure_path"])
+    failure_payload_path = Path(
+        str(payload.get("failure_payload_path") or failure_path.with_name("failure_payload.json"))
+    )
     trace_path = Path(payload["trace_path"])
+    dump_trace_path = Path(str(payload["dump_trace_path"])) if payload.get("dump_trace_path") else None
+    live_trace = bool(payload.get("live_trace")) or env_flag_enabled(
+        "KOGWISTAR_LONGRUN_LIVE_TRACE",
+        "KOGWISTAR_LLM_WIKI_LIVE_TRACE",
+        default=os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1",
+    )
+    live_trace_printer = LiveTracePrinter(prefix="longrun.parser") if live_trace else None
+    budget_ledger: StateBackedBudgetLedger | None = None
+    trace_context = (
+        f"doc={payload.get('doc_id')} "
+        f"parser_lane={payload.get('parser_lane')} "
+        f"provider={payload.get('parser_provider') or 'unknown'} "
+        f"model={payload.get('parser_model') or 'unknown'} "
+        f"parser_workflow_run_id={payload.get('parser_workflow_run_id') or 'unknown'}"
+    )
 
     def _heartbeat(phase: str, **extra: object) -> None:
         _write_json_file(
@@ -349,16 +561,41 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "timestamp_ms": _now_ms(),
                 "parser_lane": payload["parser_lane"],
                 "doc_id": payload["doc_id"],
+                "parser_provider": payload.get("parser_provider"),
+                "parser_model": payload.get("parser_model"),
+                "parser_workflow_run_id": payload.get("parser_workflow_run_id"),
                 "pid": os.getpid(),
                 **extra,
             },
         )
 
     def _trace(message: str) -> None:
-        _append_trace_line(trace_path, message)
+        contextual_message = f"{message} {trace_context}"
+        _append_trace_line(trace_path, contextual_message)
+        if dump_trace_path is not None:
+            _append_trace_line(dump_trace_path, f"child::{contextual_message}")
+        if live_trace_printer is not None:
+            live_trace_printer.emit(
+                {
+                    "stage": "parser_trace",
+                    "message": f"child::{contextual_message}",
+                    "doc_id": payload.get("doc_id"),
+                    "parser_lane": payload.get("parser_lane"),
+                    "parser_provider": payload.get("parser_provider"),
+                    "parser_model": payload.get("parser_model"),
+                    "parser_workflow_run_id": payload.get("parser_workflow_run_id"),
+                    "pid": os.getpid(),
+                    "process_name": multiprocessing.current_process().name,
+                    "thread_name": threading.current_thread().name,
+                }
+            )
 
     try:
-        _trace(f"child_boot doc={payload.get('doc_id')} pid={os.getpid()}")
+        _trace(
+            f"child_boot doc={payload.get('doc_id')} pid={os.getpid()} "
+            f"process_name={multiprocessing.current_process().name} "
+            f"parent_pid={os.getppid()} thread={threading.current_thread().name}"
+        )
         if payload.get("child_mode") == "sleep":
             _trace("child_sleep_mode entered")
             _heartbeat("sleeping")
@@ -426,6 +663,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
             engine_dir = Path(payload["parser_run_dir"]) / "workflow_engines"
             _trace(f"child_building_workflow_engines dir={engine_dir}")
             _trace("child_before_workflow_layered_parse")
+            _heartbeat("workflow_layered_parse_start")
             result = run_workflow_layered_parse(
                 source_document_id=source_document_id,
                 title=str(payload["title"]),
@@ -435,8 +673,19 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 budget_ledger=budget_ledger,
                 trace=_trace,
                 heartbeat=_heartbeat,
+                run_id=str(payload.get("parser_workflow_run_id") or f"parser:{source_document_id}"),
+                resume_from_checkpoint=bool(payload.get("resume_from_checkpoint")),
+                usage_event_path=(
+                    Path(str(payload["usage_event_path"]))
+                    if payload.get("usage_event_path")
+                    else None
+                ),
+                conversation_persistence_mode=str(
+                    payload.get("conversation_persistence_mode") or "single_stage"
+                ),
             )
             _trace("child_workflow_layered_parse_call_returned")
+            _heartbeat("workflow_layered_parse_complete")
             title = str(payload["title"])
             graph_payload = result.graph_payload
             evaluation = result.evaluation
@@ -444,20 +693,28 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
             diagnostics = dict(result.diagnostics)
         else:
             raise ValueError(f"unsupported long-run parser lane: {parser_lane!r}")
+        workflow_status = str(diagnostics.get("workflow_status") or "").strip().lower()
+        result_ok = workflow_status not in {"failure", "failed", "error"}
         _trace("child_write_result_json")
         _write_json_file(
             result_path,
             {
-                "ok": True,
+                "ok": result_ok,
+                "parser_workflow_run_id": str(
+                    payload.get("parser_workflow_run_id") or f"parser:{source_document_id}"
+                ),
                 "parser_lane": parser_lane,
                 "title": title,
                 "graph_payload": graph_payload,
                 "evaluation": evaluation,
                 "usage_summary": usage_summary,
+                "usage_events": list(getattr(result, "usage_events", []) or []),
                 "diagnostics": diagnostics,
+                "workflow_status": workflow_status or None,
                 "layer_log": getattr(result, "layer_log", None) if parser_lane == "workflow_layered" else None,
             },
         )
+        _heartbeat("result_written", result_path=str(result_path))
         if parser_lane == "workflow_layered" and getattr(result, "layer_log", None):
             _write_json_file(result_path.with_name("parser_layer_log.json"), list(result.layer_log))
         _heartbeat(
@@ -469,6 +726,10 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
         _trace("child_completed")
     except BaseException as exc:  # noqa: BLE001
         _trace(f"child_exception {type(exc).__name__}: {exc}")
+        try:
+            _write_json_file(failure_payload_path, dict(payload))
+        except Exception as payload_exc:  # noqa: BLE001
+            _trace(f"failure_payload_write_error {type(payload_exc).__name__}: {payload_exc}")
         _write_json_file(
             failure_path,
             {
@@ -476,6 +737,17 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 "error_type": type(exc).__name__,
                 "message": str(exc),
                 "traceback": traceback.format_exc(),
+                "payload_path": str(failure_payload_path),
+                "usage_events": [
+                    budget_event_to_dict(event) for event in (budget_ledger.events if budget_ledger else [])
+                ],
+                "llm_call_count": len(
+                    {
+                        str(event.meta.get("provider_run_id"))
+                        for event in (budget_ledger.events if budget_ledger else [])
+                        if event.meta.get("provider_run_id")
+                    }
+                ),
             },
         )
         _heartbeat("failed", failure_path=str(failure_path), error_type=type(exc).__name__)

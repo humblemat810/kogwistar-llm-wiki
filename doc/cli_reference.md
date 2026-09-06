@@ -90,6 +90,35 @@ Current semantics:
 - Interrupted work is recovered by core projection repair plus lease redelivery.
 - Delivery remains at-least-once; duplicate execution should converge through deterministic IDs, completion checks, and versioned replacement.
 
+## `llm-wiki workbench`
+
+Serve the interactive graph workbench and its durable background Codex brain:
+
+```bash
+python -m kogwistar_llm_wiki \
+  --data-dir <persistent-data-directory> \
+  workbench \
+  --workspace <workspace-id> \
+  [--host 127.0.0.1] \
+  [--port 8765] \
+  [--codex-workers 1] \
+  [--codex-executable <path>] \
+  [--codex-model <model>] \
+  [--codex-profile <profile>] \
+  [--codex-timeout 300]
+```
+
+The command recovers pending workbench interactions, serves the lens/history/
+proposal and interaction APIs, and invokes Codex in an ephemeral read-only
+sandbox. Model activity renews the job lease; ownership is checked again before
+the first terminal result is appended. Browser clients submit Codex turns to
+`POST /api/interactions` and poll `GET /api/interactions` rather than holding a
+model-length HTTP request open.
+
+The current Codex worker answers from the bounded lens or returns `no_change`.
+It does not receive direct graph-write access. Any future mutation proposal
+still requires host validation and confirmation.
+
 ## Programmatic API Cheatsheet
 
 ```python
@@ -121,7 +150,8 @@ python -m kogwistar_llm_wiki --help
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
+| `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `workbench`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
+| `KOGWISTAR_CODEX_EXECUTABLE` | workbench | Optional Codex CLI path when `codex` is not on `PATH` |
 | `KOGWISTAR_PARSER_PROVIDER` | CLI, parser workflows | Explicit parser provider alias. `azure_openai` is normalized to the `azure` chat provider. |
 | `KOGWISTAR_PARSER_MODEL` | CLI, parser workflows | Explicit parser model or Azure deployment name |
 | `KOGWISTAR_PARSER_BASE_URL` | CLI, parser workflows | Parser endpoint URL, for example Ollama base URL or Azure OpenAI endpoint |
@@ -144,3 +174,39 @@ the page-index parser.
 .venv\Scripts\python.exe -m pytest tests/unit/test_temporary_namespace.py -q
 .venv\Scripts\python.exe -m pytest tests/unit/test_projection_consistency.py -q
 ```
+
+## `llm-wiki seed-bundle`
+
+Seed a versioned, source-grounded learning graph into the curated workspace,
+optionally run a real Codex cockpit review over the persisted graph, and export
+the graph back to canonical JSON:
+
+```powershell
+python -m kogwistar_llm_wiki `
+  --data-dir logs/workbench_seed_rl/state `
+  seed-bundle `
+  --workspace rl-agent-learning `
+  --bundle data/seed_bundles/rl_llm_agent_tool_use_v1.json `
+  --output logs/workbench_seed_rl/exported.json `
+  --cockpit-question "Compare DeepSeek-R1, Kimi k1.5, and Kimi K2 from the grounded graph."
+```
+
+The command fails if source excerpts are absent, ambiguous, or inconsistent
+with their half-open offsets; if IDs collide with another seed bundle; or if
+the persisted export differs from the canonical input. Re-running the same
+bundle in the same workspace is idempotent. Source records are persisted as
+curated graph entities, so a future export does not depend on retaining the
+original input file.
+
+`--cockpit-question` is optional because it invokes the installed Codex CLI.
+When supplied, the turn uses the normal read-only cockpit contract: reads are
+bounded, any graph patch remains a proposal, and `no_change` is a valid result.
+The interaction and investigation history are persisted before the graph is
+exported and checked again. The concise cockpit outcome is printed to stdout;
+the complete lens, trace, observations, and answer are written beside the
+export as `<export-stem>.cockpit.json`.
+
+The repository includes
+`data/seed_bundles/rl_llm_agent_tool_use_v1.json`, covering RLHF, WebGPT,
+ReAct, Toolformer, GRPO, DeepSeek-R1, Kimi k1.5, Kimi K2, and host-executed
+tool calling with ordinary edges and first-class multi-endpoint hyperedges.

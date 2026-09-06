@@ -2,7 +2,7 @@
 
 ## Goal
 
-Align the long-run workflow test with the existing `kogwistar` crash-continuation semantics instead of inventing a separate harness-level resume system.
+Align the long-run workflow test with the existing `kogwistar` crash-continuation semantics instead of inventing a separate harness-level resume system. The parser child now has an explicit inner workflow run and recovery handoff in addition to the outer document manifest.
 
 The key decision is:
 
@@ -16,23 +16,23 @@ The key decision is:
 - [x] Remove or back out any harness-only resume mechanism that bypasses the existing runtime continuation model.
 - [x] Keep the `noop` registration fix if it is required for the current workflow design to validate.
 - [x] Confirm no workflow topology changes were made for this effort.
-- [x] Confirm no extra workflow steps were added just to support resume.
+- [x] Confirm no extra workflow topology steps were added just to support resume; runtime checkpoints are used at existing workflow step boundaries.
 
 ## Understand Existing Continuation Semantics
 
-- [ ] Identify exactly where `kogwistar` stores step-level runtime state, checkpoints, and workflow progress.
-- [ ] Document whether continuation is driven by:
+- [x] Identify exactly where `kogwistar` stores step-level runtime state, checkpoints, and workflow progress.
+- [x] Document whether continuation is driven by:
   - workflow run records
   - checkpoints
   - durable queues
   - projected lane rows
   - some combination of the above
-- [ ] Verify whether continuation expects:
+- [x] Verify whether continuation expects:
   - same `run_id`
   - same `conversation_id`
   - same `turn_node_id`
   - same workflow graph
-- [ ] Verify whether the runtime can resume a partially completed run automatically, or whether recovery code must be called explicitly.
+- [x] Verify whether the runtime can resume a partially completed run automatically, or whether recovery code must be called explicitly. The parser calls `WorkflowRuntime.resume_from_latest_checkpoint(...)` explicitly; no scheduler-wide auto-resume is implied.
 
 ## Harness Behavior Audit
 
@@ -54,7 +54,7 @@ The key decision is:
   - workflow id
   - conversation id
   - document ids
-- [ ] Ensure those identities are deterministic across reruns of the same interrupted long-run session.
+- [x] Ensure those identities are deterministic across reruns of the same interrupted long-run session. The parser uses `parser:<source-document-id>` and reuses its engine directory.
 - [ ] Confirm which IDs may change safely and which must stay fixed for continuation to work.
 
 ## Observable Progress
@@ -73,35 +73,35 @@ The key decision is:
 
 ## Crash-Reentry Contract
 
-- [ ] Define what should happen if the process is interrupted during:
+- [x] Define what should happen if the process is interrupted during:
   - `claim_document`
   - `parse_document`
   - `persist_document`
   - `enqueue_background_maintenance`
   - `observe_background_maintenance`
   - `verify_document_artifacts`
-- [ ] Define whether a doc in `processing/` should be:
+- [x] Define whether a doc in `processing/` should be:
   - resumed in place
   - retried from a known safe step
   - quarantined only after recovery logic fails
-- [ ] Confirm the harness follows existing project conventions for interrupted in-flight work instead of inventing new folder semantics.
+- [x] Confirm the harness follows existing project conventions for interrupted in-flight work instead of inventing new folder semantics. Parser usage is append-only JSONL; outer status remains in the manifest.
 
 ## Recovery Hooking
 
-- [ ] Identify whether the harness should invoke existing recovery APIs on startup for an interrupted run.
-- [ ] If yes, use those APIs directly instead of replaying ad hoc logic.
+- [x] Identify whether the harness should invoke existing recovery APIs on startup for an interrupted run.
+- [x] If yes, use those APIs directly instead of replaying ad hoc logic.
 - [ ] If no, document why existing recovery does not apply to this long-run path.
 - [x] Verify that recovery results are included in the diagnostic dump.
 
 ## Timeout-Probe Strategy
 
-- [ ] Design an intentional "progressive probe" mode for local diagnosis:
+- [x] Design an intentional "progressive probe" mode for local diagnosis:
   - run for a bounded window
   - return control
   - inspect state
   - rerun against the same interrupted session
-- [ ] Ensure this probe mode uses the same runtime/recovery semantics as the full long run.
-- [ ] Do not treat probe mode as a separate implementation path.
+- [x] Ensure this probe mode uses the same runtime/recovery semantics as the full long run.
+- [x] Do not treat probe mode as a separate implementation path.
 
 ## Tests To Add
 
@@ -112,20 +112,23 @@ The key decision is:
   - real continuation
   - accidental fresh start
 - [ ] Keep full Ollama long-run coverage opt-in, but add at least one smaller interruption/continuation regression test that can run without a full soak.
+- [x] Add parser-level resume-contract and usage-event recovery regressions
+  without requiring a live provider.
 
 ## Documentation
 
-- [ ] Update the long-run doc to explain:
+- [x] Update the long-run doc to explain:
   - whether crash continuation is supported
   - what is required for it to work
   - how to tell resumed progress from a fresh run
-- [ ] Document the exact operator workflow for interrupted long runs.
-- [ ] Add a note describing what the harness should and should not own versus what `kogwistar` runtime/recovery already owns.
+- [x] Document the exact operator workflow for interrupted long runs.
+- [x] Add a note describing what the harness should and should not own versus what `kogwistar` runtime/recovery already owns.
 
 ## Acceptance Criteria
 
-- [ ] The harness does not pretend to resume by rebuilding state from scratch unless that is explicitly the approved behavior.
-- [ ] A repeated run after interruption can show real progress using existing `kogwistar` continuation semantics.
-- [ ] The dump makes it obvious whether the run resumed, restarted, or stalled.
-- [ ] No workflow design changes are introduced just to support continuation.
-- [ ] The only harness changes are observability and correct use of existing recovery/runtime behavior.
+- [x] The harness does not pretend to resume by rebuilding state from scratch unless no inner checkpoint exists; that fallback is explicit and recorded.
+- [x] A repeated run after interruption can show real progress using existing `kogwistar` continuation semantics.
+- [x] The dump makes it obvious whether the run resumed, restarted, or stalled, including parser run ID and resume flag.
+- [x] No workflow topology changes are introduced just to support continuation.
+- [x] The harness owns document-attempt status and handoff files; `kogwistar`
+  owns inner workflow checkpoints and resume execution.

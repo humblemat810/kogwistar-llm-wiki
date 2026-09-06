@@ -18,6 +18,11 @@ from kogwistar.policy import (
 )
 
 
+def _and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
+    """Build a portable Chroma conjunction for app-owned metadata filters."""
+    return {"$and": [dict(clause) for clause in clauses]}
+
+
 @dataclass(frozen=True, slots=True)
 class LlmWikiArtifactTaxonomy:
     maintenance_job_request: str = "maintenance_job_request"
@@ -90,20 +95,24 @@ class LlmWikiDerivedKnowledgePolicy:
     def source_query(self, *, workspace_id: str) -> SourceQueryDecision:
         query = self._core.source_query(workspace_id=workspace_id)
         return SourceQueryDecision(
-            where={
-                **query.where,
-                "artifact_kind": self.taxonomy.promoted_knowledge,
-            }
+            # Chroma's ``where`` grammar accepts one top-level operator.  Keep
+            # the two source predicates explicit so this remains valid for
+            # both the persistent Chroma backend and the in-memory backend.
+            where=_and_where(
+                {"artifact_kind": self.taxonomy.promoted_knowledge},
+                {"workspace_id": workspace_id},
+            )
         )
 
     def source_where(self, *, workspace_id: str) -> dict[str, object]:
         return self.source_query(workspace_id=workspace_id).where
 
     def match_where(self, *, workspace_id: str, label: str) -> dict[str, object]:
-        return {
-            **self._core.match_where(workspace_id=workspace_id, label=label),
-            "artifact_kind": self.taxonomy.derived_knowledge,
-        }
+        return _and_where(
+            {"artifact_kind": self.taxonomy.derived_knowledge},
+            {"workspace_id": workspace_id},
+            {"label": label},
+        )
 
     def build_metadata(
         self,
@@ -136,20 +145,21 @@ class LlmWikiWisdomPolicy:
 
     def source_query(self, *, workspace_id: str) -> SourceQueryDecision:
         return SourceQueryDecision(
-            where={
-                "entity_type": self.taxonomy.workflow_step_exec_entity_type,
-                "workspace_id": workspace_id,
-            }
+            where=_and_where(
+                {"entity_type": self.taxonomy.workflow_step_exec_entity_type},
+                {"workspace_id": workspace_id},
+            )
         )
 
     def source_where(self, *, workspace_id: str) -> dict[str, object]:
         return self.source_query(workspace_id=workspace_id).where
 
     def match_where(self, *, workspace_id: str, step_op: str) -> dict[str, object]:
-        return {
-            **self._core.match_where(workspace_id=workspace_id, step_op=step_op),
-            "artifact_kind": self.taxonomy.execution_wisdom,
-        }
+        return _and_where(
+            {"artifact_kind": self.taxonomy.execution_wisdom},
+            {"workspace_id": workspace_id},
+            {"step_op": step_op},
+        )
 
     def build_metadata(
         self,

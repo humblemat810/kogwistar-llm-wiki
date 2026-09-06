@@ -30,6 +30,34 @@ source map.
 
 ## Decision
 
+### Bounded Maintenance Planner
+
+`maintenance_first` uses a durable, phase-oriented planner. A document is not
+held by one worker until it is complete. Its job payload carries a typed
+`maintenance_plan`, `maintenance_phase_index`, and `maintenance_round`. After
+one phase succeeds, the worker persists the phase transition and requeues the
+same job at the durable queue tail. This gives other documents an opportunity
+to run between phases and makes resume independent of worker count.
+
+The initial document plan is:
+
+1. `document_seed_graph`
+2. `document_parse_graph`
+3. `document_propose_crosslinks`
+4. `document_validate_crosslinks`
+
+The parse phase reads the persisted source document and performs the LLM call
+outside graph transactions. Only the resulting extraction and readiness
+checkpoint are persisted before the next phase is queued. Crosslink phases are
+proposal/review work and may not create an edge without two-sided evidence and
+the normal append-only patch application rules.
+
+The planner stops when the plan is complete, an explicit stop is requested, a
+per-document round limit is reached, or the global run budget prevents another
+claim. A suspended runtime continuation remains distinct from a successful
+planner phase continuation; both are durable queue payloads and both re-enter
+at the queue tail.
+
 Introduce an iterative maintenance graph construction mode at the
 `kogwistar-llm-wiki` layer.
 
@@ -77,6 +105,30 @@ Required provenance fields:
 - `status`
 
 ### Typed Patch, Not Direct LLM Writes
+
+### Source-Attempt Fencing
+
+Every source registration creates an immutable `source_revision` artifact
+whose digest identifies the content and whose revision ID identifies that
+ingestion attempt. Readiness artifacts record the stages that are safe for
+maintenance, such as `source_map_seeded` or `parsed_graph_persisted`.
+
+Every maintenance request and durable job carries the source revision ID,
+source digest, and required readiness stage. Before a worker dispatches a job,
+and again immediately before graph-patch application or workflow execution, it
+checks that the job still targets the current revision and that the required
+stage is recorded. A mismatch is not retried as business work: the job is
+terminally marked failed as `stale` or `blocked`, a
+`maintenance_guard_decision` artifact is appended, and the lane receives the
+reason. A newer registration supersedes older queued jobs for the same source
+and maintenance kind without deleting their history.
+
+This is an application-level optimistic fence layered over Kogwistar's durable
+queue lease and idempotency semantics. It prevents the common admin-triggered
+retry/maintenance race and fails closed if a legacy job lacks revision
+metadata. It is not a claim of a distributed transaction across the queue and
+graph backends; graph mutation must remain append-only and patch application
+must be idempotent.
 
 LLMs may propose graph changes, but they must not directly mutate the graph.
 

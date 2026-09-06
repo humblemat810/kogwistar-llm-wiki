@@ -3,6 +3,11 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
+from kogwistar.utils import (
+    SourcePointerValidationError,
+    source_pointer_has_character_span,
+    validate_source_pointer,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -224,6 +229,28 @@ def validate_maintenance_patch(
                 )
             )
         seen_operation_ids.add(operation.operation_id)
+
+        if operation.provenance:
+            for pointer_index, pointer in enumerate(operation.provenance.source_pointers):
+                if not source_pointer_has_character_span(pointer):
+                    continue
+                try:
+                    validate_source_pointer(
+                        pointer,
+                        end_mode="exclusive",
+                        require_source_cluster=False,
+                        require_source_text=False,
+                        require_parent_containment=False,
+                        require_text_match=False,
+                    )
+                except SourcePointerValidationError as exc:
+                    issues.append(
+                        MaintenancePatchValidationIssue(
+                            operation_id=operation.operation_id,
+                            code="invalid_source_pointer",
+                            message=f"source_pointers[{pointer_index}] {exc}",
+                        )
+                    )
 
         created_id = operation.created_node_id or operation.created_edge_id
         if created_id:

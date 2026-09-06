@@ -1,0 +1,41 @@
+{
+  "fixture_id": "rl_verifiable_reasoning_v1",
+  "description": "A compact offline curriculum for learning why mechanically checkable rewards help reasoning systems.",
+  "sources": [
+    {"id": "src:rl:mdp", "title": "MDP notes", "revision": "1", "text": "An MDP describes states, actions, transitions, and rewards."},
+    {"id": "src:rl:verifiers", "title": "Verifier notes", "revision": "1", "text": "A verifier checks an outcome against an executable or formal criterion."},
+    {"id": "src:rl:limits", "title": "Evaluation cautions", "revision": "1", "text": "A weak verifier can reward hacking rather than robust reasoning."}
+  ],
+  "nodes": [
+    {"id": "fixture:mdp", "label": "Markov decision process", "kind": "concept", "source_id": "src:rl:mdp", "span": {"start_char": 0, "end_char": 3, "excerpt": "MDP"}},
+    {"id": "fixture:policy", "label": "Policy", "kind": "concept", "source_id": "src:rl:mdp", "span": {"start_char": 4, "end_char": 10, "excerpt": "policy"}},
+    {"id": "fixture:return", "label": "Return", "kind": "concept", "source_id": "src:rl:mdp", "span": {"start_char": 11, "end_char": 17, "excerpt": "reward"}},
+    {"id": "fixture:exploration", "label": "Exploration", "kind": "concept", "source_id": "src:rl:mdp", "span": {"start_char": 18, "end_char": 29, "excerpt": "exploration"}},
+    {"id": "fixture:verifier", "label": "Verifier", "kind": "method", "source_id": "src:rl:verifiers", "span": {"start_char": 0, "end_char": 8, "excerpt": "verifier"}},
+    {"id": "fixture:outcome-reward", "label": "Outcome reward", "kind": "method", "source_id": "src:rl:verifiers", "span": {"start_char": 9, "end_char": 22, "excerpt": "outcome reward"}},
+    {"id": "fixture:code-test", "label": "Code test", "kind": "example", "source_id": "src:rl:verifiers", "span": {"start_char": 23, "end_char": 32, "excerpt": "code test"}},
+    {"id": "fixture:reward-model", "label": "Reward model", "kind": "method", "source_id": "src:rl:verifiers", "span": {"start_char": 33, "end_char": 45, "excerpt": "reward model"}},
+    {"id": "fixture:group-relative", "label": "Group-relative optimization", "kind": "method", "source_id": "src:rl:verifiers", "span": {"start_char": 46, "end_char": 74, "excerpt": "group-relative optimization"}},
+    {"id": "fixture:reward-hacking", "label": "Reward hacking", "kind": "risk", "source_id": "src:rl:limits", "span": {"start_char": 0, "end_char": 13, "excerpt": "reward hacking"}},
+    {"id": "fixture:weak-verifier", "label": "Weak verifier", "kind": "risk", "source_id": "src:rl:limits", "span": {"start_char": 14, "end_char": 27, "excerpt": "weak verifier"}},
+    {"id": "fixture:distribution-shift", "label": "Distribution shift", "kind": "risk", "source_id": "src:rl:limits", "span": {"start_char": 28, "end_char": 47, "excerpt": "distribution shift"}}
+  ],
+  "edges": [
+    {"id": "fixture-edge:policy-mdp", "source": "fixture:mdp", "target": "fixture:policy", "relation": "has_policy"},
+    {"id": "fixture-edge:return-policy", "source": "fixture:policy", "target": "fixture:return", "relation": "optimizes"},
+    {"id": "fixture-edge:explore-policy", "source": "fixture:policy", "target": "fixture:exploration", "relation": "balances"},
+    {"id": "fixture-edge:verify-outcome", "source": "fixture:verifier", "target": "fixture:outcome-reward", "relation": "supports"},
+    {"id": "fixture-edge:code-verify", "source": "fixture:code-test", "target": "fixture:verifier", "relation": "implements"},
+    {"id": "fixture-edge:model-outcome", "source": "fixture:reward-model", "target": "fixture:outcome-reward", "relation": "estimates"},
+    {"id": "fixture-edge:hack-weak", "source": "fixture:reward-hacking", "target": "fixture:weak-verifier", "relation": "exploits"},
+    {"id": "fixture-edge:weak-outcome", "source": "fixture:weak-verifier", "target": "fixture:outcome-reward", "relation": "weakens"},
+    {"id": "fixture-edge:shift-generalization", "source": "fixture:distribution-shift", "target": "fixture:verifier", "relation": "challenges"}
+  ],
+  "hyperedges": [
+    {"id": "fixture-hyperedge:group", "sources": ["fixture:group-relative"], "targets": ["fixture:policy", "fixture:outcome-reward", "fixture:verifier"], "relation": "compares_candidates"}
+  ],
+  "acceptance_queries": [
+    {"query": "Why do verifiable rewards help?", "anchors": ["fixture:verifier", "fixture:outcome-reward"]},
+    {"query": "Does reward create reasoning?", "anchors": ["fixture:reward-model", "fixture:reward-hacking"]}
+  ]
+}
