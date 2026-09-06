@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import Graph from "graphology";
+import { MultiDirectedGraph } from "graphology";
 import Sigma from "sigma";
 import type { LensNode, LensSnapshot, WorkbenchAskResponse, WorkbenchInteraction } from "./contracts";
 import { sampleLens } from "./contracts";
@@ -131,7 +131,7 @@ export function App() {
 
   useEffect(() => {
     if (!graphRoot.current) return;
-    const graph = new Graph();
+    const graph = new MultiDirectedGraph();
     for (const [index, node] of lens.nodes.entries()) {
       const previous = positions.current.get(node.id);
       const seed = index === 0

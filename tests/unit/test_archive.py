@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import io
 import tarfile
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +38,21 @@ def _node(workspace_id: str) -> Node:
         })])],
         metadata={"workspace_id": workspace_id, "graph_space": "source"},
     )
+
+
+def _tamper_archive_member(source: Path, target: Path, member_name: str) -> None:
+    with tarfile.open(source, "r:gz") as incoming, tarfile.open(target, "w:gz") as outgoing:
+        for member in incoming.getmembers():
+            if not member.isfile():
+                outgoing.addfile(member)
+                continue
+            payload = incoming.extractfile(member)
+            assert payload is not None
+            raw = payload.read()
+            if member.name == member_name:
+                raw = b"tampered archive payload"
+                member.size = len(raw)
+            outgoing.addfile(member, io.BytesIO(raw))
 
 
 def _add_node(engines, workspace_id: str) -> None:
@@ -193,6 +209,85 @@ def test_archive_restores_canonical_artifacts_without_overwriting_conflicts(tmp_
     target.close()
 
 
+def test_verify_rejects_corrupted_artifact_and_snapshot_payloads(tmp_path):
+    source_data = tmp_path / "source-data"
+    (source_data / "raw_documents").mkdir(parents=True)
+    (source_data / "raw_documents" / "doc.md").write_text("source revision", encoding="utf-8")
+    source = build_in_memory_namespace_engines(base_dir=tmp_path / "source-engines")
+    _add_node(source, "ws")
+    archive_path = tmp_path / "checked.tar.gz"
+    manifest = create_archive(
+        source,
+        workspace_id="ws",
+        output=archive_path,
+        data_dir=source_data,
+        include_backend_snapshot=True,
+        backend="chroma",
+    )
+
+    artifact_member = str(manifest["artifact_entries"][0]["path"])
+    corrupted_artifact = tmp_path / "corrupted-artifact.tar.gz"
+    _tamper_archive_member(archive_path, corrupted_artifact, artifact_member)
+    with pytest.raises(ArchiveError, match="checksum"):
+        verify_archive(corrupted_artifact)
+
+    snapshot_member = str(manifest["backend_snapshot_entries"][0]["files"][0]["path"])
+    corrupted_snapshot = tmp_path / "corrupted-snapshot.tar.gz"
+    _tamper_archive_member(archive_path, corrupted_snapshot, snapshot_member)
+    with pytest.raises(ArchiveError, match="checksum"):
+        verify_archive(corrupted_snapshot)
+    source.close()
+
+
+def test_incremental_archive_replaces_verified_predecessor_artifact(tmp_path):
+    source_data = tmp_path / "source-data"
+    raw = source_data / "raw_documents"
+    raw.mkdir(parents=True)
+    source_file = raw / "doc.md"
+    source_file.write_text("revision one", encoding="utf-8")
+    source = build_in_memory_namespace_engines(base_dir=tmp_path / "source-engines")
+    _add_node(source, "ws")
+    base_path = tmp_path / "base.tar.gz"
+    base = create_archive(
+        source,
+        workspace_id="ws",
+        output=base_path,
+        data_dir=source_data,
+    )
+    source.kg.meta_sqlite.append_entity_event(
+        namespace=WorkspaceNamespaces("ws").source_space,
+        event_id="artifact-update",
+        entity_kind="opaque",
+        entity_id="artifact-update",
+        op="UPSERT",
+        payload_json="{}",
+    )
+    source_file.write_text("revision two", encoding="utf-8")
+    delta_path = tmp_path / "delta.tar.gz"
+    create_archive(
+        source,
+        workspace_id="ws",
+        output=delta_path,
+        data_dir=source_data,
+        parent_archive=base_path,
+    )
+
+    target_data = tmp_path / "target-data"
+    target = build_in_memory_namespace_engines(base_dir=tmp_path / "target-engines")
+    restore_archive(
+        target,
+        archive=delta_path,
+        parent_archives=[base_path],
+        target_workspace_id="ws-copy",
+        target_data_dir=target_data,
+        apply=True,
+    )
+    assert source_file.read_text(encoding="utf-8") == "revision two"
+    assert (target_data / "raw_documents" / "doc.md").read_text(encoding="utf-8") == "revision two"
+    source.close()
+    target.close()
+
+
 def test_fast_backend_snapshot_requires_fingerprint_and_copies_nested_files(tmp_path):
     source = build_in_memory_namespace_engines(base_dir=tmp_path / "snapshot-source")
     archive_path = tmp_path / "snapshot.tar.gz"
@@ -210,11 +305,20 @@ def test_fast_backend_snapshot_requires_fingerprint_and_copies_nested_files(tmp_
             target_data_dir=tmp_path / "snapshot-target",
             backend="chroma",
         )
+    dry_run = restore_backend_snapshot(
+        archive=archive_path,
+        target_data_dir=tmp_path / "snapshot-target",
+        backend="chroma",
+        embedding_fingerprint=manifest["embedding_fingerprint"],
+    )
+    assert dry_run["dry_run"] is True
+    assert not (tmp_path / "snapshot-target").exists()
     result = restore_backend_snapshot(
         archive=archive_path,
         target_data_dir=tmp_path / "snapshot-target",
         backend="chroma",
         embedding_fingerprint=manifest["embedding_fingerprint"],
+        apply=True,
     )
     assert result["snapshot_entries"] >= 1
     assert any((tmp_path / "snapshot-target").rglob("*"))

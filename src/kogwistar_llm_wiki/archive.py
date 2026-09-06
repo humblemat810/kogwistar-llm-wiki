@@ -25,7 +25,8 @@ from .namespaces import WorkspaceNamespaces
 from .utils import _temporary_namespace
 
 
-ARCHIVE_FORMAT_VERSION = 1
+ARCHIVE_FORMAT_VERSION = 2
+_READABLE_ARCHIVE_FORMATS = {1, ARCHIVE_FORMAT_VERSION}
 _ARTIFACT_DIRS = ("raw_documents", "source_artifacts", "parser_runs", "workflow_runs", "maintenance")
 _SECRET_NAMES = {".env", ".env.local", "auth.sqlite", "credentials.json", "secrets.json"}
 
@@ -175,7 +176,7 @@ def _read_manifest(path: str | Path) -> dict[str, Any]:
         if raw is None:
             raise ArchiveError("archive has no manifest.json")
         value = json.load(raw)
-    if value.get("archive_format_version") != ARCHIVE_FORMAT_VERSION:
+    if value.get("archive_format_version") not in _READABLE_ARCHIVE_FORMATS:
         raise ArchiveError(f"unsupported archive format: {value.get('archive_format_version')!r}")
     return value
 
@@ -232,7 +233,56 @@ def verify_archive(path: str | Path) -> dict[str, Any]:
             raise ArchiveError(f"archive range does not match events for {namespace!r}")
     if set(first) - set(ranges):
         raise ArchiveError("events contain a namespace missing from the manifest ranges")
+    _verify_artifact_payloads(archive_path=path, manifest=manifest)
     return manifest
+
+
+def _verify_artifact_payloads(*, archive_path: str | Path, manifest: Mapping[str, Any]) -> None:
+    """Verify every declared artifact and v2 snapshot file before restore."""
+    version = int(manifest.get("archive_format_version", 1))
+    artifacts: dict[str, str] = {}
+    for item in manifest.get("artifact_entries", []):
+        if not isinstance(item, Mapping) or not item.get("path") or not item.get("sha256"):
+            if version >= 2:
+                raise ArchiveError("v2 artifact entry has no checksum")
+            continue
+        path = str(item["path"])
+        checksum = str(item["sha256"])
+        if path in artifacts and artifacts[path] != checksum:
+            raise ArchiveError(f"artifact has conflicting checksums: {path!r}")
+        artifacts[path] = checksum
+    snapshots = [item for item in manifest.get("backend_snapshot_entries", []) if isinstance(item, Mapping)]
+    snapshot_files: dict[str, str] = {}
+    for entry in snapshots:
+        files = entry.get("files")
+        if files is None:
+            if manifest.get("archive_format_version", 1) >= 2:
+                raise ArchiveError("v2 snapshot entry has no per-file checksums")
+            continue
+        for item in files:
+            if not isinstance(item, Mapping) or not item.get("path") or not item.get("sha256"):
+                raise ArchiveError("snapshot checksum entry is malformed")
+            snapshot_files[str(item["path"])] = str(item["sha256"])
+    with tarfile.open(archive_path, "r:gz") as archive:
+        declared = {**artifacts, **snapshot_files}
+        seen: set[str] = set()
+        for member in archive.getmembers():
+            if not member.isfile() or member.issym() or member.islnk():
+                continue
+            if not (member.name.startswith("artifacts/") or member.name.startswith("backend_snapshots/")):
+                continue
+            if member.name not in declared:
+                continue
+            raw = archive.extractfile(member)
+            if raw is None:
+                raise ArchiveError(f"archive payload is unreadable: {member.name!r}")
+            actual = hashlib.sha256(raw.read()).hexdigest()
+            if actual != declared[member.name]:
+                raise ArchiveError(f"archive payload checksum does not match manifest: {member.name!r}")
+            seen.add(member.name)
+        missing = set(declared) - seen
+        if missing:
+            raise ArchiveError(f"archive payload is missing: {sorted(missing)[0]!r}")
 
 
 def _iter_archive_events(path: str | Path) -> Iterator[EntityEventEnvelope]:
@@ -302,6 +352,7 @@ def _restore_artifacts(
     archive: tarfile.TarFile,
     target_data_dir: Path,
     expected_entries: Mapping[str, Any] | None = None,
+    predecessor_entries: Mapping[str, Any] | None = None,
 ) -> int:
     restored = 0
     seen: set[str] = set()
@@ -321,7 +372,11 @@ def _restore_artifacts(
         seen.add(member.name)
         if destination.exists():
             if destination.read_bytes() != incoming:
-                raise ArchiveError(f"artifact target already differs: {destination}")
+                predecessor = (predecessor_entries or {}).get(member.name)
+                if predecessor is None or _sha256_file(destination) != str(predecessor):
+                    raise ArchiveError(f"artifact target already differs: {destination}")
+                destination.write_bytes(incoming)
+                restored += 1
             continue
         destination.write_bytes(incoming)
         restored += 1
@@ -434,7 +489,17 @@ def create_archive(
                 )
                 arcname = Path("backend_snapshots") / Path(relative)
                 shutil.copytree(source, staging / arcname, dirs_exist_ok=True)
-                snapshot_entries.append({"label": spec.label, "path": arcname.as_posix(), "relative_path": relative})
+                snapshot_files = []
+                copied_root = staging / arcname
+                for copied in copied_root.rglob("*"):
+                    if copied.is_file() and not copied.is_symlink():
+                        snapshot_files.append(
+                            {
+                                "path": copied.relative_to(staging).as_posix(),
+                                "sha256": _sha256_file(copied),
+                            }
+                        )
+                snapshot_entries.append({"label": spec.label, "path": arcname.as_posix(), "relative_path": relative, "files": snapshot_files})
 
         profiles = _embedding_profiles(engines)
         manifest = {
@@ -559,6 +624,7 @@ def restore_archive(
     if target_data_dir is not None:
         data_root = Path(target_data_dir).expanduser().resolve()
         data_root.mkdir(parents=True, exist_ok=True)
+        previous_artifacts: dict[str, str] = {}
         for archive_path in [*(Path(item) for item in parent_archives), Path(archive)]:
             archive_manifest = verify_archive(archive_path)
             expected = {
@@ -566,7 +632,8 @@ def restore_archive(
                 for item in archive_manifest.get("artifact_entries", [])
             }
             with tarfile.open(archive_path, "r:gz") as incoming:
-                _restore_artifacts(incoming, data_root, expected)
+                _restore_artifacts(incoming, data_root, expected, predecessor_entries=previous_artifacts)
+            previous_artifacts.update(expected)
 
     for namespace, rows in grouped.items():
         writer = _event_writer(getattr(target_specs[namespace].engine, "meta_sqlite"))
@@ -592,8 +659,9 @@ def restore_backend_snapshot(
     target_data_dir: str | Path,
     backend: str,
     embedding_fingerprint: str | None = None,
+    apply: bool = False,
 ) -> dict[str, Any]:
-    """Extract an exact compatible local snapshot into a fresh data directory."""
+    """Validate, and optionally extract, an exact compatible local snapshot."""
     manifest = verify_archive(archive)
     if manifest.get("archive_kind") != "base":
         raise ArchiveError("fast backend snapshot restore requires a base archive")
@@ -605,9 +673,24 @@ def restore_backend_snapshot(
     entries = list(manifest.get("backend_snapshot_entries") or [])
     if not entries:
         raise ArchiveError("archive does not contain a backend snapshot")
+    if int(manifest.get("archive_format_version", 1)) < 2:
+        raise ArchiveError("legacy snapshots without per-file checksums are not eligible for fast restore")
     target = Path(target_data_dir).expanduser().resolve()
     if target.exists() and any(target.iterdir()):
         raise ArchiveError(f"snapshot restore target is not empty: {target}")
+    artifact_expected = {
+        str(item["path"]): str(item["sha256"])
+        for item in manifest.get("artifact_entries", [])
+    }
+    if not apply:
+        return {
+            "archive_id": manifest["archive_id"],
+            "target_data_dir": str(target),
+            "backend": backend,
+            "embedding_fingerprint": expected,
+            "snapshot_entries": len(entries),
+            "dry_run": True,
+        }
     target.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive, "r:gz") as incoming:
         for entry in entries:
@@ -633,17 +716,14 @@ def restore_backend_snapshot(
                 if source is None:
                     raise ArchiveError(f"snapshot member is unreadable: {member.name!r}")
                 destination.write_bytes(source.read())
-        expected = {
-            str(item["path"]): str(item["sha256"])
-            for item in manifest.get("artifact_entries", [])
-        }
-        _restore_artifacts(incoming, target, expected)
+        _restore_artifacts(incoming, target, artifact_expected)
     return {
         "archive_id": manifest["archive_id"],
         "target_data_dir": str(target),
         "backend": backend,
-        "embedding_fingerprint": expected,
+        "embedding_fingerprint": str(manifest.get("embedding_fingerprint") or ""),
         "snapshot_entries": len(entries),
+        "dry_run": False,
     }
 
 

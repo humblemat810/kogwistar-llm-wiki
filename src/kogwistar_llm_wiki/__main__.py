@@ -630,15 +630,28 @@ def _cmd_archive_restore(args: argparse.Namespace) -> None:
 
     source_workspace = str(inspect_archive(args.archive)["workspace_id"])
     if args.use_backend_snapshot:
-        if args.target_workspace and args.target_workspace != source_workspace:
-            raise ValueError("--use-backend-snapshot supports exact workspace recovery only")
         if not args.data_dir:
             raise ValueError("--data-dir is required with --use-backend-snapshot")
+        if not args.apply:
+            # Snapshot validation must never create directories or write files.
+            # The explicit flag mirrors portable event restore safety.
+            result = restore_backend_snapshot(
+                archive=args.archive,
+                target_data_dir=args.data_dir or "",
+                backend=args.backend,
+                embedding_fingerprint=args.embedding_fingerprint,
+                apply=False,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return
+        if args.target_workspace and args.target_workspace != source_workspace:
+            raise ValueError("--use-backend-snapshot supports exact workspace recovery only")
         result = restore_backend_snapshot(
             archive=args.archive,
             target_data_dir=args.data_dir,
             backend=args.backend,
             embedding_fingerprint=args.embedding_fingerprint,
+            apply=True,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
         return
