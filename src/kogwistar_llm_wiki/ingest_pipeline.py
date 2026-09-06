@@ -1552,6 +1552,13 @@ class IngestPipeline:
         maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
         revision = self.source_revision(request=request, source_document_id=source_document_id)
         required_stage = required_stage_for_maintenance(maintenance_kind)
+        request_fingerprint = str(
+            stable_id(
+                "kogwistar_llm_wiki.maintenance_request_parameters",
+                objective or "",
+                json.dumps(dict(budgets or {}), sort_keys=True, default=str),
+            )
+        )
         self._trace_step(
             "create_maintenance_request_start",
             request=request,
@@ -1566,6 +1573,7 @@ class IngestPipeline:
                 source_document_id,
                 maintenance_kind,
                 revision.revision_id,
+                request_fingerprint,
             )
         )
         if not self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
@@ -1589,6 +1597,7 @@ class IngestPipeline:
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
                     "objective": objective,
+                    "request_fingerprint": request_fingerprint,
                     "budgets": _metadata_digest_value(dict(budgets or {})),
                 },
             )
@@ -1604,6 +1613,7 @@ class IngestPipeline:
                 source_document_id,
                 maintenance_kind,
                 revision.revision_id,
+                request_fingerprint,
             )
         )
         with _temporary_namespace(self.engines.conversation, namespace):
@@ -1633,6 +1643,7 @@ class IngestPipeline:
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
                     "objective": objective,
+                    "request_fingerprint": request_fingerprint,
                     "budgets": dict(budgets or {}),
                 },
                 idempotency_key=lane_idempotency_key,
@@ -1652,6 +1663,7 @@ class IngestPipeline:
             payload_matches={
                 "maintenance_kind": maintenance_kind,
                 "source_revision_id": revision.revision_id,
+                "request_fingerprint": request_fingerprint,
             },
         ):
             self._enqueue_maintenance_job(

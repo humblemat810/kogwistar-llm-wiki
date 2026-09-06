@@ -164,6 +164,43 @@ class WorkbenchInteractionStore:
         winner = self.get(workspace_id=workspace_id, interaction_id=interaction_id)
         return (winner or interaction), False
 
+    def persist_proposal(
+        self,
+        *,
+        workspace_id: str,
+        request: Mapping[str, object],
+        proposal: Mapping[str, object],
+    ) -> WorkbenchInteraction:
+        """Store a validated proposal as a completed interaction for confirmation."""
+        interaction_id = str(uuid.uuid4())
+        session_id = str(request.get("session_id") or "default")
+        submitted_at_ms = int(time.time() * 1000)
+        stored_request = {
+            **dict(request),
+            "workspace_id": workspace_id,
+            "session_id": session_id,
+            "interaction_id": interaction_id,
+            "submitted_at_ms": submitted_at_ms,
+        }
+        self._write_artifact(
+            workspace_id=workspace_id,
+            node_id=_request_node_id(workspace_id, interaction_id),
+            artifact_kind=self.request_kind,
+            interaction_id=interaction_id,
+            payload=stored_request,
+        )
+        interaction, _ = self.persist_result(
+            workspace_id=workspace_id,
+            interaction_id=interaction_id,
+            session_id=session_id,
+            submitted_at_ms=submitted_at_ms,
+            response={
+                "answer": {"proposal": dict(proposal)},
+                "proposal_request": stored_request,
+            },
+        )
+        return interaction
+
     def get_confirmation(self, *, workspace_id: str, interaction_id: str) -> dict[str, object] | None:
         return self._read_artifact(
             workspace_id=workspace_id,

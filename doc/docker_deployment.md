@@ -26,6 +26,11 @@ REST agent protocol routes are disabled by default. Enable them explicitly for
 local use with `LLM_WIKI_AGENT_API_ENABLED=true`. Bearer authentication is
 available through `LLM_WIKI_API_TOKEN` and `LLM_WIKI_AUTH_REQUIRED=true`;
 configure token scopes with `LLM_WIKI_API_TOKEN_SCOPES=read,write` or `admin`.
+For a trusted single-user local container, set `LLM_WIKI_AUTH_MODE=disabled`
+explicitly. This is a special no-identity mode: no bearer token or workspace
+ACL is required, but the configured workspace ID still scopes the data. It is
+not a named default user and must not be used on a shared or non-local bind.
+Explicit `disabled` overrides token variables left in the environment.
 The native MCP transport has its own equivalent boundary: set
 `LLM_WIKI_MCP_AUTH_REQUIRED=true` and `LLM_WIKI_MCP_TOKEN`. If the MCP token is
 omitted, it falls back to `LLM_WIKI_API_TOKEN`; `LLM_WIKI_MCP_TOKEN_SCOPES`
@@ -35,6 +40,20 @@ FastMCP provider for production identity management.
 The application agent extra pins the tested FastMCP release, and the Docker
 image installs that extra from `pyproject.toml` so the Dockerfile does not carry
 a second FastMCP version declaration.
+For production identity, set `LLM_WIKI_AUTH_MODE=kogwistar_jwt`, `JWT_ALG`,
+`JWT_SECRET` (and optional `JWT_ISS`/`JWT_AUD`), then provide workspace
+membership through JWT `workspaces`/`workspace_ids` claims or
+`LLM_WIKI_WORKSPACE_ACL_JSON`, for example
+`{"alice":{"workspaces":{"demo":["read","write"]}}}`. JWT mode fails
+closed for an unlisted workspace and passes verified claims into the Kogwistar
+ACL context. Change environment variables with `docker compose up -d
+--force-recreate`; Compose captures environment at container start.
+Moving from personal mode to static-token or JWT mode is configuration-only if
+the same workspace ID is retained: graph data does not need re-indexing. You
+must provision token scopes and, for JWT mode, workspace membership before
+clients can access it. Existing personal records have no retroactive principal
+owner. Splitting data between users requires explicit application-level
+export/import into separate workspace IDs.
 For any non-local bind or production deployment, require authentication, TLS,
 rate limiting, and network policy in front of both services.
 

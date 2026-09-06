@@ -905,6 +905,7 @@ class MaintenanceWorker(BaseWorker):
             budget_state["budget_scope"] = "maintenance_job"
         budget_state.setdefault("budget_kind", "token")
         budget_ledger: StateBackedBudgetLedger = StateBackedBudgetLedger(budget_state)
+        usage_persisted = False
         started_ms = int(time.time() * 1000)
         self._emit_trace(
             "maintenance_runtime_attempt_start",
@@ -1009,6 +1010,8 @@ class MaintenanceWorker(BaseWorker):
                     if terminal_success and ctx.job_id:
                         if self._advance_maintenance_plan(ctx, budget_state=budget_state):
                             return
+                        self._persist_maintenance_usage(ctx, budget_ledger, result)
+                        usage_persisted = True
                         self._emit_lane_reply(
                             workspace_id=ctx.workspace_id,
                             source_document_id=str(ctx.payload.get("source_document_id") or ""),
@@ -1087,34 +1090,45 @@ class MaintenanceWorker(BaseWorker):
                     if ctx.job_id:
                         self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
                 finally:
-                    try:
-                        persist_usage_events(
-                            self.engines.conversation.meta_sqlite,
-                            namespace=ns.usage_events,
-                            events=budget_ledger.events,
-                            workspace_id=ctx.workspace_id,
-                            attempt_id=str(
-                                getattr(locals().get("result"), "run_id", None)
-                                or uuid.uuid4()
-                            ),
-                            source_document_id=str(ctx.payload.get("source_document_id") or "") or None,
-                            operation_id=str(ctx.job_id or ctx.request_node_id),
-                            operation_kind=ctx.maintenance_kind,
-                            maintenance_job_id=str(ctx.job_id or ctx.request_node_id),
-                            provider=self.provider_settings.parser.provider,
-                            model=self.provider_settings.parser.model,
-                        )
-                        UsageProjection(
-                            self.engines.conversation.meta_sqlite,
-                            workspace_id=ctx.workspace_id,
-                            source_namespace=ns.usage_events,
-                            projection_namespace=ns.usage_projection,
-                        ).refresh()
-                    except Exception:
-                        logger.exception(
-                            "Failed to persist usage events for maintenance job %s",
-                            ctx.request_node_id,
-                        )
+                    if not usage_persisted:
+                        try:
+                            self._persist_maintenance_usage(
+                                ctx,
+                                budget_ledger,
+                                locals().get("result"),
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Failed to persist usage events for maintenance job %s",
+                                ctx.request_node_id,
+                            )
+
+    def _persist_maintenance_usage(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        budget_ledger: StateBackedBudgetLedger,
+        result: object | None,
+    ) -> None:
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        persist_usage_events(
+            self.engines.conversation.meta_sqlite,
+            namespace=ns.usage_events,
+            events=budget_ledger.events,
+            workspace_id=ctx.workspace_id,
+            attempt_id=str(getattr(result, "run_id", "") or uuid.uuid4()),
+            source_document_id=str(ctx.payload.get("source_document_id") or "") or None,
+            operation_id=str(ctx.job_id or ctx.request_node_id),
+            operation_kind=ctx.maintenance_kind,
+            maintenance_job_id=str(ctx.job_id or ctx.request_node_id),
+            provider=self.provider_settings.parser.provider,
+            model=self.provider_settings.parser.model,
+        )
+        UsageProjection(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=ctx.workspace_id,
+            source_namespace=ns.usage_events,
+            projection_namespace=ns.usage_projection,
+        ).refresh()
 
     def _requeue_suspended_maintenance_job(
         self,
