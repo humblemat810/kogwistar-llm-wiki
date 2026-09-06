@@ -114,9 +114,42 @@ another graph space. A space-specific setting overrides the global
 the parser-compatible `KG_DOC_EMBED_*` setting. Postgres requires the real
 model output dimension to be declared; it will reject an ambiguous real-model
 configuration rather than create an incompatible vector index. This contract
-is backend-independent; Postgres additionally needs the dimension for its
-typed vector columns, while Chroma validates the dimension when its collection
-is opened or written.
+is backend-independent. Each persistent graph-space store records a sanitized
+embedding profile in the Kogwistar metadata store. Chroma does not use mutable
+collection metadata as the authority because reopening a collection can retain
+old metadata silently.
+
+The current LLM-Wiki PostgreSQL bundle stores all graph spaces in shared
+physical pgvector tables. Consequently, every PostgreSQL graph space must use
+the same embedding provider, model, dimension, and base URL. Per-space models
+and dimensions remain valid for in-memory and Chroma bundles because those
+spaces have separate physical stores. PostgreSQL refuses a mixed profile at
+bootstrap instead of silently storing incomparable vectors in one HNSW index.
+
+Changing the embedding dimension of an existing PostgreSQL store is a storage
+migration, not a configuration-only change. Startup checks every `embedding`
+column and fails before writes when it finds a stale `vector(N)` type. Stop
+writers, archive canonical state, create an isolated target database or schema
+with the new profile, replay/re-embed, validate, and then cut over. Do not run
+`ALTER COLUMN ... TYPE vector(N)` on populated tables: old vectors and HNSW
+indexes require rebuilding. See [PostgreSQL embedding migrations](postgres_embedding_migration.md).
+The same rule applies to Chroma when the provider, model, endpoint, dimension,
+or similarity metric changes. Startup rejects a populated Chroma directory
+whose registered profile differs, including same-dimension model changes.
+Legacy populated Chroma directories created before profile registration fail
+closed until an operator verifies the old settings and explicitly runs:
+
+```powershell
+python -m kogwistar_llm_wiki --data-dir ./data --backend chroma `
+  embeddings inspect --workspace demo
+python -m kogwistar_llm_wiki --data-dir ./data --backend chroma `
+  embeddings adopt-legacy-profile --workspace demo `
+  --acknowledge-legacy-vectors
+```
+
+Adoption records an operator attestation; it does not re-embed or prove old
+vectors. The safer migration is archive, restore into an isolated directory,
+re-embed, validate, and cut over.
 Both the REST and MCP containers construct all graph-space engines before
 serving requests, so this validation happens during container startup. A
 Compose configuration can therefore fail fast at startup instead of running
@@ -167,6 +200,11 @@ default. Embedded Chroma is suitable for a single application container or a
 development demo, but two independent containers must not concurrently share
 an embedded Chroma directory. Use separate Compose projects or a shared
 server-backed store when process isolation is required.
+Persistent Chroma profiles are bound per graph-space directory, so separate
+conversation, workflow, knowledge, and wisdom directories may use different
+embedding models and dimensions. They must not be mixed inside one physical
+directory. Use `embeddings inspect` to see configured, registered, and physical
+state without binding a new profile.
 
 ## Shutdown And Persistence
 

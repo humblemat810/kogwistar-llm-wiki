@@ -167,6 +167,38 @@ python -m kogwistar_llm_wiki --help
 `workflow_layered` when you want the iterative layerwise parser path instead of
 the page-index parser.
 
+## `llm-wiki embeddings`
+
+Inspect or explicitly adopt the embedding profile for persistent graph stores.
+The profile includes provider, model, dimension, similarity metric, and a
+sanitized endpoint fingerprint; credentials and API-key environment variable
+names are never persisted. The profile is checked before graph writes. A
+PostgreSQL physical table bundle must use one exact profile, while each
+persistent Chroma graph directory has its own profile binding.
+
+```powershell
+# Read configured, registered, and physical state without binding a profile:
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend chroma `
+  embeddings inspect `
+  --workspace demo
+
+# Explicitly attest to the configured profile for a known legacy Chroma store:
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend chroma `
+  embeddings adopt-legacy-profile `
+  --workspace demo `
+  --acknowledge-legacy-vectors
+```
+
+Adoption is operator-only and does not convert or re-embed existing vectors.
+For an unknown or incompatible store, prefer a portable archive, isolated
+restore, re-embedding, validation, and cutover. There is no automatic in-place
+dimension migration. In-memory stores are process-local and do not provide
+durable profile compatibility across restarts.
+
 ## Test Commands
 
 ```powershell

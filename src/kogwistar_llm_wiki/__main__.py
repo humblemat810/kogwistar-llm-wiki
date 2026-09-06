@@ -75,6 +75,7 @@ def _build_engines(
     *,
     split_derived_knowledge: bool = False,
     conversation_persistence_mode: str = "single_stage",
+    embedding_profile_mode: str = "enforce",
 ) -> "NamespaceEngines":
     """Construct a NamespaceEngines bundle from the selected backend."""
     from kogwistar_llm_wiki.ingest_pipeline import (
@@ -90,6 +91,8 @@ def _build_engines(
     builder_kwargs: dict[str, object] = {
         "split_derived_knowledge": split_derived_knowledge,
     }
+    if embedding_profile_mode != "enforce":
+        builder_kwargs["embedding_profile_mode"] = embedding_profile_mode
     if conversation_persistence_mode != "single_stage":
         builder_kwargs["conversation_persistence_mode"] = conversation_persistence_mode
     if backend == "chroma":
@@ -678,6 +681,73 @@ def _cmd_archive_catalog(args: argparse.Namespace) -> None:
     print(json.dumps(rows, indent=2, sort_keys=True))
 
 
+def _namespace_engine_items(engines: "NamespaceEngines"):
+    return (
+        ("conversation", engines.conversation),
+        ("workflow", engines.workflow),
+        ("knowledge", engines.kg),
+        ("wisdom", engines.wisdom),
+        ("derived_knowledge", engines.derived_knowledge),
+    )
+
+
+def _cmd_embeddings_inspect(args: argparse.Namespace) -> None:
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+        conversation_persistence_mode=args.conversation_persistence_mode,
+        embedding_profile_mode="inspect",
+    )
+    try:
+        print(
+            json.dumps(
+                {
+                    label: engine.embedding_profile_report
+                    for label, engine in _namespace_engine_items(engines)
+                    if engine is not None
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    finally:
+        _close_engines(engines)
+
+
+def _cmd_embeddings_adopt_legacy(args: argparse.Namespace) -> None:
+    if not args.acknowledge_legacy_vectors:
+        raise ValueError(
+            "legacy profile adoption is unsafe without --acknowledge-legacy-vectors; "
+            "verify the previous provider, model, dimension, endpoint, and metric first"
+        )
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+        conversation_persistence_mode=args.conversation_persistence_mode,
+        embedding_profile_mode="adopt",
+    )
+    try:
+        print(
+            json.dumps(
+                {
+                    label: engine.embedding_profile_report
+                    for label, engine in _namespace_engine_items(engines)
+                    if engine is not None
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    finally:
+        _close_engines(engines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m kogwistar_llm_wiki",
@@ -937,6 +1007,28 @@ def main(argv: list[str] | None = None) -> int:
     archive_catalog_p.add_argument("--directory", required=True, help="Archive directory")
     archive_catalog_p.add_argument("--before-ms", type=int, default=None, help="Only show archives captured by this epoch-millisecond")
     archive_catalog_p.set_defaults(func=_cmd_archive_catalog)
+
+    embeddings_p = sub.add_parser(
+        "embeddings",
+        help="Inspect or explicitly adopt persistent embedding profiles",
+    )
+    embeddings_sub = embeddings_p.add_subparsers(dest="embedding_command", required=True)
+    embedding_inspect_p = embeddings_sub.add_parser(
+        "inspect", help="Report configured, registered, and physical embedding state"
+    )
+    embedding_inspect_p.add_argument("--workspace", required=True, help="Workspace ID")
+    embedding_inspect_p.set_defaults(func=_cmd_embeddings_inspect)
+    embedding_adopt_p = embeddings_sub.add_parser(
+        "adopt-legacy-profile",
+        help="Bind the configured profile to already-populated unregistered storage",
+    )
+    embedding_adopt_p.add_argument("--workspace", required=True, help="Workspace ID")
+    embedding_adopt_p.add_argument(
+        "--acknowledge-legacy-vectors",
+        action="store_true",
+        help="Acknowledge that existing vectors were verified against the configured profile",
+    )
+    embedding_adopt_p.set_defaults(func=_cmd_embeddings_adopt_legacy)
 
     # daemon sub-command
     daemon_p = sub.add_parser("daemon", help="Run a background daemon")

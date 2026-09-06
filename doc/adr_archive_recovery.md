@@ -13,6 +13,12 @@ workspace namespace. Each namespace has explicit `from_seq` and `to_seq`
 watermarks. The archive timestamp is observability metadata; it is not the
 correctness cursor.
 
+Archive manifests record the registered embedding profile for each graph space,
+including provider, model, dimension, similarity metric, and a sanitized
+endpoint fingerprint. Archive creation does not infer a profile from an
+embedding callable name. An engine without a registered profile must be
+initialized and verified before it can be archived.
+
 The existing five-field replay iterator remains compatible. Archive tooling
 uses the separate full envelope containing `namespace`, `seq`, `event_id`,
 `entity_kind`, `entity_id`, `op`, canonical `payload_json`, and `created_at`.

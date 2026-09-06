@@ -72,6 +72,7 @@ def test_archive_round_trip_remaps_workspace_and_replays_valid_node(tmp_path):
     manifest = create_archive(source, workspace_id="source-ws", output=archive_path)
     assert manifest["archive_kind"] == "base"
     assert inspect_archive(archive_path)["event_count"] >= 1
+    assert manifest["embedding_profiles"]["knowledge"]["fingerprint"]
 
     target = build_in_memory_namespace_engines()
     report = restore_archive(

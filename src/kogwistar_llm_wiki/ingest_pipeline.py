@@ -21,6 +21,7 @@ from typing import Callable, Literal, Mapping, Protocol
 
 from .utils import _temporary_namespace
 from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core.embedding_profile import EmbeddingProfile, endpoint_fingerprint
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.engine_core.models import Document, GraphExtractionWithIDs, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
@@ -282,6 +283,33 @@ def _resolve_embedding_functions(
     return functions, configs
 
 
+def _validate_shared_postgres_embedding_profile(
+    configs: Mapping[str, EmbeddingProviderConfig],
+) -> None:
+    """Protect shared PostgreSQL vector tables from mixed embedding spaces.
+
+    The PostgreSQL namespace bundle uses one schema and one set of pgvector
+    tables, partitioned logically by graph namespace. A physical vector
+    collection therefore needs one compatible provider/model/dimension profile.
+    Chroma's per-directory stores do not have this restriction.
+    """
+    profiles = {space: _embedding_profile(config) for space, config in configs.items()}
+    if len(set(profiles.values())) <= 1:
+        return
+    rendered = ", ".join(
+        f"{space}={profile.provider}/{profile.model}/{profile.dimension}D"
+        for space, profile in sorted(profiles.items())
+    )
+    raise ValueError(
+        "PostgreSQL LLM-Wiki namespace engines currently share physical "
+        f"pgvector tables, but their embedding profiles differ: {rendered}. "
+        "Configure one provider/model/dimension for all graph spaces, or use "
+        "separate physical PostgreSQL schemas or databases per embedding space. "
+        "Existing vectors are not migrated automatically; archive, replay, "
+        "and re-embed into the isolated target before cutover."
+    )
+
+
 
 
 
@@ -294,6 +322,18 @@ class ParseSourceResult(Protocol):
 
 
 ParserFn = Callable[..., ParseSourceResult]
+
+
+def _embedding_profile(config: EmbeddingProviderConfig) -> EmbeddingProfile:
+    """Translate parser-owned provider settings into the core contract."""
+
+    return EmbeddingProfile(
+        provider=config.provider,
+        model=config.model,
+        dimension=config.dimension,
+        similarity_metric="cosine",
+        endpoint_fingerprint=endpoint_fingerprint(config.base_url),
+    )
 
 
 def build_in_memory_namespace_engines(
@@ -310,9 +350,10 @@ def build_in_memory_namespace_engines(
     embedding_api_key_env: str | None = None,
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
 ) -> NamespaceEngines:
     root = Path(base_dir) if base_dir is not None else Path(tempfile.mkdtemp(prefix="kogwistar-llm-wiki-"))
-    embeddings, _ = _resolve_embedding_functions(
+    embeddings, configs = _resolve_embedding_functions(
         embedding_function=embedding_function,
         embedding_config=embedding_config,
         embedding_functions=embedding_functions,
@@ -329,15 +370,17 @@ def build_in_memory_namespace_engines(
         root / "conversation",
         kg_graph_type="conversation",
         embedding_function=embeddings["conversation"],
+        embedding_profile=_embedding_profile(configs["conversation"]),
+        embedding_profile_mode=embedding_profile_mode,
         persistence_mode=conversation_persistence_mode,
     )
     
-    derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"]) if split_derived_knowledge else None
+    derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(configs["knowledge"]), embedding_profile_mode=embedding_profile_mode) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=conversation,
-        workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"]),
-        kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"]),
-        wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"]),
+        workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"], embedding_profile=_embedding_profile(configs["workflow"]), embedding_profile_mode=embedding_profile_mode),
+        kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(configs["knowledge"]), embedding_profile_mode=embedding_profile_mode),
+        wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"], embedding_profile=_embedding_profile(configs["wisdom"]), embedding_profile_mode=embedding_profile_mode),
         derived_knowledge=derived_engine,
     )
 
@@ -356,9 +399,10 @@ def build_persistent_namespace_engines(
     embedding_api_key_env: str | None = None,
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
 ) -> NamespaceEngines:
     root = Path(base_dir)
-    embeddings, _ = _resolve_embedding_functions(
+    embeddings, resolved_embedding_configs = _resolve_embedding_functions(
         embedding_function=embedding_function,
         embedding_config=embedding_config,
         embedding_functions=embedding_functions,
@@ -369,17 +413,19 @@ def build_persistent_namespace_engines(
         embedding_base_url=embedding_base_url,
         embedding_api_key_env=embedding_api_key_env,
     )
-    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"]) if split_derived_knowledge else None
+    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]), embedding_profile_mode=embedding_profile_mode) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_persistent_engine(
             root / "conversation",
             kg_graph_type="conversation",
             embedding_function=embeddings["conversation"],
+            embedding_profile=_embedding_profile(resolved_embedding_configs["conversation"]),
+            embedding_profile_mode=embedding_profile_mode,
             persistence_mode=conversation_persistence_mode,
         ),
-        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"]),
-        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"]),
-        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"]),
+        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"], embedding_profile=_embedding_profile(resolved_embedding_configs["workflow"]), embedding_profile_mode=embedding_profile_mode),
+        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]), embedding_profile_mode=embedding_profile_mode),
+        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"], embedding_profile=_embedding_profile(resolved_embedding_configs["wisdom"]), embedding_profile_mode=embedding_profile_mode),
         derived_knowledge=derived_engine,
     )
 
@@ -401,6 +447,7 @@ def build_postgres_namespace_engines(
     embedding_api_key_env: str | None = None,
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
 ) -> NamespaceEngines:
     root = Path(base_dir)
     embeddings, resolved_embedding_configs = _resolve_embedding_functions(
@@ -414,10 +461,9 @@ def build_postgres_namespace_engines(
         embedding_base_url=embedding_base_url,
         embedding_api_key_env=embedding_api_key_env,
     )
-    # Each physical engine owns its own vector column/index contract. A legacy
-    # global ``embedding_dim`` remains a fallback, but scoped configurations
-    # retain their dimensions instead of forcing the knowledge dimension onto
-    # conversation or workflow state.
+    # A global ``embedding_dim`` remains a fallback. The PostgreSQL bundle
+    # validates the resolved profiles below because its graph spaces share the
+    # same physical vector tables.
     embedding_dimensions = {
         space: (
             (embedding_configs or {}).get(space).dimension
@@ -426,6 +472,7 @@ def build_postgres_namespace_engines(
         )
         for space in _EMBEDDING_SPACES
     }
+    _validate_shared_postgres_embedding_profile(resolved_embedding_configs)
     root.mkdir(parents=True, exist_ok=True)
     derived_engine = _build_postgres_engine(
         root / "derived_knowledge",
@@ -434,6 +481,8 @@ def build_postgres_namespace_engines(
         dsn=dsn,
         embedding_dim=embedding_dimensions["knowledge"],
         schema=schema,
+        embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]),
+        embedding_profile_mode=embedding_profile_mode,
     ) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_postgres_engine(
@@ -443,6 +492,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["conversation"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["conversation"]),
+            embedding_profile_mode=embedding_profile_mode,
             persistence_mode=conversation_persistence_mode,
         ),
         workflow=_build_postgres_engine(
@@ -452,6 +503,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["workflow"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["workflow"]),
+            embedding_profile_mode=embedding_profile_mode,
         ),
         kg=_build_postgres_engine(
             root / "kg",
@@ -460,6 +513,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["knowledge"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]),
+            embedding_profile_mode=embedding_profile_mode,
         ),
         wisdom=_build_postgres_engine(
             root / "wisdom",
@@ -468,6 +523,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["wisdom"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["wisdom"]),
+            embedding_profile_mode=embedding_profile_mode,
         ),
         derived_knowledge=derived_engine,
     )
@@ -478,6 +535,8 @@ def _build_engine(
     *,
     kg_graph_type: str,
     embedding_function: EmbeddingFunctionLike,
+    embedding_profile: EmbeddingProfile | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
@@ -485,6 +544,8 @@ def _build_engine(
         persist_directory=str(persist_directory),
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
+        embedding_profile=embedding_profile,
+        embedding_profile_mode=embedding_profile_mode,
         backend_factory=build_in_memory_backend,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
@@ -496,6 +557,8 @@ def _build_persistent_engine(
     *,
     kg_graph_type: str,
     embedding_function: EmbeddingFunctionLike,
+    embedding_profile: EmbeddingProfile | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
@@ -503,6 +566,8 @@ def _build_persistent_engine(
         persist_directory=str(persist_directory),
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
+        embedding_profile=embedding_profile,
+        embedding_profile_mode=embedding_profile_mode,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
     )
@@ -516,6 +581,8 @@ def _build_postgres_engine(
     dsn: str,
     embedding_dim: int,
     schema: str,
+    embedding_profile: EmbeddingProfile | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     from kogwistar.engine_core.engine_postgres import EnginePostgresConfig, build_postgres_backend
@@ -534,6 +601,8 @@ def _build_postgres_engine(
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
         backend=backend,
+        embedding_profile=embedding_profile,
+        embedding_profile_mode=embedding_profile_mode,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
     )

@@ -169,7 +169,62 @@ def test_non_postgres_builder_also_rejects_real_provider_without_dimension(
     assert not data_dir.exists()
 
 
-def test_postgres_uses_each_space_dimension(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_postgres_requires_one_embedding_profile_for_shared_vector_tables(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dimensions: dict[str, int] = {}
+
+    def fake_postgres_engine(*args: object, **kwargs: object) -> object:
+        dimensions[str(kwargs["kg_graph_type"])] = int(kwargs["embedding_dim"])
+        return object()
+
+    monkeypatch.setattr(ingest_pipeline, "_build_postgres_engine", fake_postgres_engine)
+    with pytest.raises(ValueError, match="share physical pgvector tables"):
+        ingest_pipeline.build_postgres_namespace_engines(
+            base_dir=tmp_path / "must-not-initialize",
+            dsn="postgresql://localhost/example",
+            embedding_configs={
+                "conversation": EmbeddingProviderConfig(provider="fake", dimension=3),
+                "workflow": EmbeddingProviderConfig(provider="fake", dimension=4),
+                "knowledge": EmbeddingProviderConfig(provider="fake", dimension=5),
+                "wisdom": EmbeddingProviderConfig(provider="fake", dimension=6),
+            },
+    )
+
+    assert dimensions == {}
+    assert not (tmp_path / "must-not-initialize").exists()
+
+
+def test_postgres_rejects_mixed_models_with_matching_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        ingest_pipeline,
+        "_build_postgres_engine",
+        lambda *args, **kwargs: pytest.fail("PostgreSQL backend must not initialize"),
+    )
+
+    with pytest.raises(ValueError, match="embedding profiles differ"):
+        ingest_pipeline.build_postgres_namespace_engines(
+            base_dir=tmp_path / "must-not-initialize-model",
+            dsn="postgresql://localhost/example",
+            embedding_configs={
+                "conversation": EmbeddingProviderConfig(provider="fake", model="history", dimension=5),
+                "workflow": EmbeddingProviderConfig(provider="fake", model="runtime", dimension=5),
+                "knowledge": EmbeddingProviderConfig(provider="fake", model="knowledge", dimension=5),
+                "wisdom": EmbeddingProviderConfig(provider="fake", model="wisdom", dimension=5),
+            },
+        )
+
+    assert not (tmp_path / "must-not-initialize-model").exists()
+
+
+def test_postgres_reuses_one_profile_for_each_shared_graph_space(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     dimensions: dict[str, int] = {}
 
     def fake_postgres_engine(*args: object, **kwargs: object) -> object:
@@ -178,21 +233,21 @@ def test_postgres_uses_each_space_dimension(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(ingest_pipeline, "_build_postgres_engine", fake_postgres_engine)
     ingest_pipeline.build_postgres_namespace_engines(
-        base_dir="unused",
+        base_dir=tmp_path / "shared-profile",
         dsn="postgresql://localhost/example",
         embedding_configs={
-            "conversation": EmbeddingProviderConfig(provider="fake", dimension=3),
-            "workflow": EmbeddingProviderConfig(provider="fake", dimension=4),
-            "knowledge": EmbeddingProviderConfig(provider="fake", dimension=5),
-            "wisdom": EmbeddingProviderConfig(provider="fake", dimension=6),
+            "conversation": EmbeddingProviderConfig(provider="fake", model="shared", dimension=5),
+            "workflow": EmbeddingProviderConfig(provider="fake", model="shared", dimension=5),
+            "knowledge": EmbeddingProviderConfig(provider="fake", model="shared", dimension=5),
+            "wisdom": EmbeddingProviderConfig(provider="fake", model="shared", dimension=5),
         },
     )
 
     assert dimensions == {
-        "conversation": 3,
-        "workflow": 4,
+        "conversation": 5,
+        "workflow": 5,
         "knowledge": 5,
-        "wisdom": 6,
+        "wisdom": 5,
     }
 
 

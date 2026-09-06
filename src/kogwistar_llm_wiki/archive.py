@@ -151,13 +151,14 @@ def _embedding_profiles(engines: NamespaceEngines) -> dict[str, dict[str, Any]]:
         if engine is None or id(engine) in seen:
             continue
         seen.add(id(engine))
-        provider = getattr(engine, "_ef", None)
-        backend = getattr(engine, "backend", None)
-        profiles[label] = {
-            "provider_type": type(provider).__name__ if provider is not None else None,
-            "model": str(provider.name()) if provider is not None and callable(getattr(provider, "name", None)) else None,
-            "dimension": getattr(backend, "embedding_dim", None),
-        }
+        report = getattr(engine, "embedding_profile_report", None) or {}
+        registered = report.get("registered") if isinstance(report, Mapping) else None
+        if not isinstance(registered, Mapping) or not registered.get("fingerprint"):
+            raise ArchiveError(
+                f"archive requires a registered embedding profile for {label}; "
+                "initialize the engine with the profile guard before capture"
+            )
+        profiles[label] = dict(registered)
     return profiles
 
 
