@@ -83,7 +83,13 @@ The first application slice is implemented without a Kogwistar source change:
 - `src/kogwistar_llm_wiki/codex_workbench_agent.py` runs the installed Codex
   CLI as an ephemeral, read-only central reasoning worker. JSONL activity
   renews the 150-second lease only while the process is making progress. A
-  late worker that lost ownership cannot overwrite the accepted result.
+  late worker that lost ownership cannot overwrite the accepted result. The
+  same bounded responder can optionally use `codex app-server --stdio`: it
+  performs the App Server JSON-RPC handshake and one ephemeral read-only turn,
+  streams assistant deltas, supports cockpit output schemas, and always closes
+  the child process on timeout or completion. The default remains `codex exec`
+  for backwards compatibility; select App Server transport with
+  `--codex-transport app_server` or `KOGWISTAR_CODEX_TRANSPORT=app_server`.
 - `python -m kogwistar_llm_wiki ... workbench` starts the local HTTP transport,
   recovers pending interactions, and spawns a configurable bounded worker
   pool. The agent receives only the bounded lens and has no direct graph-write

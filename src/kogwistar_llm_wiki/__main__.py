@@ -440,6 +440,8 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
                 model=args.codex_model,
                 profile=args.codex_profile,
                 timeout_seconds=args.codex_timeout,
+                transport=getattr(args, "codex_transport", None)
+                or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec"),
             ),
             trace_line=trace_line,
         )
@@ -524,6 +526,8 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
                     model=args.codex_model,
                     profile=args.codex_profile,
                     timeout_seconds=args.codex_timeout,
+                    transport=getattr(args, "codex_transport", None)
+                    or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec"),
                 ),
                 trace_line=lambda line: logger.info("seed_cockpit_trace %s", line),
             )
@@ -950,6 +954,12 @@ def main(argv: list[str] | None = None) -> int:
     workbench_p.add_argument("--codex-executable", default=None, help="Codex executable override")
     workbench_p.add_argument("--codex-model", default=None, help="Codex model override")
     workbench_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
+    workbench_p.add_argument(
+        "--codex-transport",
+        choices=["exec", "app_server"],
+        default=None,
+        help="Codex transport (default: KOGWISTAR_CODEX_TRANSPORT or exec)",
+    )
     workbench_p.add_argument("--codex-timeout", type=int, default=300, help="Per-turn timeout in seconds")
     workbench_p.set_defaults(func=_cmd_workbench)
 
@@ -986,6 +996,12 @@ def main(argv: list[str] | None = None) -> int:
     seed_p.add_argument("--codex-executable", default=None, help="Codex executable override")
     seed_p.add_argument("--codex-model", default=None, help="Codex model override")
     seed_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
+    seed_p.add_argument(
+        "--codex-transport",
+        choices=["exec", "app_server"],
+        default=None,
+        help="Codex transport (default: KOGWISTAR_CODEX_TRANSPORT or exec)",
+    )
     seed_p.add_argument("--codex-timeout", type=int, default=300, help="Per-action timeout in seconds")
     seed_p.set_defaults(func=_cmd_seed_bundle)
 

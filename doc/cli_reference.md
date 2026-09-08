@@ -105,6 +105,7 @@ python -m kogwistar_llm_wiki \
   [--codex-executable <path>] \
   [--codex-model <model>] \
   [--codex-profile <profile>] \
+  [--codex-transport exec|app_server] \
   [--codex-timeout 300]
 ```
 
@@ -114,6 +115,12 @@ sandbox. Model activity renews the job lease; ownership is checked again before
 the first terminal result is appended. Browser clients submit Codex turns to
 `POST /api/interactions` and poll `GET /api/interactions` rather than holding a
 model-length HTTP request open.
+
+`exec` is the default Codex transport. Set `--codex-transport app_server` (or
+`KOGWISTAR_CODEX_TRANSPORT=app_server`) to use the installed
+`codex app-server --stdio` JSON-RPC protocol. The adapter starts one
+ephemeral, read-only App Server thread per bounded turn and closes the child on
+completion or timeout.
 
 The current Codex worker answers from the bounded lens or returns `no_change`.
 It does not receive direct graph-write access. Any future mutation proposal
@@ -152,6 +159,7 @@ python -m kogwistar_llm_wiki --help
 |---|---|---|
 | `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `workbench`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
 | `KOGWISTAR_CODEX_EXECUTABLE` | workbench | Optional Codex CLI path when `codex` is not on `PATH` |
+| `KOGWISTAR_CODEX_TRANSPORT` | workbench, seed-bundle | `exec` (default) or `app_server` |
 | `KOGWISTAR_PARSER_PROVIDER` | CLI, parser workflows | Explicit parser provider alias. `azure_openai` is normalized to the `azure` chat provider. |
 | `KOGWISTAR_PARSER_MODEL` | CLI, parser workflows | Explicit parser model or Azure deployment name |
 | `KOGWISTAR_PARSER_BASE_URL` | CLI, parser workflows | Parser endpoint URL, for example Ollama base URL or Azure OpenAI endpoint |
