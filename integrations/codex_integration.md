@@ -1,5 +1,8 @@
 # Codex host integration
 
+For an end-to-end article knowledge-base runbook, including the deterministic
+and App Server paths, see the [LLM-Wiki Cookbook](../doc/cookbook.md).
+
 The Codex executable stays on the host. Run llm-wiki in Docker and connect
 Codex to its native MCP endpoint or REST gateway; do not install Codex inside
 the llm-wiki image.

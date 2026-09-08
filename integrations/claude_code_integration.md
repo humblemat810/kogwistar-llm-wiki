@@ -1,5 +1,8 @@
 # Claude Code Integration
 
+For the complete source-to-query operational flow, see the
+[LLM-Wiki Cookbook](../doc/cookbook.md).
+
 The llm-wiki MCP server is intended to run as a separate service from Claude
 Code. Start the container with `LLM_WIKI_AGENT_API_ENABLED=true` if REST agent
 routes are also needed, and configure a token for remote MCP:

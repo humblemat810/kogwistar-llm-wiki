@@ -1,5 +1,8 @@
 # llm-wiki pi-agent extension
 
+For the complete article ingestion, maintenance, recovery, and agent-serving
+runbook, see the [LLM-Wiki Cookbook](../../doc/cookbook.md).
+
 Install the standalone TypeScript extension into pi's global or project
 extension directory:
 

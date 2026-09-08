@@ -17,6 +17,9 @@ Optional shared-backend equivalents are included later:
 - optional shared ChromaDB backend: slower, explicit shared deployment
 - optional PostgreSQL/pgvector backend: slower still, heavier shared deployment
 
+For task-oriented recipes covering article collections, agents, authentication,
+embeddings, archives, Docker, and Codex, see the [LLM-Wiki Cookbook](doc/cookbook.md).
+
 ---
 
 ## Prerequisites

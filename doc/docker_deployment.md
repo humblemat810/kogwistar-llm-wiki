@@ -5,6 +5,10 @@ REST and MCP containers. Both containers use the same Postgres/pgvector
 database and application-data volume, so they are loosely coupled at the
 process boundary while sharing durable graph state.
 
+For copy-paste workflows from local article ingestion through agent serving,
+health checks, embedding validation, and archive recovery, see the
+[LLM-Wiki Cookbook](cookbook.md).
+
 ## Start
 
 Set a development password first, then build and start the stack:

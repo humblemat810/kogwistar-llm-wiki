@@ -1,5 +1,8 @@
 # llm-wiki Hermes portable plugin
 
+For the complete article ingestion, maintenance, recovery, and agent-serving
+runbook, see the [LLM-Wiki Cookbook](../../doc/cookbook.md).
+
 This directory follows Hermes Agent Plugins v1 portable layout. Install it
 from a repository containing this directory, then enable it:
 
