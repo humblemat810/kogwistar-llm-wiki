@@ -224,6 +224,14 @@ def test_native_mcp_accepts_explicit_token(monkeypatch):
     assert mcp.auth is not None
 
 
+def test_native_mcp_explicit_no_auth_does_not_enable_token_verifier(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "false")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "present-but-disabled")
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+    assert mcp.auth is None
+
+
 def test_native_mcp_jwt_does_not_require_a_static_token(monkeypatch):
     monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "kogwistar_jwt")
     monkeypatch.setenv("JWT_SECRET", "test-secret")
@@ -278,6 +286,7 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
 
 
 def test_native_mcp_applies_read_and_write_scopes_to_tools(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
     monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "secret")
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     # The provider-level list is intentionally unfiltered; list_tools() needs a

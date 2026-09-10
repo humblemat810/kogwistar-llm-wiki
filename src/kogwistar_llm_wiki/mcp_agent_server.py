@@ -58,7 +58,7 @@ def build_agent_mcp(gateway: AgentGateway) -> Any:
                 )
 
         auth = KogwistarJwtVerifier()
-    elif token:
+    elif selected_mode == "static_token" and auth_required and token:
         scopes = [
             item.strip()
             for item in _env_value(
