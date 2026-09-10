@@ -24,6 +24,169 @@ not a safe shared directory for independent writer processes. See the
 [Docker deployment guide](docker_deployment.md) for the container boundary and
 [Quickstart](../QUICKSTART.md) for installation.
 
+## Recipe: Multimodal Representation Service
+
+Use the isolated FastAPI service for production Qwen3-VL inference. The app
+captures source units first and sends resolved, bounded asset bytes to the
+sidecar only during Stage 2 promotion:
+
+```bash
+docker compose -f compose.yml -f compose.multimodal.yml up --build
+```
+
+Use `-f compose.representation-cuda.yml` with the CPU overlay on a host with
+NVIDIA Container Toolkit. Set `LLM_WIKI_REPRESENTATION_DIMENSION=1024` (the
+recommended profile), `1536` for a larger pgvector profile, or `2048` only for
+Chroma/non-HNSW storage. Changing model, revision, dimension, metric, or
+preprocessing requires an isolated re-embedding projection.
+
+The service does not accept source paths or URLs. LLM-Wiki resolves assets,
+checks their SHA-256, and sends bounded bytes. If the service is unavailable,
+Stage 1 remains durable and retryable; text/graph retrieval can continue with
+an explicit partial status.
+
+### Developer-only local adapter
+
+The existing local installation steps below are retained for tests and
+benchmarking only. They do not change the production sidecar architecture.
+
+Native multimodal retrieval is an opt-in projection beside the canonical
+knowledge graph. The native default is Qwen3-VL-Embedding-2B. Its Torch runtime is a versioned installation profile, not an
+implicit local prerequisite: choose `cpu`, `cu126`, or `cu128` deliberately.
+The installer uses the active virtual environment, installs the checked-in
+profile before the application extra, and verifies the resulting runtime.
+It never guesses from the installed NVIDIA driver.
+
+For a local checkout, install the sibling repositories first. The bootstrap
+uses one explicit Python interpreter for every pip operation, which avoids
+mixing an Anaconda `pip` with another `python` on Windows:
+
+```bash
+PYTHON_BIN=.venv/bin/python bash scripts/bootstrap-dev.sh
+# CPU profile:
+.venv/bin/python -m pip install -r requirements/multimodal/torch-cpu.txt
+.venv/bin/python -m pip install -e ".[multimodal-cpu]"
+# OR NVIDIA CUDA 12.8 profile:
+.venv/bin/python -m pip install -r requirements/multimodal/torch-cu128.txt
+.venv/bin/python -m pip install -e ".[multimodal-cuda]"
+.venv/bin/python scripts/pull_qwen3_vl_model.py \
+  --local-dir data/models/qwen3-vl-embedding-2b \
+  --max-workers 1
+.venv/bin/python scripts/pull_qwen3_vl_model.py \
+  --local-dir data/models/qwen3-vl-embedding-2b \
+  --verify-only
+```
+
+PowerShell:
+
+```powershell
+& .\.venv\Scripts\python.exe -m pip install -e .\kg-doc-parser --no-deps
+& .\.venv\Scripts\python.exe -m pip install -e .\kogwistar-obsidian-sink --no-deps
+# CPU profile:
+& .\.venv\Scripts\python.exe -m pip install -r requirements\multimodal\torch-cpu.txt
+& .\.venv\Scripts\python.exe -m pip install -e ".[multimodal-cpu]"
+# OR NVIDIA CUDA 12.8 profile:
+& .\.venv\Scripts\python.exe -m pip install -r requirements\multimodal\torch-cu128.txt
+& .\.venv\Scripts\python.exe -m pip install -e ".[multimodal-cuda]"
+& .\.venv\Scripts\python.exe scripts/pull_qwen3_vl_model.py --local-dir data/models/qwen3-vl-embedding-2b --max-workers 1
+& .\.venv\Scripts\python.exe scripts/pull_qwen3_vl_model.py --local-dir data/models/qwen3-vl-embedding-2b --verify-only
+```
+
+Use one profile, not both examples. The CPU Torch wheel is installed from
+the checked-in CPU requirements profile, followed by the dependency-only
+`.[multimodal-cpu]` extra. CUDA dependencies are exposed as
+`.[multimodal-cuda]` and must follow an explicit official Torch requirements
+profile. `cpu` is the safe cross-platform default.
+`cu126` and `cu128` use the corresponding official PyTorch wheel index and
+fail after installation if the selected build has no usable GPU. Choose the
+CUDA profile supported by the host driver; the package intentionally does not
+infer compatibility.
+
+Do not set `LLM_WIKI_MULTIMODAL_TORCH_BACKEND` for the production application
+container. It is only for direct local adapter development. The production
+container requires the representation service URL and explicit host allowlist;
+the base default remains `none` and does not import Torch. A vision endpoint
+served by Ollama, vLLM, or llama.cpp is not automatically a native embedding
+provider. See the ADR's remote-runtime admission rules before configuring a
+future remote projection adapter.
+
+### Representation Service Docker
+
+The default application image does not install Torch or request a GPU. Start
+the separate CPU representation service with:
+
+```bash
+docker compose -f compose.yml -f compose.multimodal.yml up --build
+```
+
+For NVIDIA CUDA 12.8, add `-f compose.representation-cuda.yml`. The model
+checkpoint is cached in the sidecar volume, not installed in REST/MCP.
+
+The service defaults to `Qwen3-VL-Embedding-2B`, `dimension=1024`, and
+`batch_size=1`. Supported dimensions are 64..2048; 1536 is the larger pgvector
+option, while 2048 is intended for Chroma or non-HNSW storage.
+Capture source units into Stage 1, promote them in
+minibatches to Stage 2, and query only after promotion. Text-bearing units use
+the text processor; image, video-frame, and visual PDF/table/chart units use
+the image processor, with input order preserved. Text, images, webpage image
+occurrences, and normalized PDF page/table/chart manifests can share a
+Qwen3-VL dense projection; the existing knowledge/conversation embedding
+spaces remain separate. ColQwen remains an explicit legacy late-interaction
+comparison route and is not interchangeable. The source adapter stores references and
+locators, not binary assets, so an authorized `AssetResolver` must be supplied
+for externally stored images or page renders. See the [native multimodal ADR](adr_native_multimodal_embedding_support.md)
+for source-map, grounding, profile, and production-scaling boundaries.
+
+### Benchmark Multimodal Encoding
+
+Run the provider-free benchmark in CI or during local development:
+
+```bash
+.venv/bin/python scripts/benchmark_multimodal.py --backend fake --items 4 --batch-size 4 --repeats 5
+```
+
+It reports median and mean latency plus items per second for one image, an
+image batch, one text passage, a text batch, and a mixed image/text batch.
+Fake timings only compare code-path and batching overhead. After installing
+the native dependencies and downloading the checkpoint, measure the actual
+machine or production sidecar with:
+
+```bash
+.venv/bin/python scripts/benchmark_multimodal.py \
+  --backend remote \
+  --service-url http://representation:8790 \
+  --allowed-host representation \
+  --items 4 \
+  --batch-size 1 \
+  --repeats 3
+```
+
+When the service intentionally uses a local checkpoint directory rather than
+the canonical Hugging Face model ID, provide that exact profile identity. This
+keeps the model/profile compatibility check enabled during the benchmark:
+
+```powershell
+.venv\Scripts\python.exe scripts\benchmark_multimodal.py `
+  --backend remote `
+  --service-url http://127.0.0.1:8790 `
+  --allowed-host 127.0.0.1 `
+  --service-model (Resolve-Path data\models\qwen3-vl-embedding-2b).Path `
+  --items 4 --batch-size 1 --repeats 3
+```
+
+Start with `--batch-size 1` on an 8 GB GPU and increase it only after
+observing peak memory and latency.
+
+For a remote benchmark, the device is selected when the representation service
+starts, not by the benchmark client. Set `LLM_WIKI_REPRESENTATION_DEVICE=cpu`
+or `cuda` and the matching `LLM_WIKI_REPRESENTATION_TORCH_BACKEND` there. A
+verified Windows CUDA reference run on an RTX 3080 Laptop GPU at 1024
+dimensions, `batch_size=1`, `items=4`, `warmup=1`, and three measured repeats
+reported median latency of 110 ms for one image, 449 ms for four images, 79 ms
+for one text item, 273 ms for four text items, and 773 ms for eight mixed
+text/image units. Treat those as a smoke reference only: model cache state,
+driver, hardware, and service transport affect results.
+
 ## Recipe 1: Try A Knowledge Article
 
 Create a small article and run the complete fake-provider path. This ingests,
@@ -331,4 +494,3 @@ subscription checks are manual.
   and promotion state are visible.
 - For a hung pytest run after `100% passed`, inspect the configured cache path
   and use the repository guidance in [testing guide](testing_guide.md).
-

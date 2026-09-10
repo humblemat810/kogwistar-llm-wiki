@@ -34,6 +34,7 @@ def test_container_entrypoint_rejects_invalid_configuration(monkeypatch, capsys)
 
 def test_container_entrypoint_executes_requested_command_after_validation(monkeypatch):
     monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setattr(container_entrypoint, "validate_configured_multimodal_runtime", lambda **_: None)
     captured = SimpleNamespace(executable=None, args=None, env=None)
 
     def fake_exec(executable, args, env):
@@ -88,6 +89,16 @@ def test_global_embedding_environment_passes_startup_validation(monkeypatch):
     container_entrypoint._resolve_embedding_functions()
 
 
+def test_container_entrypoint_rejects_selected_multimodal_profile_mismatch(monkeypatch, capsys):
+    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setenv("LLM_WIKI_MULTIMODAL_BACKEND", "transformers")
+
+    assert container_entrypoint.main(["llm-wiki", "workbench"]) == 78
+    error = capsys.readouterr().err
+    assert "not supported in the production app container" in error
+    assert "LLM_WIKI_REPRESENTATION_SERVICE_URL" in error
+
+
 def test_container_contract_keeps_entrypoint_and_compose_commands():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     compose = (ROOT / "compose.yml").read_text(encoding="utf-8")
@@ -105,3 +116,19 @@ def test_dockerfile_pins_and_build_checks_fastmcp_imports():
     assert 'fastmcp = "3.0.0"' in parser_pyproject
     assert "from fastmcp import FastMCP" in dockerfile
     assert "from fastmcp.server.auth import StaticTokenVerifier, require_scopes" in dockerfile
+
+
+def test_docker_multimodal_contract_is_explicit_and_opt_in() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    representation_dockerfile = (ROOT / "Dockerfile.representation-service").read_text(encoding="utf-8")
+    compose_override = (ROOT / "compose.multimodal.yml").read_text(encoding="utf-8")
+
+    assert "LLM_WIKI_MULTIMODAL_TORCH_BACKEND" not in dockerfile
+    assert "Dockerfile.representation-service" in compose_override
+    assert "requirements/multimodal/torch-${LLM_WIKI_REPRESENTATION_TORCH_BACKEND}.txt" in representation_dockerfile
+    assert "fastapi" in representation_dockerfile
+    assert "LLM_WIKI_REPRESENTATION_MODEL" in compose_override
+    assert 'install_multimodal_runtime.py' not in dockerfile
+    cuda_override = (ROOT / "compose.representation-cuda.yml").read_text(encoding="utf-8")
+    assert "driver: nvidia" in cuda_override
+    assert "capabilities: [gpu]" in cuda_override

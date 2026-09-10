@@ -57,3 +57,6 @@ Thumbs.db
 /tests/_engine_tmp/
 /tests/_engine_tmp_check/
 /kogwistar-llm-wiki-tests-*/
+
+# Optional local multimodal model checkpoints; never commit model weights.
+/data/models/colqwen2-v1.0-hf/

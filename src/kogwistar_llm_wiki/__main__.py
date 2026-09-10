@@ -493,6 +493,14 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
         _close_engines(engines)
 
 
+def _cmd_representation_service(args: argparse.Namespace) -> None:
+    """Run the optional isolated multimodal representation service."""
+    from kogwistar_llm_wiki.representation_service.__main__ import main as run_service
+
+    del args
+    run_service()
+
+
 def _cmd_seed_bundle(args: argparse.Namespace) -> None:
     """Seed, optionally inspect through cockpit mode, and export a graph bundle."""
 
@@ -974,6 +982,12 @@ def main(argv: list[str] | None = None) -> int:
     mcp_p.add_argument("--transport", choices=["stdio", "http", "streamable-http"], default="stdio")
     mcp_p.add_argument("--split-derived-knowledge", action="store_true")
     mcp_p.set_defaults(func=_cmd_mcp)
+
+    representation_p = sub.add_parser(
+        "representation-service",
+        help="Serve one isolated Qwen3-VL representation profile",
+    )
+    representation_p.set_defaults(func=_cmd_representation_service)
 
     seed_p = sub.add_parser(
         "seed-bundle",

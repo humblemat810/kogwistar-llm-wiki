@@ -25,6 +25,15 @@ def _docker_e2e_enabled() -> bool:
     }
 
 
+def _docker_multimodal_e2e_enabled() -> bool:
+    return os.getenv("KOGWISTAR_DOCKER_MULTIMODAL_E2E", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _run(*args: str, timeout_seconds: float = 1800) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["docker", *args],
@@ -100,5 +109,50 @@ def test_built_container_enforces_startup_configuration():
         )
         assert global_embedding.returncode == 0, global_embedding.stdout + global_embedding.stderr
         assert "global embedding startup reached" in global_embedding.stdout
+    finally:
+        _run("image", "rm", "--force", tag)
+
+
+def test_built_linux_cpu_multimodal_image_has_a_verified_torch_runtime():
+    """Opt-in Docker smoke for the portable CPU profile on a Linux image."""
+    if not _docker_multimodal_e2e_enabled():
+        pytest.skip("set KOGWISTAR_DOCKER_MULTIMODAL_E2E=1 to run the multimodal Docker E2E test")
+    if shutil.which("docker") is None:
+        pytest.skip("Docker CLI is not installed")
+
+    probe = _run("info")
+    if probe.returncode != 0:
+        pytest.fail(f"Docker daemon unavailable: {probe.stderr.strip()}")
+
+    tag = f"kogwistar-llm-wiki-multimodal-cpu-e2e:{uuid.uuid4().hex[:12]}"
+    try:
+        build = _run(
+            "build",
+            "--build-arg",
+            "LLM_WIKI_MULTIMODAL_TORCH_BACKEND=cpu",
+            "--tag",
+            tag,
+            ".",
+        )
+        assert build.returncode == 0, build.stdout + build.stderr
+        runtime = _run(
+            "run",
+            "--rm",
+            tag,
+            "python",
+            "-c",
+            "import torch; assert torch.version.cuda is None; print(torch.__version__)",
+        )
+        assert runtime.returncode == 0, runtime.stdout + runtime.stderr
+        imports = _run(
+            "run",
+            "--rm",
+            tag,
+            "python",
+            "-c",
+            "from transformers import AutoModelForMultimodalLM; import qwen_vl_utils; print('qwen3-vl runtime imports reached')",
+        )
+        assert imports.returncode == 0, imports.stdout + imports.stderr
+        assert "qwen3-vl runtime imports reached" in imports.stdout
     finally:
         _run("image", "rm", "--force", tag)

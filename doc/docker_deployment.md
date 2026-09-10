@@ -197,6 +197,54 @@ The image default command is only a help display. Always provide an explicit
 service command in deployments so REST and MCP lifecycles remain independently
 supervisable.
 
+## Multimodal Representation Service
+
+Production multimodal inference is a separate service so the REST and MCP
+images remain lightweight and Torch-free. Start the CPU sidecar with:
+
+```bash
+docker compose -f compose.yml -f compose.multimodal.yml up --build
+```
+
+For NVIDIA CUDA 12.8, add the explicit GPU overlay:
+
+```bash
+LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cu128 \
+docker compose -f compose.yml -f compose.multimodal.yml \
+  -f compose.representation-cuda.yml up --build
+```
+
+PowerShell:
+
+```powershell
+$env:LLM_WIKI_REPRESENTATION_TORCH_BACKEND = "cu128"
+docker compose -f compose.yml -f compose.multimodal.yml `
+  -f compose.representation-cuda.yml up --build
+```
+
+The sidecar exposes `/healthz`, `/readyz`, `/v1/capabilities`, and
+`/v1/represent` only on the private Compose network. Configure the model,
+revision, dimension, token, and Hugging Face cache through
+`LLM_WIKI_REPRESENTATION_*`. The default is
+`Qwen/Qwen3-VL-Embedding-2B` at 1024 dimensions. A remote deployment must use
+authenticated HTTPS and an explicit `LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS`
+network allowlist.
+
+Wait for the representation sidecar's `/readyz` endpoint before submitting
+Stage 2 projection work. `/healthz` only confirms that the HTTP process is
+alive; `/readyz` additionally confirms that Torch, the selected device, model,
+and 1024-dimensional profile loaded successfully. Use the profile-matched
+remote benchmark recipe in the [cookbook](cookbook.md#benchmark-multimodal-encoding)
+after deployment. The benchmark client does not select CPU or CUDA; those are
+service startup settings.
+
+The base image intentionally remains Torch-free. Do not install a local model
+into the REST/MCP image for production. If local adapter testing is needed,
+follow the developer-only instructions in the cookbook. Qwen3-VL supports
+64..2048 dimensions; 1536 is suitable for standard pgvector HNSW, while 2048
+requires Chroma or non-HNSW storage. ColQwen is an explicit legacy
+late-interaction route and must not share the dense service profile.
+
 ## Chroma Note
 
 The Compose stack deliberately uses Postgres/pgvector for the two-service

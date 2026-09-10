@@ -27,6 +27,7 @@ from .workbench_background import (
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
+from .multimodal_remote import RepresentationServiceUnavailable
 
 AgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot], str]
 ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, ProgressCallback], str]
@@ -78,13 +79,70 @@ class WorkbenchApi:
                     checks[name] = "ok"
                 else:
                     checks[name] = "open"
+            multimodal = getattr(self.pipeline, "multimodal_encoder", None)
+            if multimodal is not None and hasattr(multimodal, "readiness"):
+                snapshot = multimodal.readiness()
+                checks["multimodal_representation"] = "ok" if snapshot.get("ready") else "degraded"
         except Exception as exc:  # noqa: BLE001
             return {"ready": False, "service": "kogwistar-llm-wiki", "checks": checks, "reason": str(exc)}
         return {"ready": True, "service": "kogwistar-llm-wiki", "checks": checks}
 
     def get_lens(self, payload: Mapping[str, Any]) -> dict[str, object]:
         request = _lens_request(payload)
-        return self.pipeline.resolve_semantic_lens(request).to_dict()
+        result = self.pipeline.resolve_semantic_lens(request).to_dict()
+        multimodal = self._multimodal_route(payload, query_text=request.query_text)
+        if multimodal is not None:
+            result["multimodal"] = multimodal
+        return result
+
+    def _multimodal_route(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        query_text: str,
+    ) -> dict[str, object] | None:
+        """Add an optional bounded multimodal route without changing graph truth."""
+        if payload.get("include_multimodal", True) is False or not query_text.strip():
+            return None
+        if (
+            self.pipeline.multimodal_projection_store is None
+            or self.pipeline.multimodal_encoder is None
+        ):
+            return None
+        limit = max(1, min(int(payload.get("multimodal_limit") or 10), 100))
+        try:
+            hits = self.pipeline.search_multimodal(query_text, limit=limit)
+        except RepresentationServiceUnavailable as exc:
+            return {
+                "status": "degraded",
+                "route": "multimodal_projection",
+                "reason": str(exc),
+                "hits": [],
+            }
+        except Exception as exc:  # keep canonical graph query available on route errors
+            return {
+                "status": "error",
+                "route": "multimodal_projection",
+                "reason": str(exc),
+                "hits": [],
+            }
+        return {
+            "status": "ok",
+            "route": "multimodal_projection",
+            "profile_fingerprint": self.pipeline.multimodal_encoder.profile.fingerprint,
+            "hits": [
+                {
+                    "view_id": hit.view_id,
+                    "score": hit.score,
+                    "source_id": hit.source_id,
+                    "source_revision_id": hit.source_revision_id,
+                    "modality": hit.modality,
+                    "locator": hit.locator,
+                    "metadata": {**hit.metadata, "grounding": "source_view"},
+                }
+                for hit in hits
+            ],
+        }
 
     def ask(
         self,
@@ -148,7 +206,7 @@ class WorkbenchApi:
             mode=mode,
             agent_answer=responder,
         )
-        return {
+        response = {
             "mode": mode,
             "agent_status": agent_status,
             "answer": {
@@ -162,6 +220,10 @@ class WorkbenchApi:
             "snapshot": turn.snapshot.to_dict(),
             "history": _history_record(turn.history),
         }
+        multimodal = self._multimodal_route(payload, query_text=request.query_text)
+        if multimodal is not None:
+            response["multimodal"] = multimodal
+        return response
 
     def _ask_cockpit(
         self,

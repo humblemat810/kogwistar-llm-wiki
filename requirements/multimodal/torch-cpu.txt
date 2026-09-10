@@ -1,0 +1,7 @@
+# Portable CPU runtime for the native multimodal extra.
+#
+# Install this selected Torch wheel before installing the application
+# multimodal dependencies. Plain PyPI's Linux Torch wheel bundles CUDA.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.8.0
+torchvision==0.23.0
