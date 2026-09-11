@@ -6,6 +6,12 @@ from kogwistar_llm_wiki import IngestPipeline, WorkbenchApi, build_in_memory_nam
 from kogwistar_llm_wiki.settings import SettingsService
 
 
+@pytest.fixture(autouse=True)
+def _isolated_settings_environment(monkeypatch):
+    """Keep settings contract tests independent of a developer's .env file."""
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
+
+
 def test_settings_snapshot_reports_effective_profiles_without_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_WIKI_API_TOKEN", "do-not-return")

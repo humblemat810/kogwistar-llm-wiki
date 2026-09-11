@@ -17,6 +17,24 @@ def test_namespace_builders_keep_tiny_embedding_as_default() -> None:
     assert len(embedding(["sample"])[0]) == 2
 
 
+def test_embedding_profile_exposes_token_context_metadata() -> None:
+    config = EmbeddingProviderConfig(
+        provider="fake",
+        model="token-aware",
+        dimension=3,
+        max_sequence_length=8192,
+        crop_token_budget=7680,
+        tokenizer_fingerprint="tokenizer-v1",
+    )
+    profile = ingest_pipeline._embedding_profile(config)
+
+    assert profile.max_sequence_length == 8192
+    assert profile.crop_token_budget == 7680
+    assert profile.tokenizer_fingerprint == "tokenizer-v1"
+    assert profile.crop_policy == "token_prefix"
+    assert profile.fingerprint
+
+
 def test_embedding_provider_knobs_use_shared_provider_factory(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[EmbeddingProviderConfig] = []
 

@@ -1183,6 +1183,11 @@ def build_configured_multimodal_encoder(
             configured_vllm_image,
             configured_vllm_token,
             configured_vllm_url,
+            configured_embedding_crop_token_budget,
+            configured_embedding_max_model_len,
+            configured_embedding_gpu_memory_utilization,
+            configured_embedding_vllm_enforce_eager,
+            configured_embedding_vllm_max_num_seqs,
         )
         from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 
@@ -1216,6 +1221,11 @@ def build_configured_multimodal_encoder(
                 ),
                 timeout_seconds=float(os.environ.get("LLM_WIKI_EMBEDDING_VLLM_TIMEOUT_SECONDS", "30")),
                 allowed_hosts=allowed_hosts,
+                max_model_len=configured_embedding_max_model_len(),
+                crop_token_budget=configured_embedding_crop_token_budget(),
+                gpu_memory_utilization=configured_embedding_gpu_memory_utilization(),
+                enforce_eager=configured_embedding_vllm_enforce_eager(),
+                max_num_seqs=configured_embedding_vllm_max_num_seqs(),
             )
         )
 
@@ -1254,9 +1264,14 @@ def build_configured_multimodal_encoder(
             dimension=configured_multimodal_dimension(),
             metric="dot",
             preprocessing_fingerprint=(
-                f"qwen3-vl:dense:768:32768:"
+                f"qwen3-vl:dense:768:{configured_embedding_max_model_len()}:"
+                f"crop={configured_embedding_crop_token_budget()}:"
                 f"{sha256(instruction.encode('utf-8')).hexdigest()[:16]}"
             ),
+            max_sequence_length=configured_embedding_max_model_len(),
+            crop_token_budget=configured_embedding_crop_token_budget(),
+            tokenizer_fingerprint="service-tokenize-v1",
+            crop_policy="service_token_count_character_prefix",
         )
         return RemoteMultimodalEncoder(
             profile,

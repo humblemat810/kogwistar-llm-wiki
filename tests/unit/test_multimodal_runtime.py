@@ -93,6 +93,25 @@ def test_vllm_backend_reads_explicit_remote_settings() -> None:
     assert multimodal_runtime.configured_vllm_image(environ).endswith("a" * 64)
 
 
+def test_embedding_context_knobs_validate_and_default() -> None:
+    assert multimodal_runtime.configured_embedding_max_model_len({}) == 8192
+    assert multimodal_runtime.configured_embedding_crop_token_budget({}) == 7680
+    values = {
+        "LLM_WIKI_EMBEDDING_MAX_MODEL_LEN": "8192",
+        "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET": "7680",
+    }
+    assert multimodal_runtime.configured_embedding_max_model_len(values) == 8192
+    assert multimodal_runtime.configured_embedding_crop_token_budget(values) == 7680
+    with pytest.raises(ValueError, match="cannot exceed"):
+        multimodal_runtime.configured_embedding_crop_token_budget(
+            {"LLM_WIKI_EMBEDDING_MAX_MODEL_LEN": "2048", "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET": "7680"}
+        )
+    with pytest.raises(ValueError, match="cannot exceed 8192"):
+        multimodal_runtime.configured_embedding_max_model_len(
+            {"LLM_WIKI_EMBEDDING_MAX_MODEL_LEN": "8193"}
+        )
+
+
 def test_vllm_builder_is_remote_only(monkeypatch) -> None:
     values = {
         "LLM_WIKI_MULTIMODAL_BACKEND": "vllm",
@@ -101,6 +120,8 @@ def test_vllm_builder_is_remote_only(monkeypatch) -> None:
         "LLM_WIKI_EMBEDDING_VLLM_IMAGE": "vllm/vllm-openai@sha256:" + "a" * 64,
         "LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS": "embedding",
         "LLM_WIKI_MULTIMODAL_MODEL_REVISION": "revision",
+        "LLM_WIKI_EMBEDDING_MAX_MODEL_LEN": "8192",
+        "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET": "7680",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)

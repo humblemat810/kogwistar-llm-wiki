@@ -15,6 +15,8 @@ from .multimodal_runtime import (
     configured_multimodal_backend,
     configured_embedding_service_url,
     configured_vllm_url,
+    configured_embedding_max_model_len,
+    configured_embedding_crop_token_budget,
 )
 from .provider_config import resolve_maintenance_provider_settings, resolve_parser_provider_settings
 from .model_catalog import _safe_endpoint
@@ -31,6 +33,8 @@ _DESIRED_KEYS = frozenset({
     "maintenance_provider",
     "parser_base_url",
     "maintenance_base_url",
+    "embedding_max_model_len",
+    "embedding_crop_token_budget",
 })
 _SECRET_WORDS = ("token", "secret", "password", "api_key", "credential")
 _WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router"})
@@ -141,6 +145,8 @@ class SettingsService:
                 "backend": configured_multimodal_backend(),
                 "model": getattr(getattr(multimodal, "profile", None), "model", configured_multimodal_model()),
                 "dimension": getattr(getattr(multimodal, "profile", None), "dimension", configured_multimodal_dimension()),
+                "max_model_len": configured_embedding_max_model_len(),
+                "crop_token_budget": configured_embedding_crop_token_budget(),
                 "service_url": configured_embedding_service_url(),
                 "vllm_url": configured_vllm_url(),
             },
@@ -184,6 +190,20 @@ class SettingsService:
             raise ValueError("multimodal_enabled must be boolean")
         if "auth_mode" in next_desired and next_desired["auth_mode"] not in {"disabled", "static_token", "kogwistar_jwt"}:
             raise ValueError("auth_mode must be disabled, static_token, or kogwistar_jwt")
+        for key in ("embedding_max_model_len", "embedding_crop_token_budget"):
+            if key in next_desired:
+                try:
+                    next_desired[key] = int(next_desired[key])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{key} must be an integer") from exc
+                if next_desired[key] <= 0:
+                    raise ValueError(f"{key} must be positive")
+        if (
+            "embedding_max_model_len" in next_desired
+            and "embedding_crop_token_budget" in next_desired
+            and next_desired["embedding_crop_token_budget"] > next_desired["embedding_max_model_len"]
+        ):
+            raise ValueError("embedding_crop_token_budget cannot exceed embedding_max_model_len")
         for key in ("parser_provider", "maintenance_provider"):
             if key in next_desired and str(next_desired[key]).strip().lower() not in _WORKER_PROVIDERS:
                 raise ValueError(f"{key} must be a configured structured provider or router; Codex cockpit is workbench-only")
@@ -237,7 +257,7 @@ class SettingsService:
 
     @staticmethod
     def _impact(effective: Mapping[str, object], desired: Mapping[str, object]) -> dict[str, object]:
-        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "parser_base_url", "maintenance_base_url"}
+        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget"}
         parser = effective.get("parser", {})
         maintenance = effective.get("maintenance", {})
         effective_values = {
@@ -249,13 +269,15 @@ class SettingsService:
             "maintenance_base_url": maintenance.get("base_url") if isinstance(maintenance, Mapping) else None,
             "auth_mode": effective.get("auth_mode"),
             "otel_enabled": effective.get("otel", {}).get("enabled") if isinstance(effective.get("otel"), Mapping) else None,
+            "embedding_max_model_len": effective.get("multimodal", {}).get("max_model_len") if isinstance(effective.get("multimodal"), Mapping) else None,
+            "embedding_crop_token_budget": effective.get("multimodal", {}).get("crop_token_budget") if isinstance(effective.get("multimodal"), Mapping) else None,
         }
         pending_changes = sorted(
             key for key, value in desired.items()
             if key in _DESIRED_KEYS and value != effective_values.get(key, effective.get("multimodal", {}).get("enabled") if key == "multimodal_enabled" and isinstance(effective.get("multimodal"), Mapping) else None)
         )
         restart_required = bool(restart_keys.intersection(pending_changes))
-        profile_keys = {"embedding_provider", "embedding_model", "embedding_dimension", "embedding_metric"}
+        profile_keys = {"embedding_provider", "embedding_model", "embedding_dimension", "embedding_metric", "embedding_max_model_len", "embedding_crop_token_budget"}
         reembedding_required = bool(profile_keys.intersection(pending_changes))
         warnings: list[str] = []
         if restart_required:

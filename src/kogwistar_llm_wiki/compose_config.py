@@ -28,6 +28,11 @@ class ComposeOptions:
     auth_mode: str = "disabled"
     model_revision: str = ""
     embedding_dimension: int = 1024
+    embedding_max_model_len: int = 8192
+    embedding_crop_token_budget: int = 7680
+    embedding_gpu_memory_utilization: float = 0.86
+    embedding_vllm_enforce_eager: bool = True
+    embedding_vllm_max_num_seqs: int = 1
     postgres_password: str = "change-this-development-password"
 
 
@@ -60,6 +65,18 @@ def validate_options(options: ComposeOptions) -> list[str]:
         errors.append("embedding_dimension must be between 64 and 2048")
     if options.backend == "postgres" and options.mode == "gpu" and options.embedding_dimension > 1536:
         errors.append("GPU pgvector default profile cannot use dimensions above 1536")
+    if options.embedding_max_model_len <= 0:
+        errors.append("embedding_max_model_len must be positive")
+    elif options.embedding_max_model_len > 8192:
+        errors.append("embedding_max_model_len cannot exceed 8192")
+    if options.embedding_crop_token_budget <= 0:
+        errors.append("embedding_crop_token_budget must be positive")
+    elif options.embedding_crop_token_budget > options.embedding_max_model_len:
+        errors.append("embedding_crop_token_budget cannot exceed embedding_max_model_len")
+    if not 0 < options.embedding_gpu_memory_utilization <= 1:
+        errors.append("embedding_gpu_memory_utilization must be between 0 and 1")
+    if options.embedding_vllm_max_num_seqs <= 0:
+        errors.append("embedding_vllm_max_num_seqs must be positive")
     return errors
 
 
@@ -129,6 +146,10 @@ def render_compose(options: ComposeOptions) -> str:
         f"      LLM_WIKI_MULTIMODAL_MODEL: \"${{LLM_WIKI_MULTIMODAL_MODEL:-{'Qwen/Qwen3-VL-Embedding-2B' if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_DIMENSION: \"${{LLM_WIKI_MULTIMODAL_DIMENSION:-{options.embedding_dimension if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_MODEL_REVISION: \"${{LLM_WIKI_MULTIMODAL_MODEL_REVISION:-{options.model_revision if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: \"${{LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-{options.embedding_max_model_len if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: \"${{LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-{options.embedding_crop_token_budget if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_EMBEDDING_VLLM_ENFORCE_EAGER: \"${{LLM_WIKI_EMBEDDING_VLLM_ENFORCE_EAGER:-{'1' if options.embedding_vllm_enforce_eager else '0'}}}\"",
+        f"      LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS: \"${{LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS:-{options.embedding_vllm_max_num_seqs}}}\"",
         f"    command: [llm-wiki, --backend, {options.backend}, workbench, --workspace, \"${{LLM_WIKI_WORKSPACE:-default}}\", --host, 0.0.0.0, --port, '8765']",
         "    ports: ['127.0.0.1:${LLM_WIKI_REST_PORT:-8765}:8765']",
         "    extra_hosts: ['host.docker.internal:host-gateway']",
@@ -148,6 +169,8 @@ def render_compose(options: ComposeOptions) -> str:
         f"      LLM_WIKI_AUTH_MODE: \"{auth}\"",
         f"      LLM_WIKI_MCP_AUTH_REQUIRED: \"${{LLM_WIKI_MCP_AUTH_REQUIRED:-{'true' if options.auth_mode != 'disabled' else 'false'}}}\"",
         "      LLM_WIKI_MCP_TOKEN: \"${LLM_WIKI_MCP_TOKEN:-}\"",
+        f"      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: \"${{LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-{options.embedding_max_model_len if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: \"${{LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-{options.embedding_crop_token_budget if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_BACKEND: \"${{LLM_WIKI_MULTIMODAL_BACKEND:-{embedding_backend if embedding_url else 'none'}}}\"",
         f"      LLM_WIKI_EMBEDDING_SERVICE_URL: \"${{LLM_WIKI_EMBEDDING_SERVICE_URL:-{embedding_url if embedding_backend == 'transformers' else ''}}}\"",
         "      LLM_WIKI_EMBEDDING_SERVICE_TOKEN: \"${LLM_WIKI_EMBEDDING_SERVICE_TOKEN:-}\"",
@@ -156,6 +179,8 @@ def render_compose(options: ComposeOptions) -> str:
         "      LLM_WIKI_EMBEDDING_VLLM_TOKEN: \"${LLM_WIKI_EMBEDDING_VLLM_TOKEN:-}\"",
         "      LLM_WIKI_EMBEDDING_VLLM_IMAGE: \"${LLM_WIKI_EMBEDDING_VLLM_IMAGE:-}\"",
         f"      LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS: \"${{LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS:-{'embedding' if embedding_backend == 'vllm' else ''}}}\"",
+        f"      LLM_WIKI_EMBEDDING_VLLM_ENFORCE_EAGER: \"${{LLM_WIKI_EMBEDDING_VLLM_ENFORCE_EAGER:-{'1' if options.embedding_vllm_enforce_eager else '0'}}}\"",
+        f"      LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS: \"${{LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS:-{options.embedding_vllm_max_num_seqs}}}\"",
         f"    command: [llm-wiki, --backend, {options.backend}, mcp, --transport, streamable-http, --host, 0.0.0.0, --port, '8780', --path, /mcp]",
         "    ports: ['127.0.0.1:${LLM_WIKI_MCP_PORT:-8780}:8780']",
         "    extra_hosts: ['host.docker.internal:host-gateway']",
@@ -205,6 +230,13 @@ def render_compose(options: ComposeOptions) -> str:
             "      - pooling",
             "      - --convert",
             "      - embed",
+            "      - --max-model-len",
+            f"      - ${{LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-{options.embedding_max_model_len}}}",
+            "      - --gpu-memory-utilization",
+            f"      - ${{LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION:-{options.embedding_gpu_memory_utilization}}}",
+            *(["      - --enforce-eager"] if options.embedding_vllm_enforce_eager else []),
+            "      - --max-num-seqs",
+            f"      - ${{LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS:-{options.embedding_vllm_max_num_seqs}}}",
             "      - --api-key",
             "      - ${LLM_WIKI_EMBEDDING_VLLM_TOKEN:?Set LLM_WIKI_EMBEDDING_VLLM_TOKEN}",
             "    environment: [HF_HOME=/root/.cache/huggingface]",

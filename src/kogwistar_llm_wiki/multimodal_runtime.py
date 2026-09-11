@@ -15,6 +15,9 @@ SUPPORTED_MULTIMODAL_BACKENDS: tuple[MultimodalBackend, ...] = (
 )
 DEFAULT_MULTIMODAL_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
 DEFAULT_MULTIMODAL_DIMENSION = 1024
+DEFAULT_EMBEDDING_MAX_MODEL_LEN = 8192
+DEFAULT_EMBEDDING_CROP_TOKEN_BUDGET = 7680
+MAX_EMBEDDING_MODEL_LEN = 8192
 TORCH_PUBLIC_VERSION = "2.8.0"
 _CUDA_VERSION_BY_BACKEND: dict[TorchBackend, str | None] = {
     "none": None,
@@ -167,6 +170,83 @@ def configured_vllm_allowed_hosts(
         host.strip().lower()
         for host in values.get("LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS", "").split(",")
         if host.strip()
+    )
+
+
+def _positive_int_env(
+    environ: dict[str, str] | None, name: str, default: int
+) -> int:
+    values = environ if environ is not None else os.environ
+    value = values.get(name, str(default)).strip()
+    try:
+        result = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if result <= 0:
+        raise ValueError(f"{name} must be positive")
+    return result
+
+
+def configured_embedding_max_model_len(environ: dict[str, str] | None = None) -> int:
+    value = _positive_int_env(
+        environ,
+        "LLM_WIKI_EMBEDDING_MAX_MODEL_LEN",
+        DEFAULT_EMBEDDING_MAX_MODEL_LEN,
+    )
+    if value > MAX_EMBEDDING_MODEL_LEN:
+        raise ValueError(
+            "LLM_WIKI_EMBEDDING_MAX_MODEL_LEN cannot exceed 8192"
+        )
+    return value
+
+
+def configured_embedding_crop_token_budget(environ: dict[str, str] | None = None) -> int:
+    values = environ if environ is not None else os.environ
+    limit = configured_embedding_max_model_len(values)
+    raw = values.get("LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET")
+    budget = (
+        min(DEFAULT_EMBEDDING_CROP_TOKEN_BUDGET, limit)
+        if raw in {None, ""}
+        else _positive_int_env(values, "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET", 0)
+    )
+    if budget > limit:
+        raise ValueError(
+            "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET cannot exceed "
+            "LLM_WIKI_EMBEDDING_MAX_MODEL_LEN"
+        )
+    return budget
+
+
+def configured_embedding_gpu_memory_utilization(
+    environ: dict[str, str] | None = None,
+) -> float:
+    values = environ if environ is not None else os.environ
+    raw = values.get("LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION", "0.86").strip()
+    try:
+        result = float(raw)
+    except ValueError as exc:
+        raise ValueError("LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION must be a number") from exc
+    if not 0 < result <= 1:
+        raise ValueError("LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION must be between 0 and 1")
+    return result
+
+
+def configured_embedding_vllm_enforce_eager(
+    environ: dict[str, str] | None = None,
+) -> bool:
+    values = environ if environ is not None else os.environ
+    return values.get("LLM_WIKI_EMBEDDING_VLLM_ENFORCE_EAGER", "1").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def configured_embedding_vllm_max_num_seqs(
+    environ: dict[str, str] | None = None,
+) -> int:
+    return _positive_int_env(
+        environ,
+        "LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS",
+        1,
     )
 
 
