@@ -23,6 +23,12 @@ The default development endpoints are bound to loopback:
 - REST/workbench: `http://127.0.0.1:8765`
 - MCP Streamable HTTP: `http://127.0.0.1:8780/mcp`
 - REST health: `http://127.0.0.1:8765/healthz`
+
+The workbench **Settings** panel is an operator view over the same service.
+It reports effective and staged desired settings, backend/profile compatibility,
+and representation-service health. Model and embedding profile changes are not
+live edits: review the restart and re-embedding impact before applying them.
+The panel never returns tokens or secret environment values.
 - REST readiness: `http://127.0.0.1:8765/readyz`
 - API capabilities: `http://127.0.0.1:8765/api/capabilities`
 
@@ -96,9 +102,13 @@ container-local path as the identity of an experiment.
 
 Compose passes parser and maintenance provider settings through from the shell
 or `.env`. For Ollama on the host, the default URL uses
-`host.docker.internal`. For Azure/OpenAI, set the corresponding provider,
+`host.docker.internal`. Generated bundles include an explicit
+`host.docker.internal:host-gateway` mapping so this host-model configuration
+also works on Linux, not only Docker Desktop. For Azure/OpenAI, set the corresponding provider,
 model, endpoint, and API-key environment variables without putting secrets in
-the image.
+the image. If an `.env` secret contains `$`, write it as a single-quoted
+literal, such as `LLM_WIKI_MCP_TOKEN='token-with-$-characters'`; otherwise
+Compose may treat part of the token as a variable reference and alter it.
 
 Embedding configuration is independent from parser/maintenance LLM
 configuration. The fast deterministic embedder is used when no embedding
@@ -200,18 +210,21 @@ supervisable.
 ## Multimodal Representation Service
 
 Production multimodal inference is a separate service so the REST and MCP
-images remain lightweight and Torch-free. Start the CPU sidecar with:
-
-```bash
-docker compose -f compose.yml -f compose.multimodal.yml up --build
-```
-
-For NVIDIA CUDA 12.8, add the explicit GPU overlay:
+images remain lightweight and Torch-free. GPU is the recommended deployment
+for practical Qwen3-VL vision inference:
 
 ```bash
 LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cu128 \
 docker compose -f compose.yml -f compose.multimodal.yml \
   -f compose.representation-cuda.yml up --build
+```
+
+For CPU-only smoke tests or hosts without NVIDIA Container Toolkit, use the
+explicit CPU fallback:
+
+```bash
+docker compose -f compose.yml -f compose.multimodal.yml \
+  up --build
 ```
 
 PowerShell:
@@ -220,6 +233,13 @@ PowerShell:
 $env:LLM_WIKI_REPRESENTATION_TORCH_BACKEND = "cu128"
 docker compose -f compose.yml -f compose.multimodal.yml `
   -f compose.representation-cuda.yml up --build
+```
+
+CPU fallback in PowerShell:
+
+```powershell
+$env:LLM_WIKI_REPRESENTATION_TORCH_BACKEND = "cpu"
+docker compose -f compose.yml -f compose.multimodal.yml up --build
 ```
 
 The sidecar exposes `/healthz`, `/readyz`, `/v1/capabilities`, and
@@ -245,6 +265,39 @@ follow the developer-only instructions in the cookbook. Qwen3-VL supports
 requires Chroma or non-HNSW storage. ColQwen is an explicit legacy
 late-interaction route and must not share the dense service profile.
 
+The representation image is a separate distribution boundary: it installs
+`llm-wiki-representation-contract` and `llm-wiki-representation-service`, not
+the application, parser, sink, Kogwistar, database, or MCP packages. Set
+`LLM_WIKI_REPRESENTATION_MODEL_REVISION` to an immutable Hugging Face revision;
+the sidecar refuses to start with a missing or floating revision. The model is
+loaded asynchronously during startup, so `/healthz` can be live while `/readyz`
+remains `503` until the profile-pinned model is ready.
+
+## OpenTelemetry And Grafana
+
+For a complete local memory-agent example combining PostgreSQL, the private
+Qwen3-VL representation service, OTel, and Grafana, use
+[`compose.memory-agent.yml`](../compose.memory-agent.yml) as the final Compose
+overlay. The same overlay contains a commented Keycloak example; see the
+[cookbook recipe](cookbook.md#recipe-11-multimodal-memory-agent-with-otel) for
+the required JWT/OIDC boundary and restart procedure.
+
+Enable application tracing before starting the service:
+
+```bash
+LLM_WIKI_OTEL_ENABLED=true \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+docker compose up -d
+```
+
+The workbench Settings panel shows whether tracing is enabled and whether an
+OTLP endpoint is configured. Its toggle controls trace emission in the current
+LLM-Wiki process after confirmation; it does not manage Grafana or the
+collector container. Start and stop those deployment services separately, and
+do not treat `/healthz` as proof that traces reached Grafana. The base image
+continues to work without OTel packages; install the `otel` extra when export
+is required.
+
 ## Chroma Note
 
 The Compose stack deliberately uses Postgres/pgvector for the two-service
@@ -257,6 +310,11 @@ conversation, workflow, knowledge, and wisdom directories may use different
 embedding models and dimensions. They must not be mixed inside one physical
 directory. Use `embeddings inspect` to see configured, registered, and physical
 state without binding a new profile.
+
+The Compose generator does not emit embedded Chroma bundles because REST and
+MCP would be separate writers of one local directory. Use PostgreSQL for
+multi-process Compose, or run the single-process `demo` command when embedded
+Chroma is required.
 
 ## Shutdown And Persistence
 
@@ -300,3 +358,17 @@ embedding fingerprints; use `--use-backend-snapshot` only for a compatible
 quiescent base archive. Archive files can contain source text and history, so
 protect them with the deployment's filesystem, backup, transport, or KMS
 encryption controls.
+### Compose file composition
+
+The checked-in Compose files are intentionally layered, not independent
+applications:
+
+- `compose.yml` is the required base and defines PostgreSQL, REST, MCP, and
+  persistent volumes.
+- `compose.multimodal.yml` is an optional overlay for the Qwen3-VL service.
+- `compose.memory-agent.yml` is an optional overlay for OTel/Grafana and the
+  memory-agent authentication example.
+
+Do not run an overlay alone. Compose does not have a built-in way for an
+overlay to require its base file, so the operator must use the documented
+`-f` order. The CLI generator instead writes one self-contained YAML file.

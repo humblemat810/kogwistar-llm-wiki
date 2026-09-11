@@ -1,0 +1,104 @@
+name: llm-wiki
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: llm_wiki
+      POSTGRES_USER: llm_wiki
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  llm-wiki:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      representation:
+        condition: service_started
+    environment:
+      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki
+      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki
+      LLM_WIKI_WORKSPACE: default
+      LLM_WIKI_AUTH_MODE: "disabled"
+      LLM_WIKI_AUTH_REQUIRED: "${LLM_WIKI_AUTH_REQUIRED:-false}"
+      LLM_WIKI_API_TOKEN: "${LLM_WIKI_API_TOKEN:-}"
+      KOGWISTAR_PARSER_PROVIDER: ${KOGWISTAR_PARSER_PROVIDER:-ollama}
+      KOGWISTAR_PARSER_MODEL: ${KOGWISTAR_PARSER_MODEL:-gemma4:e2b}
+      KOGWISTAR_PARSER_BASE_URL: ${KOGWISTAR_PARSER_BASE_URL:-http://host.docker.internal:11434}
+      KOGWISTAR_MAINTENANCE_PROVIDER: ${KOGWISTAR_MAINTENANCE_PROVIDER:-ollama}
+      KOGWISTAR_MAINTENANCE_MODEL: ${KOGWISTAR_MAINTENANCE_MODEL:-gemma4:e2b}
+      KOGWISTAR_MAINTENANCE_BASE_URL: ${KOGWISTAR_MAINTENANCE_BASE_URL:-http://host.docker.internal:11434}
+      LLM_WIKI_OTEL_ENABLED: "${LLM_WIKI_OTEL_ENABLED:-false}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4318}"
+      LLM_WIKI_REPRESENTATION_SERVICE_URL: "${LLM_WIKI_REPRESENTATION_SERVICE_URL:-http://representation:8790}"
+      LLM_WIKI_REPRESENTATION_SERVICE_TOKEN: "${LLM_WIKI_REPRESENTATION_SERVICE_TOKEN:-}"
+      LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS: "${LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS:-representation}"
+      LLM_WIKI_MULTIMODAL_MODEL: "${LLM_WIKI_MULTIMODAL_MODEL:-Qwen/Qwen3-VL-Embedding-2B}"
+      LLM_WIKI_MULTIMODAL_DIMENSION: "${LLM_WIKI_MULTIMODAL_DIMENSION:-1024}"
+      LLM_WIKI_MULTIMODAL_MODEL_REVISION: "${LLM_WIKI_MULTIMODAL_MODEL_REVISION:-9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda}"
+    command: [llm-wiki, --backend, postgres, workbench, --workspace, "${LLM_WIKI_WORKSPACE:-default}", --host, 0.0.0.0, --port, '8765']
+    ports: ['127.0.0.1:${LLM_WIKI_REST_PORT:-8765}:8765']
+    extra_hosts: ['host.docker.internal:host-gateway']
+    volumes: [app_data:/var/lib/llm-wiki]
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      representation:
+        condition: service_started
+    environment:
+      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki
+      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki
+      LLM_WIKI_OTEL_ENABLED: "${LLM_WIKI_OTEL_ENABLED:-false}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4318}"
+      LLM_WIKI_AUTH_MODE: "disabled"
+      LLM_WIKI_MCP_AUTH_REQUIRED: "${LLM_WIKI_MCP_AUTH_REQUIRED:-false}"
+      LLM_WIKI_MCP_TOKEN: "${LLM_WIKI_MCP_TOKEN:-}"
+      LLM_WIKI_REPRESENTATION_SERVICE_URL: "${LLM_WIKI_REPRESENTATION_SERVICE_URL:-http://representation:8790}"
+      LLM_WIKI_REPRESENTATION_SERVICE_TOKEN: "${LLM_WIKI_REPRESENTATION_SERVICE_TOKEN:-}"
+      LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS: "${LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS:-representation}"
+    command: [llm-wiki, --backend, postgres, mcp, --transport, streamable-http, --host, 0.0.0.0, --port, '8780', --path, /mcp]
+    ports: ['127.0.0.1:${LLM_WIKI_MCP_PORT:-8780}:8780']
+    extra_hosts: ['host.docker.internal:host-gateway']
+    volumes: [app_data:/var/lib/llm-wiki]
+  representation:
+    build:
+      context: .
+      dockerfile: Dockerfile.representation-service
+      args: {LLM_WIKI_REPRESENTATION_TORCH_BACKEND: cu128}
+    environment:
+      LLM_WIKI_REPRESENTATION_MODEL: Qwen/Qwen3-VL-Embedding-2B
+      LLM_WIKI_REPRESENTATION_MODEL_REVISION: 9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda
+      LLM_WIKI_REPRESENTATION_DIMENSION: 1024
+      LLM_WIKI_REPRESENTATION_DEVICE: cuda
+      LLM_WIKI_REPRESENTATION_TORCH_BACKEND: cu128
+      LLM_WIKI_REPRESENTATION_TOKEN: "${LLM_WIKI_REPRESENTATION_TOKEN:-}"
+    expose: ['8790']
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    volumes: [representation_hf_cache:/var/lib/huggingface]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+volumes:
+  postgres_data:
+  app_data:
+  representation_hf_cache:

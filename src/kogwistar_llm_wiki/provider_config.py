@@ -11,6 +11,8 @@ from kg_doc_parser.workflow_ingest.providers import (
 
 _PROVIDER_ALIASES = {
     "azure_openai": "azure",
+    "llm_router": "openai",
+    "router": "openai",
 }
 
 

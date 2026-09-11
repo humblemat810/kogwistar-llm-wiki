@@ -99,6 +99,15 @@ workbench protocol calls, ingestion trace events, and long-run trace events.
 Only primitive correlation fields are emitted by the event adapter; raw source
 text, secrets, and full graph payloads are not emitted.
 
+The operating settings console exposes the effective OTel state, configured
+OTLP endpoint, service name, and package availability without exposing tokens.
+The `otel_enabled` setting can be staged and explicitly applied as a live
+emission toggle for the current process. It does not start or stop Docker
+containers; Grafana/OTel Collector lifecycle remains a Compose or deployment
+operation. When no OTLP endpoint or exporter is available, the UI reports the
+sink as disabled or unavailable rather than claiming that Grafana received
+traces.
+
 Integration artifacts live outside the Python package: pi uses
 `integrations/pi-agent/`, Hermes uses `integrations/hermes-agent/`, and
 compatible agents can use `skills/llm-wiki-knowledge/`.

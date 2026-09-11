@@ -18,12 +18,12 @@ from kogwistar_llm_wiki.multimodal_remote import (
     RepresentationServiceSettings,
     RepresentationServiceUnavailable,
 )
-from kogwistar_llm_wiki.representation_service.app import _represent_payload
-from kogwistar_llm_wiki.representation_service.config import RepresentationServiceConfig
+from llm_wiki_representation_service.app import _represent_payload
+from llm_wiki_representation_service.config import RepresentationServiceConfig
 
 
 def _profile() -> MultimodalEmbeddingProfile:
-    return RepresentationServiceConfig(dimension=64).profile
+    return RepresentationServiceConfig(dimension=64, revision="test-revision").profile
 
 
 class _Response:
@@ -57,6 +57,9 @@ class _FakeEncoder:
     def encode_documents(self, units, *, batch_size=None, resolver=None):
         del batch_size
         return [((0.0, 0.0, 1.0) + (0.0,) * 61,) for _ in units]
+
+    def encode(self, items):
+        return [((1.0,) + (0.0,) * 63,) for _ in items]
 
 
 def test_remote_adapter_sends_resolved_bytes_and_preserves_order() -> None:
@@ -167,7 +170,7 @@ def test_remote_service_host_allowlist_is_enforced() -> None:
 
 
 def test_fake_service_contract_handles_document_and_query() -> None:
-    config = RepresentationServiceConfig(dimension=64)
+    config = RepresentationServiceConfig(dimension=64, revision="test-revision")
     encoder = _FakeEncoder(config.profile)
     query = _represent_payload(
         {
@@ -196,7 +199,7 @@ def test_fake_service_contract_handles_document_and_query() -> None:
 
 
 def test_service_supports_mixed_query_and_preserves_item_order() -> None:
-    config = RepresentationServiceConfig(dimension=64)
+    config = RepresentationServiceConfig(dimension=64, revision="test-revision")
     result = _represent_payload(
         {
             "contract_version": "v1",

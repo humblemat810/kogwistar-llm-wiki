@@ -74,6 +74,7 @@ def test_bundle_rejects_ambiguous_implicit_excerpt() -> None:
         GraphSeedBundle.model_validate(payload)
 
 
+@pytest.mark.slow
 def test_seed_cockpit_export_and_reseed_round_trip_end_to_end(tmp_path: Path) -> None:
     bundle = load_seed_bundle(BUNDLE_PATH)
     engines = build_in_memory_namespace_engines()

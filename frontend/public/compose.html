@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LLM-Wiki Compose setup</title>
+<style>
+body{max-width:820px;margin:40px auto;padding:0 20px;font:15px system-ui;background:#0b1119;color:#e6eef8}
+label{display:grid;gap:6px;margin:14px 0}input,select,button,textarea{font:inherit;padding:9px;border:1px solid #49637d;border-radius:7px;background:#13202d;color:#e6eef8}
+button{cursor:pointer}textarea{width:100%;box-sizing:border-box;font:12px monospace}.error{color:#f5b94c}.hint{color:#9baed0}
+</style>
+<h1>LLM-Wiki Compose setup</h1>
+<p class="hint">Generate one self-contained PostgreSQL Compose bundle. Secrets remain environment placeholders.</p>
+<label>Graph backend
+  <select id="backend"><option value="postgres">PostgreSQL / pgvector (recommended)</option><option value="chroma">Embedded Chroma (single-process only; unavailable in this bundle)</option></select>
+</label>
+<label>Embedding runtime
+  <select id="mode"><option value="gpu">GPU / Qwen3-VL</option><option value="cpu">CPU / Qwen3-VL</option><option value="text-only">Text only</option></select>
+</label>
+<label>Workspace<input id="workspace" value="default"></label>
+<label>Authentication
+  <select id="auth"><option value="disabled">Personal local mode</option><option value="static_token">Static token</option><option value="kogwistar_jwt">JWT/OIDC (configure issuer and keys separately)</option></select>
+</label>
+<label>Immutable Qwen3-VL model revision<input id="revision" placeholder="required for GPU or CPU multimodal"></label>
+<label><input type="checkbox" id="otel"> Include Grafana OpenTelemetry</label>
+<label><input type="checkbox" id="oauth"> Include optional OAuth/OIDC test-provider example</label>
+<button id="generate">Generate YAML</button> <button id="download" hidden>Download YAML</button>
+<p id="message" class="error" role="alert"></p><textarea id="output" rows="42" readonly></textarea>
+<script>
+const $=id=>document.getElementById(id);
+const env=(name,fallback)=>`${'${'}${name}:-${fallback}}`;
+function generate(){
+  const backend=$("backend").value,mode=$("mode").value,workspace=$("workspace").value.trim(),auth=$("auth").value,revision=$("revision").value.trim(),otel=$("otel").checked,oauth=$("oauth").checked;
+  $("message").textContent="";
+  if(backend!=="postgres"){$("message").textContent="Embedded Chroma is single-process only. Use the demo command or select PostgreSQL for this REST/MCP bundle.";return}
+  if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(workspace)){$("message").textContent="Workspace contains unsupported characters.";return}
+  if(mode!=="text-only"&&!revision){$("message").textContent="An immutable model revision is required for Qwen3-VL.";return}
+  if(oauth&&auth!=="kogwistar_jwt"){$("message").textContent="Select JWT/OIDC when including the OAuth/OIDC test-provider example.";return}
+  const multimodal=mode!=="text-only",device=mode==="gpu"?"cuda":"cpu",torch=mode==="gpu"?"cu128":"cpu";
+  const lines=[
+    "name: llm-wiki","services:",
+    "  postgres:","    image: pgvector/pgvector:pg17","    environment:","      POSTGRES_DB: llm_wiki","      POSTGRES_USER: llm_wiki","      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}","    volumes:","      - postgres_data:/var/lib/postgresql/data","    healthcheck:","      test: [\"CMD-SHELL\", \"pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB\"]","      interval: 5s","      timeout: 5s","      retries: 12",
+    "  rest:","    build:","      context: .","      dockerfile: Dockerfile","    depends_on:","      postgres:","        condition: service_healthy","    environment:","      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki","      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:\${POSTGRES_PASSWORD}@postgres:5432/llm_wiki",`      LLM_WIKI_WORKSPACE: ${workspace}`,`      LLM_WIKI_AUTH_MODE: "${auth}"`,`      LLM_WIKI_AUTH_REQUIRED: "${env("LLM_WIKI_AUTH_REQUIRED",auth==="disabled"?"false":"true")}"`,`      LLM_WIKI_API_TOKEN: "${env("LLM_WIKI_API_TOKEN","")}"`,`      KOGWISTAR_PARSER_PROVIDER: "${env("KOGWISTAR_PARSER_PROVIDER","ollama")}"`,`      KOGWISTAR_PARSER_MODEL: "${env("KOGWISTAR_PARSER_MODEL","gemma4:e2b")}"`,`      KOGWISTAR_PARSER_BASE_URL: "${env("KOGWISTAR_PARSER_BASE_URL","http://host.docker.internal:11434")}"`,`      KOGWISTAR_MAINTENANCE_PROVIDER: "${env("KOGWISTAR_MAINTENANCE_PROVIDER","ollama")}"`,`      KOGWISTAR_MAINTENANCE_MODEL: "${env("KOGWISTAR_MAINTENANCE_MODEL","gemma4:e2b")}"`,`      KOGWISTAR_MAINTENANCE_BASE_URL: "${env("KOGWISTAR_MAINTENANCE_BASE_URL","http://host.docker.internal:11434")}"`,`      LLM_WIKI_OTEL_ENABLED: "${env("LLM_WIKI_OTEL_ENABLED",otel?"true":"false")}"`,`      OTEL_EXPORTER_OTLP_ENDPOINT: "${env("OTEL_EXPORTER_OTLP_ENDPOINT","http://grafana:4318")}"`,`      LLM_WIKI_REPRESENTATION_SERVICE_URL: "${env("LLM_WIKI_REPRESENTATION_SERVICE_URL",multimodal?"http://representation:8790":"")}"`,`      LLM_WIKI_REPRESENTATION_SERVICE_TOKEN: "${env("LLM_WIKI_REPRESENTATION_SERVICE_TOKEN","")}"`,`      LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS: "${env("LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS",multimodal?"representation":"")}"`,`      LLM_WIKI_MULTIMODAL_MODEL: "${env("LLM_WIKI_MULTIMODAL_MODEL",multimodal?"Qwen/Qwen3-VL-Embedding-2B":"")}"`,`      LLM_WIKI_MULTIMODAL_DIMENSION: "${env("LLM_WIKI_MULTIMODAL_DIMENSION",multimodal?"1024":"")}"`,`      LLM_WIKI_MULTIMODAL_MODEL_REVISION: "${env("LLM_WIKI_MULTIMODAL_MODEL_REVISION",multimodal?revision:"")}"`,"    command: [llm-wiki, --backend, postgres, workbench, --workspace, \"${LLM_WIKI_WORKSPACE:-default}\", --host, 0.0.0.0, --port, '8765']","    ports:","      - \"127.0.0.1:${LLM_WIKI_REST_PORT:-8765}:8765\"","    volumes:","      - app_data:/var/lib/llm-wiki","    healthcheck:","      test: [\"CMD\", \"python\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3)\"]","      interval: 10s","      timeout: 5s","      retries: 12","      start_period: 30s",
+    "  mcp:","    build:","      context: .","      dockerfile: Dockerfile","    depends_on:","      postgres:","        condition: service_healthy","    environment:","      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki","      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:\${POSTGRES_PASSWORD}@postgres:5432/llm_wiki",`      LLM_WIKI_OTEL_ENABLED: "${env("LLM_WIKI_OTEL_ENABLED",otel?"true":"false")}"`,`      OTEL_EXPORTER_OTLP_ENDPOINT: "${env("OTEL_EXPORTER_OTLP_ENDPOINT","http://grafana:4318")}"`,`      LLM_WIKI_AUTH_MODE: "${auth}"`,`      LLM_WIKI_MCP_AUTH_REQUIRED: "${env("LLM_WIKI_MCP_AUTH_REQUIRED",auth==="disabled"?"false":"true")}"`,`      LLM_WIKI_MCP_TOKEN: "${env("LLM_WIKI_MCP_TOKEN","")}"`,`      LLM_WIKI_REPRESENTATION_SERVICE_URL: "${env("LLM_WIKI_REPRESENTATION_SERVICE_URL",multimodal?"http://representation:8790":"")}"`,`      LLM_WIKI_REPRESENTATION_SERVICE_TOKEN: "${env("LLM_WIKI_REPRESENTATION_SERVICE_TOKEN","")}"`,`      LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS: "${env("LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS",multimodal?"representation":"")}"`,"    command: [llm-wiki, --backend, postgres, mcp, --transport, streamable-http, --host, 0.0.0.0, --port, '8780', --path, /mcp]","    ports:","      - \"127.0.0.1:${LLM_WIKI_MCP_PORT:-8780}:8780\"","    volumes:","      - app_data:/var/lib/llm-wiki","    healthcheck:","      test: [\"CMD\", \"python\", \"-c\", \"import socket; socket.create_connection(('127.0.0.1', 8780), 3).close()\"]","      interval: 10s","      timeout: 5s","      retries: 12","      start_period: 30s"
+  ];
+  for(const service of ["rest","mcp"]){const ports=lines.indexOf("    ports:",lines.indexOf("  "+service+":"));lines.splice(ports+2,0,"    extra_hosts: [\"host.docker.internal:host-gateway\"]");}
+  if(multimodal){for(const service of ["rest","mcp"]){const environment=lines.indexOf("    environment:",lines.indexOf("  "+service+":"));lines.splice(environment,0,"      representation:","        condition: service_started");}lines.push("  representation:","    build:","      context: .","      dockerfile: Dockerfile.representation-service",`      args: {LLM_WIKI_REPRESENTATION_TORCH_BACKEND: ${torch}}`,"    environment:","      LLM_WIKI_REPRESENTATION_MODEL: Qwen/Qwen3-VL-Embedding-2B",`      LLM_WIKI_REPRESENTATION_MODEL_REVISION: ${revision}`,"      LLM_WIKI_REPRESENTATION_DIMENSION: 1024",`      LLM_WIKI_REPRESENTATION_DEVICE: ${device}`,`      LLM_WIKI_REPRESENTATION_TORCH_BACKEND: ${torch}`,"      HF_HOME: /var/lib/huggingface",`      LLM_WIKI_REPRESENTATION_TOKEN: "${env("LLM_WIKI_REPRESENTATION_TOKEN","")}"`,"    expose:","      - \"8790\"","    volumes:","      - representation_hf_cache:/var/lib/huggingface","    healthcheck:","      test: [\"CMD\", \"python\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/readyz', timeout=3)\"]","      interval: 10s","      timeout: 5s","      retries: 12","      start_period: 30s");}
+  if(otel){lines.push("  grafana:","    image: grafana/otel-lgtm:latest","    ports:","      - \"127.0.0.1:${GRAFANA_PORT:-3000}:3000\"");}
+  if(oauth){lines.push("  oauth:","    image: ghcr.io/navikt/mock-oauth2-server:2.2.1","    profiles: [oauth]","    expose:","      - \"8080\"");}
+  lines.push("volumes:","  postgres_data:","  app_data:");if(multimodal)lines.push("  representation_hf_cache:");
+  const y=lines.join("\n")+"\n";$("output").value=y;$("download").hidden=false;$("download").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([y],{type:"text/yaml"}));a.download="compose.generated.yml";a.click()};
+}
+$("generate").onclick=generate;
+</script>

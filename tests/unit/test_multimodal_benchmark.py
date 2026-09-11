@@ -32,3 +32,9 @@ def test_multimodal_benchmark_rejects_invalid_configuration() -> None:
         run_multimodal_benchmark(backend="remote")
     with pytest.raises(ValueError, match="allowed-host"):
         run_multimodal_benchmark(backend="remote", service_url="http://representation:8790")
+    with pytest.raises(ValueError, match="service-batch-size"):
+        run_multimodal_benchmark(
+            backend="remote",
+            service_url="http://representation:8790",
+            service_allowed_hosts=("representation",),
+        )

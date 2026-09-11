@@ -38,10 +38,13 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .compose_config import ComposeConfigurationError, ComposeOptions, check_compose_text, write_compose
 
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest, NamespaceEngines
@@ -495,7 +498,7 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
 
 def _cmd_representation_service(args: argparse.Namespace) -> None:
     """Run the optional isolated multimodal representation service."""
-    from kogwistar_llm_wiki.representation_service.__main__ import main as run_service
+    from llm_wiki_representation_service.__main__ import main as run_service
 
     del args
     run_service()
@@ -771,6 +774,58 @@ def _cmd_embeddings_adopt_legacy(args: argparse.Namespace) -> None:
         )
     finally:
         _close_engines(engines)
+
+
+def _compose_options_from_args(args: argparse.Namespace) -> ComposeOptions:
+    return ComposeOptions(
+        backend=args.backend,
+        workspace=args.workspace,
+        project_name=args.project_name,
+        mode=args.mode,
+        with_otel=args.with_otel,
+        with_oauth=args.with_oauth,
+        auth_mode=args.auth_mode,
+        model_revision=args.model_revision,
+        representation_dimension=args.representation_dimension,
+    )
+
+
+def _cmd_compose_generate(args: argparse.Namespace) -> None:
+    path = write_compose(args.output, _compose_options_from_args(args))
+    print(json.dumps({"status": "generated", "path": str(path.resolve())}, indent=2))
+
+
+def _cmd_compose_check(args: argparse.Namespace) -> None:
+    path = Path(args.file)
+    result = check_compose_text(path.read_text(encoding="utf-8"))
+    docker_check: dict[str, object] = {"status": "not_run", "detail": "docker command unavailable"}
+    try:
+        completed = subprocess.run(
+            ["docker", "compose", "-f", str(path), "config", "--quiet"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        docker_check["detail"] = f"docker compose check skipped: {exc}"
+    else:
+        if completed.returncode == 0:
+            docker_check = {"status": "passed"}
+        else:
+            docker_check = {
+                "status": "failed",
+                "detail": (completed.stderr or completed.stdout).strip()[:2000],
+            }
+            result["valid"] = False
+            errors = result.setdefault("errors", [])
+            if isinstance(errors, list):
+                errors.append("docker compose config rejected the file")
+    result["docker_compose"] = docker_check
+    print(json.dumps({"file": str(path), **result}, indent=2, sort_keys=True))
+    if not result["valid"]:
+        raise SystemExit(78)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1072,6 +1127,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Acknowledge that existing vectors were verified against the configured profile",
     )
     embedding_adopt_p.set_defaults(func=_cmd_embeddings_adopt_legacy)
+
+    compose_p = sub.add_parser("compose", help="Generate or validate a safe Docker Compose bundle")
+    compose_sub = compose_p.add_subparsers(dest="compose_command", required=True)
+    compose_generate_p = compose_sub.add_parser("generate", help="Generate a self-contained Compose configuration")
+    compose_generate_p.add_argument("--output", required=True, help="Output YAML path")
+    compose_generate_p.add_argument("--workspace", default="default")
+    compose_generate_p.add_argument("--backend", choices=["postgres", "chroma"], default="postgres")
+    compose_generate_p.add_argument("--project-name", default="llm-wiki")
+    compose_generate_p.add_argument("--mode", choices=["gpu", "cpu", "text-only"], default="gpu")
+    compose_generate_p.add_argument("--auth-mode", choices=["disabled", "static_token", "kogwistar_jwt"], default="disabled")
+    compose_generate_p.add_argument("--with-otel", action="store_true")
+    compose_generate_p.add_argument("--with-oauth", action="store_true")
+    compose_generate_p.add_argument("--model-revision", default="")
+    compose_generate_p.add_argument("--representation-dimension", type=int, default=1024)
+    compose_generate_p.set_defaults(func=_cmd_compose_generate)
+    compose_check_p = compose_sub.add_parser("check", help="Validate a generated or checked-in Compose YAML")
+    compose_check_p.add_argument("--file", required=True, help="Compose YAML path")
+    compose_check_p.set_defaults(func=_cmd_compose_check)
 
     # daemon sub-command
     daemon_p = sub.add_parser("daemon", help="Run a background daemon")

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-wiki-representation-contract"
+version = "0.1.0"
+description = "Stdlib-only v1 contract for LLM-Wiki representation services"
+requires-python = ">=3.13"
+
+[tool.setuptools]
+package-dir = {"" = "../src"}
+
+[tool.setuptools.packages.find]
+where = ["../src"]
+include = ["llm_wiki_representation_contract*"]

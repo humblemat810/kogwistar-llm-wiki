@@ -10,10 +10,20 @@
 ## Production Inference Boundary
 
 Production Qwen3-VL inference runs in the isolated FastAPI representation
-service (`Dockerfile.representation-service`). The normal LLM-Wiki image stays
-Torch-free and uses `LLM_WIKI_REPRESENTATION_SERVICE_URL` through the typed
-remote encoder. One service process owns one dense, profile-pinned
+service (`Dockerfile.representation-service`). The standalone service is built
+from the `llm-wiki-representation-service` distribution and its stdlib-only
+`llm-wiki-representation-contract` dependency. It does not import the
+LLM-Wiki application, Kogwistar, parser, sink, Chroma, PostgreSQL, or MCP.
+The normal LLM-Wiki image stays Torch-free and uses
+`LLM_WIKI_REPRESENTATION_SERVICE_URL` through the typed remote encoder. One
+service process owns one dense, profile-pinned
 `Qwen/Qwen3-VL-Embedding-2B` model; CPU and CUDA images are separate.
+
+`LLM_WIKI_REPRESENTATION_MODEL_REVISION` is mandatory and must be an immutable
+Hugging Face commit, tag, or other verified revision. It is part of the profile
+fingerprint; a floating model reference is rejected at service startup. The
+HTTP contract remains version `v1`, while the two distributions can be
+installed and tested independently of the application distribution.
 
 The service accepts only bounded text and resolved asset bytes with a MIME type
 and SHA-256. It never fetches source URLs or filesystem paths. LLM-Wiki keeps
@@ -1274,6 +1284,19 @@ compatibility release can deserialize all old payloads unchanged.
   1 or rank fusion is sufficient.
 - Set limits for image pixels, PDF pages, webpage subresources, query fanout,
   vector count, and retained old projection generations.
+
+## Operating Settings Console
+
+The workbench settings console displays the effective text and multimodal
+profiles, backend compatibility, Qwen3-VL service readiness, and projection
+state. Local Chroma text embeddings remain the default knowledge plane while
+the Docker Qwen3-VL service is an optional multimodal route.
+
+The route can be enabled or disabled after confirmation without changing its
+profile. Model, provider, metric, dimension, preprocessing, or representation
+changes remain staged until a graceful restart and isolated re-embedding are
+completed. The console never performs in-place vector migration or exposes
+service credentials.
 
 ## Technical References
 

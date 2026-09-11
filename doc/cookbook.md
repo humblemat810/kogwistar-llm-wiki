@@ -24,15 +24,51 @@ not a safe shared directory for independent writer processes. See the
 [Docker deployment guide](docker_deployment.md) for the container boundary and
 [Quickstart](../QUICKSTART.md) for installation.
 
+## Recipe: Operating Settings
+
+Open the graph workbench and choose **Settings** to inspect the effective
+runtime configuration. The panel shows the local text embedding plane, the
+optional Docker Qwen3-VL representation service, parser and maintenance model,
+readiness, and profile locks. Effective values are what the current process is
+using; desired values are staged for a future launch and never replace them
+silently.
+
+The multimodal route can be enabled or disabled after confirmation when the
+representation service is already configured. Changing an embedding model,
+provider, metric, or dimension requires a restart and isolated re-embedding.
+The UI does not perform destructive migration or edit arbitrary environment
+variables. Operators can inspect the same profile data from the CLI:
+
+```bash
+python -m kogwistar_llm_wiki embeddings inspect --workspace demo
+```
+
 ## Recipe: Multimodal Representation Service
 
-Use the isolated FastAPI service for production Qwen3-VL inference. The app
+Use the isolated FastAPI service for production Qwen3-VL inference. GPU is the
+practical default for this vision model. The app
 captures source units first and sends resolved, bounded asset bytes to the
 sidecar only during Stage 2 promotion:
 
 ```bash
+LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cu128 \
+docker compose -f compose.yml -f compose.multimodal.yml \
+  -f compose.representation-cuda.yml up --build
+```
+
+CPU fallback for smoke tests or hosts without NVIDIA Container Toolkit:
+
+```bash
+LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cpu \
 docker compose -f compose.yml -f compose.multimodal.yml up --build
 ```
+
+Set `LLM_WIKI_REPRESENTATION_MODEL_REVISION` to an immutable Hugging Face
+revision before starting Compose. The sidecar is the standalone
+`llm-wiki-representation-service` distribution plus its
+`llm-wiki-representation-contract` dependency; it does not install the
+LLM-Wiki application or graph stack. `/healthz` is liveness and `/readyz` is
+model readiness. A live but not-ready sidecar must not receive Stage 2 work.
 
 Use `-f compose.representation-cuda.yml` with the CPU overlay on a host with
 NVIDIA Container Toolkit. Set `LLM_WIKI_REPRESENTATION_DIMENSION=1024` (the
@@ -158,6 +194,7 @@ machine or production sidecar with:
   --allowed-host representation \
   --items 4 \
   --batch-size 1 \
+  --service-batch-size 1 \
   --repeats 3
 ```
 
@@ -171,10 +208,27 @@ keeps the model/profile compatibility check enabled during the benchmark:
   --service-url http://127.0.0.1:8790 `
   --allowed-host 127.0.0.1 `
   --service-model (Resolve-Path data\models\qwen3-vl-embedding-2b).Path `
-  --items 4 --batch-size 1 --repeats 3
+  --items 4 --batch-size 1 --service-batch-size 1 --repeats 3
 ```
 
-Start with `--batch-size 1` on an 8 GB GPU and increase it only after
+For local encoders, `--batch-size` controls model batching. For the remote
+backend, it only describes the client workload; the actual model microbatch is
+set when the service starts with
+`LLM_WIKI_REPRESENTATION_BATCH_SIZE`. The remote benchmark requires
+`--service-batch-size` and verifies it against `/v1/capabilities`, failing
+closed if the running service has a different value. Restart/recreate the
+service to compare batch sizes, for example:
+
+```powershell
+$env:LLM_WIKI_REPRESENTATION_BATCH_SIZE='16'
+# restart/recreate the representation container, then run:
+.venv\Scripts\python.exe scripts\benchmark_multimodal.py `
+  --backend remote --service-url http://127.0.0.1:8790 `
+  --allowed-host 127.0.0.1 --service-batch-size 16 `
+  --items 16 --batch-size 16 --repeats 3
+```
+
+Start with service batch size `1` on an 8 GB GPU and increase it only after
 observing peak memory and latency.
 
 For a remote benchmark, the device is selected when the representation service
@@ -482,6 +536,49 @@ The adapter starts one bounded local App Server child per turn, requests typed
 output, and keeps graph mutation behind proposal validation and confirmation.
 Use the default deterministic mode or fake App Server tests in CI; live Codex
 subscription checks are manual.
+
+## Recipe 11: Multimodal Memory Agent With OTel
+
+For a local PostgreSQL-backed memory agent with Qwen3-VL embeddings and a
+Grafana OTEL-LGTM viewer, either use the checked-in example overlay or generate
+the equivalent full Compose file from explicit options:
+
+```bash
+cp .env.example .env
+# Set POSTGRES_PASSWORD and LLM_WIKI_API_TOKEN in .env first.
+docker compose -f compose.yml -f compose.multimodal.yml \
+  -f compose.memory-agent.yml up --build
+```
+
+The generator combination is:
+
+```bash
+python -m kogwistar_llm_wiki compose generate \
+  --output compose.memory-agent.yml \
+  --backend postgres --mode gpu \
+  --with-otel --with-oauth --auth-mode static_token \
+  --model-revision <immutable-Qwen3-VL-revision>
+```
+
+There is no special memory-agent generator mode. A standard deployment is the
+same command with OTel/OAuth disabled and authentication set to `disabled`.
+
+The base `postgres`, `rest`, and `mcp` services provide the memory-agent
+interfaces. `compose.multimodal.yml` adds the private Qwen3-VL representation
+service, while `compose.memory-agent.yml` enables the OTel sink and exposes
+Grafana on `http://127.0.0.1:3000`. The application traces are disabled or
+enabled with `LLM_WIKI_OTEL_ENABLED`; the Settings panel can toggle the sink
+for the current process after confirmation, but it does not start or stop
+Docker services.
+
+The example contains a commented Keycloak OAuth/OIDC service. Uncommenting it
+only starts the identity provider; it does not change application auth. To use
+it, configure `LLM_WIKI_AUTH_MODE=kogwistar_jwt`, issuer/audience, and a
+compatible verification key, then recreate the app containers and verify
+workspace ACLs. The UI reports OAuth/OIDC as deployment-managed and provides
+no live toggle, because changing authentication without a restart could
+expose the service or invalidate active sessions. For a trusted personal
+deployment, use `LLM_WIKI_AUTH_MODE=disabled` instead.
 
 ## Troubleshooting Checklist
 

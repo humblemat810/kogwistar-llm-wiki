@@ -588,3 +588,18 @@ visible instead of flattening them away.
 - Treating embedding proximity as evidence or truth.
 - Training an RL model as part of the initial viewer work.
 - Porting product UI policy into Rust core.
+
+## Operating Settings Console
+
+The workbench includes an authenticated operator settings console backed by
+`/api/settings` and `/api/settings/health`. It reports effective runtime values
+separately from non-secret desired values stored under the application data
+directory. Local Chroma text embedding remains the always-on knowledge plane;
+the Docker Qwen3-VL representation service is an optional multimodal route.
+
+Only the multimodal retrieval route is live-toggleable in the initial console.
+Provider/model changes are staged and require a graceful restart. Embedding
+profile changes also require an isolated projection and re-embedding; the UI
+never mutates vector dimensions or bypasses the profile guard. High-risk
+operations remain explicit confirmation actions, and personal mode may use the
+same view without an ACL identity.

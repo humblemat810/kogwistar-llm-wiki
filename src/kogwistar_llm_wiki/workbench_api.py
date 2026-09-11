@@ -28,6 +28,9 @@ from .workbench_background import (
     WorkbenchInteractionStore,
 )
 from .multimodal_remote import RepresentationServiceUnavailable
+from .settings import SettingsService
+from .compose_config import ComposeOptions, check_compose_text, render_compose, validate_options
+from .model_catalog import available_models
 
 AgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot], str]
 ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, ProgressCallback], str]
@@ -42,8 +45,10 @@ class WorkbenchApi:
         cockpit_responder: CockpitResponder | None = None,
         codex_worker_count: int = 0,
         trace_sink: Callable[[dict[str, object]], None] | None = None,
+        settings_path: str | None = None,
     ) -> None:
         self.pipeline = pipeline
+        self.settings = SettingsService(pipeline, path=settings_path)
         self.agent_responder = agent_responder
         self.cockpit_responder = cockpit_responder
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
@@ -87,6 +92,51 @@ class WorkbenchApi:
             return {"ready": False, "service": "kogwistar-llm-wiki", "checks": checks, "reason": str(exc)}
         return {"ready": True, "service": "kogwistar-llm-wiki", "checks": checks}
 
+    def get_settings(self, *, workspace_id: str = "default") -> dict[str, object]:
+        return self.settings.snapshot(workspace_id=workspace_id)
+
+    def settings_health(self, *, workspace_id: str = "default") -> dict[str, object]:
+        return self.settings.health(workspace_id=workspace_id, readiness=self.readiness())
+
+    def update_desired_settings(
+        self, *, workspace_id: str, changes: Mapping[str, object]
+    ) -> dict[str, object]:
+        return self.settings.update_desired(changes, workspace_id=workspace_id)
+
+    def apply_settings(
+        self, *, workspace_id: str, confirmed: bool
+    ) -> dict[str, object]:
+        return self.settings.apply(workspace_id=workspace_id, confirmed=confirmed)
+
+    def compose_preview(self, payload: Mapping[str, Any]) -> dict[str, object]:
+        """Return a generated Compose bundle without writing files or secrets."""
+        options = ComposeOptions(
+            backend=str(payload.get("backend") or "postgres"),
+            workspace=str(payload.get("workspace_id") or "default"),
+            project_name=str(payload.get("project_name") or "llm-wiki"),
+            mode=str(payload.get("mode") or "gpu"),
+            with_otel=bool(payload.get("with_otel", False)),
+            with_oauth=bool(payload.get("with_oauth", False)),
+            auth_mode=str(payload.get("auth_mode") or "disabled"),
+            model_revision=str(payload.get("model_revision") or ""),
+            representation_dimension=int(payload.get("representation_dimension") or 1024),
+        )
+        errors = validate_options(options)
+        return {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None}
+
+    @staticmethod
+    def compose_check(payload: Mapping[str, Any]) -> dict[str, object]:
+        text = payload.get("yaml")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("yaml must be a non-empty string")
+        return check_compose_text(text)
+
+    @staticmethod
+    def available_models(role: str, *, provider: str | None = None, base_url: str | None = None) -> dict[str, object]:
+        if role not in {"parser", "maintenance"}:
+            raise ValueError("role must be parser or maintenance")
+        return available_models(role, provider=provider, base_url=base_url)
+
     def get_lens(self, payload: Mapping[str, Any]) -> dict[str, object]:
         request = _lens_request(payload)
         result = self.pipeline.resolve_semantic_lens(request).to_dict()
@@ -104,6 +154,8 @@ class WorkbenchApi:
         """Add an optional bounded multimodal route without changing graph truth."""
         if payload.get("include_multimodal", True) is False or not query_text.strip():
             return None
+        if not self.settings.snapshot().get("effective", {}).get("multimodal", {}).get("enabled", True):
+            return {"status": "disabled", "route": "multimodal_projection", "hits": []}
         if (
             self.pipeline.multimodal_projection_store is None
             or self.pipeline.multimodal_encoder is None

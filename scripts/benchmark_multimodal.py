@@ -15,6 +15,7 @@ import json
 from statistics import mean, median
 import time
 from typing import Any
+from urllib.request import Request, urlopen
 
 from kogwistar_llm_wiki.multimodal_projection import (
     ColQwenNativeEncoder,
@@ -151,6 +152,7 @@ def run_multimodal_benchmark(
     service_model: str | None = None,
     service_model_revision: str | None = None,
     service_instruction: str | None = None,
+    service_batch_size: int | None = None,
 ) -> dict[str, Any]:
     """Run the five requested workload shapes and return JSON-ready metrics."""
 
@@ -189,14 +191,31 @@ def run_multimodal_benchmark(
             raise ValueError("--service-url is required for the remote backend")
         if not service_allowed_hosts:
             raise ValueError("--allowed-host is required for the remote backend")
+        if service_batch_size is None or service_batch_size <= 0:
+            raise ValueError("--service-batch-size is required and must be positive for the remote backend")
         from kogwistar_llm_wiki.multimodal_remote import (
             RemoteMultimodalEncoder,
             RepresentationServiceSettings,
         )
-        from kogwistar_llm_wiki.representation_service.config import RepresentationServiceConfig
+        from llm_wiki_representation_service.config import RepresentationServiceConfig
+
+        capabilities_request = Request(service_url.rstrip("/") + "/v1/capabilities", method="GET")
+        if service_token:
+            capabilities_request.add_header("Authorization", f"Bearer {service_token}")
+        try:
+            with urlopen(capabilities_request, timeout=30) as capabilities_response:
+                capabilities = json.loads(capabilities_response.read().decode("utf-8"))
+        except Exception as exc:
+            raise ValueError("unable to inspect remote service capabilities before benchmarking") from exc
+        if not isinstance(capabilities, dict) or capabilities.get("batch_size") != service_batch_size:
+            actual = capabilities.get("batch_size") if isinstance(capabilities, dict) else None
+            raise ValueError(
+                f"remote service batch size mismatch: expected {service_batch_size}, got {actual}; "
+                "restart the service with LLM_WIKI_REPRESENTATION_BATCH_SIZE"
+            )
 
         profile = RepresentationServiceConfig(
-            model=service_model or RepresentationServiceConfig().model,
+            model=service_model or "Qwen/Qwen3-VL-Embedding-2B",
             revision=service_model_revision,
             dimension=dimension,
             instruction=service_instruction or "Represent the user's input.",
@@ -239,6 +258,7 @@ def run_multimodal_benchmark(
         "backend": backend,
         "profile": asdict(encoder.profile),
         "batch_size": batch_size,
+        "service_batch_size": service_batch_size,
         "requested_items": items,
         "warmup": warmup,
         "cases": [asdict(result) for result in results],
@@ -269,6 +289,11 @@ def main() -> int:
         help="Explicit allowed service hostname; repeat for multiple hosts",
     )
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument(
+        "--service-batch-size",
+        type=int,
+        help="Actual remote service microbatch; required for --backend remote and set at service startup",
+    )
     parser.add_argument("--items", type=int, default=4)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
@@ -289,6 +314,7 @@ def main() -> int:
         service_model=args.service_model,
         service_model_revision=args.service_model_revision,
         service_instruction=args.service_instruction,
+        service_batch_size=args.service_batch_size,
     )
     rendered = json.dumps(report, indent=2, sort_keys=True)
     if args.output:

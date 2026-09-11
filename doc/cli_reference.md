@@ -318,3 +318,58 @@ watermark archive rather than slicing events at an arbitrary timestamp.
 `seed-bundle` and report dumps remain teaching/diagnostic exports. They are not
 substitutes for `archive create`. Backend snapshots are only exact accelerators;
 portable event restore is the migration and recovery fallback.
+
+## `llm-wiki compose`
+
+Generate a safe self-contained local stack without putting credentials in the
+file. GPU is the practical default; pass an immutable Hugging Face revision:
+
+```powershell
+python -m kogwistar_llm_wiki compose generate `
+  --output .\compose.generated.yml `
+  --workspace demo `
+  --model-revision <immutable-commit> `
+  --with-otel
+python -m kogwistar_llm_wiki compose check --file .\compose.generated.yml
+```
+
+Use `--mode cpu` for a CPU sidecar or `--mode text-only` when no multimodal
+service is wanted. Use `--with-oauth` to include the optional Compose-profiled
+OAuth example; it does not configure application JWT verification automatically.
+Start that profile explicitly with `docker compose --profile oauth up` after
+configuring issuer and verification settings. Put passwords and tokens in the
+shell or `.env`, never in the generated YAML. Quote `.env` values containing
+`$` with single quotes so Compose does not interpolate them. The checker runs
+structural checks and, when Docker is available, `docker compose config`; it
+falls back to structural checks when Docker is unavailable. After it passes,
+run the service health/readiness checks.
+### Compose combinations
+
+The checked-in `compose.memory-agent.yml` is reproducible as an ordinary
+configuration combination (PostgreSQL, GPU, OTel, OAuth service, and static
+token authentication):
+
+```powershell
+.venv\Scripts\python.exe -m kogwistar_llm_wiki compose generate `
+  --output compose.memory-agent.yml `
+  --backend postgres `
+  --mode gpu `
+  --with-otel `
+  --with-oauth `
+  --auth-mode static_token `
+  --model-revision <immutable-Qwen3-VL-revision>
+```
+
+The standard bundle is the same command without `--with-otel`, `--with-oauth`,
+and `--auth-mode static_token`. There is deliberately no separate profile
+argument; every generated deployment is the result of explicit options.
+
+Use `--mode cpu` for a CPU sidecar or `--mode text-only` when no multimodal
+service is wanted. The generated Compose target is independent of the live
+settings page. The Compose generator rejects embedded Chroma because REST and
+MCP are separate processes; use PostgreSQL for this bundle or the one-process
+`demo` command for local Chroma. Validate it with:
+
+```powershell
+.venv\Scripts\python.exe -m kogwistar_llm_wiki compose check --file compose.memory-agent.yml
+```

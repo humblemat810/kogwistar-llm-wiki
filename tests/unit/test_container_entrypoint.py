@@ -128,7 +128,18 @@ def test_docker_multimodal_contract_is_explicit_and_opt_in() -> None:
     assert "requirements/multimodal/torch-${LLM_WIKI_REPRESENTATION_TORCH_BACKEND}.txt" in representation_dockerfile
     assert "fastapi" in representation_dockerfile
     assert "LLM_WIKI_REPRESENTATION_MODEL" in compose_override
+    assert "LLM_WIKI_REPRESENTATION_MODEL_REVISION" in compose_override
     assert 'install_multimodal_runtime.py' not in dockerfile
     cuda_override = (ROOT / "compose.representation-cuda.yml").read_text(encoding="utf-8")
     assert "driver: nvidia" in cuda_override
     assert "capabilities: [gpu]" in cuda_override
+
+
+def test_representation_image_isolated_from_application_dependencies() -> None:
+    dockerfile = (ROOT / "Dockerfile.representation-service").read_text(encoding="utf-8")
+    assert "representation-contract/pyproject.toml" in dockerfile
+    assert "representation-service/pyproject.toml" in dockerfile
+    for forbidden in ("kogwistar", "kg-doc-parser", "obsidian", "maturin", "cargo", "gcc"):
+        assert forbidden not in dockerfile.lower()
+    assert "llm_wiki_representation_contract" in dockerfile
+    assert "llm_wiki_representation_service" in dockerfile

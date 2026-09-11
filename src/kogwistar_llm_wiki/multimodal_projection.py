@@ -28,6 +28,14 @@ import os
 import sqlite3
 from typing import Literal, Protocol, runtime_checkable
 
+from llm_wiki_representation_contract import (
+    EmbeddingProfile as MultimodalEmbeddingProfile,
+    EmbeddingSet,
+    EmbeddingRepresentation,
+    SimilarityMetric,
+    SourceModality,
+)
+
 from .multimodal_runtime import (
     configured_multimodal_backend,
     configured_multimodal_dimension,
@@ -38,18 +46,6 @@ from .multimodal_runtime import (
 )
 
 
-EmbeddingRepresentation = Literal["single_vector", "dense", "late_interaction"]
-SimilarityMetric = Literal["dot", "cosine"]
-SourceModality = Literal[
-    "text",
-    "image",
-    "pdf_page",
-    "table",
-    "chart",
-    "webpage",
-    "video_frame",
-]
-EmbeddingSet = tuple[tuple[float, ...], ...]
 DEFAULT_COLQWEN_MODEL = "vidore/colqwen2-v1.0-hf"
 DEFAULT_COLQWEN_REVISION = "ddc07d2317c80f75fc742b7362ee9ad1912908f9"
 DEFAULT_QWEN3_VL_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
@@ -63,67 +59,6 @@ class EmbeddingProfileMismatch(ValueError):
 
 class ProjectionIntegrityError(ValueError):
     """Raised when a stage transition or vector payload is invalid."""
-
-
-@dataclass(frozen=True, slots=True)
-class MultimodalEmbeddingProfile:
-    """Compatibility identity for one physical multimodal projection."""
-
-    provider: str
-    model: str
-    representation: EmbeddingRepresentation
-    dimension: int
-    metric: SimilarityMetric = "dot"
-    model_revision: str | None = None
-    preprocessing_fingerprint: str = "default"
-    max_sequence_length: int = 32768
-    max_image_patches: int = 768
-
-    def __post_init__(self) -> None:
-        if not str(self.provider).strip() or not str(self.model).strip():
-            raise ValueError("multimodal embedding provider and model are required")
-        if self.representation not in {"single_vector", "dense", "late_interaction"}:
-            raise ValueError(f"unsupported embedding representation {self.representation!r}")
-        if self.dimension <= 0:
-            raise ValueError("multimodal embedding dimension must be positive")
-        if self.metric not in {"dot", "cosine"}:
-            raise ValueError(f"unsupported similarity metric {self.metric!r}")
-        if self.max_sequence_length <= 0 or self.max_image_patches <= 0:
-            raise ValueError("multimodal sequence and patch limits must be positive")
-
-    def canonical_payload(self) -> dict[str, object]:
-        return {
-            "provider": str(self.provider),
-            "model": str(self.model),
-            "representation": self.representation,
-            "dimension": int(self.dimension),
-            "metric": self.metric,
-            "model_revision": self.model_revision,
-            "preprocessing_fingerprint": str(self.preprocessing_fingerprint),
-            "max_sequence_length": int(self.max_sequence_length),
-            "max_image_patches": int(self.max_image_patches),
-        }
-
-    @property
-    def fingerprint(self) -> str:
-        payload = json.dumps(
-            self.canonical_payload(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        ).encode("utf-8")
-        return sha256(payload).hexdigest()
-
-    @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "MultimodalEmbeddingProfile":
-        return cls(
-            provider=str(payload["provider"]),
-            model=str(payload["model"]),
-            representation=str(payload["representation"]),  # type: ignore[arg-type]
-            dimension=int(payload["dimension"]),
-            metric=str(payload.get("metric", "dot")),  # type: ignore[arg-type]
-            model_revision=str(payload["model_revision"]) if payload.get("model_revision") else None,
-            preprocessing_fingerprint=str(payload.get("preprocessing_fingerprint", "default")),
-            max_sequence_length=int(payload.get("max_sequence_length", 32768)),
-            max_image_patches=int(payload.get("max_image_patches", 768)),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1304,12 +1239,10 @@ def build_configured_multimodal_encoder(
             device=device,
             batch_size=batch_size,
         )
-    return Qwen3VLDenseEncoder.from_pretrained(
-        configured_multimodal_model(),
-        revision=configured_multimodal_revision(),
-        device=device,
-        batch_size=batch_size,
-        dimension=configured_multimodal_dimension(),
+    raise ValueError(
+        "Qwen3-VL production inference requires "
+        "LLM_WIKI_REPRESENTATION_SERVICE_URL; local Transformers inference is "
+        "available only through developer/test tooling"
     )
 
 def embed_pending(

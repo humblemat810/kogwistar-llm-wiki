@@ -50,6 +50,36 @@ def build_workbench_handler(
                         return
                 elif parsed.path in {"/api/capabilities", "/v1/models"}:
                     body = _capabilities(gateway.mcp_tool_names()) if parsed.path == "/api/capabilities" else _models()
+                elif parsed.path == "/api/settings":
+                    workspace_id = _first(query, "workspace_id", "default")
+                    self._require_scope("read", workspace_id)
+                    body = api.get_settings(workspace_id=workspace_id)
+                elif parsed.path == "/api/settings/health":
+                    workspace_id = _first(query, "workspace_id", "default")
+                    self._require_scope("read", workspace_id)
+                    body = api.settings_health(workspace_id=workspace_id)
+                elif parsed.path == "/api/compose/preview":
+                    workspace_id = _first(query, "workspace_id", "default")
+                    self._require_scope("read", workspace_id)
+                    body = api.compose_preview({
+                        "workspace_id": workspace_id,
+                        "backend": _first(query, "backend", "postgres"),
+                        "project_name": _first(query, "project_name", "llm-wiki"),
+                        "mode": _first(query, "mode", "gpu"),
+                        "auth_mode": _first(query, "auth_mode", "disabled"),
+                        "model_revision": _first(query, "model_revision", ""),
+                        "representation_dimension": int(_first(query, "representation_dimension", "1024")),
+                        "with_otel": _first(query, "with_otel", "false").lower() in {"1", "true", "yes"},
+                        "with_oauth": _first(query, "with_oauth", "false").lower() in {"1", "true", "yes"},
+                    })
+                elif parsed.path == "/api/models":
+                    workspace_id = _first(query, "workspace_id", "default")
+                    self._require_scope("read", workspace_id)
+                    body = api.available_models(
+                        _first(query, "role", "parser"),
+                        provider=_first(query, "provider", "") or None,
+                        base_url=_first(query, "base_url", "") or None,
+                    )
                 elif parsed.path.startswith("/a2a/v1/tasks/"):
                     self._require_agent_api()
                     workspace_id = _first(query, "workspace_id", "default")
@@ -111,7 +141,7 @@ def build_workbench_handler(
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
-            if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", *agent_paths}:
+            if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -182,6 +212,26 @@ def build_workbench_handler(
                     status = 202
                 elif parsed.path == "/api/proposal/confirm":
                     body = api.confirm_cockpit_proposal(payload)
+                    status = 200
+                elif parsed.path == "/api/settings/desired":
+                    changes = payload.get("settings")
+                    if not isinstance(changes, dict):
+                        raise ValueError("settings must be an object")
+                    body = api.update_desired_settings(
+                        workspace_id=str(workspace_id or "default"), changes=changes
+                    )
+                    status = 200
+                elif parsed.path == "/api/settings/apply":
+                    body = api.apply_settings(
+                        workspace_id=str(workspace_id or "default"),
+                        confirmed=bool(payload.get("confirmed", False)),
+                    )
+                    status = 200
+                elif parsed.path == "/api/compose/preview":
+                    body = api.compose_preview(payload)
+                    status = 200
+                elif parsed.path == "/api/compose/check":
+                    body = api.compose_check(payload)
                     status = 200
                 else:
                     body = api.validate_proposal(payload)

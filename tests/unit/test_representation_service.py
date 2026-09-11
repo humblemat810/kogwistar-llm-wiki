@@ -7,14 +7,24 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from kogwistar_llm_wiki.representation_service.app import create_app
-from kogwistar_llm_wiki.representation_service.config import RepresentationServiceConfig
-from kogwistar_llm_wiki.representation_service.config import load_config
-from tests.unit.test_multimodal_remote import _FakeEncoder
+from llm_wiki_representation_contract import EmbeddingProfile
+from llm_wiki_representation_service.app import create_app
+from llm_wiki_representation_service.config import RepresentationServiceConfig
+from llm_wiki_representation_service.config import load_config
+
+
+class _FakeEncoder:
+    def __init__(self, profile: EmbeddingProfile) -> None:
+        self.profile = profile
+
+    def encode(self, items):
+        return [((1.0,) + (0.0,) * (self.profile.dimension - 1),) for _ in items]
 
 
 def test_fastapi_service_health_capabilities_and_authenticated_representation() -> None:
-    config = RepresentationServiceConfig(dimension=64, token="secret")
+    config = RepresentationServiceConfig(
+        dimension=64, revision="test-revision", token="secret", batch_size=8
+    )
     with TestClient(create_app(encoder=_FakeEncoder(config.profile), config=config)) as client:
         assert client.get("/healthz").json()["ok"] is True
         assert client.get("/readyz").status_code == 200
@@ -23,6 +33,7 @@ def test_fastapi_service_health_capabilities_and_authenticated_representation() 
             "/v1/capabilities", headers={"Authorization": "Bearer secret"}
         )
         assert capabilities.json()["profile"]["fingerprint"] == config.profile.fingerprint
+        assert capabilities.json()["batch_size"] == 8
         response = client.post(
             "/v1/represent",
             headers={"Authorization": "Bearer secret"},
@@ -42,6 +53,7 @@ def test_representation_config_uses_supplied_environment_mapping() -> None:
     config = load_config(
         {
             "LLM_WIKI_REPRESENTATION_MODEL": "test/qwen-vl",
+            "LLM_WIKI_REPRESENTATION_MODEL_REVISION": "test-revision",
             "LLM_WIKI_REPRESENTATION_DIMENSION": "1536",
             "LLM_WIKI_REPRESENTATION_DEVICE": "cpu",
             "LLM_WIKI_REPRESENTATION_TORCH_BACKEND": "cpu",
