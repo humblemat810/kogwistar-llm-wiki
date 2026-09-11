@@ -67,7 +67,7 @@ Possible initial artifacts:
 
 - source is registered
 - grounded parse exists
-- initial graph representation exists
+- initial graph embedding exists
 - maintenance follow-up is queued
 
 ---

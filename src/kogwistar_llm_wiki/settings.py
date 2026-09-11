@@ -12,7 +12,9 @@ from typing import Any, Mapping
 from .multimodal_runtime import (
     configured_multimodal_dimension,
     configured_multimodal_model,
-    configured_representation_service_url,
+    configured_multimodal_backend,
+    configured_embedding_service_url,
+    configured_vllm_url,
 )
 from .provider_config import resolve_maintenance_provider_settings, resolve_parser_provider_settings
 from .model_catalog import _safe_endpoint
@@ -133,10 +135,14 @@ class SettingsService:
             "embeddings": self._effective_embeddings(),
             "multimodal": {
                 "enabled": multimodal_enabled,
-                "configured": bool(multimodal or configured_representation_service_url()),
+                "configured": bool(
+                    multimodal or configured_embedding_service_url() or configured_vllm_url()
+                ),
+                "backend": configured_multimodal_backend(),
                 "model": getattr(getattr(multimodal, "profile", None), "model", configured_multimodal_model()),
                 "dimension": getattr(getattr(multimodal, "profile", None), "dimension", configured_multimodal_dimension()),
-                "service_url": configured_representation_service_url(),
+                "service_url": configured_embedding_service_url(),
+                "vllm_url": configured_vllm_url(),
             },
             "auth_mode": auth_mode(),
             "otel": {
@@ -159,14 +165,14 @@ class SettingsService:
     def health(self, *, workspace_id: str = "default", readiness: Mapping[str, object] | None = None) -> dict[str, object]:
         readiness = dict(readiness or self.pipeline_ready())
         multimodal = getattr(self.pipeline, "multimodal_encoder", None)
-        representation: dict[str, object] = {"state": "disabled"}
+        embedding: dict[str, object] = {"state": "disabled"}
         if multimodal is not None:
             try:
                 probe = multimodal.readiness() if hasattr(multimodal, "readiness") else {"ready": True}
-                representation = {"state": "up" if probe.get("ready") else "degraded", **probe}
+                embedding = {"state": "up" if probe.get("ready") else "degraded", **probe}
             except Exception as exc:  # noqa: BLE001
-                representation = {"state": "unavailable", "reason": str(exc)}
-        return {"version": 1, "workspace_id": workspace_id, "state": "up" if readiness.get("ready") else "degraded", "readiness": readiness, "representation_service": _redact(representation), "checked_at_ms": int(time.time() * 1000)}
+                embedding = {"state": "unavailable", "reason": str(exc)}
+        return {"version": 1, "workspace_id": workspace_id, "state": "up" if readiness.get("ready") else "degraded", "readiness": readiness, "embedding_service": _redact(embedding), "checked_at_ms": int(time.time() * 1000)}
 
     def update_desired(self, changes: Mapping[str, object], *, workspace_id: str = "default") -> dict[str, object]:
         unknown = sorted(set(changes) - _DESIRED_KEYS)
@@ -198,7 +204,7 @@ class SettingsService:
             self._runtime_otel_enabled = desired["otel_enabled"]
         if isinstance(desired, Mapping) and isinstance(desired.get("multimodal_enabled"), bool):
             if desired["multimodal_enabled"] and self.pipeline.multimodal_encoder is None:
-                return {"status": "rejected", "reason": "multimodal_representation_service_not_configured", **snapshot}
+                return {"status": "rejected", "reason": "multimodal_embedding_service_not_configured", **snapshot}
             self._runtime_multimodal_enabled = desired["multimodal_enabled"]
             snapshot = self.snapshot(workspace_id=workspace_id)
         if snapshot["restart_required"] or snapshot["reembedding_required"]:

@@ -9,7 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 ARG LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
-ARG LLM_WIKI_REPRESENTATION_TORCH_BACKEND=
 ENV LLM_WIKI_EMBEDDING_TORCH_BACKEND=${LLM_WIKI_EMBEDDING_TORCH_BACKEND}
 
 RUN apt-get update \
@@ -17,23 +16,23 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only the standalone service and its dependency-light contract.
-COPY representation-contract/pyproject.toml ./representation-contract/pyproject.toml
-COPY representation-service/pyproject.toml ./representation-service/pyproject.toml
-COPY src/llm_wiki_representation_contract ./src/llm_wiki_representation_contract
-COPY src/llm_wiki_representation_service ./src/llm_wiki_representation_service
+COPY embedding-contract/pyproject.toml ./embedding-contract/pyproject.toml
+COPY embedding-service/pyproject.toml ./embedding-service/pyproject.toml
+COPY src/llm_wiki_embedding_contract ./src/llm_wiki_embedding_contract
+COPY src/llm_wiki_embedding_service ./src/llm_wiki_embedding_service
 COPY requirements/multimodal ./requirements/multimodal
 
 RUN python -m pip install --upgrade pip \
-    && BACKEND="${LLM_WIKI_REPRESENTATION_TORCH_BACKEND:-$LLM_WIKI_EMBEDDING_TORCH_BACKEND}" \
+    && BACKEND="${LLM_WIKI_EMBEDDING_TORCH_BACKEND}" \
     && python -m pip install --no-cache-dir -r requirements/multimodal/torch-${BACKEND}.txt \
-    && python -m pip install --no-cache-dir -e ./representation-contract --no-deps \
-    && python -m pip install --no-cache-dir --no-deps -e ./representation-service \
+    && python -m pip install --no-cache-dir -e ./embedding-contract --no-deps \
+    && python -m pip install --no-cache-dir --no-deps -e ./embedding-service \
     && python -m pip install --no-cache-dir \
        "fastapi>=0.115,<1" "uvicorn[standard]>=0.30,<1" \
        "transformers>=4.57.0" "qwen-vl-utils>=0.0.14" \
        "accelerate>=1.10,<2" "Pillow>=10" "huggingface_hub>=0.26"
 
-RUN python -c "import llm_wiki_representation_contract, llm_wiki_representation_service; print('standalone representation import check passed')"
+RUN python -c "import llm_wiki_embedding_contract, llm_wiki_embedding_service; print('standalone embedding import check passed')"
 
 RUN useradd --create-home --uid 10001 llmwiki \
     && mkdir -p /var/lib/huggingface \
@@ -44,4 +43,4 @@ EXPOSE 8790
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/healthz', timeout=3)"
 
-ENTRYPOINT ["python", "-m", "llm_wiki_representation_service"]
+ENTRYPOINT ["python", "-m", "llm_wiki_embedding_service"]

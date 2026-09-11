@@ -27,7 +27,7 @@ from .workbench_background import (
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
-from .multimodal_remote import RepresentationServiceUnavailable
+from .multimodal_remote import EmbeddingServiceUnavailable
 from .settings import SettingsService
 from .compose_config import ComposeOptions, check_compose_text, render_compose, validate_options
 from .model_catalog import available_models
@@ -87,7 +87,7 @@ class WorkbenchApi:
             multimodal = getattr(self.pipeline, "multimodal_encoder", None)
             if multimodal is not None and hasattr(multimodal, "readiness"):
                 snapshot = multimodal.readiness()
-                checks["multimodal_representation"] = "ok" if snapshot.get("ready") else "degraded"
+                checks["multimodal_embedding"] = "ok" if snapshot.get("ready") else "degraded"
         except Exception as exc:  # noqa: BLE001
             return {"ready": False, "service": "kogwistar-llm-wiki", "checks": checks, "reason": str(exc)}
         return {"ready": True, "service": "kogwistar-llm-wiki", "checks": checks}
@@ -119,7 +119,7 @@ class WorkbenchApi:
             with_oauth=bool(payload.get("with_oauth", False)),
             auth_mode=str(payload.get("auth_mode") or "disabled"),
             model_revision=str(payload.get("model_revision") or ""),
-            representation_dimension=int(payload.get("representation_dimension") or 1024),
+            embedding_dimension=int(payload.get("embedding_dimension") or 1024),
         )
         errors = validate_options(options)
         return {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None}
@@ -164,7 +164,7 @@ class WorkbenchApi:
         limit = max(1, min(int(payload.get("multimodal_limit") or 10), 100))
         try:
             hits = self.pipeline.search_multimodal(query_text, limit=limit)
-        except RepresentationServiceUnavailable as exc:
+        except EmbeddingServiceUnavailable as exc:
             return {
                 "status": "degraded",
                 "route": "multimodal_projection",

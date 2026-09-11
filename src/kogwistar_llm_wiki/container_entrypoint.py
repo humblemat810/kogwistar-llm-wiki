@@ -8,9 +8,11 @@ import sys
 from .ingest_pipeline import _resolve_embedding_functions
 from .multimodal_runtime import (
     configured_multimodal_backend,
-    configured_representation_service_url,
+    configured_embedding_service_url,
+    configured_vllm_url,
     validate_configured_multimodal_runtime,
 )
+from .multimodal_projection import build_configured_multimodal_encoder
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,18 +23,29 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         _resolve_embedding_functions()
-        if configured_representation_service_url():
+        remote_configured = configured_embedding_service_url() or configured_vllm_url()
+        if remote_configured:
             if configured_multimodal_backend() != "none":
-                raise RuntimeError(
-                    "local multimodal model settings cannot be combined with "
-                    "LLM_WIKI_REPRESENTATION_SERVICE_URL; use the remote service profile"
-                )
+                if configured_vllm_url() and configured_multimodal_backend() != "vllm":
+                    raise RuntimeError(
+                        "LLM_WIKI_EMBEDDING_VLLM_URL requires "
+                        "LLM_WIKI_MULTIMODAL_BACKEND=vllm"
+                    )
+                if configured_embedding_service_url() and configured_multimodal_backend() != "none":
+                    raise RuntimeError(
+                        "local multimodal model settings cannot be combined with "
+                        "LLM_WIKI_EMBEDDING_SERVICE_URL; use the remote Embedding Service profile"
+                    )
+                if configured_multimodal_backend() == "vllm":
+                    # Validate the complete local configuration before any
+                    # application command can initialize durable state.
+                    build_configured_multimodal_encoder()
         else:
             if configured_multimodal_backend() != "none":
                 raise RuntimeError(
                     "local multimodal inference is not supported in the production app container; "
-                    "set LLM_WIKI_REPRESENTATION_SERVICE_URL and an explicit "
-                    "LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS allowlist, or disable "
+                    "set LLM_WIKI_EMBEDDING_SERVICE_URL and an explicit "
+                    "LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS allowlist, or disable "
                     "LLM_WIKI_MULTIMODAL_BACKEND"
                 )
             # The base app image is Torch-free. Local adapters remain available

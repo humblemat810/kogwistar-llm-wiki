@@ -1,0 +1,75 @@
+# EXPERIMENTAL GPU OVERLAY ONLY.
+# Compose this with compose.yml. Do not combine it with compose.multimodal.yml.
+# The current Transformers Embedding Service remains the reference backend.
+#
+# Example:
+#   docker compose -f compose.yml -f compose.embedding-vllm.yml up -d
+services:
+  embedding:
+    image: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE to a pinned vllm/vllm-openai@sha256 digest}
+    command:
+      - vllm
+      - serve
+      - ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      - --served-model-name
+      - ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      - --revision
+      - ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION to an immutable Hugging Face revision}
+      - --runner
+      - pooling
+      - --convert
+      - embed
+      - --max-model-len
+      - ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-8192}
+      - --api-key
+      - ${LLM_WIKI_EMBEDDING_VLLM_TOKEN:?Set LLM_WIKI_EMBEDDING_VLLM_TOKEN}
+    environment:
+      HF_HOME: /root/.cache/huggingface
+    volumes:
+      - embedding_vllm_hf_cache:/root/.cache/huggingface
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  rest:
+    depends_on:
+      embedding:
+        condition: service_healthy
+    environment:
+      LLM_WIKI_MULTIMODAL_BACKEND: vllm
+      LLM_WIKI_EMBEDDING_VLLM_URL: http://embedding:8000
+      LLM_WIKI_EMBEDDING_VLLM_TOKEN: ${LLM_WIKI_EMBEDDING_VLLM_TOKEN:?Set LLM_WIKI_EMBEDDING_VLLM_TOKEN}
+      LLM_WIKI_EMBEDDING_VLLM_IMAGE: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE}
+      LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS: embedding
+      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
+      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION}
+
+  mcp:
+    depends_on:
+      embedding:
+        condition: service_healthy
+    environment:
+      LLM_WIKI_MULTIMODAL_BACKEND: vllm
+      LLM_WIKI_EMBEDDING_VLLM_URL: http://embedding:8000
+      LLM_WIKI_EMBEDDING_VLLM_TOKEN: ${LLM_WIKI_EMBEDDING_VLLM_TOKEN:?Set LLM_WIKI_EMBEDDING_VLLM_TOKEN}
+      LLM_WIKI_EMBEDDING_VLLM_IMAGE: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE}
+      LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS: embedding
+      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
+      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION}
+
+volumes:
+  embedding_vllm_hf_cache:

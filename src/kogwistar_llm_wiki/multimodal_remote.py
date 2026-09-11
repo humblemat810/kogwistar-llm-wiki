@@ -31,21 +31,21 @@ from .multimodal_projection import (
 )
 
 
-class RepresentationServiceError(RuntimeError):
-    """Base error for remote representation calls."""
+class EmbeddingServiceError(RuntimeError):
+    """Base error for remote embedding calls."""
 
 
-class RepresentationServiceUnavailable(RepresentationServiceError):
+class EmbeddingServiceUnavailable(EmbeddingServiceError):
     """A transient network or service availability failure."""
 
 
-class RepresentationProtocolError(RepresentationServiceError):
+class EmbeddingProtocolError(EmbeddingServiceError):
     """A non-retryable contract, authentication, or profile failure."""
 
 
 @dataclass(frozen=True, slots=True)
-class RepresentationServiceSettings:
-    """Transport limits and authentication for one representation service."""
+class EmbeddingServiceSettings:
+    """Transport limits and authentication for one embedding service."""
 
     url: str
     token: str | None = None
@@ -56,12 +56,12 @@ class RepresentationServiceSettings:
 
     def __post_init__(self) -> None:
         if not self.url.startswith(("http://", "https://")):
-            raise ValueError("representation service URL must use HTTP(S)")
+            raise ValueError("embedding service URL must use HTTP(S)")
         if self.timeout_seconds <= 0 or self.max_request_bytes <= 0:
-            raise ValueError("representation service limits must be positive")
+            raise ValueError("embedding service limits must be positive")
         hostname = (urlparse(self.url).hostname or "").lower()
         if self.allowed_hosts and hostname not in {host.lower() for host in self.allowed_hosts}:
-            raise ValueError(f"representation service host {hostname!r} is not allowlisted")
+            raise ValueError(f"embedding service host {hostname!r} is not allowlisted")
 
 
 def _asset_bytes(value: object) -> bytes:
@@ -121,7 +121,7 @@ class RemoteMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
     def __init__(
         self,
         profile: MultimodalEmbeddingProfile,
-        settings: RepresentationServiceSettings,
+        settings: EmbeddingServiceSettings,
         *,
         opener: Any = urlopen,
     ) -> None:
@@ -131,7 +131,7 @@ class RemoteMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
         if settings.expected_profile_fingerprint and (
             settings.expected_profile_fingerprint != profile.fingerprint
         ):
-            raise ValueError("configured representation profile fingerprint does not match the encoder profile")
+            raise ValueError("configured embedding profile fingerprint does not match the encoder profile")
 
     @property
     def profile(self) -> MultimodalEmbeddingProfile:
@@ -170,7 +170,7 @@ class RemoteMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
         }
         body = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         if len(body) > self.settings.max_request_bytes:
-            raise ProjectionIntegrityError("representation request exceeds configured byte limit")
+            raise ProjectionIntegrityError("embedding request exceeds configured byte limit")
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.settings.token:
             headers["Authorization"] = f"Bearer {self.settings.token}"
@@ -186,50 +186,50 @@ class RemoteMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
                 raw = response.read()
         except HTTPError as exc:
             detail = _http_error_detail(exc)
-            message = f"representation service HTTP {exc.code}{detail}"
+            message = f"embedding service HTTP {exc.code}{detail}"
             if exc.code in {408, 425, 429} or exc.code >= 500:
-                raise RepresentationServiceUnavailable(message) from exc
-            raise RepresentationProtocolError(message) from exc
+                raise EmbeddingServiceUnavailable(message) from exc
+            raise EmbeddingProtocolError(message) from exc
         except (TimeoutError, URLError, OSError) as exc:
-            raise RepresentationServiceUnavailable("representation service is unavailable") from exc
+            raise EmbeddingServiceUnavailable("embedding service is unavailable") from exc
         if status >= 500:
-            raise RepresentationServiceUnavailable(f"representation service HTTP {status}")
+            raise EmbeddingServiceUnavailable(f"embedding service HTTP {status}")
         try:
             result = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RepresentationProtocolError("representation service returned invalid JSON") from exc
+            raise EmbeddingProtocolError("embedding service returned invalid JSON") from exc
         if not isinstance(result, Mapping):
-            raise RepresentationProtocolError("representation response must be an object")
+            raise EmbeddingProtocolError("embedding response must be an object")
         if result.get("contract_version") != self.contract_version:
-            raise RepresentationProtocolError("representation contract version mismatch")
+            raise EmbeddingProtocolError("embedding contract version mismatch")
         profile_payload = result.get("profile")
         if not isinstance(profile_payload, Mapping):
-            raise RepresentationProtocolError("representation response omitted profile")
+            raise EmbeddingProtocolError("embedding response omitted profile")
         try:
             returned_profile = MultimodalEmbeddingProfile.from_payload(profile_payload)
         except (KeyError, TypeError, ValueError) as exc:
-            raise RepresentationProtocolError("representation response contains an invalid profile") from exc
+            raise EmbeddingProtocolError("embedding response contains an invalid profile") from exc
         if returned_profile.fingerprint != self.profile.fingerprint:
-            raise RepresentationProtocolError("representation profile fingerprint mismatch")
+            raise EmbeddingProtocolError("embedding profile fingerprint mismatch")
         raw_results = result.get("results")
         if not isinstance(raw_results, Sequence) or isinstance(raw_results, (str, bytes)):
-            raise RepresentationProtocolError("representation response results must be a sequence")
+            raise EmbeddingProtocolError("embedding response results must be a sequence")
         expected_ids = [str(item["item_id"]) for item in items]
         if len(raw_results) != len(expected_ids):
-            raise RepresentationProtocolError("representation response count does not match request")
+            raise EmbeddingProtocolError("embedding response count does not match request")
         vectors: list[EmbeddingSet] = []
         for expected_id, raw_item in zip(expected_ids, raw_results):
             if not isinstance(raw_item, Mapping) or raw_item.get("item_id") != expected_id:
-                raise RepresentationProtocolError("representation response changed item ordering or identity")
+                raise EmbeddingProtocolError("embedding response changed item ordering or identity")
             try:
                 value = raw_item["vectors"]
                 vectors.append(_normalise_embedding_set(value, dimension=self.profile.dimension))
             except (KeyError, TypeError, ValueError, ProjectionIntegrityError) as exc:
-                raise RepresentationProtocolError(
-                    f"invalid representation vector for item {expected_id!r}"
+                raise EmbeddingProtocolError(
+                    f"invalid embedding vector for item {expected_id!r}"
                 ) from exc
             if any(not math.isfinite(number) for vector in vectors[-1] for number in vector):
-                raise RepresentationProtocolError("representation response contains a non-finite value")
+                raise EmbeddingProtocolError("embedding response contains a non-finite value")
         return vectors
     def encode_queries(self, queries: Sequence[str], *, batch_size: int | None = None) -> Sequence[EmbeddingSet]:
         del batch_size
@@ -281,8 +281,8 @@ def _http_error_detail(error: HTTPError) -> str:
 
 __all__ = [
     "RemoteMultimodalEncoder",
-    "RepresentationProtocolError",
-    "RepresentationServiceError",
-    "RepresentationServiceSettings",
-    "RepresentationServiceUnavailable",
+    "EmbeddingProtocolError",
+    "EmbeddingServiceError",
+    "EmbeddingServiceSettings",
+    "EmbeddingServiceUnavailable",
 ]

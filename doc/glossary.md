@@ -581,7 +581,7 @@ artifact must explicitly mark itself as a reference.
 
 ### Projection
 
-A derived external representation of graph state.
+A derived external embedding of graph state.
 
 Projection is:
 

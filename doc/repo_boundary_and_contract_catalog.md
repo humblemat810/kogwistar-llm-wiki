@@ -140,7 +140,7 @@ Examples:
 ### Layer D — materialized projections
 
 - Obsidian vault
-- UI representations
+- UI embeddings
 - review queue views
 - interactive knowledge-workbench lenses and evidence panels
 

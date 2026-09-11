@@ -96,11 +96,12 @@ from .multimodal_projection import (
 )
 from .multimodal_remote import (
     RemoteMultimodalEncoder,
-    RepresentationProtocolError,
-    RepresentationServiceError,
-    RepresentationServiceSettings,
-    RepresentationServiceUnavailable,
+    EmbeddingProtocolError,
+    EmbeddingServiceError,
+    EmbeddingServiceSettings,
+    EmbeddingServiceUnavailable,
 )
+from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 from .multimodal_sources import (
     LocalFileAssetResolver,
     MappingAssetResolver,
@@ -216,10 +217,12 @@ __all__ = [
     "embed_pending",
     "score_embedding_sets",
     "RemoteMultimodalEncoder",
-    "RepresentationProtocolError",
-    "RepresentationServiceError",
-    "RepresentationServiceSettings",
-    "RepresentationServiceUnavailable",
+    "EmbeddingProtocolError",
+    "EmbeddingServiceError",
+    "EmbeddingServiceSettings",
+    "EmbeddingServiceUnavailable",
+    "VllmEmbeddingSettings",
+    "VllmMultimodalEncoder",
     "LocalFileAssetResolver",
     "MappingAssetResolver",
     "MultimodalSourceBundle",

@@ -7,10 +7,10 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from llm_wiki_representation_contract import EmbeddingProfile
-from llm_wiki_representation_service.app import create_app
-from llm_wiki_representation_service.config import RepresentationServiceConfig
-from llm_wiki_representation_service.config import load_config
+from llm_wiki_embedding_contract import EmbeddingProfile
+from llm_wiki_embedding_service.app import create_app
+from llm_wiki_embedding_service.config import EmbeddingServiceConfig
+from llm_wiki_embedding_service.config import load_config
 
 
 class _FakeEncoder:
@@ -21,8 +21,8 @@ class _FakeEncoder:
         return [((1.0,) + (0.0,) * (self.profile.dimension - 1),) for _ in items]
 
 
-def test_fastapi_service_health_capabilities_and_authenticated_representation() -> None:
-    config = RepresentationServiceConfig(
+def test_fastapi_service_health_capabilities_and_authenticated_embedding() -> None:
+    config = EmbeddingServiceConfig(
         dimension=64, revision="test-revision", token="secret", batch_size=8
     )
     with TestClient(create_app(encoder=_FakeEncoder(config.profile), config=config)) as client:
@@ -49,17 +49,17 @@ def test_fastapi_service_health_capabilities_and_authenticated_representation() 
         assert response.json()["results"][0]["item_id"] == "q"
 
 
-def test_representation_config_uses_supplied_environment_mapping() -> None:
+def test_embedding_config_uses_supplied_environment_mapping() -> None:
     config = load_config(
         {
-            "LLM_WIKI_REPRESENTATION_MODEL": "test/qwen-vl",
-            "LLM_WIKI_REPRESENTATION_MODEL_REVISION": "test-revision",
-            "LLM_WIKI_REPRESENTATION_DIMENSION": "1536",
-            "LLM_WIKI_REPRESENTATION_DEVICE": "cpu",
-            "LLM_WIKI_REPRESENTATION_TORCH_BACKEND": "cpu",
-            "LLM_WIKI_REPRESENTATION_MAX_ITEMS": "7",
-            "LLM_WIKI_REPRESENTATION_MAX_REQUEST_BYTES": "12345",
-            "LLM_WIKI_REPRESENTATION_INSTRUCTION": "custom instruction",
+            "LLM_WIKI_EMBEDDING_MODEL": "test/qwen-vl",
+            "LLM_WIKI_EMBEDDING_MODEL_REVISION": "test-revision",
+            "LLM_WIKI_EMBEDDING_DIMENSION": "1536",
+            "LLM_WIKI_EMBEDDING_DEVICE": "cpu",
+            "LLM_WIKI_EMBEDDING_TORCH_BACKEND": "cpu",
+            "LLM_WIKI_EMBEDDING_MAX_ITEMS": "7",
+            "LLM_WIKI_EMBEDDING_MAX_REQUEST_BYTES": "12345",
+            "LLM_WIKI_EMBEDDING_INSTRUCTION": "custom instruction",
         }
     )
     assert config.model == "test/qwen-vl"

@@ -12,13 +12,13 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 
-from llm_wiki_representation_contract import ContractValidationError, validate_asset_bytes, validate_dense_vectors
+from llm_wiki_embedding_contract import ContractValidationError, validate_asset_bytes, validate_dense_vectors
 
-from .config import RepresentationServiceConfig, load_config
+from .config import EmbeddingServiceConfig, load_config
 from .encoder import Qwen3VLDenseEncoder
 
 
-def _profile(config: RepresentationServiceConfig) -> dict[str, object]:
+def _profile(config: EmbeddingServiceConfig) -> dict[str, object]:
     return config.profile.canonical_payload() | {"fingerprint": config.profile.fingerprint}
 
 
@@ -27,7 +27,7 @@ def _error(message: str, status: int) -> Any:
     return JSONResponse({"error": message}, status_code=status)
 
 
-def create_app(*, encoder: Any | None = None, config: RepresentationServiceConfig | None = None) -> Any:
+def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | None = None) -> Any:
     selected = config or load_config()
     if encoder is not None and getattr(encoder, "profile", None) != selected.profile:
         raise ValueError("injected encoder profile does not match service configuration")
@@ -55,7 +55,7 @@ def create_app(*, encoder: Any | None = None, config: RepresentationServiceConfi
 
     @app.get("/healthz")
     def healthz() -> dict[str, object]:
-        return {"ok": True, "service": "llm-wiki-representation"}
+        return {"ok": True, "service": "llm-wiki-embedding"}
 
     @app.get("/readyz")
     def readyz() -> Any:
@@ -67,7 +67,7 @@ def create_app(*, encoder: Any | None = None, config: RepresentationServiceConfi
     def capabilities(request: Request) -> Any:
         if not _authorized(request, selected.token):
             return _error("unauthorized", 401)
-        return {"contract_version": "v1", "service": "llm-wiki-representation", "representation": "dense", "modalities": ["text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"], "profile": _profile(selected), "batch_size": selected.batch_size, "max_items": selected.max_items, "max_request_bytes": selected.max_request_bytes}
+        return {"contract_version": "v1", "service": "llm-wiki-embedding", "embedding": "dense", "modalities": ["text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"], "profile": _profile(selected), "batch_size": selected.batch_size, "max_items": selected.max_items, "max_request_bytes": selected.max_request_bytes}
 
     @app.post("/v1/represent")
     async def represent(request: Request) -> Any:
@@ -98,9 +98,9 @@ def _authorized(request: Any, token: str | None) -> bool:
     return not token or hmac.compare_digest(supplied, expected)
 
 
-def _represent_payload(payload: object, encoder: Any, config: RepresentationServiceConfig) -> dict[str, object]:
+def _represent_payload(payload: object, encoder: Any, config: EmbeddingServiceConfig) -> dict[str, object]:
     if not isinstance(payload, Mapping) or payload.get("contract_version") != "v1":
-        raise ContractValidationError("unsupported representation contract version")
+        raise ContractValidationError("unsupported embedding contract version")
     if payload.get("operation") not in {"query", "document"}:
         raise ContractValidationError("operation must be query or document")
     if payload.get("profile_fingerprint") != config.profile.fingerprint:

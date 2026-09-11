@@ -39,7 +39,7 @@ def _profile(**overrides: object) -> MultimodalEmbeddingProfile:
     values: dict[str, object] = {
         "provider": "fake",
         "model": "colqwen-compatible-fixture",
-        "representation": "late_interaction",
+        "embedding": "late_interaction",
         "dimension": 2,
     }
     values.update(overrides)
@@ -123,7 +123,7 @@ def test_profile_mismatch_fails_before_projection_write() -> None:
 
 
 def test_single_vector_rejects_multiple_vectors() -> None:
-    profile = _profile(representation="single_vector")
+    profile = _profile(embedding="single_vector")
     store = InMemoryMultimodalProjectionStore(scope="demo:pooled", profile=profile)
     with pytest.raises(ProjectionIntegrityError, match="single_vector"):
         store.upsert_embedding(_unit("view-1", "text"), ((1.0, 0.0), (0.0, 1.0)), profile=profile)
@@ -205,14 +205,14 @@ def test_qwen3_vl_dense_profile_and_dimensions_are_explicit() -> None:
     profile = _profile(
         provider="transformers",
         model="Qwen/Qwen3-VL-Embedding-2B",
-        representation="dense",
+        embedding="dense",
         dimension=1024,
     )
-    assert profile.representation == "dense"
+    assert profile.embedding == "dense"
     assert QWEN3_VL_MIN_DIMENSION == 64
     assert QWEN3_VL_MAX_DIMENSION == 2048
     assert profile.fingerprint != _profile(
-        provider="ollama", model="qwen3-embedding:0.6b", representation="single_vector", dimension=1024
+        provider="ollama", model="qwen3-embedding:0.6b", embedding="single_vector", dimension=1024
     ).fingerprint
 
 
@@ -249,7 +249,7 @@ def test_qwen3_vl_dense_fake_model_preserves_mixed_batch_order(monkeypatch) -> N
     profile = _profile(
         provider="transformers",
         model="Qwen/Qwen3-VL-Embedding-2B",
-        representation="dense",
+        embedding="dense",
         dimension=64,
     )
     encoder = Qwen3VLDenseEncoder(
@@ -308,7 +308,7 @@ def test_qwen3_vl_decodes_transport_asset_bytes_before_vision_processing(monkeyp
     profile = _profile(
         provider="transformers",
         model="Qwen/Qwen3-VL-Embedding-2B",
-        representation="dense",
+        embedding="dense",
         dimension=64,
     )
     processor = FakeProcessor()
@@ -344,7 +344,7 @@ def test_qwen3_vl_rejects_dimensions_outside_mrl_range(dimension: int) -> None:
     profile = _profile(
         provider="transformers",
         model="Qwen/Qwen3-VL-Embedding-2B",
-        representation="dense",
+        embedding="dense",
         dimension=dimension,
     )
     with pytest.raises(ValueError, match="between 64 and 2048"):

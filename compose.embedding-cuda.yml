@@ -1,14 +1,14 @@
 # Add this overlay on a host with NVIDIA Container Toolkit:
 #   docker compose -f compose.yml -f compose.multimodal.yml \
-#     -f compose.representation-cuda.yml up --build
+#     -f compose.embedding-cuda.yml up --build
 services:
   embedding:
     build:
       args:
-        LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-${LLM_WIKI_REPRESENTATION_TORCH_BACKEND:-cu128}}
+        LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-cu128}
     environment:
       LLM_WIKI_EMBEDDING_DEVICE: cuda
-      LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-${LLM_WIKI_REPRESENTATION_TORCH_BACKEND:-cu128}}
+      LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-cu128}
     deploy:
       resources:
         reservations:

@@ -9,9 +9,9 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from llm_wiki_representation_contract import EmbeddingProfile
-from llm_wiki_representation_service.app import _represent_payload, create_app
-from llm_wiki_representation_service.config import RepresentationServiceConfig, load_config
+from llm_wiki_embedding_contract import EmbeddingProfile
+from llm_wiki_embedding_service.app import _represent_payload, create_app
+from llm_wiki_embedding_service.config import EmbeddingServiceConfig, load_config
 
 
 class FakeEncoder:
@@ -22,13 +22,13 @@ class FakeEncoder:
         return [((1.0,) + (0.0,) * (self.profile.dimension - 1),) for _ in items]
 
 
-def _config() -> RepresentationServiceConfig:
-    return RepresentationServiceConfig(dimension=64, revision="test-revision", token="secret")
+def _config() -> EmbeddingServiceConfig:
+    return EmbeddingServiceConfig(dimension=64, revision="test-revision", token="secret")
 
 
 def test_standalone_import_does_not_load_application_package() -> None:
     source_root = Path(__file__).parents[2] / "src"
-    service_files = list((source_root / "llm_wiki_representation_service").glob("*.py"))
+    service_files = list((source_root / "llm_wiki_embedding_service").glob("*.py"))
     text = "\n".join(path.read_text(encoding="utf-8") for path in service_files)
     assert "kogwistar_llm_wiki" not in text
     assert "kogwistar" not in text
@@ -78,9 +78,9 @@ def test_revision_is_required_and_runtime_backend_is_explicit() -> None:
     with pytest.raises(ValueError, match="revision"):
         load_config({})
     config = load_config({
-        "LLM_WIKI_REPRESENTATION_MODEL_REVISION": "abc123",
-        "LLM_WIKI_REPRESENTATION_TORCH_BACKEND": "cu128",
-        "LLM_WIKI_REPRESENTATION_DEVICE": "cuda",
+        "LLM_WIKI_EMBEDDING_MODEL_REVISION": "abc123",
+        "LLM_WIKI_EMBEDDING_TORCH_BACKEND": "cu128",
+        "LLM_WIKI_EMBEDDING_DEVICE": "cuda",
     })
     assert config.revision == "abc123"
     assert config.torch_backend == "cu128"
@@ -89,6 +89,6 @@ def test_revision_is_required_and_runtime_backend_is_explicit() -> None:
 
 def test_standalone_service_has_no_sibling_runtime_dependencies() -> None:
     source_root = Path(__file__).parents[2] / "src"
-    files = list((source_root / "llm_wiki_representation_service").glob("*.py"))
+    files = list((source_root / "llm_wiki_embedding_service").glob("*.py"))
     text = "\n".join(path.read_text(encoding="utf-8") for path in files)
     assert all(name not in text for name in ("kg_doc_parser", "kogwistar_obsidian_sink", "chromadb", "psycopg", "mcp"))

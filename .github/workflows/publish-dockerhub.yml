@@ -45,7 +45,7 @@ jobs:
           cache-from: type=gha,scope=llm-wiki
           cache-to: type=gha,mode=max,scope=llm-wiki
 
-  publish-representation-cpu:
+  publish-embedding-cpu:
     if: github.event_name == 'push' || inputs.confirm == true
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -66,15 +66,15 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.representation-service
-          build-args: LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cpu
+          file: Dockerfile.embedding-service
+          build-args: LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=representation-cpu
-          cache-to: type=gha,mode=max,scope=representation-cpu
+          cache-from: type=gha,scope=embedding-cpu
+          cache-to: type=gha,mode=max,scope=embedding-cpu
 
-  publish-representation-cuda:
+  publish-embedding-cuda:
     if: github.event_name == 'push' || inputs.confirm == true
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -90,16 +90,16 @@ jobs:
         with:
           images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding
           tags: |
-            type=semver,pattern={{version}}
+            type=semver,pattern={{version}}-cuda12.8
             type=raw,value=cuda12.8
-            type=raw,value=latest
+            type=raw,value=latest-cuda12.8
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.representation-service
-          build-args: LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cu128
+          file: Dockerfile.embedding-service
+          build-args: LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=representation-cuda12.8
-          cache-to: type=gha,mode=max,scope=representation-cuda12.8
+          cache-from: type=gha,scope=embedding-cuda12.8
+          cache-to: type=gha,mode=max,scope=embedding-cuda12.8

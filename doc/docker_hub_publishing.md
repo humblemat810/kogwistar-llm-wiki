@@ -6,12 +6,12 @@ The repository can publish three public images through
 | Image | Tags | Purpose |
 | --- | --- | --- |
 | `kogwistar-llm-wiki` | `latest`, release version | Torch-free REST/MCP application |
-| `kogwistar-llm-wiki-embedding` | `latest`, `cuda12.8`, release version | GPU-default Qwen3-VL Embedding Service |
+| `kogwistar-llm-wiki-embedding` | `latest-cuda12.8`, `cuda12.8`, release version with `-cuda12.8` | GPU-default Qwen3-VL Embedding Service |
 | `kogwistar-llm-wiki-embedding` | `cpu`, release version with `-cpu` | CPU fallback and smoke tests |
 
-The representation images contain the inference runtime but do not contain the
+The Embedding Service images contain the inference runtime but do not contain the
 Qwen checkpoint. Mount or configure the Hugging Face cache and set an immutable
-`LLM_WIKI_REPRESENTATION_MODEL_REVISION` before starting the service.
+`LLM_WIKI_EMBEDDING_MODEL_REVISION` before starting the service.
 
 ## One-Time Docker Hub Setup
 
@@ -36,8 +36,8 @@ git push origin v0.3.0
 ```
 
 The tag starts all three builds and publishes the release tags. The application
-image receives `latest`; the CUDA representation image receives `latest` and
-`cuda12.8`; the CPU image receives `cpu`.
+image receives `latest`; the CUDA embedding image receives `latest-cuda12.8`
+and `cuda12.8`; the CPU image receives `cpu`.
 
 For a deliberate non-release build, open the workflow in GitHub Actions, choose
 **Run workflow**, and set `confirm` to `true`. Do not use this to publish an
@@ -47,16 +47,16 @@ untested branch over `latest`.
 
 ```powershell
 docker pull <dockerhub-user>/kogwistar-llm-wiki:latest
-docker pull <dockerhub-user>/kogwistar-llm-wiki-embedding:latest
+docker pull <dockerhub-user>/kogwistar-llm-wiki-embedding:latest-cuda12.8
 ```
 
 Use the images with the existing Compose files:
 
 ```powershell
 $env:LLM_WIKI_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki:latest'
-$env:LLM_WIKI_EMBEDDING_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki-embedding:latest'
-$env:LLM_WIKI_REPRESENTATION_MODEL_REVISION = '<40-character-model-commit-sha>'
-docker compose -f compose.yml -f compose.multimodal.yml -f compose.representation-cuda.yml up -d
+$env:LLM_WIKI_EMBEDDING_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki-embedding:latest-cuda12.8'
+$env:LLM_WIKI_EMBEDDING_MODEL_REVISION = '<40-character-model-commit-sha>'
+docker compose -f compose.yml -f compose.multimodal.yml -f compose.embedding-cuda.yml up -d
 ```
 
 For CPU:
@@ -91,10 +91,10 @@ $env:DOCKERHUB_USERNAME = '<dockerhub-user>'
 ```
 
 Use `-Login` to run the interactive login from the script, or use
-`-RepresentationBackend cpu` for the CPU image:
+`-EmbeddingBackend cpu` for the CPU image:
 
 ```powershell
-.\scripts\publish_docker_images.ps1 -Tag v0.3.0 -RepresentationBackend cpu
+.\scripts\publish_docker_images.ps1 -Tag v0.3.0 -EmbeddingBackend cpu
 ```
 
 For CI, use `DOCKERHUB_TOKEN` with `docker login --password-stdin` rather than

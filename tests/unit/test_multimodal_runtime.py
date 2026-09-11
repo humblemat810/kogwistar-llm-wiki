@@ -77,6 +77,43 @@ def test_qwen3_vl_configuration_defaults_and_overrides() -> None:
     assert multimodal_runtime.configured_multimodal_dimension(environ) == 1536
 
 
+def test_vllm_backend_reads_explicit_remote_settings() -> None:
+    environ = {
+        "LLM_WIKI_MULTIMODAL_BACKEND": "vllm",
+        "LLM_WIKI_EMBEDDING_VLLM_URL": "http://embedding:8000",
+        "LLM_WIKI_EMBEDDING_VLLM_TOKEN": "secret",
+        "LLM_WIKI_EMBEDDING_VLLM_IMAGE": "vllm/vllm-openai@sha256:" + "a" * 64,
+        "LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS": "embedding",
+    }
+
+    assert multimodal_runtime.configured_multimodal_backend(environ) == "vllm"
+    assert multimodal_runtime.configured_vllm_url(environ) == "http://embedding:8000"
+    assert multimodal_runtime.configured_vllm_token(environ) == "secret"
+    assert multimodal_runtime.configured_vllm_allowed_hosts(environ) == ("embedding",)
+    assert multimodal_runtime.configured_vllm_image(environ).endswith("a" * 64)
+
+
+def test_vllm_builder_is_remote_only(monkeypatch) -> None:
+    values = {
+        "LLM_WIKI_MULTIMODAL_BACKEND": "vllm",
+        "LLM_WIKI_EMBEDDING_VLLM_URL": "http://embedding:8000",
+        "LLM_WIKI_EMBEDDING_VLLM_TOKEN": "secret",
+        "LLM_WIKI_EMBEDDING_VLLM_IMAGE": "vllm/vllm-openai@sha256:" + "a" * 64,
+        "LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS": "embedding",
+        "LLM_WIKI_MULTIMODAL_MODEL_REVISION": "revision",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("LLM_WIKI_EMBEDDING_SERVICE_URL", raising=False)
+
+    from kogwistar_llm_wiki.multimodal_projection import build_configured_multimodal_encoder
+    from kogwistar_llm_wiki.vllm_remote import VllmMultimodalEncoder
+
+    encoder = build_configured_multimodal_encoder()
+    assert isinstance(encoder, VllmMultimodalEncoder)
+    assert encoder.profile.provider == "vllm"
+
+
 @pytest.mark.parametrize("value", ["63", "2049", "not-an-int"])
 def test_qwen3_vl_configuration_rejects_invalid_dimension(value: str) -> None:
     with pytest.raises(ValueError):
@@ -92,23 +129,19 @@ def test_qwen3_vl_revision_is_optional() -> None:
     ) == "rev-1"
 
 
-def test_embedding_service_names_prefer_clear_aliases_and_keep_legacy_fallback() -> None:
+def test_embedding_service_uses_canonical_environment_names() -> None:
     environ = {
         "LLM_WIKI_EMBEDDING_SERVICE_URL": "http://embedding:8790",
-        "LLM_WIKI_REPRESENTATION_SERVICE_URL": "http://old-name:8790",
         "LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS": "embedding",
     }
 
-    assert multimodal_runtime.configured_representation_service_url(environ) == "http://embedding:8790"
-    assert multimodal_runtime.configured_representation_service_allowed_hosts(environ) == ("embedding",)
-    assert multimodal_runtime.configured_representation_service_url(
-        {"LLM_WIKI_REPRESENTATION_SERVICE_URL": "http://old-name:8790"}
-    ) == "http://old-name:8790"
+    assert multimodal_runtime.configured_embedding_service_url(environ) == "http://embedding:8790"
+    assert multimodal_runtime.configured_embedding_service_allowed_hosts(environ) == ("embedding",)
 
 
-def test_remote_representation_requires_an_explicit_host_allowlist(monkeypatch) -> None:
-    monkeypatch.setenv("LLM_WIKI_REPRESENTATION_SERVICE_URL", "http://representation:8790")
-    monkeypatch.delenv("LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS", raising=False)
+def test_remote_embedding_requires_an_explicit_host_allowlist(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_WIKI_EMBEDDING_SERVICE_URL", "http://embedding:8790")
+    monkeypatch.delenv("LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS", raising=False)
 
     from kogwistar_llm_wiki.multimodal_projection import build_configured_multimodal_encoder
 

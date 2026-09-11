@@ -9,17 +9,16 @@
 
 ## Production Inference Boundary
 
-Production Qwen3-VL inference runs in the isolated FastAPI representation
-service (`Dockerfile.representation-service`). The standalone service is built
-from the `llm-wiki-representation-service` distribution and its stdlib-only
-`llm-wiki-representation-contract` dependency. It does not import the
+Production Qwen3-VL inference runs in the isolated FastAPI embedding
+service (`Dockerfile.embedding-service`). The standalone Embedding Service
+is built from a dependency-light service distribution and contract. It does not import the
 LLM-Wiki application, Kogwistar, parser, sink, Chroma, PostgreSQL, or MCP.
 The normal LLM-Wiki image stays Torch-free and uses
-`LLM_WIKI_REPRESENTATION_SERVICE_URL` through the typed remote encoder. One
+`LLM_WIKI_EMBEDDING_SERVICE_URL` through the typed remote encoder. One
 service process owns one dense, profile-pinned
 `Qwen/Qwen3-VL-Embedding-2B` model; CPU and CUDA images are separate.
 
-`LLM_WIKI_REPRESENTATION_MODEL_REVISION` is mandatory and must be an immutable
+`LLM_WIKI_EMBEDDING_MODEL_REVISION` is mandatory and must be an immutable
 Hugging Face commit, tag, or other verified revision. It is part of the profile
 fingerprint; a floating model reference is rejected at service startup. The
 HTTP contract remains version `v1`, while the two distributions can be
@@ -35,7 +34,7 @@ The existing in-process Qwen and ColQwen adapters remain for provider-free
 tests, migration compatibility, and developer benchmarking. They are not the
 production container path. A remote profile must match the stored profile
 exactly, including model revision, dimension, preprocessing, instruction,
-normalization, metric, and representation. Equal dimensions alone are not
+normalization, metric, and embedding. Equal dimensions alone are not
 compatible.
 
 ## Context
@@ -67,7 +66,7 @@ The product needs one design that handles these source shapes correctly:
 - a webpage whose meaning is split across DOM text, captions, and images.
 
 This ADR is self-contained. It does not require textual OCR/caption derivatives
-to be the primary retrieval representation. Such derivatives may still be
+to be the primary retrieval embedding. Such derivatives may still be
 created for accessibility, grounding inspection, text-only answer models, or
 fallback search, but native media vectors are a first-class retrieval path.
 
@@ -98,7 +97,7 @@ The application now contains a provider-free reference implementation in
 
 - `MultimodalSourceUnit` is a revision-bound Stage-1 view containing locators
   and an external `content_ref`, not copied binary source bytes;
-- `MultimodalEmbeddingProfile` binds provider, model, representation,
+- `MultimodalEmbeddingProfile` binds provider, model, embedding,
   dimension, metric, preprocessing, sequence, and patch limits;
 - `InMemoryMultimodalProjectionStore` and
   `SQLiteMultimodalProjectionStore` enforce profile identity and preserve
@@ -156,7 +155,7 @@ Use 1024 dimensions for the default production balance, 1536 for a larger
 pgvector profile, or 2048 for Chroma/full-output experiments. Standard
 pgvector HNSW does not support ordinary `vector(2048)` indexes, so a 2048
 profile must use Chroma, exact/non-indexed storage, or a future `halfvec`
-projection. Changing model, representation, or dimension requires a new
+projection. Changing model, embedding, or dimension requires a new
 profile and re-embedding; vectors are never silently reused.
 
 The old ColQwen adapter remains available only as an explicit legacy
@@ -200,7 +199,7 @@ input dtype from that head, so quantizing it would expose packed `uint8`
 storage and break embedding normalization.
 
 The base application Dockerfile does not install Torch. Production inference
-uses `Dockerfile.representation-service`, whose CPU and CUDA variants install
+uses `Dockerfile.embedding-service`, whose CPU and CUDA variants install
 the selected Torch profile and expose the FastAPI contract. The in-process
 installation steps in this section are retained only for local development,
 migration compatibility, and provider-free adapter work; they are not a
@@ -216,20 +215,20 @@ identity.
 
 | Route | Current status | Safe use and admission rule |
 | --- | --- | --- |
-| `qwen3-vl-representation-service` | Implemented as the production FastAPI sidecar | Native dense text/image projection. The profile pins model revision, preprocessing, instruction, normalization, metric, and dimension. |
+| `qwen3-vl-embedding-service` | Implemented as the production FastAPI sidecar | Native dense text/image projection. The profile pins model revision, preprocessing, instruction, normalization, metric, and dimension. |
 | `colqwen-local` | Developer/migration compatibility only | Native late-interaction text/image projection. It is not interchangeable with the dense service profile. |
 | `multimodal-ollama-extract` | Follow-up extraction adapter | Ollama's documented `/api/embed` input is text or an array of texts, so it is not admitted as native cross-modal embedding. A vision model may produce OCR/captions as derived evidence, then the normal text embedding plane indexes that text. |
-| `multimodal-vllm` | Follow-up remote projection adapter | vLLM supports both multimodal generation and pooling/embedding workloads, but an adapter must capability-probe one deployed model and prove that its embedding route accepts the required media inputs with stable output shape. Do not infer this from chat support. |
+| `multimodal-vllm` | Experimental GPU-only direct adapter | LLM-Wiki calls vLLM's Qwen3-VL Chat Embeddings API through a separate profile and isolated projection. It remains opt-in until the pinned image/revision passes contract, GPU, and labeled retrieval comparison checks. |
 | `multimodal-llamacpp` | Experimental follow-up remote projection adapter | llama.cpp documents multimodal support for its non-OpenAI `/embedding` route, but that path is experimental and has a provider-specific media payload. It requires a model/mmproj hash, server-build fingerprint, fixture verification, and cannot use the generic OpenAI embeddings route as an equivalence claim. |
 
 Each future remote adapter must implement the same typed source-unit and
 embedding-set contracts, declare a complete profile (provider endpoint,
 backend/server build, model revision or content hash, model-projector hash,
-preprocessing, representation, dimension, metric, and capability shape), and
+preprocessing, embedding, dimension, metric, and capability shape), and
 pass these admission tests before Stage 2 writes:
 
 1. text, image, and mixed batch requests preserve input ordering;
-2. image changes alter the returned representation where the model promises
+2. image changes alter the returned embedding where the model promises
    native image embedding;
 3. text/image output dimensions, normalization, and scoring convention are
    stable and declared;
@@ -356,7 +355,7 @@ acceptable, `Span` can become the `TextSpan` member of a general
 `EvidenceLocator` union; it should not be mutated into an ambiguous bag of
 fields.
 
-Do not use graph or hypergraph edges as the sole grounding representation.
+Do not use graph or hypergraph edges as the sole grounding embedding.
 That would make a node's validity depend on a later graph traversal and allow a
 node event to exist without its evidence event. Grounding should remain embedded
 and atomically validated with the node or edge. Graph relationships may project
@@ -441,7 +440,7 @@ existing `EvidencePackDigest` extensibility contract, which preserves extra
 canonical fields in its hash. The existing `node_ids` and `edge_ids` remain a
 compatible local-ID projection; validators and cross-namespace readers use the
 typed references. Before adopting the extension, its exact canonical ordering
-and portable representation must receive Python/Rust parity and archive replay
+and portable embedding must receive Python/Rust parity and archive replay
 tests. `LogicalRef` remains useful for locating live entities and the durable
 pack, but it is not sufficient by itself as immutable provenance because it
 does not pin an entity revision or event watermark.
@@ -618,7 +617,7 @@ embed_images(profile, image inputs) -> list[EmbeddingSet]
 
 EmbeddingSet
   vectors: matrix[float]
-  representation: single_vector | late_interaction
+  embedding: single_vector | late_interaction
   vector_roles: optional patch/token coordinates
   scoring_operator: cosine | dot | l2 | maxsim
 ```
@@ -628,7 +627,7 @@ convention for a shared-space profile. The number of vectors per input may
 differ: a pooled Sentence-Transformers/CLIP-style adapter normally returns one
 vector, while a ColQwen/ColPali-style late-interaction adapter returns many
 patch or token vectors. Batch limits, supported MIME types, maximum image
-resolution, representation kind, scoring operator, and provider usage are
+resolution, embedding kind, scoring operator, and provider usage are
 capabilities exposed by the adapter.
 
 The adapter owns provider-specific preprocessing. The workflow owns batching,
@@ -674,7 +673,7 @@ depends on the complete input transformation. Define a versioned
 - dimension, similarity metric, and vector normalization;
 - image decoder, colorspace, resize, crop, and tiling policy;
 - text tokenizer, truncation, query/document prompt, and pooling policy;
-- single-vector or multi-vector representation and aggregation algorithm;
+- single-vector or multi-vector embedding and aggregation algorithm;
 - adapter implementation and profile schema versions.
 
 Its canonical fingerprint becomes the model identity supplied to the physical
@@ -975,7 +974,7 @@ by exact grouped reranking; production deployments need bounded candidate
 generation followed by exact grouped reranking from a side store, or a
 purpose-built late-interaction index.
 
-The projection capability advertises supported representation and scoring
+The projection capability advertises supported embedding and scoring
 operators. Startup fails when a late-interaction profile is attached to a
 single-vector-only store. Averaging page patch vectors is allowed only as an
 explicit coarse candidate projection; it is not the authoritative
@@ -1293,7 +1292,7 @@ state. Local Chroma text embeddings remain the default knowledge plane while
 the Docker Qwen3-VL service is an optional multimodal route.
 
 The route can be enabled or disabled after confirmation without changing its
-profile. Model, provider, metric, dimension, preprocessing, or representation
+profile. Model, provider, metric, dimension, preprocessing, or embedding
 changes remain staged until a graceful restart and isolated re-embedding are
 completed. The console never performs in-place vector migration or exposes
 service credentials.

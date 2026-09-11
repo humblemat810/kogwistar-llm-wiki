@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_standalone_service_imports_without_application_package() -> None:
     code = """
 import sys
-import llm_wiki_representation_contract
-import llm_wiki_representation_service
+import llm_wiki_embedding_contract
+import llm_wiki_embedding_service
 assert 'kogwistar_llm_wiki' not in sys.modules
 assert 'kogwistar' not in sys.modules
 assert 'kg_doc_parser' not in sys.modules

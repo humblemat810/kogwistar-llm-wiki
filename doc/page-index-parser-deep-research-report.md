@@ -1,4 +1,4 @@
-﻿# Robust Page Index Parsing on 8GB Ollama
+# Robust Page Index Parsing on 8GB Ollama
 
 ## Executive summary
 
@@ -64,7 +64,7 @@ For markdown-like input, the fastest win is to **trust the syntax before you tru
 
 If the text is only **quasi-markdown**—for example, numbered clauses, all-caps headings, short title-case lines, or mixed bullets—then you want a **lightweight line/block classifier** instead of a markdown-only parser. In that regime, a homegrown regex-plus-scoring extractor is usually more robust than trying to coerce a small local LLM into discovering the block boundaries from scratch. The CommonMark rules are still useful as a baseline because they define the most stable heading and list cases, especially Setext heading ambiguity and ordered-list precedence. citeturn34view1turn34view2
 
-Docling and Unstructured are useful when you want **semantic normalization** instead of only syntactic parsing. Docling can parse plain text and markdown into a unified document representation and export lossless JSON locally. Unstructured’s partitioning API yields typed elements such as `Title`, `NarrativeText`, and `ListItem`, which maps nicely onto page-index pipelines. Marker is a strong document-conversion tool for PDFs and Office documents, supports JSON/schema extraction, and can optionally use LLMs, but for already-plain text it adds more stack than value. citeturn35view0turn35view1turn35view2turn35view4turn35view5turn35view3
+Docling and Unstructured are useful when you want **semantic normalization** instead of only syntactic parsing. Docling can parse plain text and markdown into a unified document embedding and export lossless JSON locally. Unstructured’s partitioning API yields typed elements such as `Title`, `NarrativeText`, and `ListItem`, which maps nicely onto page-index pipelines. Marker is a strong document-conversion tool for PDFs and Office documents, supports JSON/schema extraction, and can optionally use LLMs, but for already-plain text it adds more stack than value. citeturn35view0turn35view1turn35view2turn35view4turn35view5turn35view3
 
 The following table frames the tools the same way as the model table: by **suitability for block-assignment preprocessing** on this specific workload. The memory-footprint column is qualitative because these are software stacks rather than model artifacts. The scores are again synthesis, not benchmarks. citeturn35view6turn35view7turn35view0turn35view4turn35view3turn35view8
 
@@ -143,7 +143,7 @@ Then merge deterministically:
 - merge heading-like lines with immediately following continuation lines only when the second line is short and also heading-like;
 - if two consecutive heading candidates have very low confidence and no body text between them, keep the stronger as heading and demote the weaker to paragraph text unless numbering implies real nesting.
 
-A minimal **CandidateBlock** representation can look like this:
+A minimal **CandidateBlock** embedding can look like this:
 
 ```json
 {

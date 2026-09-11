@@ -3,11 +3,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-wiki-representation-service"
+name = "llm-wiki-embedding-service"
 version = "0.1.0"
-description = "Standalone Qwen3-VL representation service and shared v1 contract"
+description = "Standalone Qwen3-VL embedding service and shared v1 contract"
 requires-python = ">=3.13"
-dependencies = ["llm-wiki-representation-contract==0.1.0"]
+dependencies = ["llm-wiki-embedding-contract==0.1.0"]
 
 [project.optional-dependencies]
 service = [
@@ -25,4 +25,4 @@ package-dir = {"" = "../src"}
 
 [tool.setuptools.packages.find]
 where = ["../src"]
-include = ["llm_wiki_representation_service*"]
+include = ["llm_wiki_embedding_service*"]

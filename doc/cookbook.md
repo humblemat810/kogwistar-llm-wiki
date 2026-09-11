@@ -28,13 +28,13 @@ not a safe shared directory for independent writer processes. See the
 
 Open the graph workbench and choose **Settings** to inspect the effective
 runtime configuration. The panel shows the local text embedding plane, the
-optional Docker Qwen3-VL representation service, parser and maintenance model,
+optional Docker Qwen3-VL Embedding Service, parser and maintenance model,
 readiness, and profile locks. Effective values are what the current process is
 using; desired values are staged for a future launch and never replace them
 silently.
 
 The multimodal route can be enabled or disabled after confirmation when the
-representation service is already configured. Changing an embedding model,
+Embedding Service is already configured. Changing an embedding model,
 provider, metric, or dimension requires a restart and isolated re-embedding.
 The UI does not perform destructive migration or edit arbitrary environment
 variables. Operators can inspect the same profile data from the CLI:
@@ -51,27 +51,27 @@ captures source units first and sends resolved, bounded asset bytes to the
 sidecar only during Stage 2 promotion:
 
 ```bash
-LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cu128 \
+LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128 \
 docker compose -f compose.yml -f compose.multimodal.yml \
-  -f compose.representation-cuda.yml up --build
+  -f compose.embedding-cuda.yml up --build
 ```
 
 CPU fallback for smoke tests or hosts without NVIDIA Container Toolkit:
 
 ```bash
-LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cpu \
+LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu \
 docker compose -f compose.yml -f compose.multimodal.yml up --build
 ```
 
-Set `LLM_WIKI_REPRESENTATION_MODEL_REVISION` to an immutable Hugging Face
+Set `LLM_WIKI_EMBEDDING_MODEL_REVISION` to an immutable Hugging Face
 revision before starting Compose. The sidecar is the standalone
-`llm-wiki-representation-service` distribution plus its
-`llm-wiki-representation-contract` dependency; it does not install the
+standalone Embedding Service distribution plus its
+dependency-light contract; it does not install the
 LLM-Wiki application or graph stack. `/healthz` is liveness and `/readyz` is
 model readiness. A live but not-ready sidecar must not receive Stage 2 work.
 
-Use `-f compose.representation-cuda.yml` with the CPU overlay on a host with
-NVIDIA Container Toolkit. Set `LLM_WIKI_REPRESENTATION_DIMENSION=1024` (the
+Use `-f compose.embedding-cuda.yml` with the CPU overlay on a host with
+NVIDIA Container Toolkit. Set `LLM_WIKI_EMBEDDING_DIMENSION=1024` (the
 recommended profile), `1536` for a larger pgvector profile, or `2048` only for
 Chroma/non-HNSW storage. Changing model, revision, dimension, metric, or
 preprocessing requires an isolated re-embedding projection.
@@ -140,22 +140,22 @@ infer compatibility.
 
 Do not set `LLM_WIKI_MULTIMODAL_TORCH_BACKEND` for the production application
 container. It is only for direct local adapter development. The production
-container requires the representation service URL and explicit host allowlist;
+container requires the Embedding Service URL and explicit host allowlist;
 the base default remains `none` and does not import Torch. A vision endpoint
 served by Ollama, vLLM, or llama.cpp is not automatically a native embedding
 provider. See the ADR's remote-runtime admission rules before configuring a
 future remote projection adapter.
 
-### Representation Service Docker
+### Embedding Service Docker
 
 The default application image does not install Torch or request a GPU. Start
-the separate CPU representation service with:
+the separate CPU Embedding Service with:
 
 ```bash
 docker compose -f compose.yml -f compose.multimodal.yml up --build
 ```
 
-For NVIDIA CUDA 12.8, add `-f compose.representation-cuda.yml`. The model
+For NVIDIA CUDA 12.8, add `-f compose.embedding-cuda.yml`. The model
 checkpoint is cached in the sidecar volume, not installed in REST/MCP.
 
 The service defaults to `Qwen3-VL-Embedding-2B`, `dimension=1024`, and
@@ -190,8 +190,8 @@ machine or production sidecar with:
 ```bash
 .venv/bin/python scripts/benchmark_multimodal.py \
   --backend remote \
-  --service-url http://representation:8790 \
-  --allowed-host representation \
+  --service-url http://embedding:8790 \
+  --allowed-host embedding \
   --items 4 \
   --batch-size 1 \
   --service-batch-size 1 \
@@ -214,14 +214,14 @@ keeps the model/profile compatibility check enabled during the benchmark:
 For local encoders, `--batch-size` controls model batching. For the remote
 backend, it only describes the client workload; the actual model microbatch is
 set when the service starts with
-`LLM_WIKI_REPRESENTATION_BATCH_SIZE`. The remote benchmark requires
+`LLM_WIKI_EMBEDDING_BATCH_SIZE`. The remote benchmark requires
 `--service-batch-size` and verifies it against `/v1/capabilities`, failing
 closed if the running service has a different value. Restart/recreate the
 service to compare batch sizes, for example:
 
 ```powershell
-$env:LLM_WIKI_REPRESENTATION_BATCH_SIZE='16'
-# restart/recreate the representation container, then run:
+$env:LLM_WIKI_EMBEDDING_BATCH_SIZE='16'
+# restart/recreate the Embedding Service container, then run:
 .venv\Scripts\python.exe scripts\benchmark_multimodal.py `
   --backend remote --service-url http://127.0.0.1:8790 `
   --allowed-host 127.0.0.1 --service-batch-size 16 `
@@ -231,15 +231,37 @@ $env:LLM_WIKI_REPRESENTATION_BATCH_SIZE='16'
 Start with service batch size `1` on an 8 GB GPU and increase it only after
 observing peak memory and latency.
 
-For a remote benchmark, the device is selected when the representation service
-starts, not by the benchmark client. Set `LLM_WIKI_REPRESENTATION_DEVICE=cpu`
-or `cuda` and the matching `LLM_WIKI_REPRESENTATION_TORCH_BACKEND` there. A
+For a remote benchmark, the device is selected when the Embedding Service
+starts, not by the benchmark client. Set `LLM_WIKI_EMBEDDING_DEVICE=cpu`
+or `cuda` and the matching `LLM_WIKI_EMBEDDING_TORCH_BACKEND` there. A
 verified Windows CUDA reference run on an RTX 3080 Laptop GPU at 1024
 dimensions, `batch_size=1`, `items=4`, `warmup=1`, and three measured repeats
 reported median latency of 110 ms for one image, 449 ms for four images, 79 ms
 for one text item, 273 ms for four text items, and 773 ms for eight mixed
 text/image units. Treat those as a smoke reference only: model cache state,
 driver, hardware, and service transport affect results.
+
+### Experimental vLLM comparison
+
+Use vLLM only as a separate GPU comparison target. It requires a pinned image
+digest, an immutable Qwen revision, and a private allowlisted endpoint:
+
+```bash
+python scripts/benchmark_multimodal.py \
+  --backend vllm \
+  --vllm-url http://embedding:8000 \
+  --vllm-token "$LLM_WIKI_EMBEDDING_VLLM_TOKEN" \
+  --vllm-image-digest 'vllm/vllm-openai@sha256:<64-hex-digest>' \
+  --vllm-allowed-host embedding \
+  --service-model-revision "$LLM_WIKI_MULTIMODAL_MODEL_REVISION" \
+  --items 16 --batch-size 16 --repeats 3
+```
+
+This measures the direct vLLM adapter but does not migrate data or change the
+default backend. Compare its report with the Transformers service; different
+vectors are expected because vLLM documents a different Qwen3-VL image
+preprocessing path. Promote it only after explicit review of the contract,
+GPU, and labeled retrieval results.
 
 ## Recipe 1: Try A Knowledge Article
 
@@ -564,7 +586,7 @@ There is no special memory-agent generator mode. A standard deployment is the
 same command with OTel/OAuth disabled and authentication set to `disabled`.
 
 The base `postgres`, `rest`, and `mcp` services provide the memory-agent
-interfaces. `compose.multimodal.yml` adds the private Qwen3-VL representation
+interfaces. `compose.multimodal.yml` adds the private Qwen3-VL embedding
 service, while `compose.memory-agent.yml` enables the OTel sink and exposes
 Grafana on `http://127.0.0.1:3000`. The application traces are disabled or
 enabled with `LLM_WIKI_OTEL_ENABLED`; the Settings panel can toggle the sink

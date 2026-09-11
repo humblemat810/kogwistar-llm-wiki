@@ -70,7 +70,7 @@ contains stable IDs, hashes, metadata, locators, and lineage references.
 Multimodal support and multimodal vector search are separate capabilities.
 The baseline retrieval path needs no multimodal embedding model:
 
-| Source | Searchable representation | Precise evidence locator |
+| Source | Searchable embedding | Precise evidence locator |
 | --- | --- | --- |
 | Digital PDF | Extracted text, headings, tables | Page and character span |
 | Scanned PDF | OCR text and layout description | Page and bounding box |
@@ -79,7 +79,7 @@ The baseline retrieval path needs no multimodal embedding model:
 | Video | Transcript, scene/frame descriptions | Time range plus optional frame region |
 | Diagram or chart | OCR labels, legend, structural description | Region IDs and bounding boxes |
 
-A normal text query embeds against these representations. Graph expansion,
+A normal text query embeds against these embeddings. Graph expansion,
 metadata filters, exact IDs, source links, and lexical matching supplement
 vector recall. For example, an image of a circuit can be found through its
 caption, OCR labels, component observations, nearby document text, or links

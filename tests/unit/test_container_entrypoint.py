@@ -96,7 +96,35 @@ def test_container_entrypoint_rejects_selected_multimodal_profile_mismatch(monke
     assert container_entrypoint.main(["llm-wiki", "workbench"]) == 78
     error = capsys.readouterr().err
     assert "not supported in the production app container" in error
-    assert "LLM_WIKI_REPRESENTATION_SERVICE_URL" in error
+    assert "LLM_WIKI_EMBEDDING_SERVICE_URL" in error
+
+
+def test_container_entrypoint_validates_vllm_before_exec(monkeypatch, capsys):
+    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setattr(container_entrypoint, "build_configured_multimodal_encoder", lambda: object())
+    monkeypatch.setenv("LLM_WIKI_MULTIMODAL_BACKEND", "vllm")
+    monkeypatch.setenv("LLM_WIKI_EMBEDDING_VLLM_URL", "http://embedding:8000")
+    monkeypatch.delenv("LLM_WIKI_EMBEDDING_SERVICE_URL", raising=False)
+
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(
+        container_entrypoint.os,
+        "execvpe",
+        lambda executable, args, env: calls.append((executable, list(args))),
+    )
+
+    assert container_entrypoint.main(["llm-wiki", "workbench"]) == 0
+    assert calls == [("llm-wiki", ["llm-wiki", "workbench"])]
+
+
+def test_container_entrypoint_rejects_incomplete_vllm_configuration(monkeypatch, capsys):
+    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setenv("LLM_WIKI_MULTIMODAL_BACKEND", "vllm")
+    monkeypatch.setenv("LLM_WIKI_EMBEDDING_VLLM_URL", "http://embedding:8000")
+    monkeypatch.delenv("LLM_WIKI_EMBEDDING_SERVICE_URL", raising=False)
+
+    assert container_entrypoint.main(["llm-wiki", "workbench"]) == 78
+    assert "vLLM requires" in capsys.readouterr().err
 
 
 def test_container_contract_keeps_entrypoint_and_compose_commands():
@@ -120,26 +148,26 @@ def test_dockerfile_pins_and_build_checks_fastmcp_imports():
 
 def test_docker_multimodal_contract_is_explicit_and_opt_in() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    representation_dockerfile = (ROOT / "Dockerfile.representation-service").read_text(encoding="utf-8")
+    embedding_dockerfile = (ROOT / "Dockerfile.embedding-service").read_text(encoding="utf-8")
     compose_override = (ROOT / "compose.multimodal.yml").read_text(encoding="utf-8")
 
     assert "LLM_WIKI_MULTIMODAL_TORCH_BACKEND" not in dockerfile
-    assert "Dockerfile.representation-service" in compose_override
-    assert "requirements/multimodal/torch-${BACKEND}.txt" in representation_dockerfile
-    assert "fastapi" in representation_dockerfile
-    assert "LLM_WIKI_REPRESENTATION_MODEL" in compose_override
-    assert "LLM_WIKI_REPRESENTATION_MODEL_REVISION" in compose_override
+    assert "Dockerfile.embedding-service" in compose_override
+    assert "requirements/multimodal/torch-${BACKEND}.txt" in embedding_dockerfile
+    assert "fastapi" in embedding_dockerfile
+    assert "LLM_WIKI_EMBEDDING_MODEL" in compose_override
+    assert "LLM_WIKI_EMBEDDING_MODEL_REVISION" in compose_override
     assert 'install_multimodal_runtime.py' not in dockerfile
-    cuda_override = (ROOT / "compose.representation-cuda.yml").read_text(encoding="utf-8")
+    cuda_override = (ROOT / "compose.embedding-cuda.yml").read_text(encoding="utf-8")
     assert "driver: nvidia" in cuda_override
     assert "capabilities: [gpu]" in cuda_override
 
 
-def test_representation_image_isolated_from_application_dependencies() -> None:
-    dockerfile = (ROOT / "Dockerfile.representation-service").read_text(encoding="utf-8")
-    assert "representation-contract/pyproject.toml" in dockerfile
-    assert "representation-service/pyproject.toml" in dockerfile
+def test_embedding_image_isolated_from_application_dependencies() -> None:
+    dockerfile = (ROOT / "Dockerfile.embedding-service").read_text(encoding="utf-8")
+    assert "embedding-contract/pyproject.toml" in dockerfile
+    assert "embedding-service/pyproject.toml" in dockerfile
     for forbidden in ("kogwistar", "kg-doc-parser", "obsidian", "maturin", "cargo", "gcc"):
         assert forbidden not in dockerfile.lower()
-    assert "llm_wiki_representation_contract" in dockerfile
-    assert "llm_wiki_representation_service" in dockerfile
+    assert "llm_wiki_embedding_contract" in dockerfile
+    assert "llm_wiki_embedding_service" in dockerfile

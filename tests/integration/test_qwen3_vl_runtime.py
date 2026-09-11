@@ -31,5 +31,5 @@ def test_local_qwen3_vl_checkpoint_produces_verified_dense_benchmark() -> None:
         warmup=1,
     )
     assert report["profile"]["model"].endswith("Qwen3-VL-Embedding-2B") or report["profile"]["model"] == str(path)
-    assert report["profile"]["representation"] == "dense"
+    assert report["profile"]["embedding"] == "dense"
     assert all(case["item_count"] > 0 for case in report["cases"])

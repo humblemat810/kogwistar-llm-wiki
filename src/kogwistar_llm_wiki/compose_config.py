@@ -27,7 +27,7 @@ class ComposeOptions:
     with_oauth: bool = False
     auth_mode: str = "disabled"
     model_revision: str = ""
-    representation_dimension: int = 1024
+    embedding_dimension: int = 1024
     postgres_password: str = "change-this-development-password"
 
 
@@ -50,9 +50,9 @@ def validate_options(options: ComposeOptions) -> list[str]:
         errors.append("auth_mode must be disabled, static_token, or kogwistar_jwt")
     if options.mode in {"cpu", "gpu"} and not options.model_revision.strip():
         errors.append("model_revision is required for the multimodal service")
-    if not 64 <= options.representation_dimension <= 2048:
-        errors.append("representation_dimension must be between 64 and 2048")
-    if options.backend == "postgres" and options.mode == "gpu" and options.representation_dimension > 1536:
+    if not 64 <= options.embedding_dimension <= 2048:
+        errors.append("embedding_dimension must be between 64 and 2048")
+    if options.backend == "postgres" and options.mode == "gpu" and options.embedding_dimension > 1536:
         errors.append("GPU pgvector default profile cannot use dimensions above 1536")
     return errors
 
@@ -106,7 +106,7 @@ def render_compose(options: ComposeOptions) -> str:
         "      LLM_WIKI_EMBEDDING_SERVICE_TOKEN: \"${LLM_WIKI_EMBEDDING_SERVICE_TOKEN:-}\"",
         f"      LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS: \"${{LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS:-{'embedding' if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_MODEL: \"${{LLM_WIKI_MULTIMODAL_MODEL:-{'Qwen/Qwen3-VL-Embedding-2B' if embedding_url else ''}}}\"",
-        f"      LLM_WIKI_MULTIMODAL_DIMENSION: \"${{LLM_WIKI_MULTIMODAL_DIMENSION:-{options.representation_dimension if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_MULTIMODAL_DIMENSION: \"${{LLM_WIKI_MULTIMODAL_DIMENSION:-{options.embedding_dimension if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_MODEL_REVISION: \"${{LLM_WIKI_MULTIMODAL_MODEL_REVISION:-{options.model_revision if embedding_url else ''}}}\"",
         f"    command: [llm-wiki, --backend, {options.backend}, workbench, --workspace, \"${{LLM_WIKI_WORKSPACE:-default}}\", --host, 0.0.0.0, --port, '8765']",
         "    ports: ['127.0.0.1:${LLM_WIKI_REST_PORT:-8765}:8765']",
@@ -145,12 +145,12 @@ def render_compose(options: ComposeOptions) -> str:
             "  embedding:",
             "    build:",
             "      context: .",
-            "      dockerfile: Dockerfile.representation-service",
+            "      dockerfile: Dockerfile.embedding-service",
             f"      args: {{LLM_WIKI_EMBEDDING_TORCH_BACKEND: {'cu128' if options.mode == 'gpu' else 'cpu'}}}",
             "    environment:",
             "      LLM_WIKI_EMBEDDING_MODEL: Qwen/Qwen3-VL-Embedding-2B",
             f"      LLM_WIKI_EMBEDDING_MODEL_REVISION: {options.model_revision}",
-            f"      LLM_WIKI_EMBEDDING_DIMENSION: {options.representation_dimension}",
+            f"      LLM_WIKI_EMBEDDING_DIMENSION: {options.embedding_dimension}",
             f"      LLM_WIKI_EMBEDDING_DEVICE: {'cuda' if options.mode == 'gpu' else 'cpu'}",
             f"      LLM_WIKI_EMBEDDING_TORCH_BACKEND: {'cu128' if options.mode == 'gpu' else 'cpu'}",
             "      LLM_WIKI_EMBEDDING_TOKEN: \"${LLM_WIKI_EMBEDDING_TOKEN:-}\"",
@@ -210,12 +210,12 @@ def check_compose_text(text: str) -> dict[str, object]:
             if token not in text:
                 errors.append(f"missing required PostgreSQL element: {token}")
     if "LLM_WIKI_EMBEDDING_DEVICE: cuda" in text and "driver: nvidia" not in text:
-        errors.append("CUDA representation service requires an NVIDIA device reservation")
+        errors.append("CUDA embedding service requires an NVIDIA device reservation")
     if "Qwen3-VL-Embedding-2B" in text and not any(
         name in text
-        for name in ("LLM_WIKI_EMBEDDING_MODEL_REVISION", "LLM_WIKI_REPRESENTATION_MODEL_REVISION")
+        for name in ("LLM_WIKI_EMBEDDING_MODEL_REVISION", "LLM_WIKI_EMBEDDING_MODEL_REVISION")
     ):
-        errors.append("Qwen3-VL representation requires an immutable model revision")
+        errors.append("Qwen3-VL embedding requires an immutable model revision")
     return {"valid": not errors, "errors": errors, "checks": checks}
 
 

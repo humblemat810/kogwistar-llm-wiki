@@ -73,10 +73,10 @@ multimodal-cuda = [
     "huggingface_hub>=0.26",
     "bitsandbytes>=0.45",
 ]
-# Dependencies for the isolated FastAPI representation service. Torch is kept
+# Dependencies for the isolated FastAPI embedding service. Torch is kept
 # out of these extras because the selected CPU/CUDA wheel must come from the
 # checked-in PyTorch index profile.
-representation-service = [
+embedding-service = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
     "transformers>=4.57.0",
@@ -85,7 +85,7 @@ representation-service = [
     "Pillow>=10",
     "huggingface_hub>=0.26",
 ]
-representation-cpu = [
+embedding-cpu = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
     "transformers>=4.57.0",
@@ -94,7 +94,7 @@ representation-cpu = [
     "Pillow>=10",
     "huggingface_hub>=0.26",
 ]
-representation-cuda = [
+embedding-cuda = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
     "transformers>=4.57.0",

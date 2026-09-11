@@ -595,7 +595,7 @@ The workbench includes an authenticated operator settings console backed by
 `/api/settings` and `/api/settings/health`. It reports effective runtime values
 separately from non-secret desired values stored under the application data
 directory. Local Chroma text embedding remains the always-on knowledge plane;
-the Docker Qwen3-VL representation service is an optional multimodal route.
+the Docker Qwen3-VL Embedding Service is an optional multimodal route.
 
 Only the multimodal retrieval route is live-toggleable in the initial console.
 Provider/model changes are staged and require a graceful restart. Embedding

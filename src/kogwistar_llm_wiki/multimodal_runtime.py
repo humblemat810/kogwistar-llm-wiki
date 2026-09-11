@@ -8,10 +8,10 @@ from typing import Literal, cast
 
 
 TorchBackend = Literal["none", "cpu", "cu126", "cu128"]
-MultimodalBackend = Literal["none", "transformers", "legacy-colqwen"]
+MultimodalBackend = Literal["none", "transformers", "vllm", "legacy-colqwen"]
 SUPPORTED_TORCH_BACKENDS: tuple[TorchBackend, ...] = ("none", "cpu", "cu126", "cu128")
 SUPPORTED_MULTIMODAL_BACKENDS: tuple[MultimodalBackend, ...] = (
-    "none", "transformers", "legacy-colqwen"
+    "none", "transformers", "vllm", "legacy-colqwen"
 )
 DEFAULT_MULTIMODAL_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
 DEFAULT_MULTIMODAL_DIMENSION = 1024
@@ -82,27 +82,27 @@ def configured_multimodal_revision(environ: dict[str, str] | None = None) -> str
     return value or None
 
 
-def configured_representation_service_url(
+def configured_embedding_service_url(
     environ: dict[str, str] | None = None,
 ) -> str | None:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_URL", values.get("LLM_WIKI_REPRESENTATION_SERVICE_URL", "")).strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_URL", values.get("LLM_WIKI_EMBEDDING_SERVICE_URL", "")).strip()
     return value or None
 
 
-def configured_representation_service_token(
+def configured_embedding_service_token(
     environ: dict[str, str] | None = None,
 ) -> str | None:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TOKEN", values.get("LLM_WIKI_REPRESENTATION_SERVICE_TOKEN", "")).strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TOKEN", values.get("LLM_WIKI_EMBEDDING_SERVICE_TOKEN", "")).strip()
     return value or None
 
 
-def configured_representation_service_timeout(
+def configured_embedding_service_timeout(
     environ: dict[str, str] | None = None,
 ) -> float:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS", values.get("LLM_WIKI_REPRESENTATION_SERVICE_TIMEOUT_SECONDS", "30")).strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS", values.get("LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS", "30")).strip()
     try:
         timeout = float(value)
     except ValueError as exc:
@@ -114,11 +114,11 @@ def configured_representation_service_timeout(
     return timeout
 
 
-def configured_representation_service_max_request_bytes(
+def configured_embedding_service_max_request_bytes(
     environ: dict[str, str] | None = None,
 ) -> int:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES", values.get("LLM_WIKI_REPRESENTATION_SERVICE_MAX_REQUEST_BYTES", "5000000")).strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES", values.get("LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES", "5000000")).strip()
     try:
         limit = int(value)
     except ValueError as exc:
@@ -130,13 +130,42 @@ def configured_representation_service_max_request_bytes(
     return limit
 
 
-def configured_representation_service_allowed_hosts(
+def configured_embedding_service_allowed_hosts(
     environ: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
     values = environ if environ is not None else os.environ
     return tuple(
         host.strip().lower()
-        for host in values.get("LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS", values.get("LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS", "")).split(",")
+        for host in values.get("LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS", values.get("LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS", "")).split(",")
+        if host.strip()
+    )
+
+
+def configured_vllm_url(environ: dict[str, str] | None = None) -> str | None:
+    values = environ if environ is not None else os.environ
+    value = values.get("LLM_WIKI_EMBEDDING_VLLM_URL", "").strip()
+    return value or None
+
+
+def configured_vllm_token(environ: dict[str, str] | None = None) -> str | None:
+    values = environ if environ is not None else os.environ
+    value = values.get("LLM_WIKI_EMBEDDING_VLLM_TOKEN", "").strip()
+    return value or None
+
+
+def configured_vllm_image(environ: dict[str, str] | None = None) -> str | None:
+    values = environ if environ is not None else os.environ
+    value = values.get("LLM_WIKI_EMBEDDING_VLLM_IMAGE", "").strip()
+    return value or None
+
+
+def configured_vllm_allowed_hosts(
+    environ: dict[str, str] | None = None,
+) -> tuple[str, ...]:
+    values = environ if environ is not None else os.environ
+    return tuple(
+        host.strip().lower()
+        for host in values.get("LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS", "").split(",")
         if host.strip()
     )
 

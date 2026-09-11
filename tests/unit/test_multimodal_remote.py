@@ -14,16 +14,16 @@ from kogwistar_llm_wiki.multimodal_projection import (
 )
 from kogwistar_llm_wiki.multimodal_remote import (
     RemoteMultimodalEncoder,
-    RepresentationProtocolError,
-    RepresentationServiceSettings,
-    RepresentationServiceUnavailable,
+    EmbeddingProtocolError,
+    EmbeddingServiceSettings,
+    EmbeddingServiceUnavailable,
 )
-from llm_wiki_representation_service.app import _represent_payload
-from llm_wiki_representation_service.config import RepresentationServiceConfig
+from llm_wiki_embedding_service.app import _represent_payload
+from llm_wiki_embedding_service.config import EmbeddingServiceConfig
 
 
 def _profile() -> MultimodalEmbeddingProfile:
-    return RepresentationServiceConfig(dimension=64, revision="test-revision").profile
+    return EmbeddingServiceConfig(dimension=64, revision="test-revision").profile
 
 
 class _Response:
@@ -84,7 +84,7 @@ def test_remote_adapter_sends_resolved_bytes_and_preserves_order() -> None:
 
     encoder = RemoteMultimodalEncoder(
         profile,
-        RepresentationServiceSettings("http://representation:8790"),
+        EmbeddingServiceSettings("http://embedding:8790"),
         opener=opener,
     )
     unit = MultimodalSourceUnit(
@@ -124,10 +124,10 @@ def test_remote_adapter_rejects_profile_or_order_mismatch() -> None:
 
     encoder = RemoteMultimodalEncoder(
         profile,
-        RepresentationServiceSettings("http://representation:8790"),
+        EmbeddingServiceSettings("http://embedding:8790"),
         opener=opener,
     )
-    with pytest.raises(RepresentationProtocolError, match="profile fingerprint"):
+    with pytest.raises(EmbeddingProtocolError, match="profile fingerprint"):
         encoder.encode_queries(["question"])
 
 
@@ -135,7 +135,7 @@ def test_remote_adapter_rejects_path_assets_and_hash_mismatch() -> None:
     profile = _profile()
     encoder = RemoteMultimodalEncoder(
         profile,
-        RepresentationServiceSettings("http://representation:8790"),
+        EmbeddingServiceSettings("http://embedding:8790"),
         opener=lambda *_args, **_kwargs: pytest.fail("request must not be sent"),
     )
     unit = MultimodalSourceUnit(
@@ -154,23 +154,23 @@ def test_remote_adapter_exposes_outage_as_retryable_without_local_fallback() -> 
 
     encoder = RemoteMultimodalEncoder(
         profile,
-        RepresentationServiceSettings("http://representation:8790"),
+        EmbeddingServiceSettings("http://embedding:8790"),
         opener=opener,
     )
-    with pytest.raises(RepresentationServiceUnavailable, match="unavailable"):
+    with pytest.raises(EmbeddingServiceUnavailable, match="unavailable"):
         encoder.encode_queries(["question"])
 
 
 def test_remote_service_host_allowlist_is_enforced() -> None:
     with pytest.raises(ValueError, match="not allowlisted"):
-        RepresentationServiceSettings(
+        EmbeddingServiceSettings(
             "https://remote.example/v1",
-            allowed_hosts=("representation.internal",),
+            allowed_hosts=("embedding.internal",),
         )
 
 
 def test_fake_service_contract_handles_document_and_query() -> None:
-    config = RepresentationServiceConfig(dimension=64, revision="test-revision")
+    config = EmbeddingServiceConfig(dimension=64, revision="test-revision")
     encoder = _FakeEncoder(config.profile)
     query = _represent_payload(
         {
@@ -199,7 +199,7 @@ def test_fake_service_contract_handles_document_and_query() -> None:
 
 
 def test_service_supports_mixed_query_and_preserves_item_order() -> None:
-    config = RepresentationServiceConfig(dimension=64, revision="test-revision")
+    config = EmbeddingServiceConfig(dimension=64, revision="test-revision")
     result = _represent_payload(
         {
             "contract_version": "v1",

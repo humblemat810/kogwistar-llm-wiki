@@ -37,7 +37,7 @@ def test_cpu_and_text_only_modes_have_expected_services() -> None:
 def test_chroma_compose_is_rejected_even_for_full_qwen_dimension() -> None:
     with pytest.raises(ComposeConfigurationError, match="embedded Chroma"):
         render_compose(
-            ComposeOptions(backend="chroma", mode="gpu", model_revision="abc123", representation_dimension=2048)
+            ComposeOptions(backend="chroma", mode="gpu", model_revision="abc123", embedding_dimension=2048)
         )
 
 
@@ -50,7 +50,7 @@ def test_disabled_auth_is_explicitly_disabled() -> None:
     "options, message",
     [
         (ComposeOptions(), "model_revision is required"),
-        (ComposeOptions(mode="gpu", model_revision="abc123", representation_dimension=2048), "above 1536"),
+        (ComposeOptions(mode="gpu", model_revision="abc123", embedding_dimension=2048), "above 1536"),
         (ComposeOptions(mode="invalid", model_revision="abc123"), "mode must be"),
     ],
 )
@@ -87,7 +87,21 @@ def test_static_compose_helper_contains_persistent_service_contract() -> None:
     assert "KOGWISTAR_POSTGRES_DSN" in text
     assert "app_data:/var/lib/llm-wiki" in text
     assert "host.docker.internal:host-gateway" in text
-    assert "representation_hf_cache:/var/lib/huggingface" in text
+    assert "embedding_hf_cache:/var/lib/huggingface" in text
     assert "LLM_WIKI_OTEL_ENABLED" in text
     assert "condition: service_healthy" in text
     assert "Embedded Chroma is single-process only" in text
+
+
+def test_vllm_overlay_is_gpu_only_and_requires_pinned_identity() -> None:
+    text = (Path(__file__).parents[2] / "compose.embedding-vllm.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "EXPERIMENTAL GPU OVERLAY ONLY" in text
+    assert "vllm/vllm-openai@sha256" in text
+    assert "LLM_WIKI_EMBEDDING_VLLM_IMAGE:?" in text
+    assert "LLM_WIKI_MULTIMODAL_MODEL_REVISION:?" in text
+    assert "--runner" in text and "pooling" in text
+    assert "driver: nvidia" in text
+    assert "expose:" in text
+    assert "ports:" not in text

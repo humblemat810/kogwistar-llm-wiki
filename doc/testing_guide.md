@@ -87,7 +87,7 @@ available.
 
 ## Manual Qwen3-VL Docker Smoke
 
-The real Docker model smoke starts the already-built CUDA representation image,
+The real Docker model smoke starts the already-built CUDA Embedding Service image,
 waits for `/readyz`, discovers its profile, and sends a text-plus-image request
 to `/v1/represent`. It is intentionally excluded from default CI because it
 requires NVIDIA Docker support, several GB of image space, and a local or
@@ -95,8 +95,8 @@ downloadable Qwen3-VL checkpoint.
 
 ```powershell
 $env:KOGWISTAR_DOCKER_QWEN3_VL_E2E='1'
-$env:LLM_WIKI_REPRESENTATION_MODEL_REVISION='<40-character-Hugging-Face-commit-SHA>'
-$env:LLM_WIKI_REPRESENTATION_IMAGE='kogwistar-llm-wiki-representation:local'
+$env:LLM_WIKI_EMBEDDING_MODEL_REVISION='<40-character-Hugging-Face-commit-SHA>'
+$env:LLM_WIKI_EMBEDDING_IMAGE='kogwistar-llm-wiki-embedding:local'
 .\.venv\Scripts\python.exe -m pytest `
   tests\integration\test_qwen3_vl_docker_runtime.py `
   -m 'manual and slow' -q -p no:cacheprovider
@@ -110,9 +110,9 @@ the model source. The model revision is still required for profile identity.
 Build the image first with the CUDA overlay when needed:
 
 ```powershell
-$env:LLM_WIKI_REPRESENTATION_TORCH_BACKEND='cu128'
+$env:LLM_WIKI_EMBEDDING_TORCH_BACKEND='cu128'
 docker compose -f compose.yml -f compose.multimodal.yml `
-  -f compose.representation-cuda.yml build representation
+  -f compose.embedding-cuda.yml build embedding
 ```
 
 The test uses `--gpus all`, CUDA 12.8 Torch, dimension 1024, and the pinned

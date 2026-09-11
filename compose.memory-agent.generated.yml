@@ -74,7 +74,7 @@ services:
   embedding:
     build:
       context: .
-      dockerfile: Dockerfile.representation-service
+      dockerfile: Dockerfile.embedding-service
       args: {LLM_WIKI_EMBEDDING_TORCH_BACKEND: cu128}
     environment:
       LLM_WIKI_EMBEDDING_MODEL: Qwen/Qwen3-VL-Embedding-2B

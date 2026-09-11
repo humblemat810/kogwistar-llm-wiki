@@ -3,9 +3,9 @@ param(
     [string]$DockerHubUser = $env:DOCKERHUB_USERNAME,
     [string]$Tag = "latest",
     [ValidateSet("cu128", "cpu")]
-    [string]$RepresentationBackend = "cu128",
+    [string]$EmbeddingBackend = "cu128",
     [switch]$Login,
-    [switch]$SkipRepresentation
+    [switch]$SkipEmbedding
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,25 +51,27 @@ Invoke-Docker @("build", "--tag", $appImage, "--file", "Dockerfile", ".")
 Write-Host "Pushing $appImage"
 Invoke-Docker @("push", $appImage)
 
-if (-not $SkipRepresentation) {
-    $representationTag = if ($RepresentationBackend -eq "cpu" -and $Tag -eq "latest") {
+if (-not $SkipEmbedding) {
+    $embeddingTag = if ($EmbeddingBackend -eq "cpu" -and $Tag -eq "latest") {
         "latest-cpu"
-    } elseif ($RepresentationBackend -eq "cpu") {
+    } elseif ($EmbeddingBackend -eq "cpu") {
         "$Tag-cpu"
+    } elseif ($Tag -eq "latest") {
+        "latest-cuda12.8"
     } else {
-        $Tag
+        "$Tag-cuda12.8"
     }
-    $representationImage = "$DockerHubUser/kogwistar-llm-wiki-embedding:$representationTag"
-    Write-Host "Building $representationImage ($RepresentationBackend)"
+    $embeddingImage = "$DockerHubUser/kogwistar-llm-wiki-embedding:$embeddingTag"
+    Write-Host "Building $embeddingImage ($EmbeddingBackend)"
     Invoke-Docker @(
         "build",
-        "--build-arg", "LLM_WIKI_REPRESENTATION_TORCH_BACKEND=$RepresentationBackend",
-        "--tag", $representationImage,
-        "--file", "Dockerfile.representation-service",
+        "--build-arg", "LLM_WIKI_EMBEDDING_TORCH_BACKEND=$EmbeddingBackend",
+        "--tag", $embeddingImage,
+        "--file", "Dockerfile.embedding-service",
         "."
     )
-    Write-Host "Pushing $representationImage"
-    Invoke-Docker @("push", $representationImage)
+    Write-Host "Pushing $embeddingImage"
+    Invoke-Docker @("push", $embeddingImage)
 }
 
 Write-Host "Images published under Docker Hub namespace '$DockerHubUser'."

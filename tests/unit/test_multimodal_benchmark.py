@@ -20,7 +20,7 @@ def test_fake_multimodal_benchmark_reports_requested_workload_shapes() -> None:
     assert [case["item_count"] for case in report["cases"]] == [1, 3, 1, 3, 6]
     assert all(case["samples"] == 2 for case in report["cases"])
     assert all(case["median_ms"] >= 0 for case in report["cases"])
-    assert report["profile"]["representation"] == "late_interaction"
+    assert report["profile"]["embedding"] == "late_interaction"
 
 
 def test_multimodal_benchmark_rejects_invalid_configuration() -> None:
@@ -31,10 +31,10 @@ def test_multimodal_benchmark_rejects_invalid_configuration() -> None:
     with pytest.raises(ValueError, match="service-url"):
         run_multimodal_benchmark(backend="remote")
     with pytest.raises(ValueError, match="allowed-host"):
-        run_multimodal_benchmark(backend="remote", service_url="http://representation:8790")
+        run_multimodal_benchmark(backend="remote", service_url="http://embedding:8790")
     with pytest.raises(ValueError, match="service-batch-size"):
         run_multimodal_benchmark(
             backend="remote",
-            service_url="http://representation:8790",
-            service_allowed_hosts=("representation",),
+            service_url="http://embedding:8790",
+            service_allowed_hosts=("embedding",),
         )

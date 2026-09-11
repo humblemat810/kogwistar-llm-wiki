@@ -7,13 +7,13 @@ from io import BytesIO
 import math
 from typing import Any
 
-from llm_wiki_representation_contract import ContractValidationError, EmbeddingProfile, validate_dense_vectors
+from llm_wiki_embedding_contract import ContractValidationError, EmbeddingProfile, validate_dense_vectors
 
-from .config import MAX_DIMENSION, MIN_DIMENSION, RepresentationServiceConfig
+from .config import MAX_DIMENSION, MIN_DIMENSION, EmbeddingServiceConfig
 
 
-class RepresentationInferenceError(ValueError):
-    """The configured model returned an unusable representation."""
+class EmbeddingInferenceError(ValueError):
+    """The configured model returned an unusable embedding."""
 
 
 class Qwen3VLDenseEncoder:
@@ -29,15 +29,15 @@ class Qwen3VLDenseEncoder:
         self.instruction = instruction
 
     @classmethod
-    def from_pretrained(cls, config: RepresentationServiceConfig) -> "Qwen3VLDenseEncoder":
+    def from_pretrained(cls, config: EmbeddingServiceConfig) -> "Qwen3VLDenseEncoder":
         if not MIN_DIMENSION <= config.dimension <= MAX_DIMENSION:
-            raise ValueError("representation dimension must be between 64 and 2048")
+            raise ValueError("embedding dimension must be between 64 and 2048")
         try:
             import torch
             from qwen_vl_utils import process_vision_info
             from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
-            raise RuntimeError("representation service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
+            raise RuntimeError("embedding service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
         _validate_torch(torch, config)
         kwargs: dict[str, object] = {"trust_remote_code": True, "revision": config.revision}
         if config.device == "cuda":
@@ -55,7 +55,7 @@ class Qwen3VLDenseEncoder:
         if item.get("text") is not None:
             content.append({"type": "text", "text": str(item["text"])})
         if not content:
-            raise ContractValidationError("representation item requires text or asset")
+            raise ContractValidationError("embedding item requires text or asset")
         return [{"role": "system", "content": [{"type": "text", "text": self.instruction}]}, {"role": "user", "content": content}]
 
     def _prepare(self, conversations: Sequence[list[dict[str, object]]]) -> object:
@@ -86,7 +86,7 @@ class Qwen3VLDenseEncoder:
                 positions = mask.long().sum(dim=1).clamp_min(1) - 1
                 values = values[torch.arange(values.shape[0], device=values.device), positions]
         if getattr(values, "ndim", None) != 2:
-            raise RepresentationInferenceError("model did not return one dense vector per item")
+            raise EmbeddingInferenceError("model did not return one dense vector per item")
         values = torch.nn.functional.normalize(values[..., : self.profile.dimension], p=2, dim=-1).detach().cpu().tolist()
         return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in values]
 
@@ -106,17 +106,17 @@ class Qwen3VLDenseEncoder:
             for start in range(0, len(conversations), self.batch_size):
                 result.extend(self._run(self._prepare(conversations[start : start + self.batch_size])))
             if len(result) != len(items):
-                raise RepresentationInferenceError("model returned a different number of vectors")
+                raise EmbeddingInferenceError("model returned a different number of vectors")
             return result
         finally:
             for value in owned:
                 value.close()
 
 
-def _validate_torch(torch: Any, config: RepresentationServiceConfig) -> None:
+def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
     version = str(torch.__version__).partition("+")[0]
     if version != "2.8.0":
-        raise RuntimeError(f"representation service requires torch 2.8.0, found {torch.__version__}")
+        raise RuntimeError(f"embedding service requires torch 2.8.0, found {torch.__version__}")
     expected = {"cpu": None, "cu126": "12.6", "cu128": "12.8"}[config.torch_backend]
     actual = getattr(torch.version, "cuda", None)
     if actual != expected:
@@ -129,7 +129,7 @@ def _validate_torch(torch: Any, config: RepresentationServiceConfig) -> None:
         try:
             import accelerate  # noqa: F401
         except ImportError as exc:
-            raise RuntimeError("CUDA representation requires accelerate") from exc
+            raise RuntimeError("CUDA embedding requires accelerate") from exc
 
 
-__all__ = ["Qwen3VLDenseEncoder", "RepresentationInferenceError"]
+__all__ = ["Qwen3VLDenseEncoder", "EmbeddingInferenceError"]

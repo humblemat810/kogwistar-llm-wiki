@@ -7,20 +7,20 @@ usage() {
 Usage: publish_docker_images.sh [options]
 
 Build and push the LLM-Wiki application image and, unless skipped, the
-isolated multimodal representation-service image.
+isolated multimodal Embedding Service image.
 
 Options:
   --docker-hub-user USER       Docker Hub namespace (default: DOCKERHUB_USERNAME)
   --tag TAG                    Image tag (default: latest)
-  --representation-backend B  cpu or cu128 (default: cu128)
+  --embedding-backend B  cpu or cu128 (default: cu128; CUDA tags use -cuda12.8)
   --login                      Run docker login before building
-  --skip-representation        Do not build or push the representation image
+  --skip-embedding        Do not build or push the Embedding Service image
   -h, --help                   Show this help
 
 Examples:
   ./scripts/publish_docker_images.sh --docker-hub-user example --tag v0.3.0
-  ./scripts/publish_docker_images.sh --representation-backend cpu
-  ./scripts/publish_docker_images.sh --skip-representation
+  ./scripts/publish_docker_images.sh --embedding-backend cpu
+  ./scripts/publish_docker_images.sh --skip-embedding
 EOF
 }
 
@@ -38,9 +38,9 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 
 docker_hub_user="${DOCKERHUB_USERNAME:-}"
 tag="latest"
-representation_backend="cu128"
+embedding_backend="cu128"
 login=false
-skip_representation=false
+skip_embedding=false
 
 while (($# > 0)); do
   case "$1" in
@@ -54,17 +54,17 @@ while (($# > 0)); do
       tag="$2"
       shift 2
       ;;
-    --representation-backend)
-      (($# >= 2)) || die "--representation-backend requires a value"
-      representation_backend="$2"
+    --embedding-backend)
+      (($# >= 2)) || die "--embedding-backend requires a value"
+      embedding_backend="$2"
       shift 2
       ;;
     --login)
       login=true
       shift
       ;;
-    --skip-representation)
-      skip_representation=true
+    --skip-embedding)
+      skip_embedding=true
       shift
       ;;
     -h|--help)
@@ -77,9 +77,9 @@ while (($# > 0)); do
   esac
 done
 
-case "$representation_backend" in
+case "$embedding_backend" in
   cpu|cu128) ;;
-  *) die "--representation-backend must be cpu or cu128" ;;
+  *) die "--embedding-backend must be cpu or cu128" ;;
 esac
 
 docker_args info
@@ -107,27 +107,29 @@ echo "Building ${app_image}"
 echo "Pushing ${app_image}"
 docker_args push "$app_image"
 
-if [[ "$skip_representation" != true ]]; then
-  if [[ "$representation_backend" == cpu && "$tag" == latest ]]; then
-    representation_tag="latest-cpu"
-  elif [[ "$representation_backend" == cpu ]]; then
-    representation_tag="${tag}-cpu"
+if [[ "$skip_embedding" != true ]]; then
+  if [[ "$embedding_backend" == cpu && "$tag" == latest ]]; then
+    embedding_tag="latest-cpu"
+  elif [[ "$embedding_backend" == cpu ]]; then
+    embedding_tag="${tag}-cpu"
+  elif [[ "$tag" == latest ]]; then
+    embedding_tag="latest-cuda12.8"
   else
-    representation_tag="$tag"
+    embedding_tag="${tag}-cuda12.8"
   fi
 
-  representation_image="${docker_hub_user}/kogwistar-llm-wiki-representation:${representation_tag}"
-  echo "Building ${representation_image} (${representation_backend})"
+  embedding_image="${docker_hub_user}/kogwistar-llm-wiki-embedding:${embedding_tag}"
+  echo "Building ${embedding_image} (${embedding_backend})"
   (
     cd -- "$repo_root"
     docker_args build \
-      --build-arg "LLM_WIKI_REPRESENTATION_TORCH_BACKEND=${representation_backend}" \
-      --tag "$representation_image" \
-      --file Dockerfile.representation-service \
+      --build-arg "LLM_WIKI_EMBEDDING_TORCH_BACKEND=${embedding_backend}" \
+      --tag "$embedding_image" \
+      --file Dockerfile.embedding-service \
       .
   )
-  echo "Pushing ${representation_image}"
-  docker_args push "$representation_image"
+  echo "Pushing ${embedding_image}"
+  docker_args push "$embedding_image"
 fi
 
 echo "Images published under Docker Hub namespace '${docker_hub_user}'."

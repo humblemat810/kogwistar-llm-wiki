@@ -6,7 +6,7 @@ ColQwen-style encoders can return one vector per token or image patch without
 changing the graph schema.
 
 Qwen3-VL is represented separately as a normalized dense vector per source
-unit.  The representation is part of the profile fingerprint, so equal
+unit.  The embedding is part of the profile fingerprint, so equal
 dimensions never make late-interaction and dense spaces interchangeable.
 
 Stage 1 stores only source-unit metadata and references. Stage 2 adds the
@@ -28,10 +28,10 @@ import os
 import sqlite3
 from typing import Literal, Protocol, runtime_checkable
 
-from llm_wiki_representation_contract import (
+from llm_wiki_embedding_contract import (
     EmbeddingProfile as MultimodalEmbeddingProfile,
     EmbeddingSet,
-    EmbeddingRepresentation,
+    EmbeddingKind,
     SimilarityMetric,
     SourceModality,
 )
@@ -216,9 +216,9 @@ def _normalise_sets(values: Sequence[object], *, profile: MultimodalEmbeddingPro
     if hasattr(values, "detach"):
         values = values.detach().cpu().tolist()  # type: ignore[union-attr]
     result = [_normalise_embedding_set(value, dimension=profile.dimension) for value in values]
-    if profile.representation in {"single_vector", "dense"} and any(len(item) != 1 for item in result):
+    if profile.embedding in {"single_vector", "dense"} and any(len(item) != 1 for item in result):
         raise ProjectionIntegrityError(
-            f"{profile.representation} profiles require exactly one vector per view"
+            f"{profile.embedding} profiles require exactly one vector per view"
         )
     return result
 
@@ -242,9 +242,9 @@ def score_embedding_sets(
 ) -> float:
     """Score pooled vectors or ColBERT-style late interaction sets."""
 
-    if len(query) != 1 and profile.representation in {"single_vector", "dense"}:
-        raise ProjectionIntegrityError(f"{profile.representation} query must contain one vector")
-    if profile.representation in {"single_vector", "dense"}:
+    if len(query) != 1 and profile.embedding in {"single_vector", "dense"}:
+        raise ProjectionIntegrityError(f"{profile.embedding} query must contain one vector")
+    if profile.embedding in {"single_vector", "dense"}:
         return _vector_score(query[0], document[0], profile.metric)
     # ColBERT/ColQwen MaxSim: each query token chooses its best document token.
     return sum(
@@ -278,7 +278,7 @@ class InMemoryMultimodalProjectionStore:
     def upsert_embedding(self, unit: MultimodalSourceUnit, vectors: object, *, profile: MultimodalEmbeddingProfile) -> None:
         self._check_profile(profile)
         normalised = _normalise_embedding_set(vectors, dimension=profile.dimension)
-        if profile.representation == "single_vector" and len(normalised) != 1:
+        if profile.embedding == "single_vector" and len(normalised) != 1:
             raise ProjectionIntegrityError("single_vector profiles require exactly one vector per view")
         self.capture(unit)
         self._embeddings[unit.view_id] = normalised
@@ -383,7 +383,7 @@ class SQLiteMultimodalProjectionStore(InMemoryMultimodalProjectionStore):
     def upsert_embedding(self, unit: MultimodalSourceUnit, vectors: object, *, profile: MultimodalEmbeddingProfile) -> None:
         self._check_profile(profile)
         normalised = _normalise_embedding_set(vectors, dimension=profile.dimension)
-        if profile.representation == "single_vector" and len(normalised) != 1:
+        if profile.embedding == "single_vector" and len(normalised) != 1:
             raise ProjectionIntegrityError("single_vector profiles require exactly one vector per view")
         self.capture(unit)
         self._embeddings[unit.view_id] = normalised
@@ -457,7 +457,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
     ) -> None:
         self._check_profile(profile)
         normalised = _normalise_embedding_set(vectors, dimension=profile.dimension)
-        if profile.representation == "single_vector" and len(normalised) != 1:
+        if profile.embedding == "single_vector" and len(normalised) != 1:
             raise ProjectionIntegrityError("single_vector profiles require exactly one vector per view")
         ids = [f"{unit.view_id}:{ordinal}" for ordinal in range(len(normalised))]
         metadatas = [
@@ -540,7 +540,7 @@ class FakeMultimodalEncoder:
 
     profile: MultimodalEmbeddingProfile = field(
         default_factory=lambda: MultimodalEmbeddingProfile(
-            provider="fake", model="fake-colqwen-compatible", representation="late_interaction", dimension=8
+            provider="fake", model="fake-colqwen-compatible", embedding="late_interaction", dimension=8
         )
     )
 
@@ -690,7 +690,7 @@ class ColQwenNativeEncoder:
             provider="transformers",
             model=model_id,
             model_revision=effective_revision,
-            representation="late_interaction",
+            embedding="late_interaction",
             dimension=resolved_dimension,
             metric="dot",
             preprocessing_fingerprint=f"colqwen2:{max_image_patches}:{max_sequence_length}",
@@ -845,7 +845,7 @@ class Qwen3VLDenseEncoder:
         vision_processor: object | None = None,
         instruction: str = "Represent the user's input.",
     ) -> None:
-        if profile.representation != "dense":
+        if profile.embedding != "dense":
             raise ValueError("Qwen3VLDenseEncoder requires a dense embedding profile")
         if not QWEN3_VL_MIN_DIMENSION <= profile.dimension <= QWEN3_VL_MAX_DIMENSION:
             raise ValueError(
@@ -935,7 +935,7 @@ class Qwen3VLDenseEncoder:
             provider="transformers",
             model=model_id,
             model_revision=revision,
-            representation="dense",
+            embedding="dense",
             dimension=int(dimension),
             metric="dot",
             preprocessing_fingerprint=(
@@ -1177,35 +1177,81 @@ def build_configured_multimodal_encoder(
     ``none`` is intentionally not a fallback model: callers must opt in to a
     native encoder rather than accidentally loading a large checkpoint.
     """
-    service_url = os.environ.get("LLM_WIKI_REPRESENTATION_SERVICE_URL", "").strip()
+    backend = configured_multimodal_backend()
+    if backend == "vllm":
+        from .multimodal_runtime import (
+            configured_vllm_allowed_hosts,
+            configured_vllm_image,
+            configured_vllm_token,
+            configured_vllm_url,
+        )
+        from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
+
+        vllm_url = configured_vllm_url()
+        vllm_token = configured_vllm_token()
+        vllm_image = configured_vllm_image()
+        allowed_hosts = configured_vllm_allowed_hosts()
+        revision = configured_multimodal_revision()
+        if not vllm_url or not vllm_token or not vllm_image or not allowed_hosts:
+            raise ValueError(
+                "vLLM requires LLM_WIKI_EMBEDDING_VLLM_URL, "
+                "LLM_WIKI_EMBEDDING_VLLM_TOKEN, "
+                "LLM_WIKI_EMBEDDING_VLLM_IMAGE, and "
+                "LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS"
+            )
+        if not revision:
+            raise ValueError("vLLM requires LLM_WIKI_MULTIMODAL_MODEL_REVISION")
+        if configured_multimodal_dimension() != 1024:
+            raise ValueError("the experimental vLLM backend currently supports 1024 dimensions only")
+        return VllmMultimodalEncoder(
+            VllmEmbeddingSettings(
+                url=vllm_url,
+                token=vllm_token,
+                image_digest=vllm_image,
+                model=configured_multimodal_model(),
+                model_revision=revision,
+                dimension=1024,
+                instruction=os.environ.get(
+                    "LLM_WIKI_MULTIMODAL_INSTRUCTION",
+                    "Represent the user's input.",
+                ),
+                timeout_seconds=float(os.environ.get("LLM_WIKI_EMBEDDING_VLLM_TIMEOUT_SECONDS", "30")),
+                allowed_hosts=allowed_hosts,
+            )
+        )
+
+    service_url = os.environ.get(
+        "LLM_WIKI_EMBEDDING_SERVICE_URL",
+        os.environ.get("LLM_WIKI_EMBEDDING_SERVICE_URL", ""),
+    ).strip()
     if service_url:
         from .multimodal_remote import (
             RemoteMultimodalEncoder,
-            RepresentationServiceSettings,
+                EmbeddingServiceSettings,
         )
         from .multimodal_runtime import (
-            configured_representation_service_allowed_hosts,
-            configured_representation_service_max_request_bytes,
-            configured_representation_service_timeout,
-            configured_representation_service_token,
+            configured_embedding_service_allowed_hosts,
+            configured_embedding_service_max_request_bytes,
+            configured_embedding_service_timeout,
+            configured_embedding_service_token,
         )
 
-        allowed_hosts = configured_representation_service_allowed_hosts()
+        allowed_hosts = configured_embedding_service_allowed_hosts()
         if not allowed_hosts:
             raise ValueError(
-                "LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS must explicitly allow "
-                "the configured representation service host"
+                "LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS must explicitly allow "
+                "the configured Embedding Service host"
             )
 
         instruction = os.environ.get(
-            "LLM_WIKI_REPRESENTATION_INSTRUCTION",
-            "Represent the user's input.",
+            "LLM_WIKI_EMBEDDING_INSTRUCTION",
+            os.environ.get("LLM_WIKI_EMBEDDING_INSTRUCTION", "Represent the user's input."),
         )
         profile = MultimodalEmbeddingProfile(
             provider="transformers",
             model=configured_multimodal_model(),
             model_revision=configured_multimodal_revision(),
-            representation="dense",
+            embedding="dense",
             dimension=configured_multimodal_dimension(),
             metric="dot",
             preprocessing_fingerprint=(
@@ -1215,17 +1261,20 @@ def build_configured_multimodal_encoder(
         )
         return RemoteMultimodalEncoder(
             profile,
-            RepresentationServiceSettings(
+            EmbeddingServiceSettings(
                 url=service_url,
-                token=configured_representation_service_token(),
-                timeout_seconds=configured_representation_service_timeout(),
-                max_request_bytes=configured_representation_service_max_request_bytes(),
-                expected_profile_fingerprint=os.environ.get("LLM_WIKI_REPRESENTATION_PROFILE_FINGERPRINT") or None,
+                token=configured_embedding_service_token(),
+                timeout_seconds=configured_embedding_service_timeout(),
+                max_request_bytes=configured_embedding_service_max_request_bytes(),
+                expected_profile_fingerprint=(
+                    os.environ.get("LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT")
+                    or os.environ.get("LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT")
+                    or None
+                ),
                 allowed_hosts=allowed_hosts,
             ),
         )
 
-    backend = configured_multimodal_backend()
     if backend == "none":
         raise ValueError(
             "native multimodal encoding is disabled; set "
@@ -1241,7 +1290,7 @@ def build_configured_multimodal_encoder(
         )
     raise ValueError(
         "Qwen3-VL production inference requires "
-        "LLM_WIKI_REPRESENTATION_SERVICE_URL; local Transformers inference is "
+        "LLM_WIKI_EMBEDDING_SERVICE_URL; local Transformers inference is "
         "available only through developer/test tooling"
     )
 

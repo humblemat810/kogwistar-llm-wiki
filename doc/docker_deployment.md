@@ -26,7 +26,7 @@ The default development endpoints are bound to loopback:
 
 The workbench **Settings** panel is an operator view over the same service.
 It reports effective and staged desired settings, backend/profile compatibility,
-and representation-service health. Model and embedding profile changes are not
+and embedding-service health. Model and embedding profile changes are not
 live edits: review the restart and re-embedding impact before applying them.
 The panel never returns tokens or secret environment values.
 - REST readiness: `http://127.0.0.1:8765/readyz`
@@ -211,7 +211,7 @@ supervisable.
 
 This guide calls the sidecar the **Embedding Service** because its v1 contract
 returns embeddings. Internal package names and the legacy
-`Dockerfile.representation-service` filename remain for compatibility; they do
+`Dockerfile.embedding-service` filename remain for compatibility; they do
 not indicate a separate user-facing product.
 
 Production multimodal inference is a separate service so the REST and MCP
@@ -219,9 +219,9 @@ images remain lightweight and Torch-free. GPU is the recommended deployment
 for practical Qwen3-VL vision inference:
 
 ```bash
-LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cu128 \
+LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128 \
 docker compose -f compose.yml -f compose.multimodal.yml \
-  -f compose.representation-cuda.yml up --build
+  -f compose.embedding-cuda.yml up --build
 ```
 
 For CPU-only smoke tests or hosts without NVIDIA Container Toolkit, use the
@@ -235,27 +235,27 @@ docker compose -f compose.yml -f compose.multimodal.yml \
 PowerShell:
 
 ```powershell
-$env:LLM_WIKI_REPRESENTATION_TORCH_BACKEND = "cu128"
+$env:LLM_WIKI_EMBEDDING_TORCH_BACKEND = "cu128"
 docker compose -f compose.yml -f compose.multimodal.yml `
-  -f compose.representation-cuda.yml up --build
+  -f compose.embedding-cuda.yml up --build
 ```
 
 CPU fallback in PowerShell:
 
 ```powershell
-$env:LLM_WIKI_REPRESENTATION_TORCH_BACKEND = "cpu"
+$env:LLM_WIKI_EMBEDDING_TORCH_BACKEND = "cpu"
 docker compose -f compose.yml -f compose.multimodal.yml up --build
 ```
 
 The sidecar exposes `/healthz`, `/readyz`, `/v1/capabilities`, and
 `/v1/represent` only on the private Compose network. Configure the model,
 revision, dimension, token, and Hugging Face cache through
-`LLM_WIKI_REPRESENTATION_*`. The default is
+`LLM_WIKI_EMBEDDING_*`. The default is
 `Qwen/Qwen3-VL-Embedding-2B` at 1024 dimensions. A remote deployment must use
-authenticated HTTPS and an explicit `LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS`
+authenticated HTTPS and an explicit `LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS`
 network allowlist.
 
-Wait for the representation sidecar's `/readyz` endpoint before submitting
+Wait for the Embedding Service sidecar's `/readyz` endpoint before submitting
 Stage 2 projection work. `/healthz` only confirms that the HTTP process is
 alive; `/readyz` additionally confirms that Torch, the selected device, model,
 and 1024-dimensional profile loaded successfully. Use the profile-matched
@@ -270,18 +270,43 @@ follow the developer-only instructions in the cookbook. Qwen3-VL supports
 requires Chroma or non-HNSW storage. ColQwen is an explicit legacy
 late-interaction route and must not share the dense service profile.
 
-The representation image is a separate distribution boundary: it installs
-`llm-wiki-representation-contract` and `llm-wiki-representation-service`, not
+The Embedding Service image is a separate distribution boundary: it installs
+the dependency-light embedding contract and service, not
 the application, parser, sink, Kogwistar, database, or MCP packages. Set
-`LLM_WIKI_REPRESENTATION_MODEL_REVISION` to an immutable Hugging Face revision;
+`LLM_WIKI_EMBEDDING_MODEL_REVISION` to an immutable Hugging Face revision;
 the sidecar refuses to start with a missing or floating revision. The model is
 loaded asynchronously during startup, so `/healthz` can be live while `/readyz`
 remains `503` until the profile-pinned model is ready.
 
+### Experimental vLLM backend
+
+The experimental vLLM route is GPU-only and is not combined with the
+Transformers Embedding Service overlay. It calls vLLM's Qwen3-VL Chat
+Embeddings API directly from LLM-Wiki, while the application retains the
+Stage 1/Stage 2 profile and asset-safety checks. vLLM is a separate vector
+space because its Qwen3-VL image preprocessing differs from the Transformers
+path.
+
+Set an immutable model revision, private vLLM token, and pinned image digest:
+
+```bash
+export LLM_WIKI_MULTIMODAL_MODEL_REVISION='<immutable-model-commit-sha>'
+export LLM_WIKI_EMBEDDING_VLLM_TOKEN='<private-token>'
+export LLM_WIKI_EMBEDDING_VLLM_IMAGE='vllm/vllm-openai@sha256:<64-hex-digest>'
+docker compose -f compose.yml -f compose.embedding-vllm.yml up -d
+```
+
+The overlay reserves NVIDIA GPUs, exposes vLLM only inside the Compose
+network, and stores model downloads in `embedding_vllm_hf_cache`. Do not also
+apply `compose.multimodal.yml`; the two overlays define different embedding
+backends. The app creates an isolated vLLM projection and never reuses
+Transformers vectors. Production promotion requires explicit review of the
+contract, GPU, and labeled retrieval comparison results.
+
 ## OpenTelemetry And Grafana
 
 For a complete local memory-agent example combining PostgreSQL, the private
-Qwen3-VL representation service, OTel, and Grafana, use
+Qwen3-VL Embedding Service, OTel, and Grafana, use
 [`compose.memory-agent.yml`](../compose.memory-agent.yml) as the final Compose
 overlay. The same overlay contains a commented Keycloak example; see the
 [cookbook recipe](cookbook.md#recipe-11-multimodal-memory-agent-with-otel) for

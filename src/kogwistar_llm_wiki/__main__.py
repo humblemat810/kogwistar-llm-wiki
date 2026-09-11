@@ -496,9 +496,9 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
         _close_engines(engines)
 
 
-def _cmd_representation_service(args: argparse.Namespace) -> None:
-    """Run the optional isolated multimodal representation service."""
-    from llm_wiki_representation_service.__main__ import main as run_service
+def _cmd_embedding_service(args: argparse.Namespace) -> None:
+    """Run the optional isolated multimodal Embedding Service."""
+    from llm_wiki_embedding_service.__main__ import main as run_service
 
     del args
     run_service()
@@ -786,7 +786,7 @@ def _compose_options_from_args(args: argparse.Namespace) -> ComposeOptions:
         with_oauth=args.with_oauth,
         auth_mode=args.auth_mode,
         model_revision=args.model_revision,
-        representation_dimension=args.representation_dimension,
+        embedding_dimension=args.embedding_dimension,
     )
 
 
@@ -1038,12 +1038,12 @@ def main(argv: list[str] | None = None) -> int:
     mcp_p.add_argument("--split-derived-knowledge", action="store_true")
     mcp_p.set_defaults(func=_cmd_mcp)
 
-    representation_p = sub.add_parser(
+    embedding_p = sub.add_parser(
         "embedding-service",
-        aliases=["representation-service"],
+        aliases=["embedding-service"],
         help="Serve one isolated Qwen3-VL embedding profile",
     )
-    representation_p.set_defaults(func=_cmd_representation_service)
+    embedding_p.set_defaults(func=_cmd_embedding_service)
 
     seed_p = sub.add_parser(
         "seed-bundle",
@@ -1141,7 +1141,7 @@ def main(argv: list[str] | None = None) -> int:
     compose_generate_p.add_argument("--with-otel", action="store_true")
     compose_generate_p.add_argument("--with-oauth", action="store_true")
     compose_generate_p.add_argument("--model-revision", default="")
-    compose_generate_p.add_argument("--representation-dimension", type=int, default=1024)
+    compose_generate_p.add_argument("--embedding-dimension", type=int, default=1024)
     compose_generate_p.set_defaults(func=_cmd_compose_generate)
     compose_check_p = compose_sub.add_parser("check", help="Validate a generated or checked-in Compose YAML")
     compose_check_p.add_argument("--file", required=True, help="Compose YAML path")

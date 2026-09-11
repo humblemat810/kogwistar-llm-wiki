@@ -68,7 +68,7 @@ def build_workbench_handler(
                         "mode": _first(query, "mode", "gpu"),
                         "auth_mode": _first(query, "auth_mode", "disabled"),
                         "model_revision": _first(query, "model_revision", ""),
-                        "representation_dimension": int(_first(query, "representation_dimension", "1024")),
+                        "embedding_dimension": int(_first(query, "embedding_dimension", "1024")),
                         "with_otel": _first(query, "with_otel", "false").lower() in {"1", "true", "yes"},
                         "with_oauth": _first(query, "with_oauth", "false").lower() in {"1", "true", "yes"},
                     })

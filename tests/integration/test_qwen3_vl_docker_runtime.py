@@ -52,11 +52,11 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
     if not _enabled():
         pytest.skip("set KOGWISTAR_DOCKER_QWEN3_VL_E2E=1 for the real Docker model smoke test")
 
-    image = os.getenv("LLM_WIKI_REPRESENTATION_IMAGE", "kogwistar-llm-wiki-representation:local")
-    revision = os.getenv("LLM_WIKI_REPRESENTATION_MODEL_REVISION", "").strip()
+    image = os.getenv("LLM_WIKI_EMBEDDING_IMAGE", "kogwistar-llm-wiki-embedding:local")
+    revision = os.getenv("LLM_WIKI_EMBEDDING_MODEL_REVISION", "").strip()
     local_model_dir = os.getenv("LLM_WIKI_QWEN3_VL_MODEL_DIR", "").strip()
     if not revision:
-        pytest.fail("LLM_WIKI_REPRESENTATION_MODEL_REVISION must contain the pinned model commit SHA")
+        pytest.fail("LLM_WIKI_EMBEDDING_MODEL_REVISION must contain the pinned model commit SHA")
     if subprocess.run(
         ["docker", "image", "inspect", image],
         capture_output=True,
@@ -69,27 +69,27 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
         pytest.fail(f"configured local Qwen3-VL model directory does not exist: {local_model_dir}")
 
     port = _free_port()
-    token = os.getenv("LLM_WIKI_REPRESENTATION_TOKEN") or None
-    cache_volume = os.getenv("LLM_WIKI_REPRESENTATION_HF_VOLUME", "llm-wiki-qwen3-vl-hf-cache")
+    token = os.getenv("LLM_WIKI_EMBEDDING_TOKEN") or None
+    cache_volume = os.getenv("LLM_WIKI_EMBEDDING_HF_VOLUME", "llm-wiki-qwen3-vl-hf-cache")
     container = f"llm-wiki-qwen3-vl-e2e-{uuid.uuid4().hex[:10]}"
     command = [
         "docker", "run", "--detach", "--name", container,
         "--gpus", "all", "--publish", f"{port}:8790",
         "--volume", f"{cache_volume}:/var/lib/huggingface",
-        "--env", "LLM_WIKI_REPRESENTATION_DEVICE=cuda",
-        "--env", "LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cu128",
-        "--env", f"LLM_WIKI_REPRESENTATION_MODEL_REVISION={revision}",
-        "--env", "LLM_WIKI_REPRESENTATION_DIMENSION=1024",
+        "--env", "LLM_WIKI_EMBEDDING_DEVICE=cuda",
+        "--env", "LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128",
+        "--env", f"LLM_WIKI_EMBEDDING_MODEL_REVISION={revision}",
+        "--env", "LLM_WIKI_EMBEDDING_DIMENSION=1024",
     ]
     if local_model_dir:
         command.extend([
             "--mount",
             f"type=bind,source={Path(local_model_dir).resolve()},target=/models/qwen3-vl,readonly",
             "--env",
-            "LLM_WIKI_REPRESENTATION_MODEL=/models/qwen3-vl",
+            "LLM_WIKI_EMBEDDING_MODEL=/models/qwen3-vl",
         ])
     if token:
-        command.extend(["--env", f"LLM_WIKI_REPRESENTATION_TOKEN={token}"])
+        command.extend(["--env", f"LLM_WIKI_EMBEDDING_TOKEN={token}"])
     command.append(image)
     timings: dict[str, float] = {}
     test_started = time.perf_counter()

@@ -656,9 +656,15 @@ class IngestPipeline:
         if self.multimodal_encoder is None and multimodal_projection_store is not None:
             # A configured service client is lightweight; model inference stays
             # outside this process and is only attempted during Stage 2.
-            from .multimodal_runtime import configured_representation_service_url
+            from .multimodal_runtime import (
+                configured_embedding_service_url,
+                configured_multimodal_backend,
+                configured_vllm_url,
+            )
 
-            if configured_representation_service_url():
+            if configured_embedding_service_url() or (
+                configured_multimodal_backend() == "vllm" and configured_vllm_url()
+            ):
                 self.multimodal_encoder = build_configured_multimodal_encoder()
         self._source_revisions: dict[tuple[str, str], SourceRevision] = {}
         self.stats_store = (
@@ -1715,7 +1721,7 @@ class IngestPipeline:
         """Repair uniquely recoverable offsets before graph persistence.
 
         Parser pointers and Kogwistar spans use different internal
-        representations, so persistence remains strict. This boundary pass
+        embeddings, so persistence remains strict. This boundary pass
         uses the authoritative registered source document and only accepts a
         unique exact/fuzzy repair; ambiguous evidence still fails closed.
         """

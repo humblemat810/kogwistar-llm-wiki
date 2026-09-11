@@ -1,4 +1,4 @@
-"""Dependency-light v1 contract shared by the app and representation service."""
+"""Dependency-light v1 contract shared by the app and embedding service."""
 
 from __future__ import annotations
 
@@ -9,21 +9,21 @@ import json
 import math
 from typing import Literal
 
-EmbeddingRepresentation = Literal["single_vector", "dense", "late_interaction"]
+EmbeddingKind = Literal["single_vector", "dense", "late_interaction"]
 SimilarityMetric = Literal["dot", "cosine"]
 SourceModality = Literal["text", "image", "pdf_page", "table", "chart", "webpage", "video_frame"]
 EmbeddingSet = tuple[tuple[float, ...], ...]
 
 
 class ContractValidationError(ValueError):
-    """A v1 wire or representation payload is invalid."""
+    """A v1 wire or embedding payload is invalid."""
 
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingProfile:
     provider: str
     model: str
-    representation: EmbeddingRepresentation
+    embedding: EmbeddingKind
     dimension: int
     metric: SimilarityMetric = "dot"
     model_revision: str | None = None
@@ -34,8 +34,8 @@ class EmbeddingProfile:
     def __post_init__(self) -> None:
         if not str(self.provider).strip() or not str(self.model).strip():
             raise ContractValidationError("embedding provider and model are required")
-        if self.representation not in {"single_vector", "dense", "late_interaction"}:
-            raise ContractValidationError(f"unsupported embedding representation {self.representation!r}")
+        if self.embedding not in {"single_vector", "dense", "late_interaction"}:
+            raise ContractValidationError(f"unsupported embedding kind {self.embedding!r}")
         if self.dimension <= 0:
             raise ContractValidationError("embedding dimension must be positive")
         if self.metric not in {"dot", "cosine"}:
@@ -47,7 +47,7 @@ class EmbeddingProfile:
         return {
             "provider": str(self.provider),
             "model": str(self.model),
-            "representation": self.representation,
+            "embedding": self.embedding,
             "dimension": int(self.dimension),
             "metric": self.metric,
             "model_revision": self.model_revision,
@@ -67,7 +67,7 @@ class EmbeddingProfile:
             return cls(
                 provider=str(payload["provider"]),
                 model=str(payload["model"]),
-                representation=str(payload["representation"]),  # type: ignore[arg-type]
+                embedding=str(payload["embedding"]),  # type: ignore[arg-type]
                 dimension=int(payload["dimension"]),
                 metric=str(payload.get("metric", "dot")),  # type: ignore[arg-type]
                 model_revision=str(payload["model_revision"]) if payload.get("model_revision") else None,
@@ -107,6 +107,6 @@ def validate_dense_vectors(value: object, *, dimension: int) -> EmbeddingSet:
 
 
 __all__ = [
-    "EmbeddingProfile", "EmbeddingRepresentation", "EmbeddingSet", "SimilarityMetric",
+    "EmbeddingProfile", "EmbeddingKind", "EmbeddingSet", "SimilarityMetric",
     "SourceModality", "ContractValidationError", "validate_asset_bytes", "validate_dense_vectors",
 ]

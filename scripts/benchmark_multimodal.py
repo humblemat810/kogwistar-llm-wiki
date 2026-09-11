@@ -1,7 +1,7 @@
 """Benchmark multimodal source encoding without requiring a provider by default.
 
 The default fake mode measures API and batching overhead deterministically. Use
-``--backend remote`` to measure the production representation service, or use
+``--backend remote`` to measure the production embedding service, or use
 ``--backend qwen3-vl`` with an installed local checkpoint for developer-only
 comparison. ``colqwen`` remains an explicit legacy comparison route.
 """
@@ -25,6 +25,7 @@ from kogwistar_llm_wiki.multimodal_projection import (
     MultimodalSourceUnit,
 )
 from kogwistar_llm_wiki.multimodal_sources import MappingAssetResolver
+from kogwistar_llm_wiki.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +119,7 @@ def _measure_case(
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         if len(result) != len(units):
             raise RuntimeError(f"{name} returned {len(result)} results for {len(units)} inputs")
-        if encoder.profile.representation == "dense":
+        if encoder.profile.embedding == "dense":
             for index, embedding in enumerate(result):
                 if len(embedding) != 1 or len(embedding[0]) != encoder.profile.dimension:
                     raise RuntimeError(
@@ -153,6 +154,10 @@ def run_multimodal_benchmark(
     service_model_revision: str | None = None,
     service_instruction: str | None = None,
     service_batch_size: int | None = None,
+    vllm_url: str | None = None,
+    vllm_token: str | None = None,
+    vllm_image_digest: str | None = None,
+    vllm_allowed_hosts: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Run the five requested workload shapes and return JSON-ready metrics."""
 
@@ -195,9 +200,9 @@ def run_multimodal_benchmark(
             raise ValueError("--service-batch-size is required and must be positive for the remote backend")
         from kogwistar_llm_wiki.multimodal_remote import (
             RemoteMultimodalEncoder,
-            RepresentationServiceSettings,
+            EmbeddingServiceSettings,
         )
-        from llm_wiki_representation_service.config import RepresentationServiceConfig
+        from llm_wiki_embedding_service.config import EmbeddingServiceConfig
 
         capabilities_request = Request(service_url.rstrip("/") + "/v1/capabilities", method="GET")
         if service_token:
@@ -211,10 +216,10 @@ def run_multimodal_benchmark(
             actual = capabilities.get("batch_size") if isinstance(capabilities, dict) else None
             raise ValueError(
                 f"remote service batch size mismatch: expected {service_batch_size}, got {actual}; "
-                "restart the service with LLM_WIKI_REPRESENTATION_BATCH_SIZE"
+                "restart the service with LLM_WIKI_EMBEDDING_BATCH_SIZE"
             )
 
-        profile = RepresentationServiceConfig(
+        profile = EmbeddingServiceConfig(
             model=service_model or "Qwen/Qwen3-VL-Embedding-2B",
             revision=service_model_revision,
             dimension=dimension,
@@ -222,11 +227,39 @@ def run_multimodal_benchmark(
         ).profile
         encoder = RemoteMultimodalEncoder(
             profile,
-            RepresentationServiceSettings(
+            EmbeddingServiceSettings(
                 url=service_url,
                 token=service_token,
                 allowed_hosts=service_allowed_hosts,
             ),
+        )
+        image = _png_bytes()
+        resolver = MappingAssetResolver(
+            {f"benchmark://image/{index}": image for index in range(items)}
+        )
+    elif backend == "vllm":
+        if not vllm_url or not vllm_token or not vllm_image_digest:
+            raise ValueError(
+                "--vllm-url, --vllm-token, and --vllm-image-digest are required for the vllm backend"
+            )
+        if not vllm_allowed_hosts:
+            raise ValueError("--vllm-allowed-host is required for the vllm backend")
+        from kogwistar_llm_wiki.multimodal_runtime import configured_multimodal_revision
+
+        revision = service_model_revision or configured_multimodal_revision()
+        if not revision:
+            raise ValueError("--service-model-revision is required for the vllm backend")
+        encoder = VllmMultimodalEncoder(
+            VllmEmbeddingSettings(
+                url=vllm_url,
+                token=vllm_token,
+                image_digest=vllm_image_digest,
+                model=service_model or "Qwen/Qwen3-VL-Embedding-2B",
+                model_revision=revision,
+                dimension=dimension,
+                instruction=service_instruction or "Represent the user's input.",
+                allowed_hosts=vllm_allowed_hosts,
+            )
         )
         image = _png_bytes()
         resolver = MappingAssetResolver(
@@ -267,12 +300,12 @@ def run_multimodal_benchmark(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("fake", "remote", "qwen3-vl", "colqwen"), default="fake")
+    parser.add_argument("--backend", choices=("fake", "remote", "vllm", "qwen3-vl", "colqwen"), default="fake")
     parser.add_argument("--model-dir", help="Local checkpoint directory for a native backend")
     parser.add_argument("--dimension", type=int, default=1024, help="Qwen3-VL MRL output dimension")
     parser.add_argument("--device", choices=("cpu", "cuda"))
-    parser.add_argument("--service-url", help="Base URL for the remote representation service")
-    parser.add_argument("--service-token", help="Bearer token for the remote representation service")
+    parser.add_argument("--service-url", help="Base URL for the remote embedding service")
+    parser.add_argument("--service-token", help="Bearer token for the remote embedding service")
     parser.add_argument(
         "--service-model",
         help="Service profile model identity; set this when the service uses a local checkpoint path",
@@ -293,6 +326,15 @@ def main() -> int:
         "--service-batch-size",
         type=int,
         help="Actual remote service microbatch; required for --backend remote and set at service startup",
+    )
+    parser.add_argument("--vllm-url", help="Base URL for the experimental vLLM backend")
+    parser.add_argument("--vllm-token", help="Bearer token for the experimental vLLM backend")
+    parser.add_argument("--vllm-image-digest", help="Pinned vLLM image reference, including @sha256:...")
+    parser.add_argument(
+        "--vllm-allowed-host",
+        action="append",
+        default=[],
+        help="Allowed vLLM hostname; repeat for multiple hosts",
     )
     parser.add_argument("--items", type=int, default=4)
     parser.add_argument("--repeats", type=int, default=3)
@@ -315,6 +357,10 @@ def main() -> int:
         service_model_revision=args.service_model_revision,
         service_instruction=args.service_instruction,
         service_batch_size=args.service_batch_size,
+        vllm_url=args.vllm_url,
+        vllm_token=args.vllm_token,
+        vllm_image_digest=args.vllm_image_digest,
+        vllm_allowed_hosts=tuple(args.vllm_allowed_host),
     )
     rendered = json.dumps(report, indent=2, sort_keys=True)
     if args.output:
