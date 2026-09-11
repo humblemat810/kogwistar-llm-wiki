@@ -3,12 +3,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from kogwistar.engine_core import EntityEventEnvelope
 from kogwistar_llm_wiki import IngestPipeline, WorkbenchApi, build_in_memory_namespace_engines
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
 from kogwistar_llm_wiki.archive import create_archive, restore_archive, verify_archive
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+
+
+@pytest.fixture(autouse=True)
+def _isolated_smoke_environment(monkeypatch):
+    """Smoke flows use explicit test auth, never a developer's .env value."""
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
 
 
 def test_cookbook_demo_ingests_markdown_corpus_and_projects_vault(

@@ -30,6 +30,9 @@ class EmbeddingProfile:
     preprocessing_fingerprint: str = "default"
     max_sequence_length: int = 32768
     max_image_patches: int = 768
+    crop_token_budget: int | None = None
+    tokenizer_fingerprint: str | None = None
+    crop_policy: str | None = None
 
     def __post_init__(self) -> None:
         if not str(self.provider).strip() or not str(self.model).strip():
@@ -42,9 +45,13 @@ class EmbeddingProfile:
             raise ContractValidationError(f"unsupported similarity metric {self.metric!r}")
         if self.max_sequence_length <= 0 or self.max_image_patches <= 0:
             raise ContractValidationError("embedding sequence and patch limits must be positive")
+        if self.crop_token_budget is not None and not 0 < self.crop_token_budget <= self.max_sequence_length:
+            raise ContractValidationError(
+                "embedding crop_token_budget must be positive and no greater than max_sequence_length"
+            )
 
     def canonical_payload(self) -> dict[str, object]:
-        return {
+        payload = {
             "provider": str(self.provider),
             "model": str(self.model),
             "embedding": self.embedding,
@@ -55,6 +62,13 @@ class EmbeddingProfile:
             "max_sequence_length": int(self.max_sequence_length),
             "max_image_patches": int(self.max_image_patches),
         }
+        optional = {
+            "crop_token_budget": self.crop_token_budget,
+            "tokenizer_fingerprint": self.tokenizer_fingerprint,
+            "crop_policy": self.crop_policy,
+        }
+        payload.update({key: value for key, value in optional.items() if value is not None})
+        return payload
 
     @property
     def fingerprint(self) -> str:
@@ -74,6 +88,17 @@ class EmbeddingProfile:
                 preprocessing_fingerprint=str(payload.get("preprocessing_fingerprint", "default")),
                 max_sequence_length=int(payload.get("max_sequence_length", 32768)),
                 max_image_patches=int(payload.get("max_image_patches", 768)),
+                crop_token_budget=(
+                    int(payload["crop_token_budget"])
+                    if payload.get("crop_token_budget") is not None
+                    else None
+                ),
+                tokenizer_fingerprint=(
+                    str(payload["tokenizer_fingerprint"])
+                    if payload.get("tokenizer_fingerprint") is not None
+                    else None
+                ),
+                crop_policy=(str(payload["crop_policy"]) if payload.get("crop_policy") is not None else None),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ContractValidationError("invalid embedding profile") from exc

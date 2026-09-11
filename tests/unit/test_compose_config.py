@@ -33,6 +33,22 @@ def test_gpu_auto_selects_vllm_and_cpu_keeps_reference_service() -> None:
     assert "Dockerfile.embedding-service" not in gpu
     assert "LLM_WIKI_MULTIMODAL_BACKEND: \"${LLM_WIKI_MULTIMODAL_BACKEND:-transformers}\"" in cpu
     assert "Dockerfile.embedding-service" in cpu
+    assert "--max-model-len" in gpu
+    assert "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET" in gpu
+    assert "--enforce-eager" in gpu
+
+
+def test_compose_context_knobs_reject_invalid_budget() -> None:
+    with pytest.raises(ComposeConfigurationError, match="cannot exceed"):
+        render_compose(
+            ComposeOptions(
+                model_revision="abc123",
+                embedding_max_model_len=2048,
+                embedding_crop_token_budget=7680,
+            )
+        )
+    with pytest.raises(ComposeConfigurationError, match="cannot exceed 8192"):
+        render_compose(ComposeOptions(model_revision="abc123", embedding_max_model_len=8193))
 
 
 def test_vllm_is_explicitly_gpu_only() -> None:

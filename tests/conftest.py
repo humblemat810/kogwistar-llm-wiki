@@ -20,6 +20,10 @@ TEST_TMP.mkdir(parents=True, exist_ok=True)
 for key in ("TMPDIR", "TEMP", "TMP"):
     os.environ[key] = str(TEST_TMP)
 
+# Provider-free tests must not inherit an invalid or deployment-specific auth
+# mode from the developer's .env file. Auth-specific tests override this value.
+os.environ["LLM_WIKI_AUTH_MODE"] = "disabled"
+
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 for path in (OBSIDIAN_SINK_ROOT,):

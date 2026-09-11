@@ -8,8 +8,6 @@ services:
   embedding:
     image: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE to a pinned vllm/vllm-openai@sha256 digest}
     command:
-      - vllm
-      - serve
       - ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
       - --served-model-name
       - ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
@@ -21,20 +19,27 @@ services:
       - embed
       - --max-model-len
       - ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization
+      - ${LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION:-0.86}
+      - --enforce-eager
+      - --max-num-seqs
+      - ${LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS:-1}
       - --api-key
       - ${LLM_WIKI_EMBEDDING_VLLM_TOKEN:?Set LLM_WIKI_EMBEDDING_VLLM_TOKEN}
     environment:
       HF_HOME: /root/.cache/huggingface
+      # Docker Desktop/WSL2 commonly lacks UVA; native Linux can set this to 1.
+      VLLM_USE_V2_MODEL_RUNNER: ${LLM_WIKI_EMBEDDING_VLLM_USE_V2_MODEL_RUNNER:-0}
     volumes:
       - embedding_vllm_hf_cache:/root/.cache/huggingface
     expose:
       - "8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
+      timeout: 10s
+      retries: 60
+      start_period: 600s
     deploy:
       resources:
         reservations:
@@ -56,6 +61,8 @@ services:
       LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
       LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
       LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION}
+      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-8192}
+      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: ${LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-7680}
 
   mcp:
     depends_on:
@@ -70,6 +77,8 @@ services:
       LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
       LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
       LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION}
+      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-8192}
+      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: ${LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-7680}
 
 volumes:
   embedding_vllm_hf_cache:

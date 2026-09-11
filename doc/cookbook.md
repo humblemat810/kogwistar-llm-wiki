@@ -187,6 +187,11 @@ Fake timings only compare code-path and batching overhead. After installing
 the native dependencies and downloading the checkpoint, measure the actual
 machine or production sidecar with:
 
+For providers that expose a tokenizer, the application uses the declared
+token budget and tokenizer-aware prefix cropping before retrying. Providers
+without that capability retain the older character-length defensive fallback;
+it is deliberately not presented as an exact token count.
+
 ```bash
 .venv/bin/python scripts/benchmark_multimodal.py \
   --backend remote \

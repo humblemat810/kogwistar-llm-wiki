@@ -126,6 +126,9 @@ def _resolve_embedding_function(
     embedding_dimension: int | None = None,
     embedding_base_url: str | None = None,
     embedding_api_key_env: str | None = None,
+    embedding_max_sequence_length: int | None = None,
+    embedding_crop_token_budget: int | None = None,
+    embedding_tokenizer_fingerprint: str | None = None,
 ) -> tuple[EmbeddingFunctionLike, EmbeddingProviderConfig]:
     """Resolve the app embedding choice without changing the test default.
 
@@ -164,9 +167,13 @@ def _resolve_embedding_function(
             embedding_dimension,
             embedding_base_url,
             embedding_api_key_env,
+            embedding_max_sequence_length,
+            embedding_crop_token_budget,
+            embedding_tokenizer_fingerprint,
         )
     ) or any(_embedding_env(suffix) is not None for suffix in (
-        "PROVIDER", "MODEL", "DIMENSION", "BASE_URL", "API_KEY_ENV"
+        "PROVIDER", "MODEL", "DIMENSION", "BASE_URL", "API_KEY_ENV",
+        "MAX_SEQUENCE_LENGTH", "CROP_TOKEN_BUDGET", "TOKENIZER_FINGERPRINT"
     ))
 
     if embedding_function is not None:
@@ -184,6 +191,28 @@ def _resolve_embedding_function(
         dimension=int(embedding_dimension or _embedding_env("DIMENSION", "2")),
         base_url=embedding_base_url or _embedding_env("BASE_URL"),
         api_key_env=embedding_api_key_env or _embedding_env("API_KEY_ENV"),
+        max_sequence_length=(
+            embedding_max_sequence_length
+            if embedding_max_sequence_length is not None
+            else (
+                int(value)
+                if (value := _embedding_env("MAX_SEQUENCE_LENGTH")) is not None
+                else None
+            )
+        ),
+        crop_token_budget=(
+            embedding_crop_token_budget
+            if embedding_crop_token_budget is not None
+            else (
+                int(value)
+                if (value := _embedding_env("CROP_TOKEN_BUDGET")) is not None
+                else None
+            )
+        ),
+        tokenizer_fingerprint=(
+            embedding_tokenizer_fingerprint
+            or _embedding_env("TOKENIZER_FINGERPRINT")
+        ),
     )
     return build_embedding_function(config), config
 
@@ -235,6 +264,9 @@ def _resolve_embedding_functions(
         embedding_dimension=embedding_dimension,
         embedding_base_url=embedding_base_url,
         embedding_api_key_env=embedding_api_key_env,
+        embedding_max_sequence_length=None,
+        embedding_crop_token_budget=None,
+        embedding_tokenizer_fingerprint=None,
     )
     functions: dict[str, EmbeddingFunctionLike] = {}
     configs: dict[str, EmbeddingProviderConfig] = {}
@@ -251,7 +283,16 @@ def _resolve_embedding_functions(
                     + "_EMBED_"
                     + suffix
                 ) not in {None, ""}
-                for suffix in ("PROVIDER", "MODEL", "DIMENSION", "BASE_URL", "API_KEY_ENV")
+                for suffix in (
+                    "PROVIDER",
+                    "MODEL",
+                    "DIMENSION",
+                    "BASE_URL",
+                    "API_KEY_ENV",
+                    "MAX_SEQUENCE_LENGTH",
+                    "CROP_TOKEN_BUDGET",
+                    "TOKENIZER_FINGERPRINT",
+                )
             )
             if not namespace_setting:
                 functions[space] = shared_function
@@ -343,6 +384,10 @@ def _embedding_profile(config: EmbeddingProviderConfig) -> EmbeddingProfile:
         dimension=config.dimension,
         similarity_metric="cosine",
         endpoint_fingerprint=endpoint_fingerprint(config.base_url),
+        max_sequence_length=config.max_sequence_length,
+        crop_token_budget=config.crop_token_budget,
+        tokenizer_fingerprint=config.tokenizer_fingerprint,
+        crop_policy=("token_prefix" if config.crop_token_budget is not None else None),
     )
 
 

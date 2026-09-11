@@ -120,6 +120,11 @@ class WorkbenchApi:
             auth_mode=str(payload.get("auth_mode") or "disabled"),
             model_revision=str(payload.get("model_revision") or ""),
             embedding_dimension=int(payload.get("embedding_dimension") or 1024),
+            embedding_max_model_len=int(payload.get("embedding_max_model_len") or 8192),
+            embedding_crop_token_budget=int(payload.get("embedding_crop_token_budget") or 7680),
+            embedding_gpu_memory_utilization=float(payload.get("embedding_gpu_memory_utilization") or 0.86),
+            embedding_vllm_enforce_eager=bool(payload.get("embedding_vllm_enforce_eager", True)),
+            embedding_vllm_max_num_seqs=int(payload.get("embedding_vllm_max_num_seqs") or 1),
         )
         errors = validate_options(options)
         return {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None}
