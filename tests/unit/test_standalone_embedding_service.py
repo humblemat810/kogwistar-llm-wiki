@@ -10,7 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from llm_wiki_embedding_contract import EmbeddingProfile
-from llm_wiki_embedding_service.app import _represent_payload, create_app
+from llm_wiki_embedding_service.app import create_app
 from llm_wiki_embedding_service.config import EmbeddingServiceConfig, load_config
 
 

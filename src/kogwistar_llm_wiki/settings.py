@@ -255,8 +255,6 @@ class SettingsService:
             if key in _DESIRED_KEYS and value != effective_values.get(key, effective.get("multimodal", {}).get("enabled") if key == "multimodal_enabled" and isinstance(effective.get("multimodal"), Mapping) else None)
         )
         restart_required = bool(restart_keys.intersection(pending_changes))
-        multimodal = effective.get("multimodal", {})
-        current_enabled = multimodal.get("enabled") if isinstance(multimodal, Mapping) else None
         profile_keys = {"embedding_provider", "embedding_model", "embedding_dimension", "embedding_metric"}
         reembedding_required = bool(profile_keys.intersection(pending_changes))
         warnings: list[str] = []

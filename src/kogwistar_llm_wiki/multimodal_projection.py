@@ -26,12 +26,11 @@ from math import sqrt
 from pathlib import Path
 import os
 import sqlite3
-from typing import Literal, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from llm_wiki_embedding_contract import (
     EmbeddingProfile as MultimodalEmbeddingProfile,
     EmbeddingSet,
-    EmbeddingKind,
     SimilarityMetric,
     SourceModality,
 )

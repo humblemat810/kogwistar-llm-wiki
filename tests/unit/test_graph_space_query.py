@@ -4,7 +4,7 @@ import pytest
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 
-from kogwistar_llm_wiki import GraphSpace, GraphSpaceQueryService, WorkspaceNamespaces, workspace_graph_spaces
+from kogwistar_llm_wiki import GraphSpace, WorkspaceNamespaces, workspace_graph_spaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

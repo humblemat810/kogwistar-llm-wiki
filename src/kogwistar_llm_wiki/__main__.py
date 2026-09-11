@@ -44,7 +44,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .compose_config import ComposeConfigurationError, ComposeOptions, check_compose_text, write_compose
+from .compose_config import ComposeOptions, check_compose_text, write_compose
 
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest, NamespaceEngines
@@ -422,7 +422,8 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
         split_derived_knowledge=args.split_derived_knowledge,
         **_conversation_persistence_kwargs(args),
     )
-    trace_line = lambda line: logger.info("workbench_cockpit_trace %s", line)
+    def trace_line(line: str) -> None:
+        logger.info("workbench_cockpit_trace %s", line)
     callback_url = os.environ.get("LLM_WIKI_COCKPIT_CALLBACK_URL", "").strip()
     if callback_url:
         allowed_hosts = os.environ.get(

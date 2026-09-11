@@ -18,7 +18,6 @@ from urllib.parse import urlparse
 from .otel import LlmWikiTelemetry
 from .inspection import build_workspace_quality_report
 from .models import IngestPipelineRequest
-from .namespaces import WorkspaceNamespaces
 from .utils import _temporary_namespace
 from .workbench_api import WorkbenchApi
 

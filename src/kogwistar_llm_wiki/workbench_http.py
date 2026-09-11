@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import os
 
-from .agent_gateway import AgentGateway, _jsonrpc_error, _jsonrpc_result
+from .agent_gateway import AgentGateway, _jsonrpc_result
 from .workbench_api import WorkbenchApi
 from .identity import IdentityError, auth_mode, authorize, authenticate_bearer, claims_context
 
@@ -26,12 +26,9 @@ def build_workbench_handler(
 ) -> type[BaseHTTPRequestHandler]:
     gateway = gateway or AgentGateway(api)
     agent_api_enabled = os.getenv("LLM_WIKI_AGENT_API_ENABLED", "").lower() in {"1", "true", "yes", "on"}
-    api_token = os.getenv("LLM_WIKI_API_TOKEN", "").strip()
     # Resolve once during server construction so invalid auth configuration
     # fails before the REST listener accepts requests.
     selected_auth_mode = auth_mode()
-    auth_required = selected_auth_mode != "disabled" and (bool(api_token) or os.getenv("LLM_WIKI_AUTH_REQUIRED", "").lower() in {"1", "true", "yes", "on"})
-    configured_scopes = frozenset(filter(None, (item.strip() for item in os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write").split(","))))
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)

@@ -248,7 +248,7 @@ def test_incremental_archive_replaces_verified_predecessor_artifact(tmp_path):
     source = build_in_memory_namespace_engines(base_dir=tmp_path / "source-engines")
     _add_node(source, "ws")
     base_path = tmp_path / "base.tar.gz"
-    base = create_archive(
+    create_archive(
         source,
         workspace_id="ws",
         output=base_path,

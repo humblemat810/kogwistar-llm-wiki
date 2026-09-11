@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import tarfile
 import tempfile
@@ -472,7 +471,6 @@ def create_archive(
         snapshot_entries: list[dict[str, Any]] = []
         if include_backend_snapshot:
             seen_paths: set[Path] = set()
-            snapshot_root = staging / "backend_snapshots"
             for spec in specs:
                 persist = getattr(spec.engine, "persist_directory", None)
                 if not persist:

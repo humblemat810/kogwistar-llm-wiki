@@ -134,14 +134,14 @@ def compare_parse_runs(left_dir: str | Path, right_dir: str | Path) -> dict[str,
     doc_ids = sorted(set(left_docs) | set(right_docs))
     rows: list[dict[str, Any]] = []
     for doc_id in doc_ids:
-        l = left_docs.get(doc_id, {})
-        r = right_docs.get(doc_id, {})
+        left_doc = left_docs.get(doc_id, {})
+        right_doc = right_docs.get(doc_id, {})
         rows.append(
             {
                 "doc_id": doc_id,
-                "left": _comparison_metrics(l),
-                "right": _comparison_metrics(r),
-                "delta_right_minus_left": _numeric_delta(r, l),
+                "left": _comparison_metrics(left_doc),
+                "right": _comparison_metrics(right_doc),
+                "delta_right_minus_left": _numeric_delta(right_doc, left_doc),
             }
         )
     return {

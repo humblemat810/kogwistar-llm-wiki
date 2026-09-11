@@ -305,7 +305,8 @@ def test_native_mcp_applies_read_and_write_scopes_to_tools(monkeypatch):
     tools = {tool.name: tool for tool in asyncio.run(mcp._list_tools())}
     read_token = AccessToken(token="secret", client_id="client", scopes=["read"])
     write_token = AccessToken(token="secret", client_id="client", scopes=["write"])
-    read_ctx = lambda name, token: AuthContext(token=token, component=tools[name])
+    def read_ctx(name, token):
+        return AuthContext(token=token, component=tools[name])
 
     assert asyncio.run(run_auth_checks(tools["search"].auth, read_ctx("search", read_token))) is True
     assert asyncio.run(run_auth_checks(tools["confirm"].auth, read_ctx("confirm", read_token))) is False
@@ -364,7 +365,7 @@ def test_openai_content_parts_are_normalized_to_text():
 
     api = RecordingApi()
     gateway = AgentGateway(api)
-    response = gateway.chat_completions(
+    gateway.chat_completions(
         {
             "workspace_id": "content-parts",
             "messages": [

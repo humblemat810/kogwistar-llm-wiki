@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Workspace graph inspection helpers for persisted llm-wiki state."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal

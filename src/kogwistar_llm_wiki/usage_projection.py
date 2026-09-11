@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime import (

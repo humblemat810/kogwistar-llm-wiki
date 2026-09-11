@@ -38,7 +38,6 @@ from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
     ProviderEndpointConfig,
     WorkflowProviderSettings,
-    build_chat_model_for_role,
 )
 
 from kogwistar.id_provider import stable_id
@@ -50,7 +49,6 @@ from kogwistar.engine_core import RecoverySurface
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.ingest_pipeline import (
-    build_in_memory_namespace_engines,
     build_persistent_namespace_engines,
     build_postgres_namespace_engines,
 )
@@ -658,7 +656,6 @@ class LongRunConfig:
             "max_repeated_systemic_errors": self.max_repeated_systemic_errors,
             "max_post_doc_maintenance_steps": self.max_post_doc_maintenance_steps,
             "max_idle_loops": self.max_idle_loops,
-            "max_runtime_seconds": self.max_runtime_seconds,
             "token_min": self.token_min,
             "token_max": self.token_max,
             "tokenizer_method": TOKENIZER_METHOD,

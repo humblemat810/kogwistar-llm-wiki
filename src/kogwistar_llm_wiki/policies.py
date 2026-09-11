@@ -93,7 +93,7 @@ class LlmWikiDerivedKnowledgePolicy:
         return self._core.group_key(node)
 
     def source_query(self, *, workspace_id: str) -> SourceQueryDecision:
-        query = self._core.source_query(workspace_id=workspace_id)
+        self._core.source_query(workspace_id=workspace_id)
         return SourceQueryDecision(
             # Chroma's ``where`` grammar accepts one top-level operator.  Keep
             # the two source predicates explicit so this remains valid for

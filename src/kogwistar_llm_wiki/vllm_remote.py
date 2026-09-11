@@ -13,7 +13,6 @@ from hashlib import sha256
 import base64
 import json
 import math
-from pathlib import Path
 import re
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -32,7 +31,6 @@ from .multimodal_projection import (
 )
 from .multimodal_remote import (
     EmbeddingProtocolError,
-    EmbeddingServiceError,
     EmbeddingServiceUnavailable,
     _asset_bytes,
 )

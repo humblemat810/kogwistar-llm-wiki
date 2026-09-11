@@ -10,7 +10,6 @@ import pytest
 
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch
 from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceIntent,

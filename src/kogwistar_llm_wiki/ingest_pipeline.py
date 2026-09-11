@@ -12,7 +12,6 @@ import os
 import hashlib
 import shutil
 import time
-from dataclasses import replace
 from pathlib import Path
 import tempfile
 import uuid
@@ -82,7 +81,6 @@ from .multimodal_projection import (
     MultimodalEncoder,
     MultimodalImageQueryEncoder,
     MultimodalProjectionStore,
-    MultimodalSearchHit,
     MultimodalSearchHit,
     MultimodalSourceUnit,
     build_configured_multimodal_encoder,

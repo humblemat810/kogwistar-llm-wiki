@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from io import BytesIO
-import math
 from typing import Any
 
 from llm_wiki_embedding_contract import ContractValidationError, EmbeddingProfile, validate_dense_vectors

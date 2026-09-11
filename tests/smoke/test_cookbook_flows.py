@@ -8,7 +8,6 @@ from kogwistar_llm_wiki import IngestPipeline, WorkbenchApi, build_in_memory_nam
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
 from kogwistar_llm_wiki.archive import create_archive, restore_archive, verify_archive
-from kogwistar_llm_wiki.models import IngestPipelineRequest
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 
 

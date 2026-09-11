@@ -141,3 +141,9 @@ markers = [
     "longrun: opt-in long-running workflow/daemon-style soak tests",
     "requires_ollama: tests that require a local Ollama service",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# These files intentionally import after runtime path/bootstrap setup.
+"tests/conftest.py" = ["E402"]
+"tests/integration/test_longrun_workflow_ingestion.py" = ["E402"]
+"tests/unit/test_embedding_service.py" = ["E402"]

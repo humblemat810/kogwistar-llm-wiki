@@ -6,7 +6,6 @@ import base64
 import asyncio
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
-from hashlib import sha256
 import hmac
 from typing import Any
 
