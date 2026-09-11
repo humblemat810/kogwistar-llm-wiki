@@ -24,6 +24,22 @@ def test_gpu_bundle_is_complete_without_secrets() -> None:
     assert "change-this-development-password" not in text
 
 
+def test_gpu_auto_selects_vllm_and_cpu_keeps_reference_service() -> None:
+    gpu = render_compose(ComposeOptions(model_revision="abc123"))
+    cpu = render_compose(ComposeOptions(mode="cpu", model_revision="abc123"))
+    assert "LLM_WIKI_MULTIMODAL_BACKEND: \"${LLM_WIKI_MULTIMODAL_BACKEND:-vllm}\"" in gpu
+    assert "LLM_WIKI_EMBEDDING_VLLM_URL: \"${LLM_WIKI_EMBEDDING_VLLM_URL:-http://embedding:8000}\"" in gpu
+    assert "vllm/vllm-openai@sha256" in gpu
+    assert "Dockerfile.embedding-service" not in gpu
+    assert "LLM_WIKI_MULTIMODAL_BACKEND: \"${LLM_WIKI_MULTIMODAL_BACKEND:-transformers}\"" in cpu
+    assert "Dockerfile.embedding-service" in cpu
+
+
+def test_vllm_is_explicitly_gpu_only() -> None:
+    with pytest.raises(ComposeConfigurationError, match="GPU-only"):
+        render_compose(ComposeOptions(mode="cpu", embedding_backend="vllm", model_revision="abc123"))
+
+
 def test_cpu_and_text_only_modes_have_expected_services() -> None:
     cpu = render_compose(ComposeOptions(mode="cpu", model_revision="abc123"))
     text_only = render_compose(ComposeOptions(mode="text-only"))

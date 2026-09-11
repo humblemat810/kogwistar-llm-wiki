@@ -782,6 +782,7 @@ def _compose_options_from_args(args: argparse.Namespace) -> ComposeOptions:
         workspace=args.workspace,
         project_name=args.project_name,
         mode=args.mode,
+        embedding_backend=args.embedding_backend,
         with_otel=args.with_otel,
         with_oauth=args.with_oauth,
         auth_mode=args.auth_mode,
@@ -1137,6 +1138,12 @@ def main(argv: list[str] | None = None) -> int:
     compose_generate_p.add_argument("--backend", choices=["postgres", "chroma"], default="postgres")
     compose_generate_p.add_argument("--project-name", default="llm-wiki")
     compose_generate_p.add_argument("--mode", choices=["gpu", "cpu", "text-only"], default="gpu")
+    compose_generate_p.add_argument(
+        "--embedding-backend",
+        choices=["auto", "vllm", "transformers"],
+        default="auto",
+        help="Multimodal backend; auto selects vLLM for GPU and Transformers for CPU",
+    )
     compose_generate_p.add_argument("--auth-mode", choices=["disabled", "static_token", "kogwistar_jwt"], default="disabled")
     compose_generate_p.add_argument("--with-otel", action="store_true")
     compose_generate_p.add_argument("--with-oauth", action="store_true")

@@ -1,8 +1,13 @@
 # OVERLAY ONLY: this file is not a standalone Compose application.
 # It requires compose.yml first, which provides postgres, rest, and mcp.
-# Isolated Qwen3-VL embedding service.
+# Legacy custom Qwen3-VL Transformers embedding service.
 #
-# Recommended for practical Qwen3-VL vision workloads (NVIDIA CUDA 12.8):
+# Preferred GPU deployment: use compose.embedding-vllm.yml instead. This file
+# remains available for the CPU/reference implementation and local debugging.
+#
+# Preferred GPU/vLLM deployment (NVIDIA):
+#   docker compose -f compose.yml -f compose.embedding-vllm.yml up -d
+# Reference custom service on CUDA 12.8:
 #   LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128 \
 #   docker compose -f compose.yml -f compose.multimodal.yml \
 #     -f compose.embedding-cuda.yml up --build

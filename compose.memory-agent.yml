@@ -4,8 +4,10 @@
 # Development/operator example: PostgreSQL-backed multimodal memory agent.
 #
 # Start with the base app, the Qwen3-VL sidecar, and this observability overlay:
-#   docker compose -f compose.yml -f compose.multimodal.yml \
+#   docker compose -f compose.yml -f compose.embedding-vllm.yml \
 #     -f compose.memory-agent.yml up --build
+# The custom Transformers reference can be selected instead with
+# compose.multimodal.yml (do not combine both embedding overlays).
 #
 # This file is intentionally an example. Keep credentials in .env or a secret
 # manager; do not commit a working token.
