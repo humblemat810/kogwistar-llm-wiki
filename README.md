@@ -110,6 +110,8 @@ For isolated REST and MCP serving in containers, see
 [`doc/docker_deployment.md`](doc/docker_deployment.md). The Compose stack runs
 separate REST and MCP containers against Postgres/pgvector with persistent
 named volumes and workspace isolation.
+For prebuilt public images and the release workflow, see
+[`doc/docker_hub_publishing.md`](doc/docker_hub_publishing.md).
 
 If you use VS Code, the launch presets already read `.env` and only prompt for
 the parser lane:

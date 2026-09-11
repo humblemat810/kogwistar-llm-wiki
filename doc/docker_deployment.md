@@ -369,6 +369,10 @@ applications:
 - `compose.memory-agent.yml` is an optional overlay for OTel/Grafana and the
   memory-agent authentication example.
 
+Prebuilt public images can be published and consumed through the
+[`Docker Hub publishing guide`](docker_hub_publishing.md). The normal REST/MCP
+image is Torch-free; Qwen3-VL inference remains a separate CPU or GPU sidecar.
+
 Do not run an overlay alone. Compose does not have a built-in way for an
 overlay to require its base file, so the operator must use the documented
 `-f` order. The CLI generator instead writes one self-contained YAML file.
