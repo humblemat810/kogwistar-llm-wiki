@@ -27,6 +27,32 @@ llm-wiki --data-dir .\data --backend postgres `
 Keep the server bound to localhost for development. For any non-local bind,
 put authentication, authorization, rate limiting, and TLS in front of it.
 
+### Personal User Mode
+
+For a single trusted user on a local machine, use the explicit no-identity
+mode:
+
+```powershell
+$env:LLM_WIKI_AUTH_MODE = "disabled"
+$env:LLM_WIKI_AGENT_API_ENABLED = "true"
+llm-wiki --data-dir .\data --backend chroma workbench --workspace personal --host 127.0.0.1 --port 8765
+```
+
+In this mode authentication returns no identity and workspace ACL checks are
+not applied. The workspace name is still required and remains the data
+boundary; `personal` is an ordinary workspace identifier, not a special user
+account. This mode is appropriate only when the listener is trusted and local.
+Set `LLM_WIKI_AUTH_MODE=static_token` or `kogwistar_jwt` before exposing the
+service to another user or network. Explicit `disabled` overrides leftover
+token variables, so this setting should be deliberate.
+
+Migration from personal mode does not require rewriting graph data: keep the
+same workspace identifier and add a static token or JWT/ACL membership. The
+existing records do not acquire an owner retroactively; access control applies
+to future requests. If you split one personal workspace among users, create
+new workspace IDs and explicitly ingest or migrate data through an application
+level export/import process.
+
 ## Human Operator Check
 
 After starting the server, use the API directly from a browser or PowerShell:
@@ -202,8 +228,23 @@ protocol surface for MCP clients.
 
 For remote native MCP, configure `LLM_WIKI_MCP_AUTH_REQUIRED=true`,
 `LLM_WIKI_MCP_TOKEN`, and optionally `LLM_WIKI_MCP_TOKEN_SCOPES`. Static tokens
-are suitable for local/private development; use a trusted OAuth-aware provider
-or proxy for production identity and authorization.
+are suitable for local/private development. For production, select the shared
+Kogwistar JWT boundary instead:
+
+```powershell
+$env:LLM_WIKI_AUTH_MODE = "kogwistar_jwt"
+$env:JWT_ALG = "HS256"
+$env:JWT_SECRET = "replace-with-a-secret"
+$env:LLM_WIKI_WORKSPACE_ACL_JSON = '{"alice":{"workspaces":{"demo":["read","write"]}}}'
+```
+
+JWT claims use `sub` (principal), `scope` or `scp` (space-separated scopes),
+and `workspaces`/`workspace_ids` (allowed workspace IDs). Alternatively,
+`LLM_WIKI_WORKSPACE_ACL_JSON` provides explicit principal-to-workspace
+permissions. JWT mode fails closed when a workspace is not in either source;
+the caller's `workspace_id` is not an authority by itself. The same decision is
+used by REST, OpenAI-compatible, A2A, the REST MCP bridge, and native MCP.
+Kogwistar claims context is reset after each request.
 
 ## Grounding And Ownership
 

@@ -5,17 +5,33 @@ import json
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from threading import Thread
+from types import SimpleNamespace
 
 import pytest
+from jose import jwt
 
 from fastmcp.server.auth import AccessToken, AuthContext, run_auth_checks
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
 from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
-from kogwistar_llm_wiki.workbench_http import build_workbench_handler
+from kogwistar_llm_wiki.workbench_http import _payload_workspace, build_workbench_handler
+
+
+@pytest.fixture(autouse=True)
+def _personal_mode_by_default(monkeypatch):
+    """Do not let repository-local credentials alter protocol unit tests."""
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
 
 
 class FakeApi:
     dispatcher = None
+
+    def __init__(self):
+        self.interactions = SimpleNamespace(
+            persist_proposal=lambda **_kwargs: SimpleNamespace(
+                interaction_id="proposal-1",
+                status="completed",
+            )
+        )
 
     def readiness(self):
         return {"ready": True, "service": "kogwistar-llm-wiki", "checks": {"fake": "open"}}
@@ -114,6 +130,7 @@ def test_public_discovery_and_readiness_endpoints(monkeypatch):
 
 def test_agent_routes_require_bearer_token_and_scope(monkeypatch):
     monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
     monkeypatch.setenv("LLM_WIKI_AUTH_REQUIRED", "true")
     monkeypatch.setenv("LLM_WIKI_API_TOKEN", "secret")
     monkeypatch.setenv("LLM_WIKI_API_TOKEN_SCOPES", "read")
@@ -159,7 +176,48 @@ def test_agent_routes_require_bearer_token_and_scope(monkeypatch):
         thread.join(timeout=5)
 
 
+def test_jwt_auth_binds_http_request_to_workspace_and_core_claims(monkeypatch):
+    class ClaimsApi(FakeApi):
+        def get_lens(self, payload):
+            from kogwistar.server.auth_middleware import claims_ctx
+
+            claims = claims_ctx.get() or {}
+            result = super().get_lens(payload)
+            result["principal"] = claims.get("sub")
+            return result
+
+    monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "kogwistar_jwt")
+    monkeypatch.setenv("JWT_SECRET", "test-secret")
+    token = jwt.encode(
+        {"sub": "alice", "scope": "read", "workspaces": ["team-a"]},
+        "test-secret",
+        algorithm="HS256",
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(ClaimsApi()))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        headers = {"Authorization": "Bearer " + token}
+        connection.request("GET", "/api/lens?workspace_id=team-a&query=q", headers=headers)
+        allowed = connection.getresponse()
+        allowed_payload = json.loads(allowed.read())
+        assert allowed.status == 200
+        assert allowed_payload["principal"] == "alice"
+
+        connection.request("GET", "/api/lens?workspace_id=team-b&query=q", headers=headers)
+        denied = connection.getresponse()
+        assert denied.status == 403
+        assert "not a member" in json.loads(denied.read())["detail"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_native_mcp_requires_configured_token_when_requested(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
     monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
     monkeypatch.delenv("LLM_WIKI_MCP_TOKEN", raising=False)
     monkeypatch.delenv("LLM_WIKI_API_TOKEN", raising=False)
@@ -168,13 +226,49 @@ def test_native_mcp_requires_configured_token_when_requested(monkeypatch):
 
 
 def test_native_mcp_accepts_explicit_token(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
     monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
     monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "secret")
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     assert mcp.auth is not None
 
 
+def test_native_mcp_explicit_no_auth_does_not_enable_token_verifier(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "false")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "present-but-disabled")
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+    assert mcp.auth is None
+
+
+def test_native_mcp_jwt_does_not_require_a_static_token(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "kogwistar_jwt")
+    monkeypatch.setenv("JWT_SECRET", "test-secret")
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
+    monkeypatch.delenv("LLM_WIKI_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("LLM_WIKI_API_TOKEN", raising=False)
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+    assert mcp.auth is not None
+
+
+def test_protocol_workspace_resolution_rejects_conflicting_envelopes():
+    assert _payload_workspace(
+        {"params": {"workspace_id": "team-a"}, "arguments": {"workspace_id": "team-a"}}
+    ) == "team-a"
+    with pytest.raises(ValueError, match="conflicting workspace_id"):
+        _payload_workspace(
+            {"workspace_id": "team-a", "arguments": {"workspace_id": "team-b"}}
+        )
+
+
+def test_rest_handler_rejects_invalid_auth_mode_at_construction(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "typo_jwt")
+    with pytest.raises(ValueError, match="must be disabled"):
+        build_workbench_handler(FakeApi())
+
+
 def test_native_mcp_shared_auth_is_used_when_mcp_overrides_are_empty(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
     monkeypatch.setenv("LLM_WIKI_AUTH_REQUIRED", "true")
     monkeypatch.setenv("LLM_WIKI_API_TOKEN", "shared-secret")
     monkeypatch.setenv("LLM_WIKI_API_TOKEN_SCOPES", "read")
@@ -202,6 +296,8 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
 
 
 def test_native_mcp_applies_read_and_write_scopes_to_tools(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
     monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "secret")
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     # The provider-level list is intentionally unfiltered; list_tools() needs a
@@ -209,7 +305,8 @@ def test_native_mcp_applies_read_and_write_scopes_to_tools(monkeypatch):
     tools = {tool.name: tool for tool in asyncio.run(mcp._list_tools())}
     read_token = AccessToken(token="secret", client_id="client", scopes=["read"])
     write_token = AccessToken(token="secret", client_id="client", scopes=["write"])
-    read_ctx = lambda name, token: AuthContext(token=token, component=tools[name])
+    def read_ctx(name, token):
+        return AuthContext(token=token, component=tools[name])
 
     assert asyncio.run(run_auth_checks(tools["search"].auth, read_ctx("search", read_token))) is True
     assert asyncio.run(run_auth_checks(tools["confirm"].auth, read_ctx("confirm", read_token))) is False
@@ -219,6 +316,7 @@ def test_native_mcp_applies_read_and_write_scopes_to_tools(monkeypatch):
 
 def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):
     monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -267,7 +365,7 @@ def test_openai_content_parts_are_normalized_to_text():
 
     api = RecordingApi()
     gateway = AgentGateway(api)
-    response = gateway.chat_completions(
+    gateway.chat_completions(
         {
             "workspace_id": "content-parts",
             "messages": [
@@ -308,6 +406,7 @@ def test_a2a_stream_polls_background_task_until_terminal(monkeypatch):
             }
 
     monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
     monkeypatch.setenv("LLM_WIKI_A2A_STREAM_POLL_SECONDS", "0.1")
     api = BackgroundApi()
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
@@ -337,6 +436,7 @@ def test_a2a_stream_polls_background_task_until_terminal(monkeypatch):
 
 def test_a2a_jsonrpc_binding_and_agent_card_contract(monkeypatch):
     monkeypatch.setenv("LLM_WIKI_AGENT_API_ENABLED", "true")
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
     monkeypatch.setenv("LLM_WIKI_API_TOKEN", "secret")
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
     thread = Thread(target=server.serve_forever, daemon=True)

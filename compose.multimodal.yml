@@ -1,0 +1,72 @@
+# OVERLAY ONLY: this file is not a standalone Compose application.
+# It requires compose.yml first, which provides postgres, rest, and mcp.
+# Legacy custom Qwen3-VL Transformers embedding service.
+#
+# Preferred GPU deployment: use compose.embedding-vllm.yml instead. This file
+# remains available for the CPU/reference implementation and local debugging.
+#
+# Preferred GPU/vLLM deployment (NVIDIA):
+#   docker compose -f compose.yml -f compose.embedding-vllm.yml up -d
+# Reference custom service on CUDA 12.8:
+#   LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128 \
+#   docker compose -f compose.yml -f compose.multimodal.yml \
+#     -f compose.embedding-cuda.yml up --build
+# CPU fallback (slower, useful for smoke tests or machines without NVIDIA):
+#   LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu \
+#   docker compose -f compose.yml -f compose.multimodal.yml up --build
+services:
+  embedding:
+    build:
+      context: .
+      dockerfile: Dockerfile.embedding-service
+      args:
+        LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-cpu}
+    image: ${LLM_WIKI_EMBEDDING_IMAGE:-kogwistar-llm-wiki-embedding:local}
+    environment:
+      LLM_WIKI_EMBEDDING_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_EMBEDDING_MODEL_REVISION: ${LLM_WIKI_EMBEDDING_MODEL_REVISION:-}
+      LLM_WIKI_EMBEDDING_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
+      LLM_WIKI_EMBEDDING_DEVICE: ${LLM_WIKI_EMBEDDING_DEVICE:-cpu}
+      LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-cpu}
+      LLM_WIKI_EMBEDDING_TOKEN: ${LLM_WIKI_EMBEDDING_TOKEN:-}
+      HF_HOME: /var/lib/huggingface
+    volumes:
+      - embedding_hf_cache:/var/lib/huggingface
+    expose:
+      - "8790"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+  rest:
+    depends_on:
+      embedding:
+        condition: service_started
+    environment:
+      LLM_WIKI_EMBEDDING_SERVICE_URL: http://embedding:8790
+      LLM_WIKI_EMBEDDING_SERVICE_TOKEN: ${LLM_WIKI_EMBEDDING_TOKEN:-}
+      LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS: embedding
+      LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT: ${LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT:-}
+      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
+      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_EMBEDDING_MODEL_REVISION:-}
+      LLM_WIKI_MULTIMODAL_BACKEND: none
+
+  mcp:
+    depends_on:
+      embedding:
+        condition: service_started
+    environment:
+      LLM_WIKI_EMBEDDING_SERVICE_URL: http://embedding:8790
+      LLM_WIKI_EMBEDDING_SERVICE_TOKEN: ${LLM_WIKI_EMBEDDING_TOKEN:-}
+      LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS: embedding
+      LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT: ${LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT:-}
+      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
+      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_EMBEDDING_MODEL_REVISION:-}
+      LLM_WIKI_MULTIMODAL_BACKEND: none
+
+volumes:
+  embedding_hf_cache:

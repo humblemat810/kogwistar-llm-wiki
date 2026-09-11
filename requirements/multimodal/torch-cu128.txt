@@ -1,0 +1,7 @@
+# NVIDIA CUDA 12.8 Torch runtime for the native multimodal extra.
+#
+# This deliberately uses the official PyTorch wheel index. Install this profile
+# before `python -m pip install -e ".[multimodal-cuda]"`.
+--index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0
+torchvision==0.23.0

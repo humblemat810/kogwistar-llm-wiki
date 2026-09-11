@@ -105,6 +105,7 @@ python -m kogwistar_llm_wiki \
   [--codex-executable <path>] \
   [--codex-model <model>] \
   [--codex-profile <profile>] \
+  [--codex-transport exec|app_server] \
   [--codex-timeout 300]
 ```
 
@@ -114,6 +115,12 @@ sandbox. Model activity renews the job lease; ownership is checked again before
 the first terminal result is appended. Browser clients submit Codex turns to
 `POST /api/interactions` and poll `GET /api/interactions` rather than holding a
 model-length HTTP request open.
+
+`exec` is the default Codex transport. Set `--codex-transport app_server` (or
+`KOGWISTAR_CODEX_TRANSPORT=app_server`) to use the installed
+`codex app-server --stdio` JSON-RPC protocol. The adapter starts one
+ephemeral, read-only App Server thread per bounded turn and closes the child on
+completion or timeout.
 
 The current Codex worker answers from the bounded lens or returns `no_change`.
 It does not receive direct graph-write access. Any future mutation proposal
@@ -152,6 +159,7 @@ python -m kogwistar_llm_wiki --help
 |---|---|---|
 | `KOGWISTAR_DATA_DIR` | CLI | Fallback persistent data directory for `ingest`, `workbench`, `daemon projection`, and `daemon maintenance` when `--data-dir` is omitted |
 | `KOGWISTAR_CODEX_EXECUTABLE` | workbench | Optional Codex CLI path when `codex` is not on `PATH` |
+| `KOGWISTAR_CODEX_TRANSPORT` | workbench, seed-bundle | `exec` (default) or `app_server` |
 | `KOGWISTAR_PARSER_PROVIDER` | CLI, parser workflows | Explicit parser provider alias. `azure_openai` is normalized to the `azure` chat provider. |
 | `KOGWISTAR_PARSER_MODEL` | CLI, parser workflows | Explicit parser model or Azure deployment name |
 | `KOGWISTAR_PARSER_BASE_URL` | CLI, parser workflows | Parser endpoint URL, for example Ollama base URL or Azure OpenAI endpoint |
@@ -166,6 +174,38 @@ python -m kogwistar_llm_wiki --help
 `demo` and `ingest` also accept `--parser-lane page_index|workflow_layered`. Use
 `workflow_layered` when you want the iterative layerwise parser path instead of
 the page-index parser.
+
+## `llm-wiki embeddings`
+
+Inspect or explicitly adopt the embedding profile for persistent graph stores.
+The profile includes provider, model, dimension, similarity metric, and a
+sanitized endpoint fingerprint; credentials and API-key environment variable
+names are never persisted. The profile is checked before graph writes. A
+PostgreSQL physical table bundle must use one exact profile, while each
+persistent Chroma graph directory has its own profile binding.
+
+```powershell
+# Read configured, registered, and physical state without binding a profile:
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend chroma `
+  embeddings inspect `
+  --workspace demo
+
+# Explicitly attest to the configured profile for a known legacy Chroma store:
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend chroma `
+  embeddings adopt-legacy-profile `
+  --workspace demo `
+  --acknowledge-legacy-vectors
+```
+
+Adoption is operator-only and does not convert or re-embed existing vectors.
+For an unknown or incompatible store, prefer a portable archive, isolated
+restore, re-embedding, validation, and cutover. There is no automatic in-place
+dimension migration. In-memory stores are process-local and do not provide
+durable profile compatibility across restarts.
 
 ## Test Commands
 
@@ -210,3 +250,126 @@ The repository includes
 `data/seed_bundles/rl_llm_agent_tool_use_v1.json`, covering RLHF, WebGPT,
 ReAct, Toolformer, GRPO, DeepSeek-R1, Kimi k1.5, Kimi K2, and host-executed
 tool calling with ordinary edges and first-class multi-endpoint hyperedges.
+
+## `llm-wiki archive`
+
+Create and validate operator-only portable event archives. Archives include
+lossless Kogwistar event envelopes and per-namespace sequence watermarks. They
+are suitable for Chroma, SQLite, and PostgreSQL-backed workspaces. The archive
+timestamp is informational; restore correctness is defined by the recorded
+watermarks.
+
+Capture must be performed with LLM-Wiki writers stopped or drained. Known
+pending or doing durable index jobs cause capture to fail. Do not copy a live
+Chroma persistence directory.
+
+```powershell
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend chroma `
+  archive create `
+  --workspace demo `
+  --output .\archives\demo-base.tar.gz `
+  --include-backend-snapshot
+
+python -m kogwistar_llm_wiki archive verify `
+  --archive .\archives\demo-base.tar.gz
+
+# Safe dry-run (the default):
+python -m kogwistar_llm_wiki `
+  --data-dir .\restore-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz
+
+# Apply an exact restore to a fresh isolated datastore. The source workspace ID
+# is retained when --target-workspace is omitted:
+python -m kogwistar_llm_wiki `
+  --data-dir .\restore-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz `
+  --apply
+
+# Or remap the workspace ID while rebuilding derived vectors/indexes:
+python -m kogwistar_llm_wiki `
+  --data-dir .\restore-copy-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz `
+  --target-workspace demo-copy `
+  --apply
+
+# Optional fast exact snapshot restore (requires the manifest fingerprint):
+python -m kogwistar_llm_wiki `
+  --data-dir .\snapshot-data `
+  --backend chroma `
+  archive restore `
+  --archive .\archives\demo-base.tar.gz `
+  --use-backend-snapshot `
+  --embedding-fingerprint <manifest-embedding-fingerprint>
+```
+
+An incremental archive is created with `--parent` and restored by supplying
+the parent archive path with `--parent`. `archive catalog --directory` lists
+verified archives and can filter by `--before-ms`; this selects a completed
+watermark archive rather than slicing events at an arbitrary timestamp.
+
+`seed-bundle` and report dumps remain teaching/diagnostic exports. They are not
+substitutes for `archive create`. Backend snapshots are only exact accelerators;
+portable event restore is the migration and recovery fallback.
+
+## `llm-wiki compose`
+
+Generate a safe self-contained local stack without putting credentials in the
+file. GPU is the practical default; pass an immutable Hugging Face revision:
+
+```powershell
+python -m kogwistar_llm_wiki compose generate `
+  --output .\compose.generated.yml `
+  --workspace demo `
+  --model-revision <immutable-commit> `
+  --with-otel
+python -m kogwistar_llm_wiki compose check --file .\compose.generated.yml
+```
+
+Use `--mode cpu` for a CPU sidecar or `--mode text-only` when no multimodal
+service is wanted. Use `--with-oauth` to include the optional Compose-profiled
+OAuth example; it does not configure application JWT verification automatically.
+Start that profile explicitly with `docker compose --profile oauth up` after
+configuring issuer and verification settings. Put passwords and tokens in the
+shell or `.env`, never in the generated YAML. Quote `.env` values containing
+`$` with single quotes so Compose does not interpolate them. The checker runs
+structural checks and, when Docker is available, `docker compose config`; it
+falls back to structural checks when Docker is unavailable. After it passes,
+run the service health/readiness checks.
+### Compose combinations
+
+The checked-in `compose.memory-agent.yml` is reproducible as an ordinary
+configuration combination (PostgreSQL, GPU, OTel, OAuth service, and static
+token authentication):
+
+```powershell
+.venv\Scripts\python.exe -m kogwistar_llm_wiki compose generate `
+  --output compose.memory-agent.yml `
+  --backend postgres `
+  --mode gpu `
+  --with-otel `
+  --with-oauth `
+  --auth-mode static_token `
+  --model-revision <immutable-Qwen3-VL-revision>
+```
+
+The standard bundle is the same command without `--with-otel`, `--with-oauth`,
+and `--auth-mode static_token`. There is deliberately no separate profile
+argument; every generated deployment is the result of explicit options.
+
+Use `--mode cpu` for a CPU sidecar or `--mode text-only` when no multimodal
+service is wanted. The generated Compose target is independent of the live
+settings page. The Compose generator rejects embedded Chroma because REST and
+MCP are separate processes; use PostgreSQL for this bundle or the one-process
+`demo` command for local Chroma. Validate it with:
+
+```powershell
+.venv\Scripts\python.exe -m kogwistar_llm_wiki compose check --file compose.memory-agent.yml
+```

@@ -38,6 +38,7 @@ from .investigation_history import InvestigationHistoryRecord, InvestigationHist
 from .workbench_api import WorkbenchApi
 from .workbench import GroundedAnswer, KnowledgeWorkbench, WorkbenchTurn
 from .workbench_http import build_workbench_handler, serve_workbench
+from .settings import SettingsService
 from .agent_gateway import AgentGateway, AgentTurn
 from .otel import LlmWikiTelemetry
 from .mcp_agent_server import build_agent_mcp
@@ -47,7 +48,13 @@ from .workbench_background import (
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
-from .codex_workbench_agent import CodexCliCockpitResponder, CodexCliResponder, CodexCliSettings, HostCockpitResponder
+from .codex_workbench_agent import (
+    CodexAppServerRunner,
+    CodexCliCockpitResponder,
+    CodexCliResponder,
+    CodexCliSettings,
+    HostCockpitResponder,
+)
 from .graph_seed_bundle import (
     GraphSeedBundle,
     SeedBundleResult,
@@ -55,6 +62,67 @@ from .graph_seed_bundle import (
     export_graph_seed_bundle,
     load_seed_bundle,
     seed_graph_bundle,
+)
+from .archive import (
+    ARCHIVE_FORMAT_VERSION,
+    ArchiveError,
+    RestoreReport,
+    create_archive,
+    inspect_archive,
+    restore_archive,
+    restore_backend_snapshot,
+    verify_archive,
+)
+from .multimodal_projection import (
+    AssetResolver,
+    ChromaMultimodalProjectionStore,
+    ColQwenNativeEncoder,
+    DEFAULT_COLQWEN_MODEL,
+    DEFAULT_COLQWEN_REVISION,
+    EmbeddingProfileMismatch,
+    EmbeddingSet,
+    FakeMultimodalEncoder,
+    InMemoryMultimodalProjectionStore,
+    MultimodalEmbeddingProfile,
+    MultimodalEncoder,
+    MultimodalImageQueryEncoder,
+    MultimodalProjectionStore,
+    MultimodalSearchHit,
+    MultimodalSourceUnit,
+    ProjectionIntegrityError,
+    SQLiteMultimodalProjectionStore,
+    embed_pending,
+    score_embedding_sets,
+)
+from .multimodal_remote import (
+    RemoteMultimodalEncoder,
+    EmbeddingProtocolError,
+    EmbeddingServiceError,
+    EmbeddingServiceSettings,
+    EmbeddingServiceUnavailable,
+)
+from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
+from .multimodal_sources import (
+    LocalFileAssetResolver,
+    MappingAssetResolver,
+    MultimodalSourceBundle,
+    build_source_bundle,
+    manifest_units,
+    pdf_manifest_units,
+    split_text_units,
+    webpage_units,
+)
+from .multimodal_grounding import (
+    EvidenceClosureResolver,
+    EvidenceClosureValidator,
+    EvidencePack,
+    EvidencePackReference,
+    GroundingComposition,
+    GroundingValidationError,
+    HigherOrderGrounding,
+    PinnedEntityRef,
+    ResolvedEntityGrounding,
+    SourceEvidenceRef,
 )
 
 __all__ = [
@@ -96,6 +164,7 @@ __all__ = [
     "InvestigationHistoryRecord",
     "InvestigationHistoryService",
     "WorkbenchApi",
+    "SettingsService",
     "GroundedAnswer",
     "KnowledgeWorkbench",
     "WorkbenchTurn",
@@ -111,6 +180,7 @@ __all__ = [
     "WorkbenchInteractionStore",
     "CodexCliResponder",
     "CodexCliCockpitResponder",
+    "CodexAppServerRunner",
     "CodexCliSettings",
     "HostCockpitResponder",
     "GraphSeedBundle",
@@ -119,4 +189,56 @@ __all__ = [
     "export_graph_seed_bundle",
     "load_seed_bundle",
     "seed_graph_bundle",
+    "ARCHIVE_FORMAT_VERSION",
+    "ArchiveError",
+    "RestoreReport",
+    "create_archive",
+    "inspect_archive",
+    "restore_archive",
+    "restore_backend_snapshot",
+    "verify_archive",
+    "AssetResolver",
+    "ChromaMultimodalProjectionStore",
+    "ColQwenNativeEncoder",
+    "DEFAULT_COLQWEN_MODEL",
+    "DEFAULT_COLQWEN_REVISION",
+    "EmbeddingProfileMismatch",
+    "EmbeddingSet",
+    "FakeMultimodalEncoder",
+    "InMemoryMultimodalProjectionStore",
+    "MultimodalEmbeddingProfile",
+    "MultimodalEncoder",
+    "MultimodalImageQueryEncoder",
+    "MultimodalProjectionStore",
+    "MultimodalSearchHit",
+    "MultimodalSourceUnit",
+    "ProjectionIntegrityError",
+    "SQLiteMultimodalProjectionStore",
+    "embed_pending",
+    "score_embedding_sets",
+    "RemoteMultimodalEncoder",
+    "EmbeddingProtocolError",
+    "EmbeddingServiceError",
+    "EmbeddingServiceSettings",
+    "EmbeddingServiceUnavailable",
+    "VllmEmbeddingSettings",
+    "VllmMultimodalEncoder",
+    "LocalFileAssetResolver",
+    "MappingAssetResolver",
+    "MultimodalSourceBundle",
+    "build_source_bundle",
+    "manifest_units",
+    "pdf_manifest_units",
+    "split_text_units",
+    "webpage_units",
+    "EvidenceClosureResolver",
+    "EvidenceClosureValidator",
+    "EvidencePack",
+    "EvidencePackReference",
+    "GroundingComposition",
+    "GroundingValidationError",
+    "HigherOrderGrounding",
+    "PinnedEntityRef",
+    "ResolvedEntityGrounding",
+    "SourceEvidenceRef",
 ]

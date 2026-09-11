@@ -15,7 +15,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from collections import deque
-from typing import Mapping, Protocol
+from typing import Literal, Mapping, Protocol
 from urllib.parse import urlparse
 from urllib import request as urllib_request
 
@@ -74,6 +74,7 @@ class CodexCliSettings:
     model: str | None = None
     profile: str | None = None
     timeout_seconds: int = 300
+    transport: Literal["exec", "app_server"] = "exec"
 
 
 class CodexProcessRunner:
@@ -180,6 +181,237 @@ class CodexProcessRunner:
                         process.kill()
 
 
+class CodexAppServerRunner:
+    """Run one bounded turn through Codex's JSON-RPC app server.
+
+    The app server is intentionally started per workbench turn.  This keeps
+    the adapter isolated from durable Codex threads and makes timeout/cleanup
+    behavior explicit while still using the server's structured-output and
+    streaming protocol.
+    """
+
+    _CLIENT_NAME = "kogwistar-llm-wiki"
+    _CLIENT_VERSION = "0.2.0"
+
+    def run(
+        self,
+        *,
+        settings: CodexCliSettings,
+        prompt: str,
+        progress: ProgressCallback,
+        trace_line: LineSink | None = None,
+        output_schema: Mapping[str, object] | None = None,
+    ) -> str:
+        executable = _resolve_codex_executable(settings.executable)
+        command = _command_for_executable(executable, ["app-server", "--stdio"])
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            # JSON-RPC owns stdout. Merging stderr would make diagnostic
+            # logging look like protocol messages and break parsing.
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        assert process.stdin is not None
+        assert process.stdout is not None
+        lines: queue.Queue[str | None] = queue.Queue()
+
+        def read_output() -> None:
+            assert process.stdout is not None
+            try:
+                for line in process.stdout:
+                    lines.put(line.rstrip("\r\n"))
+            finally:
+                lines.put(None)
+
+        reader = threading.Thread(target=read_output, name="llm-wiki-codex-app-server-output", daemon=True)
+        reader.start()
+        stderr_reader: threading.Thread | None = None
+        stderr_stream = getattr(process, "stderr", None)
+        if stderr_stream is not None:
+            def read_stderr() -> None:
+                for line in stderr_stream:
+                    if trace_line is not None:
+                        trace_line("stderr: " + line.rstrip("\r\n"))
+
+            stderr_reader = threading.Thread(
+                target=read_stderr,
+                name="llm-wiki-codex-app-server-stderr",
+                daemon=True,
+            )
+            stderr_reader.start()
+        deadline = time.monotonic() + max(1, int(settings.timeout_seconds))
+        request_id = 0
+        answer_parts: list[str] = []
+        completed = False
+        active_thread_id: str | None = None
+
+        def send(method: str, params: Mapping[str, object] | None = None) -> int:
+            nonlocal request_id
+            request_id += 1
+            message: dict[str, object] = {"jsonrpc": "2.0", "id": request_id, "method": method}
+            if params is not None:
+                message["params"] = dict(params)
+            process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+            process.stdin.flush()
+            return request_id
+
+        def notify(method: str, params: Mapping[str, object] | None = None) -> None:
+            message: dict[str, object] = {"jsonrpc": "2.0", "method": method}
+            if params is not None:
+                message["params"] = dict(params)
+            process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+            process.stdin.flush()
+
+        def read_message() -> dict[str, object]:
+            while True:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Codex App Server turn exceeded {settings.timeout_seconds}s")
+                try:
+                    line = lines.get(timeout=min(0.5, max(0.01, deadline - time.monotonic())))
+                except queue.Empty as exc:
+                    if process.poll() is not None:
+                        raise RuntimeError("Codex App Server exited before completing the turn") from exc
+                    continue
+                if line is None:
+                    raise RuntimeError("Codex App Server closed its stdio stream before completing the turn")
+                if not line:
+                    continue
+                progress()
+                if trace_line is not None:
+                    trace_line(line)
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(f"Codex App Server emitted invalid JSON: {line!r}") from exc
+                if not isinstance(message, dict):
+                    raise RuntimeError("Codex App Server emitted a non-object JSON message")
+                return message
+
+        def handle_notification(message: Mapping[str, object]) -> None:
+            nonlocal completed
+            method = message.get("method")
+            params = message.get("params")
+            if not isinstance(params, Mapping):
+                return
+            if method == "item/agentMessage/delta":
+                delta = params.get("delta")
+                if isinstance(delta, str):
+                    answer_parts.append(delta)
+            elif method == "item/completed":
+                item = params.get("item")
+                if isinstance(item, Mapping) and item.get("type") == "agentMessage":
+                    text = item.get("text")
+                    if isinstance(text, str) and not answer_parts:
+                        answer_parts.append(text)
+            elif method == "turn/completed":
+                turn = params.get("turn")
+                if isinstance(turn, Mapping) and params.get("threadId") == active_thread_id:
+                    status = turn.get("status")
+                    if status != "completed":
+                        error = turn.get("error")
+                        detail = error.get("message") if isinstance(error, Mapping) else status
+                        raise RuntimeError(f"Codex App Server turn did not complete: {detail}")
+                    completed = True
+            elif method == "error":
+                error = params.get("error")
+                if params.get("willRetry") is not True:
+                    detail = _rpc_error_message(error) if isinstance(error, Mapping) else error
+                    raise RuntimeError(f"Codex App Server reported a terminal error: {detail}")
+
+        def request(method: str, params: Mapping[str, object]) -> Mapping[str, object]:
+            expected_id = send(method, params)
+            while True:
+                message = read_message()
+                if message.get("id") == expected_id:
+                    error = message.get("error")
+                    if isinstance(error, Mapping):
+                        raise RuntimeError(f"Codex App Server {method} failed: {_rpc_error_message(error)}")
+                    result = message.get("result")
+                    if not isinstance(result, Mapping):
+                        raise RuntimeError(f"Codex App Server {method} returned no object result")
+                    return result
+                if "method" in message:
+                    handle_notification(message)
+
+        try:
+            request(
+                "initialize",
+                {
+                    "clientInfo": {"name": self._CLIENT_NAME, "version": self._CLIENT_VERSION},
+                    "capabilities": {},
+                },
+            )
+            notify("initialized")
+            thread_params: dict[str, object] = {
+                "cwd": str(Path.cwd()),
+                "ephemeral": True,
+                "sandbox": "read-only",
+                "approvalPolicy": "never",
+            }
+            if settings.model:
+                thread_params["model"] = settings.model
+            if settings.profile:
+                # App Server accepts config overrides while profile selection is
+                # not a thread field in the v2 protocol.
+                thread_params["config"] = {"profile": settings.profile}
+            thread_result = request("thread/start", thread_params)
+            thread = thread_result.get("thread")
+            thread_id = thread.get("id") if isinstance(thread, Mapping) else None
+            if not isinstance(thread_id, str) or not thread_id:
+                raise RuntimeError("Codex App Server thread/start returned no thread id")
+            active_thread_id = thread_id
+            turn_params: dict[str, object] = {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": prompt}],
+            }
+            if settings.model:
+                turn_params["model"] = settings.model
+            if output_schema is not None:
+                turn_params["outputSchema"] = _strict_output_schema(output_schema)
+            turn_result = request("turn/start", turn_params)
+            turn = turn_result.get("turn")
+            turn_id = turn.get("id") if isinstance(turn, Mapping) else None
+            while not completed:
+                message = read_message()
+                if "method" in message:
+                    handle_notification(message)
+            if not completed:
+                raise RuntimeError(f"Codex App Server turn {turn_id!r} did not complete")
+            answer = "".join(answer_parts).strip()
+            if not answer:
+                raise RuntimeError("Codex App Server completed without a final assistant message")
+            return answer
+        finally:
+            try:
+                process.stdin.close()
+            except (OSError, ValueError):
+                pass
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            reader.join(timeout=2)
+            if stderr_reader is not None:
+                stderr_reader.join(timeout=2)
+            try:
+                process.stdout.close()
+            except (OSError, ValueError):
+                pass
+            if stderr_stream is not None:
+                try:
+                    stderr_stream.close()
+                except (OSError, ValueError):
+                    pass
+
+
 class CodexCliResponder:
     """Answer from one bounded lens without granting graph or filesystem writes."""
 
@@ -191,7 +423,7 @@ class CodexCliResponder:
         trace_line: LineSink | None = None,
     ) -> None:
         self.settings = settings or CodexCliSettings()
-        self.runner = runner or CodexProcessRunner()
+        self.runner = runner or _runner_for_settings(self.settings)
         self.trace_line = trace_line
 
     def __call__(
@@ -226,7 +458,7 @@ class CodexCliCockpitResponder:
         trace_line: LineSink | None = None,
     ) -> None:
         self.settings = settings or CodexCliSettings()
-        self.runner = runner or CodexProcessRunner()
+        self.runner = runner or _runner_for_settings(self.settings)
         self.trace_line = trace_line
 
     def __call__(
@@ -253,7 +485,7 @@ class CodexCliCockpitResponder:
                     + str(validation_error)
                     + ". Return one corrected action that conforms to action_schema."
                 )
-            if isinstance(self.runner, CodexProcessRunner):
+            if isinstance(self.runner, (CodexProcessRunner, CodexAppServerRunner)):
                 raw = self.runner.run(**run_kwargs, output_schema=_cockpit_transport_schema())
             else:
                 raw = self.runner.run(**run_kwargs)
@@ -333,6 +565,25 @@ def _resolve_codex_executable(explicit: str | None) -> str:
             "Codex CLI was not found; set KOGWISTAR_CODEX_EXECUTABLE or add codex to PATH"
         )
     return str(Path(executable).expanduser())
+
+
+def _runner_for_settings(settings: CodexCliSettings) -> CodexRunner:
+    if settings.transport == "app_server":
+        return CodexAppServerRunner()
+    return CodexProcessRunner()
+
+
+def _rpc_error_message(error: Mapping[str, object]) -> str:
+    """Prefer the provider's nested message over an opaque error payload."""
+    nested = error.get("error")
+    if isinstance(nested, Mapping):
+        message = nested.get("message")
+        if isinstance(message, str) and message:
+            return message
+    message = error.get("message")
+    if isinstance(message, str) and message:
+        return message
+    return json.dumps(dict(error), sort_keys=True, default=str)
 
 
 def _command_for_executable(executable: str, args: Sequence[str]) -> list[str]:
@@ -460,4 +711,11 @@ def _strict_output_schema(schema: Mapping[str, object]) -> dict[str, object]:
     return normalized
 
 
-__all__ = ["CodexCliCockpitResponder", "CodexCliResponder", "CodexCliSettings", "CodexProcessRunner", "HostCockpitResponder"]
+__all__ = [
+    "CodexAppServerRunner",
+    "CodexCliCockpitResponder",
+    "CodexCliResponder",
+    "CodexCliSettings",
+    "CodexProcessRunner",
+    "HostCockpitResponder",
+]

@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from kogwistar_llm_wiki import IngestPipeline
 
 
 def test_build_obsidian_vault_materializes_expected_files(pipeline, ingest_request, tmp_path: Path):

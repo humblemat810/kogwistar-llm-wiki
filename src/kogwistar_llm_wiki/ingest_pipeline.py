@@ -12,15 +12,15 @@ import os
 import hashlib
 import shutil
 import time
-from dataclasses import replace
 from pathlib import Path
 import tempfile
 import uuid
 from types import SimpleNamespace
-from typing import Callable, Literal, Mapping, Protocol
+from typing import Callable, Literal, Mapping, Protocol, Sequence
 
 from .utils import _temporary_namespace
 from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core.embedding_profile import EmbeddingProfile, endpoint_fingerprint
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.engine_core.models import Document, GraphExtractionWithIDs, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
@@ -76,6 +76,17 @@ from .maintenance_guards import (
     source_digest,
 )
 from .maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
+from .multimodal_projection import (
+    AssetResolver,
+    MultimodalEncoder,
+    MultimodalImageQueryEncoder,
+    MultimodalProjectionStore,
+    MultimodalSearchHit,
+    MultimodalSourceUnit,
+    build_configured_multimodal_encoder,
+    embed_pending,
+)
+from .multimodal_sources import MultimodalSourceBundle, build_source_bundle
 
 
 def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
@@ -282,6 +293,33 @@ def _resolve_embedding_functions(
     return functions, configs
 
 
+def _validate_shared_postgres_embedding_profile(
+    configs: Mapping[str, EmbeddingProviderConfig],
+) -> None:
+    """Protect shared PostgreSQL vector tables from mixed embedding spaces.
+
+    The PostgreSQL namespace bundle uses one schema and one set of pgvector
+    tables, partitioned logically by graph namespace. A physical vector
+    collection therefore needs one compatible provider/model/dimension profile.
+    Chroma's per-directory stores do not have this restriction.
+    """
+    profiles = {space: _embedding_profile(config) for space, config in configs.items()}
+    if len(set(profiles.values())) <= 1:
+        return
+    rendered = ", ".join(
+        f"{space}={profile.provider}/{profile.model}/{profile.dimension}D"
+        for space, profile in sorted(profiles.items())
+    )
+    raise ValueError(
+        "PostgreSQL LLM-Wiki namespace engines currently share physical "
+        f"pgvector tables, but their embedding profiles differ: {rendered}. "
+        "Configure one provider/model/dimension for all graph spaces, or use "
+        "separate physical PostgreSQL schemas or databases per embedding space. "
+        "Existing vectors are not migrated automatically; archive, replay, "
+        "and re-embed into the isolated target before cutover."
+    )
+
+
 
 
 
@@ -294,6 +332,18 @@ class ParseSourceResult(Protocol):
 
 
 ParserFn = Callable[..., ParseSourceResult]
+
+
+def _embedding_profile(config: EmbeddingProviderConfig) -> EmbeddingProfile:
+    """Translate parser-owned provider settings into the core contract."""
+
+    return EmbeddingProfile(
+        provider=config.provider,
+        model=config.model,
+        dimension=config.dimension,
+        similarity_metric="cosine",
+        endpoint_fingerprint=endpoint_fingerprint(config.base_url),
+    )
 
 
 def build_in_memory_namespace_engines(
@@ -310,9 +360,10 @@ def build_in_memory_namespace_engines(
     embedding_api_key_env: str | None = None,
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
 ) -> NamespaceEngines:
     root = Path(base_dir) if base_dir is not None else Path(tempfile.mkdtemp(prefix="kogwistar-llm-wiki-"))
-    embeddings, _ = _resolve_embedding_functions(
+    embeddings, configs = _resolve_embedding_functions(
         embedding_function=embedding_function,
         embedding_config=embedding_config,
         embedding_functions=embedding_functions,
@@ -329,15 +380,17 @@ def build_in_memory_namespace_engines(
         root / "conversation",
         kg_graph_type="conversation",
         embedding_function=embeddings["conversation"],
+        embedding_profile=_embedding_profile(configs["conversation"]),
+        embedding_profile_mode=embedding_profile_mode,
         persistence_mode=conversation_persistence_mode,
     )
     
-    derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"]) if split_derived_knowledge else None
+    derived_engine = _build_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(configs["knowledge"]), embedding_profile_mode=embedding_profile_mode) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=conversation,
-        workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"]),
-        kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"]),
-        wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"]),
+        workflow=_build_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"], embedding_profile=_embedding_profile(configs["workflow"]), embedding_profile_mode=embedding_profile_mode),
+        kg=_build_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(configs["knowledge"]), embedding_profile_mode=embedding_profile_mode),
+        wisdom=_build_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"], embedding_profile=_embedding_profile(configs["wisdom"]), embedding_profile_mode=embedding_profile_mode),
         derived_knowledge=derived_engine,
     )
 
@@ -356,9 +409,10 @@ def build_persistent_namespace_engines(
     embedding_api_key_env: str | None = None,
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
 ) -> NamespaceEngines:
     root = Path(base_dir)
-    embeddings, _ = _resolve_embedding_functions(
+    embeddings, resolved_embedding_configs = _resolve_embedding_functions(
         embedding_function=embedding_function,
         embedding_config=embedding_config,
         embedding_functions=embedding_functions,
@@ -369,17 +423,19 @@ def build_persistent_namespace_engines(
         embedding_base_url=embedding_base_url,
         embedding_api_key_env=embedding_api_key_env,
     )
-    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"]) if split_derived_knowledge else None
+    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]), embedding_profile_mode=embedding_profile_mode) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_persistent_engine(
             root / "conversation",
             kg_graph_type="conversation",
             embedding_function=embeddings["conversation"],
+            embedding_profile=_embedding_profile(resolved_embedding_configs["conversation"]),
+            embedding_profile_mode=embedding_profile_mode,
             persistence_mode=conversation_persistence_mode,
         ),
-        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"]),
-        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"]),
-        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"]),
+        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"], embedding_profile=_embedding_profile(resolved_embedding_configs["workflow"]), embedding_profile_mode=embedding_profile_mode),
+        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"], embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]), embedding_profile_mode=embedding_profile_mode),
+        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"], embedding_profile=_embedding_profile(resolved_embedding_configs["wisdom"]), embedding_profile_mode=embedding_profile_mode),
         derived_knowledge=derived_engine,
     )
 
@@ -401,6 +457,7 @@ def build_postgres_namespace_engines(
     embedding_api_key_env: str | None = None,
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
 ) -> NamespaceEngines:
     root = Path(base_dir)
     embeddings, resolved_embedding_configs = _resolve_embedding_functions(
@@ -414,10 +471,9 @@ def build_postgres_namespace_engines(
         embedding_base_url=embedding_base_url,
         embedding_api_key_env=embedding_api_key_env,
     )
-    # Each physical engine owns its own vector column/index contract. A legacy
-    # global ``embedding_dim`` remains a fallback, but scoped configurations
-    # retain their dimensions instead of forcing the knowledge dimension onto
-    # conversation or workflow state.
+    # A global ``embedding_dim`` remains a fallback. The PostgreSQL bundle
+    # validates the resolved profiles below because its graph spaces share the
+    # same physical vector tables.
     embedding_dimensions = {
         space: (
             (embedding_configs or {}).get(space).dimension
@@ -426,6 +482,7 @@ def build_postgres_namespace_engines(
         )
         for space in _EMBEDDING_SPACES
     }
+    _validate_shared_postgres_embedding_profile(resolved_embedding_configs)
     root.mkdir(parents=True, exist_ok=True)
     derived_engine = _build_postgres_engine(
         root / "derived_knowledge",
@@ -434,6 +491,8 @@ def build_postgres_namespace_engines(
         dsn=dsn,
         embedding_dim=embedding_dimensions["knowledge"],
         schema=schema,
+        embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]),
+        embedding_profile_mode=embedding_profile_mode,
     ) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=_build_postgres_engine(
@@ -443,6 +502,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["conversation"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["conversation"]),
+            embedding_profile_mode=embedding_profile_mode,
             persistence_mode=conversation_persistence_mode,
         ),
         workflow=_build_postgres_engine(
@@ -452,6 +513,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["workflow"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["workflow"]),
+            embedding_profile_mode=embedding_profile_mode,
         ),
         kg=_build_postgres_engine(
             root / "kg",
@@ -460,6 +523,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["knowledge"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["knowledge"]),
+            embedding_profile_mode=embedding_profile_mode,
         ),
         wisdom=_build_postgres_engine(
             root / "wisdom",
@@ -468,6 +533,8 @@ def build_postgres_namespace_engines(
             dsn=dsn,
             embedding_dim=embedding_dimensions["wisdom"],
             schema=schema,
+            embedding_profile=_embedding_profile(resolved_embedding_configs["wisdom"]),
+            embedding_profile_mode=embedding_profile_mode,
         ),
         derived_knowledge=derived_engine,
     )
@@ -478,6 +545,8 @@ def _build_engine(
     *,
     kg_graph_type: str,
     embedding_function: EmbeddingFunctionLike,
+    embedding_profile: EmbeddingProfile | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
@@ -485,6 +554,8 @@ def _build_engine(
         persist_directory=str(persist_directory),
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
+        embedding_profile=embedding_profile,
+        embedding_profile_mode=embedding_profile_mode,
         backend_factory=build_in_memory_backend,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
@@ -496,6 +567,8 @@ def _build_persistent_engine(
     *,
     kg_graph_type: str,
     embedding_function: EmbeddingFunctionLike,
+    embedding_profile: EmbeddingProfile | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     persist_directory.mkdir(parents=True, exist_ok=True)
@@ -503,6 +576,8 @@ def _build_persistent_engine(
         persist_directory=str(persist_directory),
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
+        embedding_profile=embedding_profile,
+        embedding_profile_mode=embedding_profile_mode,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
     )
@@ -516,6 +591,8 @@ def _build_postgres_engine(
     dsn: str,
     embedding_dim: int,
     schema: str,
+    embedding_profile: EmbeddingProfile | None = None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
     from kogwistar.engine_core.engine_postgres import EnginePostgresConfig, build_postgres_backend
@@ -534,6 +611,8 @@ def _build_postgres_engine(
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
         backend=backend,
+        embedding_profile=embedding_profile,
+        embedding_profile_mode=embedding_profile_mode,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
     )
@@ -549,6 +628,8 @@ class IngestPipeline:
         debug_run_dir: str | Path | None = None,
         live_trace: bool | None = None,
         conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+        multimodal_projection_store: MultimodalProjectionStore | None = None,
+        multimodal_encoder: MultimodalEncoder | None = None,
     ) -> None:
         self.engines = engines
         self.parser = parser
@@ -568,12 +649,219 @@ class IngestPipeline:
         self.live_trace_printer = LiveTracePrinter(prefix="llm-wiki.ingest") if self.live_trace else None
         self.telemetry = LlmWikiTelemetry.from_environment()
         self.conversation_persistence_mode = conversation_persistence_mode
+        self.multimodal_projection_store = multimodal_projection_store
+        self.multimodal_encoder = multimodal_encoder
+        if self.multimodal_encoder is None and multimodal_projection_store is not None:
+            # A configured service client is lightweight; model inference stays
+            # outside this process and is only attempted during Stage 2.
+            from .multimodal_runtime import (
+                configured_embedding_service_url,
+                configured_multimodal_backend,
+                configured_vllm_url,
+            )
+
+            if configured_embedding_service_url() or (
+                configured_multimodal_backend() == "vllm" and configured_vllm_url()
+            ):
+                self.multimodal_encoder = build_configured_multimodal_encoder()
         self._source_revisions: dict[tuple[str, str], SourceRevision] = {}
         self.stats_store = (
             ParseStatisticsStore(self.debug_run_dir / "llm_wiki_stats.sqlite3")
             if self.debug_run_dir is not None
             else None
         )
+
+    def capture_multimodal_units(self, units: Sequence[MultimodalSourceUnit]) -> int:
+        """Capture validated retrieval views into Stage 1.
+
+        Multimodal projection storage is opt-in and remains separate from the
+        canonical text graph ingestion path.
+        """
+        if self.multimodal_projection_store is None:
+            raise RuntimeError("multimodal projection is not configured for this pipeline")
+        for unit in units:
+            self.multimodal_projection_store.capture(unit)
+        return len(units)
+
+    def capture_multimodal_source(
+        self,
+        *,
+        workspace_id: str,
+        source_id: str,
+        source_revision_id: str,
+        source_format: str,
+        source_uri: str | None = None,
+        raw_text: str | None = None,
+        content_ref: str | None = None,
+        manifest: Mapping[str, object] | None = None,
+        max_chars: int = 4000,
+    ) -> MultimodalSourceBundle:
+        """Decompose and capture one source revision into Stage 1 views."""
+        bundle = build_source_bundle(
+            workspace_id=workspace_id,
+            source_id=source_id,
+            source_revision_id=source_revision_id,
+            source_format=source_format,
+            source_uri=source_uri,
+            raw_text=raw_text,
+            content_ref=content_ref,
+            manifest=manifest,
+            max_chars=max_chars,
+        )
+        self.capture_multimodal_units(bundle.units)
+        return bundle
+
+    def embed_multimodal_pending(
+        self,
+        *,
+        batch_size: int | None = None,
+        resolver: AssetResolver | None = None,
+    ) -> int:
+        """Promote pending Stage-1 views using the configured encoder."""
+        if self.multimodal_projection_store is None or self.multimodal_encoder is None:
+            raise RuntimeError("multimodal projection and encoder must both be configured")
+        return embed_pending(
+            self.multimodal_projection_store,
+            self.multimodal_encoder,
+            batch_size=batch_size,
+            resolver=resolver,
+        )
+
+    def search_multimodal(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+    ) -> list[MultimodalSearchHit]:
+        """Run a grounded multimodal projection query after Stage 2."""
+        if self.multimodal_projection_store is None or self.multimodal_encoder is None:
+            raise RuntimeError("multimodal projection and encoder must both be configured")
+        query_vectors = self.multimodal_encoder.encode_queries([query])
+        if len(query_vectors) != 1:
+            raise ValueError("multimodal encoder returned an invalid query result")
+        return self.multimodal_projection_store.search(
+            query_vectors[0],
+            profile=self.multimodal_encoder.profile,
+            limit=limit,
+        )
+
+    def search_multimodal_image(
+        self,
+        images: Sequence[object],
+        *,
+        limit: int = 10,
+        batch_size: int | None = None,
+    ) -> list[MultimodalSearchHit]:
+        """Search native image projections without converting images to text."""
+        if self.multimodal_projection_store is None or self.multimodal_encoder is None:
+            raise RuntimeError("multimodal projection and encoder must both be configured")
+        if not isinstance(self.multimodal_encoder, MultimodalImageQueryEncoder):
+            raise RuntimeError("configured multimodal encoder does not support image queries")
+        query_vectors = self.multimodal_encoder.encode_image_queries(
+            images, batch_size=batch_size
+        )
+        if len(query_vectors) != 1:
+            raise ValueError("image query requires exactly one image")
+        return self.multimodal_projection_store.search(
+            query_vectors[0],
+            profile=self.multimodal_encoder.profile,
+            limit=limit,
+        )
+
+    def search_multimodal_mixed(
+        self,
+        *,
+        text_queries: Sequence[str] = (),
+        images: Sequence[object] = (),
+        limit: int = 10,
+        text_weight: float = 1.0,
+        image_weight: float = 1.0,
+    ) -> list[MultimodalSearchHit]:
+        """Fuse bounded text/image searches without averaging incompatible inputs."""
+        if self.multimodal_projection_store is None or self.multimodal_encoder is None:
+            raise RuntimeError("multimodal projection and encoder must both be configured")
+        if limit <= 0:
+            return []
+        if text_weight < 0 or image_weight < 0 or (text_weight == 0 and image_weight == 0):
+            raise ValueError("mixed query weights must be non-negative and not both zero")
+        texts = tuple(text for text in text_queries if str(text).strip())
+        image_values = tuple(images)
+        if not texts and not image_values:
+            raise ValueError("mixed query requires text_queries or images")
+        weighted_hits: dict[str, tuple[float, float, MultimodalSearchHit]] = {}
+
+        def add_hits(
+            hits: Sequence[MultimodalSearchHit],
+            *,
+            weight: float,
+            query_key: str,
+        ) -> None:
+            if weight == 0:
+                return
+            for hit in hits:
+                score, total_weight, existing = weighted_hits.get(
+                    hit.view_id, (0.0, 0.0, hit)
+                )
+                weighted_hits[hit.view_id] = (
+                    score + float(hit.score) * weight,
+                    total_weight + weight,
+                    MultimodalSearchHit(
+                        view_id=existing.view_id,
+                        score=existing.score,
+                        source_id=existing.source_id,
+                        source_revision_id=existing.source_revision_id,
+                        modality=existing.modality,
+                        locator=dict(existing.locator),
+                        metadata={
+                            **existing.metadata,
+                            "query_contributions": {
+                                **dict(existing.metadata.get("query_contributions") or {}),
+                                query_key: float(hit.score),
+                            },
+                        },
+                    ),
+                )
+
+        for index, text in enumerate(texts):
+            add_hits(
+                self.search_multimodal(text, limit=limit),
+                weight=text_weight,
+                query_key=f"text:{index}",
+            )
+        if image_values:
+            if not isinstance(self.multimodal_encoder, MultimodalImageQueryEncoder):
+                raise RuntimeError("configured multimodal encoder does not support image queries")
+            image_vectors = self.multimodal_encoder.encode_image_queries(image_values)
+            if len(image_vectors) != len(image_values):
+                raise ValueError("image query encoder returned an invalid result count")
+            for index, vectors in enumerate(image_vectors):
+                add_hits(
+                    self.multimodal_projection_store.search(
+                        vectors,
+                        profile=self.multimodal_encoder.profile,
+                        limit=limit,
+                    ),
+                    weight=image_weight,
+                    query_key=f"image:{index}",
+                )
+        ranked: list[MultimodalSearchHit] = []
+        for score, total_weight, hit in weighted_hits.values():
+            ranked.append(
+                MultimodalSearchHit(
+                    view_id=hit.view_id,
+                    score=score / total_weight,
+                    source_id=hit.source_id,
+                    source_revision_id=hit.source_revision_id,
+                    modality=hit.modality,
+                    locator=dict(hit.locator),
+                    metadata={
+                        **hit.metadata,
+                        "query_fusion": "weighted_mean_of_bounded_independent_queries",
+                    },
+                )
+            )
+        ranked.sort(key=lambda hit: (-hit.score, hit.view_id))
+        return ranked[:limit]
 
     def namespaces_for(self, workspace_id: str) -> WorkspaceNamespaces:
         return WorkspaceNamespaces(workspace_id)
@@ -1431,7 +1719,7 @@ class IngestPipeline:
         """Repair uniquely recoverable offsets before graph persistence.
 
         Parser pointers and Kogwistar spans use different internal
-        representations, so persistence remains strict. This boundary pass
+        embeddings, so persistence remains strict. This boundary pass
         uses the authoritative registered source document and only accepts a
         unique exact/fuzzy repair; ambiguous evidence still fails closed.
         """
@@ -1552,6 +1840,13 @@ class IngestPipeline:
         maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
         revision = self.source_revision(request=request, source_document_id=source_document_id)
         required_stage = required_stage_for_maintenance(maintenance_kind)
+        request_fingerprint = str(
+            stable_id(
+                "kogwistar_llm_wiki.maintenance_request_parameters",
+                objective or "",
+                json.dumps(dict(budgets or {}), sort_keys=True, default=str),
+            )
+        )
         self._trace_step(
             "create_maintenance_request_start",
             request=request,
@@ -1566,6 +1861,7 @@ class IngestPipeline:
                 source_document_id,
                 maintenance_kind,
                 revision.revision_id,
+                request_fingerprint,
             )
         )
         if not self._node_exists(self.engines.conversation, namespace=namespace, node_id=node_id):
@@ -1589,6 +1885,7 @@ class IngestPipeline:
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
                     "objective": objective,
+                    "request_fingerprint": request_fingerprint,
                     "budgets": _metadata_digest_value(dict(budgets or {})),
                 },
             )
@@ -1604,6 +1901,7 @@ class IngestPipeline:
                 source_document_id,
                 maintenance_kind,
                 revision.revision_id,
+                request_fingerprint,
             )
         )
         with _temporary_namespace(self.engines.conversation, namespace):
@@ -1633,6 +1931,7 @@ class IngestPipeline:
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
                     "objective": objective,
+                    "request_fingerprint": request_fingerprint,
                     "budgets": dict(budgets or {}),
                 },
                 idempotency_key=lane_idempotency_key,
@@ -1652,6 +1951,7 @@ class IngestPipeline:
             payload_matches={
                 "maintenance_kind": maintenance_kind,
                 "source_revision_id": revision.revision_id,
+                "request_fingerprint": request_fingerprint,
             },
         ):
             self._enqueue_maintenance_job(

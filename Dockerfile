@@ -21,12 +21,15 @@ COPY kogwistar ./kogwistar
 COPY kg-doc-parser ./kg-doc-parser
 COPY kogwistar-obsidian-sink ./kogwistar-obsidian-sink
 COPY src ./src
+COPY requirements ./requirements
+COPY scripts/__init__.py ./scripts/__init__.py
 
 # The parser checkout currently asks for a newer FastMCP range. The
 # application/core MCP contract is tested against 3.0.0, so apply the final
 # image pin after all sibling packages have been installed.
 RUN python -m pip install --upgrade pip \
-       && python -m pip install --no-cache-dir -e "./kogwistar[full]" \
+       && python -m pip install --no-cache-dir "maturin>=1.8,<2" \
+       && python -m pip install --no-cache-dir --no-build-isolation -e "./kogwistar[full]" \
        && python -m pip install --no-cache-dir -e ./kg-doc-parser \
        && python -m pip install --no-cache-dir -e ./kogwistar-obsidian-sink \
        && python -m pip install --no-cache-dir --force-reinstall --no-deps "fastmcp==3.0.0" \

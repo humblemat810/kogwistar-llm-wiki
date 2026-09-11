@@ -39,10 +39,13 @@ physical graph space, queue/history routing, and persistence contract.
 
 The application-owned `KOGWISTAR_LLM_WIKI_<SPACE>_EMBED_*` settings override
 global `KOGWISTAR_LLM_WIKI_EMBED_*`, `KOGWISTAR_EMBED_*`, and parser-compatible
-`KG_DOC_EMBED_*` settings. Different vector dimensions are valid because the
-spaces have separate indexes, but a query must be embedded with the model for
-the target space. A persistent space must not silently change model or
-dimension; operators use a separate store or an intentional migration.
+`KG_DOC_EMBED_*` settings. Different vector dimensions are valid only when the
+spaces have separate physical vector stores, and a query must be embedded with
+the model for its target space. The current PostgreSQL namespace bundle uses
+shared pgvector tables, so it requires one profile across conversation,
+workflow, knowledge, and wisdom. A persistent space must not silently change
+model or dimension; operators use an isolated store or an intentional
+migration.
 
 ## Ownership
 

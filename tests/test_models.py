@@ -22,7 +22,6 @@ def test_request_defaults():
 
 def test_request_slicing():
     # Verify that we can create slices
-    from pydantic_extension.model_slicing import ModeSlicingMixin
     
     # IngestPipelineRequest["dto"] should include the marked fields
     DtoSlice = IngestPipelineRequest["dto"]

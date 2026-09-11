@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Selection policy for surfacing disambiguation review work.
 
 This stays app-level because it decides what llm-wiki should ask a user or a
 reviewer to inspect, while the reusable reconciliation semantics live in the
 shared disambiguation model helpers.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Iterable

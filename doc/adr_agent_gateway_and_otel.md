@@ -75,11 +75,38 @@ Agent routes are disabled unless `LLM_WIKI_AGENT_API_ENABLED=true`. Operators
 must put authentication, authorization, rate limiting, and TLS at the service
 boundary before enabling them on a non-local bind address.
 
+The application-owned identity boundary supports an explicit `disabled` mode
+for a trusted single-user local deployment, `static_token` for local/private
+authenticated compatibility, and `kogwistar_jwt` for production deployments.
+In `disabled` mode authentication returns no identity and no workspace ACL is
+evaluated; the normal workspace identifier still scopes graph access. This is
+not a synthetic default principal and must not be used on a shared or
+non-local listener. If the mode is omitted, legacy token-related environment
+variables may select `static_token`; operators should set `disabled` explicitly
+for personal use. JWT validation
+delegates to Kogwistar's `verify_jwt` using `JWT_ALG`, `JWT_SECRET`, `JWT_ISS`,
+and `JWT_AUD`. `sub`/`client_id`, `scope`/`scp`, role, security scope, and
+explicit workspace claims are carried into Kogwistar's claims context. An
+optional `LLM_WIKI_WORKSPACE_ACL_JSON` supplies principal workspace
+permissions. Every non-health operation authorizes both required scope and
+target workspace before gateway dispatch; missing membership is denied. The
+context is reset after each request, including errors. This is an llm-wiki
+transport boundary and does not change Kogwistar core or Obsidian behavior.
+
 OpenTelemetry support is optional and app-owned. `LlmWikiTelemetry` is a safe
 no-op when disabled or when OTel packages are not installed. It instruments
 workbench protocol calls, ingestion trace events, and long-run trace events.
 Only primitive correlation fields are emitted by the event adapter; raw source
 text, secrets, and full graph payloads are not emitted.
+
+The operating settings console exposes the effective OTel state, configured
+OTLP endpoint, service name, and package availability without exposing tokens.
+The `otel_enabled` setting can be staged and explicitly applied as a live
+emission toggle for the current process. It does not start or stop Docker
+containers; Grafana/OTel Collector lifecycle remains a Compose or deployment
+operation. When no OTLP endpoint or exporter is available, the UI reports the
+sink as disabled or unavailable rather than claiming that Grafana received
+traces.
 
 Integration artifacts live outside the Python package: pi uses
 `integrations/pi-agent/`, Hermes uses `integrations/hermes-agent/`, and
@@ -92,6 +119,14 @@ compatible agents can use `skills/llm-wiki-knowledge/`.
 - Source lifecycle operations are workspace-scoped and use stable source identity.
 - MCP read tools require `read` authorization; source, maintenance, and mutation
   tools require `write` authorization at the HTTP bridge.
+- Every workspace-bearing protocol request is authorized against the verified
+  principal; a caller-supplied workspace ID never grants access.
+- Health and readiness probes remain public and do not select a workspace ACL.
+- Personal mode is explicitly `LLM_WIKI_AUTH_MODE=disabled`; it uses no
+  principal or ACL, while workspace IDs remain the data-scoping boundary.
+- Migrating personal mode to static-token or JWT mode is configuration-only
+  when the workspace ID is retained; splitting ownership requires an explicit
+  application-level data migration, not an implicit auth change.
 - `propose` never applies a change; only explicit `confirm` can cross the
   mutation boundary.
 - History and graph events remain the source of truth; OTel is diagnostic.

@@ -47,6 +47,7 @@ Thumbs.db
 .env
 .env.*
 *.local
+!.env.example
 
 # Opt-in local repo bootstraps
 /kogwistar/
@@ -57,3 +58,6 @@ Thumbs.db
 /tests/_engine_tmp/
 /tests/_engine_tmp_check/
 /kogwistar-llm-wiki-tests-*/
+
+# Optional local multimodal model checkpoints; never commit model weights.
+/data/models/

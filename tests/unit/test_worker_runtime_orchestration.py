@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 
 import pytest
 from pathlib import Path
@@ -19,6 +20,7 @@ from kogwistar.engine_core.jobs import DurableQueueUnavailableError
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 from kogwistar.engine_core.jobs import JobQueueSubsystem
 from kogwistar_llm_wiki.maintenance_strategies import MaintenanceJobExecutionContext
+from kogwistar_llm_wiki.maintenance_patches import MaintenancePatch
 from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
 
@@ -67,6 +69,93 @@ def test_fair_maintenance_worker_processes_one_claimed_job_per_poll() -> None:
 
     assert handled == ["job-1"]
     assert jobs.claims == 1
+
+
+def test_lease_renewal_exception_fences_the_worker_claim() -> None:
+    events: list[dict[str, object]] = []
+
+    class FailingJobs:
+        def renew_lease(self, *_args, **_kwargs):
+            raise RuntimeError("connection lost")
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.worker_id = "maintenance-renewal-test"
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=FailingJobs()))
+    worker.lease_renew_interval_seconds = 0.001
+    worker.lease_progress_grace_seconds = 90
+    worker._last_progress_monotonic = time.monotonic()
+    worker._claim_lost = threading.Event()
+    worker.trace_sink = events.append
+
+    stop = threading.Event()
+    ctx = SimpleNamespace(job_id="job-renewal", job=SimpleNamespace(claim_token="claim-1"))
+    lease_thread = threading.Thread(
+        target=worker._renew_claim_while_progressing,
+        args=(ctx, stop),
+        name="renewal-test",
+    )
+    lease_thread.start()
+    lease_thread.join(timeout=2)
+    stop.set()
+    lease_thread.join(timeout=2)
+
+    assert not lease_thread.is_alive()
+    assert worker._claim_lost.is_set()
+    assert any(event["event"] == "maintenance_lease_renewal_failed" for event in events)
+
+
+def test_claim_loss_before_graph_patch_never_calls_the_applier(monkeypatch) -> None:
+    applied: list[object] = []
+    traces: list[dict[str, object]] = []
+
+    class FakeJobs:
+        def accepted_candidate(self, _job):
+            return None
+
+        def accept_candidate(self, _job, _candidate):
+            return {"status": "accepted"}
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=FakeJobs()))
+    worker._claim_lost = threading.Event()
+    worker._claim_lost.set()
+    worker.trace_sink = traces.append
+    worker._evaluate_maintenance_guard = lambda _ctx: SimpleNamespace(status="ready")
+    worker._emit_lane_reply = lambda **_kwargs: applied.append("reply")
+    worker._acknowledge_job = lambda _ctx: applied.append("ack")
+
+    monkeypatch.setattr(
+        worker_module,
+        "apply_maintenance_patch_for_scope",
+        lambda *_args, **_kwargs: applied.append("graph")
+        or SimpleNamespace(status=SimpleNamespace(value="applied")),
+    )
+    patch = MaintenancePatch(
+        patch_id="patch-lease-loss",
+        intent="derive_summary",
+        scope={"workspace_id": "workspace-lease-loss"},
+        operations=[
+            {
+                "operation_id": "op-1",
+                "kind": "ADD_NODE",
+                "node_id": "node-1",
+            }
+        ],
+    )
+    ctx = SimpleNamespace(
+        workspace_id="workspace-lease-loss",
+        job=SimpleNamespace(claim_token="claim-1"),
+        job_id="job-lease-loss",
+        payload={"patch": patch.model_dump(mode="json")},
+        request_node_id="request-lease-loss",
+        lane_message_id="",
+        maintenance_kind="graph_patch_apply",
+    )
+
+    worker._handle_graph_patch_apply_strategy(ctx)
+
+    assert applied == []
+    assert any(event["event"] == "maintenance_repeated_work_discarded" for event in traces)
 
 
 def test_expired_maintenance_claim_cannot_be_completed_by_stale_worker() -> None:

@@ -332,7 +332,7 @@ wisdom artifact
 
 ---
 
-### 4.5 Representation
+### 4.5 Embedding
 
 Wisdom is a collection / namespace / projection of **nodes + edges** with specific semantics, derived from execution and outcomes. It lives in the `wisdom` engine namespace and is the only graph space whose nodes are written by the distillation worker rather than by ingestion.
 

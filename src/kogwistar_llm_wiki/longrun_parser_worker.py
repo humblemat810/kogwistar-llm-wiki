@@ -6,7 +6,7 @@ import os
 import threading
 import time
 import traceback
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Literal

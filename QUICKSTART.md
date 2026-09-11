@@ -17,6 +17,9 @@ Optional shared-backend equivalents are included later:
 - optional shared ChromaDB backend: slower, explicit shared deployment
 - optional PostgreSQL/pgvector backend: slower still, heavier shared deployment
 
+For task-oriented recipes covering article collections, agents, authentication,
+embeddings, archives, Docker, and Codex, see the [LLM-Wiki Cookbook](doc/cookbook.md).
+
 ---
 
 ## Prerequisites
@@ -143,7 +146,63 @@ What this does:
 
 ---
 
-## 4. Optional persistent flow: run the background workers
+## 4. Knowledge-base article collection
+
+For a durable collection of knowledge-base articles, use one stable workspace
+and a shared backend. PostgreSQL/pgvector is the recommended path when the
+ingest command and background workers run in separate processes. Keep the same
+`--data-dir`, `--backend`, and `--dsn` for every command that belongs to that
+workspace.
+
+The CLI currently ingests one local article per invocation. This PowerShell
+recipe is the supported batch composition; it intentionally does not invent a
+separate bulk-write path:
+
+```powershell
+$workspace = "engineering-kb"
+$dataDir = ".\\data"
+$dsn = "postgresql://user:pass@localhost:5432/llm_wiki"
+
+Get-ChildItem .\\articles -Recurse -File -Include *.md,*.txt |
+  ForEach-Object {
+    python -m kogwistar_llm_wiki `
+      --data-dir $dataDir `
+      --backend postgres `
+      --dsn $dsn `
+      ingest `
+      --workspace $workspace `
+      --source $_.FullName `
+      --title $_.BaseName `
+      --source-format markdown `
+      --promotion-mode sync
+  }
+```
+
+Use stable article paths and workspace IDs. To capture a changed local article,
+run the same `ingest` command for that article again; the canonical source
+lifecycle determines whether it represents a new revision. Agent clients use
+the corresponding `reingest` capability when replacement text or an approved
+HTTP(S) source is available.
+
+For a production collection:
+
+- Set parser and maintenance provider configuration before the batch. See
+  [Real provider examples](#8-real-provider-examples).
+- Keep sources and raw source artifacts available for provenance, revision
+  handling, archive, and recovery.
+- Run the maintenance and projection workers below after ingestion.
+- Inspect the workspace with `llm-wiki report --workspace engineering-kb
+  --data-dir .\\data --backend postgres --dsn $dsn`.
+- Serve grounded API, A2A, or MCP access only after the workspace has usable
+  knowledge. See [Agent Gateway Quickstart](doc/agent_gateway_quickstart.md).
+
+There is not yet a dedicated manifest-driven `knowledge-base bootstrap`
+command. The batch recipe above is deliberately transparent while that
+operator feature remains separate work.
+
+---
+
+## 5. Optional persistent flow: run the background workers
 
 Use the same `--data-dir` for both daemons so they operate on the same
 workspace and persistent backend:
@@ -165,7 +224,7 @@ Both daemons handle `Ctrl-C` cleanly.
 
 ---
 
-## 5. Inspect the Obsidian vault
+## 6. Inspect the Obsidian vault
 
 For the default demo, open `logs/llm_wiki_demo/vault` in Obsidian.
 
@@ -179,7 +238,7 @@ You should see:
 
 ---
 
-## 6. Optional parser demo harness
+## 7. Optional parser demo harness
 
 `workflow-ingest demo --output-dir logs\workflow_ingest_demo` is a separate
 demo harness from the `kg-doc-parser` repo. It writes parser/demo artifacts
@@ -187,7 +246,7 @@ only and does not populate the `llm-wiki` workspace.
 
 ---
 
-## 7. Real provider examples
+## 8. Real provider examples
 
 If you want to point parsing or maintenance at a real model, set the provider
 and model explicitly. The repo accepts `azure_openai` as an env alias and
@@ -232,7 +291,7 @@ $env:KOGWISTAR_MAINTENANCE_API_KEY_ENV='OPENAI_API_KEY_GPT4_1'
 
 ---
 
-## 8. Run the test suite
+## 9. Run the test suite
 
 ```bash
 pytest tests/unit/          # fast unit tests, no external services needed

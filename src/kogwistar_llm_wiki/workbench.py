@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal, Mapping, Protocol, Sequence
+from typing import Callable, Literal, Mapping, Protocol
 
 from .investigation_history import InvestigationHistoryRecord, InvestigationHistoryService
 from .semantic_lens import (

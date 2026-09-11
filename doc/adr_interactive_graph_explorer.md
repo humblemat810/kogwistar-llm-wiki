@@ -83,7 +83,13 @@ The first application slice is implemented without a Kogwistar source change:
 - `src/kogwistar_llm_wiki/codex_workbench_agent.py` runs the installed Codex
   CLI as an ephemeral, read-only central reasoning worker. JSONL activity
   renews the 150-second lease only while the process is making progress. A
-  late worker that lost ownership cannot overwrite the accepted result.
+  late worker that lost ownership cannot overwrite the accepted result. The
+  same bounded responder can optionally use `codex app-server --stdio`: it
+  performs the App Server JSON-RPC handshake and one ephemeral read-only turn,
+  streams assistant deltas, supports cockpit output schemas, and always closes
+  the child process on timeout or completion. The default remains `codex exec`
+  for backwards compatibility; select App Server transport with
+  `--codex-transport app_server` or `KOGWISTAR_CODEX_TRANSPORT=app_server`.
 - `python -m kogwistar_llm_wiki ... workbench` starts the local HTTP transport,
   recovers pending interactions, and spawns a configurable bounded worker
   pool. The agent receives only the bounded lens and has no direct graph-write
@@ -582,3 +588,18 @@ visible instead of flattening them away.
 - Treating embedding proximity as evidence or truth.
 - Training an RL model as part of the initial viewer work.
 - Porting product UI policy into Rust core.
+
+## Operating Settings Console
+
+The workbench includes an authenticated operator settings console backed by
+`/api/settings` and `/api/settings/health`. It reports effective runtime values
+separately from non-secret desired values stored under the application data
+directory. Local Chroma text embedding remains the always-on knowledge plane;
+the Docker Qwen3-VL Embedding Service is an optional multimodal route.
+
+Only the multimodal retrieval route is live-toggleable in the initial console.
+Provider/model changes are staged and require a graceful restart. Embedding
+profile changes also require an isolated projection and re-embedding; the UI
+never mutates vector dimensions or bypasses the profile guard. High-risk
+operations remain explicit confirmation actions, and personal mode may use the
+same view without an ACL identity.

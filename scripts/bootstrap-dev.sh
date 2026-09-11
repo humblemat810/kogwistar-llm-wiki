@@ -19,6 +19,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 # ---- Repo catalogue ----------------------------------------------------------
 # Each entry: "local-dir-name|github-url"
@@ -36,6 +37,10 @@ require_cmd() {
     printf 'ERROR: required command not found: %s\n' "$1" >&2
     exit 1
   fi
+}
+
+pip_install() {
+  "$PYTHON_BIN" -m pip "$@"
 }
 
 has_python_package() {
@@ -62,7 +67,7 @@ install_editable() {
 
   if has_python_package "$local_dir"; then
     printf '[install] %s - editable from %s\n' "$name" "$local_dir"
-    pip install -e "$local_dir"
+    pip_install install -e "$local_dir"
   else
     printf '[skip]  %s - no Python package metadata found at %s\n' "$name" "$local_dir" >&2
   fi
@@ -71,7 +76,7 @@ install_editable() {
 # ---- Main --------------------------------------------------------------------
 
 require_cmd git
-require_cmd pip
+require_cmd "$PYTHON_BIN"
 
 printf '=== LLM-Wiki bootstrap ===\n'
 printf 'Root: %s\n\n' "$ROOT_DIR"
@@ -94,7 +99,7 @@ done
 # Step 3: Install this package last
 printf '\n--- Step 3: install kogwistar-llm-wiki ---\n'
 cd "$ROOT_DIR"
-pip install -e ".[dev]"
+pip_install install -e ".[dev]"
 
 printf '\n=== Bootstrap complete ===\n'
 printf 'Local paths in use:\n'
@@ -102,4 +107,4 @@ for entry in "${REPOS[@]}"; do
   name="${entry%%|*}"
   printf '  %s -> %s/%s\n' "$name" "$ROOT_DIR" "$name"
 done
-printf '\nVerify with: pip show kogwistar kogwistar-obsidian-sink kg-doc-parser\n'
+printf '\nVerify with: %s -m pip show kogwistar kogwistar-obsidian-sink graph-knowledge-doc-parser\n' "$PYTHON_BIN"

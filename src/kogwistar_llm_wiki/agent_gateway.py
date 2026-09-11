@@ -18,7 +18,6 @@ from urllib.parse import urlparse
 from .otel import LlmWikiTelemetry
 from .inspection import build_workspace_quality_report
 from .models import IngestPipelineRequest
-from .namespaces import WorkspaceNamespaces
 from .utils import _temporary_namespace
 from .workbench_api import WorkbenchApi
 
@@ -297,15 +296,17 @@ class AgentGateway:
                 + ", ".join(missing_source_ids)
             )
         jobs: list[str] = []
+        skipped_source_ids: list[str] = []
         ns = self.api.pipeline.namespaces_for(workspace_id)
-        for source_id, request in source_requests:
+        source_requests, skipped_source_ids = _limit_budgeted_sources(source_requests, budgets)
+        for index, (source_id, request) in enumerate(source_requests):
             job_id = self.api.pipeline.create_maintenance_request(
                 request=request,
                 source_document_id=source_id,
                 namespace=ns.conv_bg,
                 maintenance_kind=str(arguments.get("maintenance_kind") or "document_propose_crosslinks"),
                 objective=objective or None,
-                budgets=budgets,
+                budgets=_partition_budgets(budgets, len(source_requests), index),
             )
             jobs.append(job_id)
         return {
@@ -315,6 +316,7 @@ class AgentGateway:
             "status": "queued" if jobs else "no_matching_sources",
             "job_ids": jobs,
             "budgets": budgets,
+            "skipped_source_document_ids": skipped_source_ids,
         }
 
     def status(self, arguments: Mapping[str, Any]) -> dict[str, object]:
@@ -324,6 +326,13 @@ class AgentGateway:
         report = build_workspace_quality_report(self.api.pipeline.engines, workspace_id=workspace_id, report_scope="all")
         maintenance_errors: list[str] = []
         jobs = self._maintenance_jobs(workspace_id, errors=maintenance_errors)
+        usage_error: str | None = None
+        usage_snapshot: dict[str, object] | None = None
+        try:
+            snapshot = self.api.pipeline.usage_projection(workspace_id).snapshot()
+            usage_snapshot = snapshot.as_dict() if snapshot is not None else None
+        except Exception as exc:  # noqa: BLE001
+            usage_error = f"{type(exc).__name__}: {exc}"
         source_states: dict[str, int] = {}
         for item in self._source_documents(workspace_id):
             state = str(item["metadata"].get("revision_status") or "registered")
@@ -339,6 +348,11 @@ class AgentGateway:
                 "jobs": jobs[:100],
                 "errors": maintenance_errors,
             },
+            "usage": {
+                "available": usage_error is None,
+                "snapshot": usage_snapshot,
+                "error": usage_error,
+            },
         }
 
     def hypergraph_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:
@@ -349,7 +363,27 @@ class AgentGateway:
         return self.api.get_lens(payload)
 
     def propose(self, arguments: Mapping[str, Any]) -> dict[str, object]:
-        return self.api.validate_proposal(arguments)
+        validation = self.api.validate_proposal(arguments)
+        if not validation.get("accepted"):
+            return validation
+        request = arguments.get("request")
+        proposal = arguments.get("proposal")
+        if not isinstance(request, Mapping) or not isinstance(proposal, Mapping):
+            return validation
+        workspace_id = str(request.get("workspace_id") or "").strip()
+        if not workspace_id:
+            return {**validation, "accepted": False, "reason": "workspace_id_required"}
+        interaction = self.api.interactions.persist_proposal(
+            workspace_id=workspace_id,
+            request=request,
+            proposal=proposal,
+        )
+        return {
+            **validation,
+            "interaction_id": interaction.interaction_id,
+            "status": interaction.status,
+            "confirmation_required": True,
+        }
 
     def confirm(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         return self.api.confirm_cockpit_proposal(arguments)
@@ -451,7 +485,9 @@ class AgentGateway:
     def _source_documents(self, workspace_id: str) -> list[dict[str, object]]:
         ns = self.api.pipeline.namespaces_for(workspace_id)
         with _temporary_namespace(self.api.pipeline.engines.kg, ns.source_space):
-            nodes = self.api.pipeline.engines.kg.read.get_nodes(limit=10_000)
+            # Source discovery must not lose records because revision and
+            # readiness artifacts consume an arbitrary fixed page size.
+            nodes = self.api.pipeline.engines.kg.read.get_nodes(limit=None)
         result: list[dict[str, object]] = []
         seen: set[str] = set()
         for node in nodes:
@@ -541,6 +577,42 @@ def _budgets(arguments: Mapping[str, Any]) -> dict[str, object]:
             if name in integer_names and not isinstance(value, int):
                 raise ValueError(f"{name} must be a non-negative integer")
             result[name] = value
+    return result
+
+
+def _limit_budgeted_sources(
+    source_requests: list[tuple[str, IngestPipelineRequest]],
+    budgets: Mapping[str, object],
+) -> tuple[list[tuple[str, IngestPipelineRequest]], list[str]]:
+    """Prevent a request-level call/step quota from multiplying per document."""
+    limits = [
+        int(budgets[name])
+        for name in ("max_llm_calls", "max_steps")
+        if name in budgets and int(budgets[name]) > 0
+    ]
+    if not limits:
+        return source_requests, []
+    allowed = min(len(source_requests), min(limits))
+    return source_requests[:allowed], [source_id for source_id, _ in source_requests[allowed:]]
+
+
+def _partition_budgets(
+    budgets: Mapping[str, object], count: int, index: int
+) -> dict[str, object]:
+    """Partition additive request budgets deterministically across source jobs."""
+    if count <= 0:
+        return dict(budgets)
+    result: dict[str, object] = {}
+    for name, value in budgets.items():
+        if not isinstance(value, Real) or isinstance(value, bool):
+            result[name] = value
+            continue
+        if name in {"max_llm_calls", "max_tokens", "max_steps"}:
+            total = int(value)
+            base, remainder = divmod(total, count)
+            result[name] = base + (1 if index < remainder else 0)
+        else:
+            result[name] = float(value) / count
     return result
 
 

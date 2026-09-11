@@ -5,6 +5,9 @@ from http.client import HTTPConnection
 from threading import Thread
 import time
 
+import pytest
+from jose import jwt
+
 from kogwistar_llm_wiki import (
     IngestPipeline,
     WorkbenchApi,
@@ -14,7 +17,16 @@ from kogwistar_llm_wiki import (
 from http.server import ThreadingHTTPServer
 
 
-def test_workbench_http_serves_lens_contract_without_core_changes():
+@pytest.fixture(autouse=True)
+def _personal_mode_by_default(monkeypatch):
+    """Keep HTTP contract tests independent of a developer's .env file."""
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
+
+
+def test_workbench_http_serves_lens_contract_without_core_changes(monkeypatch):
+    # Do not let a developer's .env turn this personal-mode contract test into
+    # an authenticated deployment.
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
     engines = build_in_memory_namespace_engines()
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(WorkbenchApi(IngestPipeline(engines))))
     thread = Thread(target=server.serve_forever, daemon=True)
@@ -89,7 +101,41 @@ def test_workbench_http_exposes_container_health_endpoint():
         engines.close()
 
 
-def test_workbench_http_runs_codex_turn_as_durable_background_interaction():
+def test_workbench_http_exposes_redacted_settings_and_staged_updates(tmp_path, monkeypatch):
+    monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN", "never-return-this")
+    engines = build_in_memory_namespace_engines()
+    api = WorkbenchApi(IngestPipeline(engines), settings_path=str(tmp_path / "desired.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        auth_headers = {"Authorization": "Bearer never-return-this"}
+        connection.request("GET", "/api/settings?workspace_id=settings-test", headers=auth_headers)
+        response = connection.getresponse()
+        snapshot = json.loads(response.read())
+        assert response.status == 200
+        assert snapshot["effective"]["workspace_id"] == "settings-test"
+        assert "never-return-this" not in json.dumps(snapshot)
+        body = json.dumps({"workspace_id": "settings-test", "settings": {"parser_model": "gpt-5-mini"}}).encode()
+        connection.request("POST", "/api/settings/desired", body=body, headers={**auth_headers, "content-type": "application/json", "content-length": str(len(body))})
+        updated = connection.getresponse()
+        payload = json.loads(updated.read())
+        assert updated.status == 200
+        assert payload["desired"]["parser_model"] == "gpt-5-mini"
+        assert payload["restart_required"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        api.close()
+        engines.close()
+
+
+def test_workbench_http_runs_codex_turn_as_durable_background_interaction(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
     engines = build_in_memory_namespace_engines()
     api = WorkbenchApi(
         IngestPipeline(engines),
@@ -133,4 +179,60 @@ def test_workbench_http_runs_codex_turn_as_durable_background_interaction():
         server.server_close()
         thread.join(timeout=5)
         api.close()
+        engines.close()
+
+
+@pytest.mark.parametrize("mode", ["disabled", "static_token", "kogwistar_jwt"])
+def test_workbench_http_auth_matrix_is_explicit_and_env_independent(monkeypatch, mode):
+    """Exercise each supported mode instead of inheriting local .env state."""
+    for name in (
+        "LLM_WIKI_AUTH_MODE",
+        "LLM_WIKI_AUTH_REQUIRED",
+        "LLM_WIKI_API_TOKEN",
+        "LLM_WIKI_MCP_TOKEN",
+        "LLM_WIKI_API_TOKEN_SCOPES",
+        "JWT_SECRET",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    headers = {}
+    if mode == "static_token":
+        monkeypatch.setenv("LLM_WIKI_AUTH_MODE", mode)
+        monkeypatch.setenv("LLM_WIKI_API_TOKEN", "matrix-secret")
+        headers = {"Authorization": "Bearer matrix-secret"}
+    elif mode == "kogwistar_jwt":
+        monkeypatch.setenv("LLM_WIKI_AUTH_MODE", mode)
+        monkeypatch.setenv("JWT_SECRET", "matrix-secret")
+        token = jwt.encode(
+            {"sub": "matrix-user", "scope": "read", "workspaces": ["matrix"]},
+            "matrix-secret",
+            algorithm="HS256",
+        )
+        headers = {"Authorization": "Bearer " + token}
+    else:
+        monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
+
+    engines = build_in_memory_namespace_engines()
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        build_workbench_handler(WorkbenchApi(IngestPipeline(engines))),
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/api/lens?workspace_id=matrix&query=missing", headers=headers)
+        response = connection.getresponse()
+        response.read()
+        assert response.status == 200
+
+        if mode != "disabled":
+            connection.request("GET", "/api/lens?workspace_id=matrix&query=missing")
+            unauthorized = connection.getresponse()
+            unauthorized.read()
+            assert unauthorized.status == 401
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
         engines.close()

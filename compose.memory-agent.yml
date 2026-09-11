@@ -1,0 +1,63 @@
+# OVERLAY ONLY: this file is not a standalone Compose application.
+# It requires compose.yml first, and compose.multimodal.yml when multimodal
+# retrieval is enabled. The base file provides PostgreSQL, REST, and MCP.
+# Development/operator example: PostgreSQL-backed multimodal memory agent.
+#
+# Start with the base app, the Qwen3-VL sidecar, and this observability overlay:
+#   docker compose -f compose.yml -f compose.embedding-vllm.yml \
+#     -f compose.memory-agent.yml up --build
+# The custom Transformers reference can be selected instead with
+# compose.multimodal.yml (do not combine both embedding overlays).
+#
+# This file is intentionally an example. Keep credentials in .env or a secret
+# manager; do not commit a working token.
+services:
+  rest:
+    depends_on:
+      grafana:
+        condition: service_started
+    environment:
+      LLM_WIKI_AGENT_API_ENABLED: "true"
+      LLM_WIKI_OTEL_ENABLED: ${LLM_WIKI_OTEL_ENABLED:-true}
+      LLM_WIKI_OTEL_SERVICE_NAME: ${LLM_WIKI_OTEL_SERVICE_NAME:-llm-wiki-memory}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://grafana:4318
+      LLM_WIKI_AUTH_MODE: ${LLM_WIKI_AUTH_MODE:-static_token}
+      LLM_WIKI_AUTH_REQUIRED: ${LLM_WIKI_AUTH_REQUIRED:-true}
+      LLM_WIKI_API_TOKEN: ${LLM_WIKI_API_TOKEN:?Set LLM_WIKI_API_TOKEN in .env}
+
+  mcp:
+    depends_on:
+      grafana:
+        condition: service_started
+    environment:
+      LLM_WIKI_OTEL_ENABLED: ${LLM_WIKI_OTEL_ENABLED:-true}
+      LLM_WIKI_OTEL_SERVICE_NAME: ${LLM_WIKI_OTEL_SERVICE_NAME:-llm-wiki-memory-mcp}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://grafana:4318
+      LLM_WIKI_AUTH_MODE: ${LLM_WIKI_AUTH_MODE:-static_token}
+      LLM_WIKI_AUTH_REQUIRED: ${LLM_WIKI_AUTH_REQUIRED:-true}
+      LLM_WIKI_MCP_AUTH_REQUIRED: ${LLM_WIKI_MCP_AUTH_REQUIRED:-true}
+      LLM_WIKI_API_TOKEN: ${LLM_WIKI_API_TOKEN:?Set LLM_WIKI_API_TOKEN in .env}
+      LLM_WIKI_MCP_TOKEN: ${LLM_WIKI_MCP_TOKEN:-${LLM_WIKI_API_TOKEN}}
+
+  # Grafana OTEL-LGTM is a convenient local collector plus Grafana viewer.
+  # Replace this with a separately managed collector/Grafana stack in prod.
+  grafana:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "127.0.0.1:${LLM_WIKI_GRAFANA_PORT:-3000}:3000"
+    expose:
+      - "4318"
+
+  # Optional local OAuth/OIDC provider for integration testing.
+  # Uncomment the whole service to run Keycloak, then configure the app's
+  # kogwistar_jwt mode with a compatible issuer, audience, and verification key.
+  # Starting Keycloak alone does NOT switch LLM-Wiki authentication on.
+  #
+  # keycloak:
+  #   image: quay.io/keycloak/keycloak:latest
+  #   command: start-dev
+  #   environment:
+  #     KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME}
+  #     KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD}
+  #   ports:
+  #     - "127.0.0.1:${KEYCLOAK_PORT:-8080}:8080"

@@ -79,6 +79,44 @@ export type WorkbenchInteraction = {
   error: string | null;
 };
 
+export type SettingsSnapshot = {
+  version: number;
+  effective: Record<string, any>;
+  desired: Record<string, any>;
+  components: Record<string, { state: string; toggleable?: boolean; description?: string }>;
+  restart_required: boolean;
+  reembedding_required: boolean;
+  warnings: string[];
+};
+
+export const sampleSettings: SettingsSnapshot = {
+  version: 1,
+  effective: {
+    workspace_id: "rl-fixture",
+    backend: "Offline fixture",
+    data_dir: "local fixture",
+    parser: { provider: "ollama", model: "gemma4:e2b" },
+    maintenance: { provider: "ollama", model: "gemma4:e2b" },
+    embeddings: {
+      kg: { backend: "Offline fixture", profile: { provider: "fake", model: "kogwistar-llm-wiki-embedding-v1", dimension: 2, similarity_metric: "cosine" }, profile_locked: false },
+    },
+    multimodal: { enabled: false, configured: false, model: "Qwen/Qwen3-VL-Embedding-2B", dimension: 1024, service_url: null },
+    auth_mode: "disabled",
+    otel: { enabled: false, configured: false, endpoint: null, service_name: "kogwistar-llm-wiki", packages_available: true },
+  },
+  desired: {},
+  components: {
+    knowledge_text_embedding: { state: "up", toggleable: false, description: "Local text embedding used by the configured graph backend." },
+    multimodal_embedding: { state: "disabled", toggleable: true, description: "Qwen3-VL remote projection route." },
+    parser: { state: "up", toggleable: false },
+    maintenance: { state: "up", toggleable: false },
+    otel_sink: { state: "disabled", toggleable: true, description: "Optional OpenTelemetry trace sink for the configured collector." },
+  },
+  restart_required: false,
+  reembedding_required: false,
+  warnings: [],
+};
+
 export const sampleLens: LensSnapshot = {
   lens_id: "lens:offline-learning",
   workspace_id: "rl-fixture",

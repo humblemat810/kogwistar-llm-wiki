@@ -1,13 +1,30 @@
 import { useEffect, useRef, useState } from "react";
-import Graph from "graphology";
+import { MultiDirectedGraph } from "graphology";
 import Sigma from "sigma";
-import type { LensNode, LensSnapshot, WorkbenchAskResponse, WorkbenchInteraction } from "./contracts";
-import { sampleLens } from "./contracts";
+import type { LensNode, LensSnapshot, SettingsSnapshot, WorkbenchAskResponse, WorkbenchInteraction } from "./contracts";
+import { sampleLens, sampleSettings } from "./contracts";
 
 type Mode = "deterministic" | "codex";
 
 type LensLoad = { snapshot: LensSnapshot; source: "live" | "offline" };
 type AskLoad = { response: WorkbenchAskResponse; source: "live" | "offline" };
+
+function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = window.sessionStorage.getItem("llmWikiApiToken");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+}
+
+async function loadSettings(): Promise<{ settings: SettingsSnapshot; source: "live" | "offline" }> {
+  try {
+    const response = await apiFetch(`/api/settings?workspace_id=${encodeURIComponent(workspaceId)}`, { headers: { accept: "application/json" } });
+    if (response.ok) return { settings: (await response.json()) as SettingsSnapshot, source: "live" };
+  } catch {
+    // The checked-in fixture keeps the browser usable without a running host.
+  }
+  return { settings: sampleSettings, source: "offline" };
+}
 
 const workspaceId = new URLSearchParams(window.location.search).get("workspace_id") || "rl-fixture";
 
@@ -17,7 +34,7 @@ async function loadLens(query: string, anchorId?: string, pinnedNodeIds: string[
   for (const nodeId of pinnedNodeIds) params.append("pinned_node_id", nodeId);
   const endpoint = `/api/lens?${params.toString()}`;
   try {
-    const response = await fetch(endpoint, { headers: { accept: "application/json" } });
+    const response = await apiFetch(endpoint, { headers: { accept: "application/json" } });
     if (response.ok) return { snapshot: (await response.json()) as LensSnapshot, source: "live" };
     if (!allowOffline) throw new Error(`Lens request failed (${response.status})`);
   } catch (error) {
@@ -36,7 +53,7 @@ async function askWorkbench(
 ): Promise<AskLoad> {
   try {
     const endpoint = mode === "codex" ? "/api/interactions" : "/api/ask";
-    const response = await fetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       signal,
@@ -59,7 +76,7 @@ async function askWorkbench(
           signal?.addEventListener("abort", () => { window.clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
         });
         const params = new URLSearchParams({ workspace_id: interaction.workspace_id, interaction_id: interaction.interaction_id });
-        const polled = await fetch(`/api/interactions?${params.toString()}`, { headers: { accept: "application/json" }, signal });
+        const polled = await apiFetch(`/api/interactions?${params.toString()}`, { headers: { accept: "application/json" }, signal });
         if (!polled.ok) throw new Error(`Interaction polling failed (${polled.status})`);
         interaction = (await polled.json()) as WorkbenchInteraction;
       }
@@ -126,12 +143,142 @@ export function App() {
   const [answer, setAnswer] = useState<WorkbenchAskResponse["answer"] | null>(null);
   const [agentStatus, setAgentStatus] = useState<WorkbenchAskResponse["agent_status"]>("not_requested");
   const [requestError, setRequestError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<SettingsSnapshot>(sampleSettings);
+  const [settingsSource, setSettingsSource] = useState<"live" | "offline">("offline");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [apiToken, setApiToken] = useState(() => window.sessionStorage.getItem("llmWikiApiToken") ?? "");
+  const [composeMode, setComposeMode] = useState("gpu");
+  const [composeBackend, setComposeBackend] = useState("postgres");
+  const [composeOtel, setComposeOtel] = useState(false);
+  const [composeOauth, setComposeOauth] = useState(false);
+  const [composeRevision, setComposeRevision] = useState("");
+  const [composeAuthMode, setComposeAuthMode] = useState("disabled");
+  const [parserProvider, setParserProvider] = useState("");
+  const [parserModel, setParserModel] = useState("");
+  const [parserEndpoint, setParserEndpoint] = useState("");
+  const [maintenanceProvider, setMaintenanceProvider] = useState("");
+  const [maintenanceModel, setMaintenanceModel] = useState("");
+  const [maintenanceEndpoint, setMaintenanceEndpoint] = useState("");
+  const [composeYaml, setComposeYaml] = useState("");
+  const [modelCatalog, setModelCatalog] = useState<{ parser: string[]; maintenance: string[] }>({ parser: [], maintenance: [] });
   const sessionId = useRef(`browser-${Math.random().toString(36).slice(2)}`);
   const activeRequest = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    void loadSettings().then((loaded) => {
+      setSettings(loaded.settings);
+      setSettingsSource(loaded.source);
+      setParserProvider(String(loaded.settings.effective.parser?.provider ?? ""));
+      setParserModel(String(loaded.settings.effective.parser?.model ?? ""));
+      setParserEndpoint(String(loaded.settings.effective.parser?.base_url ?? ""));
+      setMaintenanceProvider(String(loaded.settings.effective.maintenance?.provider ?? ""));
+      setMaintenanceModel(String(loaded.settings.effective.maintenance?.model ?? ""));
+      setMaintenanceEndpoint(String(loaded.settings.effective.maintenance?.base_url ?? ""));
+    });
+    void Promise.all(["parser", "maintenance"].map(async (role) => {
+      try {
+        const response = await apiFetch(`/api/models?role=${role}&workspace_id=${encodeURIComponent(workspaceId)}`);
+        const payload = await response.json() as { models?: string[] };
+        return [role, payload.models ?? []] as const;
+      } catch { return [role, []] as const; }
+    })).then((entries) => setModelCatalog(Object.fromEntries(entries) as { parser: string[]; maintenance: string[] }));
+  }, []);
+
+  async function saveDesiredSettings(changes: Record<string, unknown>) {
+    setSettingsSaving(true);
+    setSettingsMessage("");
+    try {
+      const response = await apiFetch("/api/settings/desired", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ workspace_id: workspaceId, settings: changes }),
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({})) as { detail?: string; error?: string };
+        throw new Error(failure.detail ?? failure.error ?? `Settings request failed (${response.status})`);
+      }
+      setSettings(await response.json() as SettingsSnapshot);
+      setSettingsMessage("Desired settings saved. The effective process is unchanged until the reported apply step.");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Settings request failed");
+    } finally { setSettingsSaving(false); }
+  }
+
+  async function applySettings() {
+    setSettingsSaving(true);
+    try {
+      const response = await apiFetch("/api/settings/apply", {
+        method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ workspace_id: workspaceId, confirmed: true }),
+      });
+      setSettings(await response.json() as SettingsSnapshot);
+      setSettingsMessage("Apply recorded. Follow the restart or re-embedding instructions before treating it as active.");
+    } catch { setSettingsMessage("Could not reach the settings service"); }
+    finally { setSettingsSaving(false); }
+  }
+
+  async function previewCompose() {
+    setSettingsMessage("");
+    try {
+      const response = await apiFetch("/api/compose/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ workspace_id: workspaceId, auth_mode: composeAuthMode, backend: composeBackend, mode: composeMode, with_otel: composeOtel, with_oauth: composeOauth, model_revision: composeRevision }),
+      });
+      const result = await response.json() as { valid?: boolean; errors?: string[]; yaml?: string | null; detail?: string; error?: string };
+      if (!response.ok) {
+        setComposeYaml("");
+        setSettingsMessage(result.detail ?? result.error ?? `Compose preview failed (${response.status})`);
+        return;
+      }
+      if (!result.valid) { setComposeYaml(""); setSettingsMessage((result.errors ?? ["Compose configuration is invalid"]).join(" ")); return; }
+      setComposeYaml(result.yaml ?? "");
+      setSettingsMessage("Compose preview generated. Save it to a new file, then run the CLI check before starting containers.");
+    } catch { setSettingsMessage("Could not reach the Compose configuration service"); }
+  }
+
+  async function scanModels(role: "parser" | "maintenance") {
+    const provider = role === "parser" ? parserProvider : maintenanceProvider;
+    const endpoint = role === "parser" ? parserEndpoint : maintenanceEndpoint;
+    try {
+      const params = new URLSearchParams({ role, workspace_id: workspaceId, provider, base_url: endpoint });
+      const response = await apiFetch(`/api/models?${params.toString()}`, { headers: { accept: "application/json" } });
+      const payload = await response.json() as { models?: string[]; source?: string };
+      setModelCatalog((current) => ({ ...current, [role]: payload.models ?? [] }));
+      setSettingsMessage(payload.source === "unavailable" ? `Could not reach ${provider || "the provider"}; manual model entry remains available.` : `Loaded ${payload.models?.length ?? 0} ${role} model suggestions.`);
+    } catch {
+      setSettingsMessage("Model discovery unavailable; enter a model name manually.");
+    }
+  }
+
+  async function checkComposePreview() {
+    if (!composeYaml) return;
+    try {
+      const response = await apiFetch("/api/compose/check", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ yaml: composeYaml }),
+      });
+      const result = await response.json() as { valid: boolean; errors?: string[] };
+      setSettingsMessage(result.valid ? "Compose preview passed the structural checks. Run docker compose config --quiet before startup." : (result.errors ?? ["Compose preview is invalid"]).join(" "));
+    } catch { setSettingsMessage("Could not validate the Compose preview"); }
+  }
+
+  function downloadComposePreview() {
+    if (!composeYaml) return;
+    const url = URL.createObjectURL(new Blob([composeYaml], { type: "text/yaml" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "compose.generated.yml";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  useEffect(() => {
     if (!graphRoot.current) return;
-    const graph = new Graph();
+    const graph = new MultiDirectedGraph();
     for (const [index, node] of lens.nodes.entries()) {
       const previous = positions.current.get(node.id);
       const seed = index === 0
@@ -316,8 +463,21 @@ export function App() {
     <main className="shell">
       <header className="topbar">
         <div><p className="eyebrow">KOGWISTAR / KNOWLEDGE WORKBENCH</p><h1>Think in a living graph.</h1></div>
-        <div className="status"><span className="dot" /> {lens.nodes.length} visible / {lens.completeness} / <span className={lensSource === "live" ? "source-live" : "source-offline"}>{lensSource === "live" ? "live graph" : "offline fixture"}</span></div>
+        <div className="status"><span className="dot" /> {lens.nodes.length} visible / {lens.completeness} / <span className={lensSource === "live" ? "source-live" : "source-offline"}>{lensSource === "live" ? "live graph" : "offline fixture"}</span><button className="settings-toggle" onClick={() => setSettingsOpen((value) => !value)} aria-expanded={settingsOpen}>Settings</button></div>
       </header>
+      {settingsOpen && <section className="settings-panel" aria-label="Operating settings">
+        <div className="settings-heading"><div><p className="eyebrow">OPERATING CONSOLE</p><h2>System settings</h2>{settingsMessage && <p className="settings-message" role="status">{settingsMessage}</p>}</div><button onClick={() => setSettingsOpen(false)}>Close</button></div>
+        <div className="settings-grid">
+          <article className="settings-card"><p className="eyebrow">OVERVIEW</p><h3>{String(settings.effective.backend)}{settingsSource === "offline" ? " (offline fixture)" : ""}</h3><p>Workspace <strong>{settings.effective.workspace_id}</strong></p><p>Auth mode <strong>{settings.effective.auth_mode}</strong></p><p className="settings-note">{settingsSource === "live" ? "Effective values are measured from this running process." : "This is an offline fixture, not a report of the Docker deployment."} Compose generation below is a separate target configuration.</p></article>
+          <article className="settings-card"><p className="eyebrow">EMBEDDING PLANES</p><h3>Knowledge text</h3>{Object.entries(settings.effective.embeddings ?? {}).map(([space, value]) => { const item = value as { backend?: string; profile?: Record<string, unknown>; profile_locked?: boolean }; const profile = item.profile ?? {}; return <div className="profile-row" key={space}><strong>{space}</strong><span>{String(profile.provider ?? "unknown")} / {String(profile.model ?? "unknown")}</span><small>{String(profile.dimension ?? "?")} dimensions / {item.backend ?? "backend"}{item.profile_locked ? " / profile locked" : ""}</small></div>; })}<p className="settings-note">The generated Compose default is PostgreSQL/pgvector. Chroma is shown only for the offline fixture or when explicitly selected.</p></article>
+          <article className="settings-card"><p className="eyebrow">MULTIMODAL</p><h3>Docker Qwen3-VL</h3><p className={settings.effective.multimodal?.enabled ? "state-up" : "state-down"}>{settings.effective.multimodal?.enabled ? "Route available" : "Route disabled"}</p><p>{String(settings.effective.multimodal?.model ?? "Qwen3-VL")}, {String(settings.effective.multimodal?.dimension ?? 1024)}D</p><button disabled={settingsSaving} onClick={() => void saveDesiredSettings({ multimodal_enabled: !settings.effective.multimodal?.enabled })}>{settings.effective.multimodal?.enabled ? "Disable route" : "Enable route"}</button><p className="settings-note">This toggles retrieval use; it does not change the stored vector profile.</p></article>
+          <article className="settings-card"><p className="eyebrow">MODELS</p><h3>Thinking workers</h3><label>Parser provider<input value={parserProvider} onChange={(event) => setParserProvider(event.target.value)} onBlur={(event) => void saveDesiredSettings({ parser_provider: event.target.value })} list="providers" placeholder="ollama, openai, router" /></label><label>Parser endpoint<input value={parserEndpoint} onChange={(event) => setParserEndpoint(event.target.value)} onBlur={(event) => void saveDesiredSettings({ parser_base_url: event.target.value })} placeholder="http://localhost:11434" /></label><label>Parser model<input list="parser-models" value={parserModel} onChange={(event) => setParserModel(event.target.value)} onBlur={(event) => void saveDesiredSettings({ parser_model: event.target.value })} /><button onClick={() => void scanModels("parser")}>Scan parser models</button><datalist id="parser-models">{modelCatalog.parser.map((model) => <option value={model} key={model} />)}</datalist></label><label>Maintenance provider<input value={maintenanceProvider} onChange={(event) => setMaintenanceProvider(event.target.value)} onBlur={(event) => void saveDesiredSettings({ maintenance_provider: event.target.value })} list="providers" placeholder="ollama, openai, router" /></label><label>Maintenance endpoint<input value={maintenanceEndpoint} onChange={(event) => setMaintenanceEndpoint(event.target.value)} onBlur={(event) => void saveDesiredSettings({ maintenance_base_url: event.target.value })} placeholder="http://localhost:11434" /></label><label>Maintenance model<input list="maintenance-models" value={maintenanceModel} onChange={(event) => setMaintenanceModel(event.target.value)} onBlur={(event) => void saveDesiredSettings({ maintenance_model: event.target.value })} /><button onClick={() => void scanModels("maintenance")}>Scan maintenance models</button><datalist id="maintenance-models">{modelCatalog.maintenance.map((model) => <option value={model} key={model} />)}</datalist></label><datalist id="providers"><option value="ollama" /><option value="openai" /><option value="azure" /><option value="router" /><option value="fake" /></datalist><p className="settings-note">Provider and endpoint discovery is advisory. Ollama uses <code>/api/tags</code>; OpenAI-compatible and router endpoints use <code>/v1/models</code>. If discovery fails, type any supported provider/model manually. Changes require a graceful restart. Codex subscription cockpit is separate from structured parser and maintenance workers.</p></article>
+        <article className="settings-card"><p className="eyebrow">OBSERVABILITY</p><h3>OpenTelemetry sink</h3><p className={settings.effective.otel?.enabled ? "state-up" : "state-down"}>{settings.effective.otel?.enabled ? "Tracing enabled" : "Tracing disabled"}</p><p>{String(settings.effective.otel?.service_name ?? "kogwistar-llm-wiki")}</p><p className="settings-note">{settings.effective.otel?.endpoint ? `Collector: ${String(settings.effective.otel.endpoint)}` : "No OTLP collector endpoint configured"}</p><button disabled={settingsSaving || settings.effective.otel?.packages_available === false} onClick={() => void saveDesiredSettings({ otel_enabled: !settings.effective.otel?.enabled })}>{settings.effective.otel?.enabled ? "Disable tracing" : "Enable tracing"}</button><p className="settings-note">Grafana/collector availability is checked separately; this toggle controls the current process sink.</p></article>
+        <article className="settings-card"><p className="eyebrow">IDENTITY</p><h3>OAuth / OIDC</h3><p className={settings.effective.auth_mode === "disabled" ? "state-down" : "state-up"}>{settings.effective.auth_mode === "disabled" ? "Personal mode" : `Managed: ${String(settings.effective.auth_mode)}`}</p><label>Authentication mode<select aria-label="Authentication mode" defaultValue={String(settings.desired.auth_mode ?? settings.effective.auth_mode ?? "disabled")} onChange={(event) => void saveDesiredSettings({ auth_mode: event.target.value })}><option value="disabled">Personal (no identity)</option><option value="static_token">Static token</option><option value="kogwistar_jwt">OAuth/OIDC JWT</option></select></label><label>Session bearer token<input aria-label="Session bearer token" type="password" value={apiToken} onChange={(event) => { setApiToken(event.target.value); if (event.target.value) window.sessionStorage.setItem("llmWikiApiToken", event.target.value); else window.sessionStorage.removeItem("llmWikiApiToken"); }} placeholder="Only needed for authenticated APIs" /></label><p className="settings-note">The token stays in this browser tab and is sent only to this same-origin API. It is never persisted by LLM-Wiki or included in settings responses.</p><p className="settings-note">This stages the mode in app settings. Update Compose JWT/OIDC variables, restart gracefully, and verify workspace ACLs before exposure.</p></article>
+          <article className="settings-card compose-card"><p className="eyebrow">DOCKER SETUP</p><h3>Compose helper</h3><p className="settings-note">Generate a safe starting bundle. Secrets remain environment placeholders.</p><label>Graph backend<select aria-label="Graph backend" value={composeBackend} onChange={(event) => setComposeBackend(event.target.value)}><option value="postgres">PostgreSQL / pgvector (recommended)</option><option value="chroma" disabled>Embedded Chroma (single-process only)</option></select></label><p className="settings-note">This two-process REST/MCP bundle uses PostgreSQL. Use the single-process demo command for embedded Chroma.</p><label>Embedding runtime<select aria-label="Embedding runtime" value={composeMode} onChange={(event) => setComposeMode(event.target.value)}><option value="gpu">GPU / Qwen3-VL</option><option value="cpu">CPU / Qwen3-VL</option><option value="text-only">Text only</option></select></label><label>Authentication<select aria-label="Compose authentication" value={composeAuthMode} onChange={(event) => setComposeAuthMode(event.target.value)}><option value="disabled">Personal local mode</option><option value="static_token">Static token</option><option value="kogwistar_jwt">OAuth/OIDC JWT</option></select></label><label className="check-label"><input type="checkbox" checked={composeOtel} onChange={(event) => setComposeOtel(event.target.checked)} /> Include Grafana OTel</label><label className="check-label"><input type="checkbox" checked={composeOauth} onChange={(event) => setComposeOauth(event.target.checked)} /> Include optional OAuth test provider</label><label>Model revision<input aria-label="Model revision" value={composeRevision} onChange={(event) => setComposeRevision(event.target.value)} placeholder="required for Qwen3-VL" /></label><p className="settings-note">OAuth is an optional Compose profile and does not configure JWT verification by itself.</p><button disabled={settingsSaving} onClick={() => void previewCompose()}>Preview Compose</button>{composeYaml && <><div className="compose-actions"><button onClick={checkComposePreview}>Check preview</button><button onClick={downloadComposePreview}>Download YAML</button></div><textarea aria-label="Generated Compose YAML" readOnly value={composeYaml} rows={10} /></>}</article>
+        </div>
+        {(settings.restart_required || settings.reembedding_required || settings.warnings.length > 0) && <div className="settings-warning" role="status"><strong>Apply impact</strong>{settings.warnings.map((warning) => <p key={warning}>{warning}</p>)}{settings.restart_required && <p>Restart the LLM-Wiki service gracefully after reviewing the desired configuration.</p>}{settings.reembedding_required && <p>Create an isolated projection and re-embed before cutover.</p>}<button disabled={settingsSaving} onClick={() => void applySettings()}>Acknowledge and stage apply</button></div>}
+      </section>}
       <section className="idea-bar" aria-label="Knowledge query controls">
         <label htmlFor="query">Ask the graph</label>
         <input id="query" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitQuery(); }} />

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { sampleSettings } from "../src/contracts";
 
 test("renders a bounded grounded lens with an accessible fallback list", async ({ page }) => {
   await page.goto("/");
@@ -37,6 +38,47 @@ test("does not create horizontal overflow on a narrow viewport", async ({ page }
   }));
   expect(widths.document).toBeLessThanOrEqual(widths.viewport);
   expect(widths.body).toBeLessThanOrEqual(widths.viewport);
+});
+
+test("opens the operating settings console and distinguishes effective values", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "System settings" })).toBeVisible();
+  await expect(page.getByText("Knowledge text")).toBeVisible();
+  await expect(page.getByText("The generated Compose default is PostgreSQL/pgvector. Chroma is shown only for the offline fixture or when explicitly selected.")).toBeVisible();
+  await expect(page.getByText("This is an offline fixture, not a report of the Docker deployment.")).toBeVisible();
+  await expect(page.getByText("OpenTelemetry sink")).toBeVisible();
+  await expect(page.getByText("No OTLP collector endpoint configured")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
+});
+
+test("Compose helper keeps PostgreSQL as the multi-process backend and sends selected auth", async ({ page }) => {
+  let request: Record<string, unknown> | undefined;
+  await page.route("**/api/compose/preview", async (route) => {
+    request = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ json: { valid: true, yaml: "services:\n  rest:\n    image: test\n" } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("option", { name: /Embedded Chroma/ })).toHaveAttribute("disabled", "");
+  await page.getByLabel("Embedding runtime").selectOption("text-only");
+  await page.getByLabel("Compose authentication").selectOption("static_token");
+  await page.getByRole("button", { name: "Preview Compose" }).click();
+  await expect(page.getByLabel("Generated Compose YAML")).toBeVisible();
+  expect(request).toMatchObject({ backend: "postgres", mode: "text-only", auth_mode: "static_token" });
+});
+
+test("sends a manually configured session token to same-origin settings APIs", async ({ page }) => {
+  let authorization = "";
+  await page.route("**/api/settings/desired", async (route) => {
+    authorization = route.request().headers().authorization ?? "";
+    await route.fulfill({ json: { ...sampleSettings, desired: { auth_mode: "static_token" } } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByLabel("Session bearer token").fill("browser-secret");
+  await page.getByLabel("Authentication mode").selectOption("static_token");
+  await expect.poll(() => authorization).toBe("Bearer browser-secret");
 });
 
 test("clicking a claim requests an anchored bounded expansion and carries pins", async ({ page }) => {

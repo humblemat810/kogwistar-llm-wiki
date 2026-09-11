@@ -4,7 +4,6 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock
 
-import pytest
 
 from kogwistar_llm_wiki.utils import _temporary_namespace, _NamespacedEngineProxy
 
@@ -139,8 +138,10 @@ class TestTemporaryNamespace:
 
         t1 = threading.Thread(target=worker, args=("ns_alpha",))
         t2 = threading.Thread(target=worker, args=("ns_beta",))
-        t1.start(); t2.start()
-        t1.join(); t2.join()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
         assert not errors, errors
         # Each thread must have seen exactly its own namespace.

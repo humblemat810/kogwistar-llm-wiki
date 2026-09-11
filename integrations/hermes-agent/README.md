@@ -1,5 +1,8 @@
 # llm-wiki Hermes portable plugin
 
+For the complete article ingestion, maintenance, recovery, and agent-serving
+runbook, see the [LLM-Wiki Cookbook](../../doc/cookbook.md).
+
 This directory follows Hermes Agent Plugins v1 portable layout. Install it
 from a repository containing this directory, then enable it:
 
@@ -15,6 +18,11 @@ HTTP agent flag is needed for this integration. For HTTP MCP, start
 `url` instead; `mcp-http.json` is a starting configuration. Set
 `LLM_WIKI_API_TOKEN` when the remote server requires bearer authentication.
 Keep shared deployments behind authentication.
+
+For a trusted local personal deployment, set `LLM_WIKI_AUTH_MODE=disabled` and
+do not configure a token. This selects the explicit no-identity mode; it does
+not create a default user, and the MCP tools still operate within the selected
+workspace. Use static-token or JWT mode before sharing the server.
 
 The server exposes the semantic tools `query`, `search`, `ingest`, `source`,
 `reingest`, `maintain`, `status`, `hypergraph_search`, `history`, `propose`,

@@ -27,6 +27,10 @@ from .workbench_background import (
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
+from .multimodal_remote import EmbeddingServiceUnavailable
+from .settings import SettingsService
+from .compose_config import ComposeOptions, check_compose_text, render_compose, validate_options
+from .model_catalog import available_models
 
 AgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot], str]
 ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, ProgressCallback], str]
@@ -41,8 +45,10 @@ class WorkbenchApi:
         cockpit_responder: CockpitResponder | None = None,
         codex_worker_count: int = 0,
         trace_sink: Callable[[dict[str, object]], None] | None = None,
+        settings_path: str | None = None,
     ) -> None:
         self.pipeline = pipeline
+        self.settings = SettingsService(pipeline, path=settings_path)
         self.agent_responder = agent_responder
         self.cockpit_responder = cockpit_responder
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
@@ -78,13 +84,117 @@ class WorkbenchApi:
                     checks[name] = "ok"
                 else:
                     checks[name] = "open"
+            multimodal = getattr(self.pipeline, "multimodal_encoder", None)
+            if multimodal is not None and hasattr(multimodal, "readiness"):
+                snapshot = multimodal.readiness()
+                checks["multimodal_embedding"] = "ok" if snapshot.get("ready") else "degraded"
         except Exception as exc:  # noqa: BLE001
             return {"ready": False, "service": "kogwistar-llm-wiki", "checks": checks, "reason": str(exc)}
         return {"ready": True, "service": "kogwistar-llm-wiki", "checks": checks}
 
+    def get_settings(self, *, workspace_id: str = "default") -> dict[str, object]:
+        return self.settings.snapshot(workspace_id=workspace_id)
+
+    def settings_health(self, *, workspace_id: str = "default") -> dict[str, object]:
+        return self.settings.health(workspace_id=workspace_id, readiness=self.readiness())
+
+    def update_desired_settings(
+        self, *, workspace_id: str, changes: Mapping[str, object]
+    ) -> dict[str, object]:
+        return self.settings.update_desired(changes, workspace_id=workspace_id)
+
+    def apply_settings(
+        self, *, workspace_id: str, confirmed: bool
+    ) -> dict[str, object]:
+        return self.settings.apply(workspace_id=workspace_id, confirmed=confirmed)
+
+    def compose_preview(self, payload: Mapping[str, Any]) -> dict[str, object]:
+        """Return a generated Compose bundle without writing files or secrets."""
+        options = ComposeOptions(
+            backend=str(payload.get("backend") or "postgres"),
+            workspace=str(payload.get("workspace_id") or "default"),
+            project_name=str(payload.get("project_name") or "llm-wiki"),
+            mode=str(payload.get("mode") or "gpu"),
+            with_otel=bool(payload.get("with_otel", False)),
+            with_oauth=bool(payload.get("with_oauth", False)),
+            auth_mode=str(payload.get("auth_mode") or "disabled"),
+            model_revision=str(payload.get("model_revision") or ""),
+            embedding_dimension=int(payload.get("embedding_dimension") or 1024),
+        )
+        errors = validate_options(options)
+        return {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None}
+
+    @staticmethod
+    def compose_check(payload: Mapping[str, Any]) -> dict[str, object]:
+        text = payload.get("yaml")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("yaml must be a non-empty string")
+        return check_compose_text(text)
+
+    @staticmethod
+    def available_models(role: str, *, provider: str | None = None, base_url: str | None = None) -> dict[str, object]:
+        if role not in {"parser", "maintenance"}:
+            raise ValueError("role must be parser or maintenance")
+        return available_models(role, provider=provider, base_url=base_url)
+
     def get_lens(self, payload: Mapping[str, Any]) -> dict[str, object]:
         request = _lens_request(payload)
-        return self.pipeline.resolve_semantic_lens(request).to_dict()
+        result = self.pipeline.resolve_semantic_lens(request).to_dict()
+        multimodal = self._multimodal_route(payload, query_text=request.query_text)
+        if multimodal is not None:
+            result["multimodal"] = multimodal
+        return result
+
+    def _multimodal_route(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        query_text: str,
+    ) -> dict[str, object] | None:
+        """Add an optional bounded multimodal route without changing graph truth."""
+        if payload.get("include_multimodal", True) is False or not query_text.strip():
+            return None
+        if not self.settings.snapshot().get("effective", {}).get("multimodal", {}).get("enabled", True):
+            return {"status": "disabled", "route": "multimodal_projection", "hits": []}
+        if (
+            self.pipeline.multimodal_projection_store is None
+            or self.pipeline.multimodal_encoder is None
+        ):
+            return None
+        limit = max(1, min(int(payload.get("multimodal_limit") or 10), 100))
+        try:
+            hits = self.pipeline.search_multimodal(query_text, limit=limit)
+        except EmbeddingServiceUnavailable as exc:
+            return {
+                "status": "degraded",
+                "route": "multimodal_projection",
+                "reason": str(exc),
+                "hits": [],
+            }
+        except Exception as exc:  # keep canonical graph query available on route errors
+            return {
+                "status": "error",
+                "route": "multimodal_projection",
+                "reason": str(exc),
+                "hits": [],
+            }
+        return {
+            "status": "ok",
+            "route": "multimodal_projection",
+            "profile_fingerprint": self.pipeline.multimodal_encoder.profile.fingerprint,
+            "hits": [
+                {
+                    "view_id": hit.view_id,
+                    "score": hit.score,
+                    "source_id": hit.source_id,
+                    "source_revision_id": hit.source_revision_id,
+                    "modality": hit.modality,
+                    "locator": hit.locator,
+                    "metadata": {**hit.metadata, "grounding": "source_view"},
+                }
+                for hit in hits
+            ],
+        }
 
     def ask(
         self,
@@ -148,7 +258,7 @@ class WorkbenchApi:
             mode=mode,
             agent_answer=responder,
         )
-        return {
+        response = {
             "mode": mode,
             "agent_status": agent_status,
             "answer": {
@@ -162,6 +272,10 @@ class WorkbenchApi:
             "snapshot": turn.snapshot.to_dict(),
             "history": _history_record(turn.history),
         }
+        multimodal = self._multimodal_route(payload, query_text=request.query_text)
+        if multimodal is not None:
+            response["multimodal"] = multimodal
+        return response
 
     def _ask_cockpit(
         self,

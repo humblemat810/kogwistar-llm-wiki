@@ -38,10 +38,13 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .compose_config import ComposeOptions, check_compose_text, write_compose
 
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest, NamespaceEngines
@@ -75,6 +78,7 @@ def _build_engines(
     *,
     split_derived_knowledge: bool = False,
     conversation_persistence_mode: str = "single_stage",
+    embedding_profile_mode: str = "enforce",
 ) -> "NamespaceEngines":
     """Construct a NamespaceEngines bundle from the selected backend."""
     from kogwistar_llm_wiki.ingest_pipeline import (
@@ -90,6 +94,8 @@ def _build_engines(
     builder_kwargs: dict[str, object] = {
         "split_derived_knowledge": split_derived_knowledge,
     }
+    if embedding_profile_mode != "enforce":
+        builder_kwargs["embedding_profile_mode"] = embedding_profile_mode
     if conversation_persistence_mode != "single_stage":
         builder_kwargs["conversation_persistence_mode"] = conversation_persistence_mode
     if backend == "chroma":
@@ -416,7 +422,8 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
         split_derived_knowledge=args.split_derived_knowledge,
         **_conversation_persistence_kwargs(args),
     )
-    trace_line = lambda line: logger.info("workbench_cockpit_trace %s", line)
+    def trace_line(line: str) -> None:
+        logger.info("workbench_cockpit_trace %s", line)
     callback_url = os.environ.get("LLM_WIKI_COCKPIT_CALLBACK_URL", "").strip()
     if callback_url:
         allowed_hosts = os.environ.get(
@@ -437,6 +444,8 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
                 model=args.codex_model,
                 profile=args.codex_profile,
                 timeout_seconds=args.codex_timeout,
+                transport=getattr(args, "codex_transport", None)
+                or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec"),
             ),
             trace_line=trace_line,
         )
@@ -488,6 +497,14 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
         _close_engines(engines)
 
 
+def _cmd_embedding_service(args: argparse.Namespace) -> None:
+    """Run the optional isolated multimodal Embedding Service."""
+    from llm_wiki_embedding_service.__main__ import main as run_service
+
+    del args
+    run_service()
+
+
 def _cmd_seed_bundle(args: argparse.Namespace) -> None:
     """Seed, optionally inspect through cockpit mode, and export a graph bundle."""
 
@@ -521,6 +538,8 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
                     model=args.codex_model,
                     profile=args.codex_profile,
                     timeout_seconds=args.codex_timeout,
+                    transport=getattr(args, "codex_transport", None)
+                    or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec"),
                 ),
                 trace_line=lambda line: logger.info("seed_cockpit_trace %s", line),
             )
@@ -586,6 +605,229 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
         if api is not None:
             api.close()
         _close_engines(engines)
+
+
+def _cmd_archive_create(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.archive import create_archive
+
+    engines = _build_engines(
+        args.workspace, args.data_dir, args.backend, args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    try:
+        manifest = create_archive(
+            engines,
+            workspace_id=args.workspace,
+            output=args.output,
+            data_dir=args.data_dir,
+            parent_archive=args.parent,
+            include_backend_snapshot=args.include_backend_snapshot,
+            backend=args.backend,
+        )
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+    finally:
+        _close_engines(engines)
+
+
+def _cmd_archive_inspect(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.archive import inspect_archive
+
+    print(json.dumps(inspect_archive(args.archive), indent=2, sort_keys=True))
+
+
+def _cmd_archive_verify(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.archive import verify_archive
+
+    print(json.dumps(verify_archive(args.archive), indent=2, sort_keys=True))
+
+
+def _cmd_archive_restore(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.archive import inspect_archive, restore_archive, restore_backend_snapshot
+
+    source_workspace = str(inspect_archive(args.archive)["workspace_id"])
+    if args.use_backend_snapshot:
+        if not args.data_dir:
+            raise ValueError("--data-dir is required with --use-backend-snapshot")
+        if not args.apply:
+            # Snapshot validation must never create directories or write files.
+            # The explicit flag mirrors portable event restore safety.
+            result = restore_backend_snapshot(
+                archive=args.archive,
+                target_data_dir=args.data_dir or "",
+                backend=args.backend,
+                embedding_fingerprint=args.embedding_fingerprint,
+                apply=False,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return
+        if args.target_workspace and args.target_workspace != source_workspace:
+            raise ValueError("--use-backend-snapshot supports exact workspace recovery only")
+        result = restore_backend_snapshot(
+            archive=args.archive,
+            target_data_dir=args.data_dir,
+            backend=args.backend,
+            embedding_fingerprint=args.embedding_fingerprint,
+            apply=True,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+    target_workspace = args.target_workspace or source_workspace
+    engines = _build_engines(
+        target_workspace, args.data_dir, args.backend, args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+    )
+    try:
+        report = restore_archive(
+            engines,
+            archive=args.archive,
+            parent_archives=args.parent,
+            target_workspace_id=args.target_workspace,
+            apply=args.apply,
+            target_data_dir=args.data_dir,
+        )
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    finally:
+        _close_engines(engines)
+
+
+def _cmd_archive_catalog(args: argparse.Namespace) -> None:
+    from kogwistar_llm_wiki.archive import inspect_archive
+
+    rows: list[dict[str, object]] = []
+    for path in sorted(Path(args.directory).expanduser().resolve().glob("*.tar.gz")):
+        try:
+            manifest = inspect_archive(path)
+        except Exception as exc:  # noqa: BLE001
+            rows.append({"path": str(path), "status": "invalid", "error": str(exc)})
+            continue
+        if args.before_ms is not None and int(manifest.get("captured_at_ms", 0)) > args.before_ms:
+            continue
+        rows.append({
+            "path": str(path), "status": "complete", "archive_id": manifest.get("archive_id"),
+            "captured_at_ms": manifest.get("captured_at_ms"), "archive_kind": manifest.get("archive_kind"),
+        })
+    rows.sort(key=lambda item: int(item.get("captured_at_ms") or 0))
+    print(json.dumps(rows, indent=2, sort_keys=True))
+
+
+def _namespace_engine_items(engines: "NamespaceEngines"):
+    return (
+        ("conversation", engines.conversation),
+        ("workflow", engines.workflow),
+        ("knowledge", engines.kg),
+        ("wisdom", engines.wisdom),
+        ("derived_knowledge", engines.derived_knowledge),
+    )
+
+
+def _cmd_embeddings_inspect(args: argparse.Namespace) -> None:
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+        conversation_persistence_mode=args.conversation_persistence_mode,
+        embedding_profile_mode="inspect",
+    )
+    try:
+        print(
+            json.dumps(
+                {
+                    label: engine.embedding_profile_report
+                    for label, engine in _namespace_engine_items(engines)
+                    if engine is not None
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    finally:
+        _close_engines(engines)
+
+
+def _cmd_embeddings_adopt_legacy(args: argparse.Namespace) -> None:
+    if not args.acknowledge_legacy_vectors:
+        raise ValueError(
+            "legacy profile adoption is unsafe without --acknowledge-legacy-vectors; "
+            "verify the previous provider, model, dimension, endpoint, and metric first"
+        )
+    engines = _build_engines(
+        args.workspace,
+        args.data_dir,
+        args.backend,
+        args.dsn,
+        split_derived_knowledge=args.split_derived_knowledge,
+        conversation_persistence_mode=args.conversation_persistence_mode,
+        embedding_profile_mode="adopt",
+    )
+    try:
+        print(
+            json.dumps(
+                {
+                    label: engine.embedding_profile_report
+                    for label, engine in _namespace_engine_items(engines)
+                    if engine is not None
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    finally:
+        _close_engines(engines)
+
+
+def _compose_options_from_args(args: argparse.Namespace) -> ComposeOptions:
+    return ComposeOptions(
+        backend=args.backend,
+        workspace=args.workspace,
+        project_name=args.project_name,
+        mode=args.mode,
+        embedding_backend=args.embedding_backend,
+        with_otel=args.with_otel,
+        with_oauth=args.with_oauth,
+        auth_mode=args.auth_mode,
+        model_revision=args.model_revision,
+        embedding_dimension=args.embedding_dimension,
+    )
+
+
+def _cmd_compose_generate(args: argparse.Namespace) -> None:
+    path = write_compose(args.output, _compose_options_from_args(args))
+    print(json.dumps({"status": "generated", "path": str(path.resolve())}, indent=2))
+
+
+def _cmd_compose_check(args: argparse.Namespace) -> None:
+    path = Path(args.file)
+    result = check_compose_text(path.read_text(encoding="utf-8"))
+    docker_check: dict[str, object] = {"status": "not_run", "detail": "docker command unavailable"}
+    try:
+        completed = subprocess.run(
+            ["docker", "compose", "-f", str(path), "config", "--quiet"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        docker_check["detail"] = f"docker compose check skipped: {exc}"
+    else:
+        if completed.returncode == 0:
+            docker_check = {"status": "passed"}
+        else:
+            docker_check = {
+                "status": "failed",
+                "detail": (completed.stderr or completed.stdout).strip()[:2000],
+            }
+            result["valid"] = False
+            errors = result.setdefault("errors", [])
+            if isinstance(errors, list):
+                errors.append("docker compose config rejected the file")
+    result["docker_compose"] = docker_check
+    print(json.dumps({"file": str(path), **result}, indent=2, sort_keys=True))
+    if not result["valid"]:
+        raise SystemExit(78)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -777,6 +1019,12 @@ def main(argv: list[str] | None = None) -> int:
     workbench_p.add_argument("--codex-executable", default=None, help="Codex executable override")
     workbench_p.add_argument("--codex-model", default=None, help="Codex model override")
     workbench_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
+    workbench_p.add_argument(
+        "--codex-transport",
+        choices=["exec", "app_server"],
+        default=None,
+        help="Codex transport (default: KOGWISTAR_CODEX_TRANSPORT or exec)",
+    )
     workbench_p.add_argument("--codex-timeout", type=int, default=300, help="Per-turn timeout in seconds")
     workbench_p.set_defaults(func=_cmd_workbench)
 
@@ -791,6 +1039,13 @@ def main(argv: list[str] | None = None) -> int:
     mcp_p.add_argument("--transport", choices=["stdio", "http", "streamable-http"], default="stdio")
     mcp_p.add_argument("--split-derived-knowledge", action="store_true")
     mcp_p.set_defaults(func=_cmd_mcp)
+
+    embedding_p = sub.add_parser(
+        "embedding-service",
+        aliases=["embedding-service"],
+        help="Serve one isolated Qwen3-VL embedding profile",
+    )
+    embedding_p.set_defaults(func=_cmd_embedding_service)
 
     seed_p = sub.add_parser(
         "seed-bundle",
@@ -813,8 +1068,92 @@ def main(argv: list[str] | None = None) -> int:
     seed_p.add_argument("--codex-executable", default=None, help="Codex executable override")
     seed_p.add_argument("--codex-model", default=None, help="Codex model override")
     seed_p.add_argument("--codex-profile", default=None, help="Codex CLI profile")
+    seed_p.add_argument(
+        "--codex-transport",
+        choices=["exec", "app_server"],
+        default=None,
+        help="Codex transport (default: KOGWISTAR_CODEX_TRANSPORT or exec)",
+    )
     seed_p.add_argument("--codex-timeout", type=int, default=300, help="Per-action timeout in seconds")
     seed_p.set_defaults(func=_cmd_seed_bundle)
+
+    archive_p = sub.add_parser(
+        "archive",
+        help="Create or inspect operator-only portable event archives",
+    )
+    archive_sub = archive_p.add_subparsers(dest="archive_command", required=True)
+
+    archive_create_p = archive_sub.add_parser("create", help="Create a quiescent base or incremental archive")
+    archive_create_p.add_argument("--workspace", required=True, help="Workspace ID")
+    archive_create_p.add_argument("--output", required=True, help="Output .tar.gz archive path")
+    archive_create_p.add_argument("--parent", default=None, help="Verified parent archive for an incremental archive")
+    archive_create_p.add_argument("--include-backend-snapshot", action="store_true", help="Include local persistent backend directories")
+    archive_create_p.set_defaults(func=_cmd_archive_create)
+
+    for name, handler in (("inspect", _cmd_archive_inspect), ("verify", _cmd_archive_verify)):
+        command_p = archive_sub.add_parser(name, help=f"{name.title()} an archive without changing state")
+        command_p.add_argument("--archive", required=True, help="Archive .tar.gz path")
+        command_p.set_defaults(func=handler)
+
+    archive_restore_p = archive_sub.add_parser("restore", help="Validate or restore to a fresh target datastore")
+    archive_restore_p.add_argument("--archive", required=True, help="Base or incremental archive path")
+    archive_restore_p.add_argument("--parent", action="append", default=[], help="Parent archive path, oldest first")
+    archive_restore_p.add_argument("--target-workspace", default=None, help="Target workspace ID; required with --apply")
+    archive_restore_p.add_argument("--apply", action="store_true", help="Apply after validation; default is dry-run")
+    archive_restore_p.add_argument("--use-backend-snapshot", action="store_true", help="Restore an exact compatible fast backend snapshot")
+    archive_restore_p.add_argument("--embedding-fingerprint", default=None, help="Exact embedding fingerprint required for fast snapshot restore")
+    archive_restore_p.set_defaults(func=_cmd_archive_restore)
+
+    archive_catalog_p = archive_sub.add_parser("catalog", help="List verified archives in a directory")
+    archive_catalog_p.add_argument("--directory", required=True, help="Archive directory")
+    archive_catalog_p.add_argument("--before-ms", type=int, default=None, help="Only show archives captured by this epoch-millisecond")
+    archive_catalog_p.set_defaults(func=_cmd_archive_catalog)
+
+    embeddings_p = sub.add_parser(
+        "embeddings",
+        help="Inspect or explicitly adopt persistent embedding profiles",
+    )
+    embeddings_sub = embeddings_p.add_subparsers(dest="embedding_command", required=True)
+    embedding_inspect_p = embeddings_sub.add_parser(
+        "inspect", help="Report configured, registered, and physical embedding state"
+    )
+    embedding_inspect_p.add_argument("--workspace", required=True, help="Workspace ID")
+    embedding_inspect_p.set_defaults(func=_cmd_embeddings_inspect)
+    embedding_adopt_p = embeddings_sub.add_parser(
+        "adopt-legacy-profile",
+        help="Bind the configured profile to already-populated unregistered storage",
+    )
+    embedding_adopt_p.add_argument("--workspace", required=True, help="Workspace ID")
+    embedding_adopt_p.add_argument(
+        "--acknowledge-legacy-vectors",
+        action="store_true",
+        help="Acknowledge that existing vectors were verified against the configured profile",
+    )
+    embedding_adopt_p.set_defaults(func=_cmd_embeddings_adopt_legacy)
+
+    compose_p = sub.add_parser("compose", help="Generate or validate a safe Docker Compose bundle")
+    compose_sub = compose_p.add_subparsers(dest="compose_command", required=True)
+    compose_generate_p = compose_sub.add_parser("generate", help="Generate a self-contained Compose configuration")
+    compose_generate_p.add_argument("--output", required=True, help="Output YAML path")
+    compose_generate_p.add_argument("--workspace", default="default")
+    compose_generate_p.add_argument("--backend", choices=["postgres", "chroma"], default="postgres")
+    compose_generate_p.add_argument("--project-name", default="llm-wiki")
+    compose_generate_p.add_argument("--mode", choices=["gpu", "cpu", "text-only"], default="gpu")
+    compose_generate_p.add_argument(
+        "--embedding-backend",
+        choices=["auto", "vllm", "transformers"],
+        default="auto",
+        help="Multimodal backend; auto selects vLLM for GPU and Transformers for CPU",
+    )
+    compose_generate_p.add_argument("--auth-mode", choices=["disabled", "static_token", "kogwistar_jwt"], default="disabled")
+    compose_generate_p.add_argument("--with-otel", action="store_true")
+    compose_generate_p.add_argument("--with-oauth", action="store_true")
+    compose_generate_p.add_argument("--model-revision", default="")
+    compose_generate_p.add_argument("--embedding-dimension", type=int, default=1024)
+    compose_generate_p.set_defaults(func=_cmd_compose_generate)
+    compose_check_p = compose_sub.add_parser("check", help="Validate a generated or checked-in Compose YAML")
+    compose_check_p.add_argument("--file", required=True, help="Compose YAML path")
+    compose_check_p.set_defaults(func=_cmd_compose_check)
 
     # daemon sub-command
     daemon_p = sub.add_parser("daemon", help="Run a background daemon")

@@ -439,6 +439,7 @@ def test_knowledge_derivation_error_resilience(pipeline, ingest_request, monkeyp
         assert steps[0].metadata.get("status") in ("failure", "error")
 
 
+@pytest.mark.slow
 def test_execution_wisdom_derivation_uses_history_failures(pipeline, ingest_request):
     workspace_id = "history_workspace"
     ns = WorkspaceNamespaces(workspace_id)
@@ -518,7 +519,6 @@ def test_execution_wisdom_derivation_uses_history_failures(pipeline, ingest_requ
             }
         )
         assert runs
-        run_id = runs[0].metadata.get("run_id")
     queued_or_done = engines.conversation.meta_sqlite.list_index_jobs(
         namespace=ns.maintenance_jobs,
         limit=20,

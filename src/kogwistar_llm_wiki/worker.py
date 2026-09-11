@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from kogwistar.engine_core.jobs import JobQueueItem
 from kg_doc_parser.semantic_document_splitting_layerwise_edits import parser_llm_cache_transaction
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
-from kogwistar.engine_core.models import Grounding, Node, Span
+from kogwistar.engine_core.models import Grounding, Node, Span, GraphExtractionWithIDs
 from kogwistar.id_provider import stable_id
 from kogwistar.maintenance.models import MaintenanceTemplateResult
 from kogwistar.runtime import RunResult
@@ -436,6 +436,7 @@ class MaintenanceWorker(BaseWorker):
                     reason="no_progress",
                     idle_seconds=round(idle_seconds, 2),
                 )
+                self._claim_lost.set()
                 return
             try:
                 renewed = self.engines.conversation.jobs.renew_lease(
@@ -448,6 +449,7 @@ class MaintenanceWorker(BaseWorker):
                     error_type=type(exc).__name__,
                     error=str(exc),
                 )
+                self._claim_lost.set()
                 return
             if not renewed:
                 self._emit_trace(
@@ -540,14 +542,65 @@ class MaintenanceWorker(BaseWorker):
             llm_model=(str(metadata["llm_model"]) if metadata.get("llm_model") else None),
         )
         pipeline = IngestPipeline(self.engines)
+        accepted_candidate = self.engines.conversation.jobs.accepted_candidate(ctx.job)
+        accepted_extraction = None
+        if isinstance(accepted_candidate, dict) and accepted_candidate.get("kind") == "document_parse":
+            raw_extraction = accepted_candidate.get("extraction")
+            if isinstance(raw_extraction, dict):
+                accepted_extraction = GraphExtractionWithIDs.model_validate(raw_extraction)
+                self._emit_trace(
+                    "maintenance_accepted_candidate_reused",
+                    workspace_id=ctx.workspace_id,
+                    source_document_id=source_document_id,
+                    job_id=ctx.job_id,
+                    candidate_kind="document_parse",
+                )
         # This is an in-memory parser-cache transaction, not a database
         # transaction: the long LLM call never holds a graph connection open.
         with parser_llm_cache_transaction() as parser_cache_transaction:
-            parse_result = pipeline.parse_source(
-                request=request,
-                source_document_id=source_document_id,
-            )
-            if getattr(self, "_claim_lost", threading.Event()).is_set():
+            parse_result = None
+            extraction = accepted_extraction
+            if extraction is None:
+                parse_result = pipeline.parse_source(
+                    request=request,
+                    source_document_id=source_document_id,
+                )
+                extraction = pipeline.translate_parse_result(
+                    parse_result=parse_result,
+                    source_document_id=source_document_id,
+                )
+                candidate = {
+                    "kind": "document_parse",
+                    "source_document_id": source_document_id,
+                    "extraction": extraction.model_dump(mode="json"),
+                }
+                decision = self.engines.conversation.jobs.accept_candidate(ctx.job, candidate)
+                if decision.get("status") == "rejected":
+                    self._emit_trace(
+                        "maintenance_repeated_work_discarded",
+                        workspace_id=ctx.workspace_id,
+                        source_document_id=source_document_id,
+                        job_id=ctx.job_id,
+                        reason=str(decision.get("reason") or "claim_not_valid"),
+                    )
+                    return {
+                        "node_count": 0,
+                        "edge_count": 0,
+                        "llm_call_count": int(dict(getattr(parse_result, "usage_summary", {}) or {}).get("llm_call_count") or 0),
+                        "stale_claim": True,
+                    }
+                if decision.get("status") == "existing":
+                    winner = self.engines.conversation.jobs.accepted_candidate(ctx.job)
+                    if isinstance(winner, dict) and isinstance(winner.get("extraction"), dict):
+                        extraction = GraphExtractionWithIDs.model_validate(winner["extraction"])
+                        self._emit_trace(
+                            "maintenance_repeated_work_discarded",
+                            workspace_id=ctx.workspace_id,
+                            source_document_id=source_document_id,
+                            job_id=ctx.job_id,
+                            reason="candidate_already_accepted",
+                        )
+            if self._claim_lost.is_set():
                 return {
                     "node_count": 0,
                     "edge_count": 0,
@@ -555,16 +608,13 @@ class MaintenanceWorker(BaseWorker):
                     "stale_claim": True,
                     "comparison_result": {"parse_completed": True},
                 }
-            pipeline.create_parse_retry_history(
-                request=request,
-                source_document_id=source_document_id,
-                parse_result=parse_result,
-                namespace=ns.conv_bg,
-            )
-            extraction = pipeline.translate_parse_result(
-                parse_result=parse_result,
-                source_document_id=source_document_id,
-            )
+            if parse_result is not None:
+                pipeline.create_parse_retry_history(
+                    request=request,
+                    source_document_id=source_document_id,
+                    parse_result=parse_result,
+                    namespace=ns.conv_bg,
+                )
             pipeline.ingest_parse_result(
                 request=request,
                 source_document_id=source_document_id,
@@ -777,7 +827,20 @@ class MaintenanceWorker(BaseWorker):
     def _handle_execution_wisdom_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
         workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         try:
-            emitted: list[str] = self._emit_execution_wisdom_from_history(ctx.workspace_id, self.engines)
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_before_wisdom")
+                return
+            emitted: list[str] = self._emit_execution_wisdom_from_history(
+                ctx.workspace_id,
+                self.engines,
+                before_write=lambda _pattern: self._assert_claim_owned(
+                    ctx,
+                    reason="claim_lost_before_wisdom_artifact",
+                ),
+            )
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_after_wisdom")
+                return
             logger.info(
                 "Maintenance job %s execution finished: finished (%s emitted=%s)",
                 ctx.request_node_id,
@@ -798,6 +861,9 @@ class MaintenanceWorker(BaseWorker):
             if ctx.job_id:
                 self._acknowledge_job(ctx)
         except Exception as e:
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_wisdom")
+                return
             logger.error(f"Maintenance job {ctx.request_node_id} encountered runtime error: {e}", exc_info=True)
             self._emit_lane_reply(
                 workspace_id=ctx.workspace_id,
@@ -822,7 +888,17 @@ class MaintenanceWorker(BaseWorker):
         if not isinstance(patch_payload, dict):
             self._handle_runtime_workflow_strategy(ctx)
             return
-        if getattr(self, "_claim_lost", threading.Event()).is_set():
+        accepted_candidate = self.engines.conversation.jobs.accepted_candidate(ctx.job)
+        if isinstance(accepted_candidate, dict) and accepted_candidate.get("kind") == "graph_patch":
+            patch_payload = accepted_candidate.get("patch")
+            self._emit_trace(
+                "maintenance_accepted_candidate_reused",
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                job_id=ctx.job_id,
+                candidate_kind="graph_patch",
+            )
+        if self._claim_lost.is_set():
             self._emit_trace(
                 "maintenance_repeated_work_discarded",
                 workspace_id=ctx.workspace_id,
@@ -835,6 +911,33 @@ class MaintenanceWorker(BaseWorker):
             return
         try:
             patch: MaintenancePatch = MaintenancePatch.model_validate(patch_payload)
+            decision = self.engines.conversation.jobs.accept_candidate(
+                ctx.job,
+                {"kind": "graph_patch", "patch": patch.model_dump(mode="json")},
+            )
+            if decision.get("status") == "rejected":
+                self._emit_trace(
+                    "maintenance_repeated_work_discarded",
+                    workspace_id=ctx.workspace_id,
+                    source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                    job_id=ctx.job_id,
+                    reason=str(decision.get("reason") or "claim_not_valid"),
+                )
+                return
+            if decision.get("status") == "existing":
+                winner = self.engines.conversation.jobs.accepted_candidate(ctx.job)
+                if isinstance(winner, dict) and isinstance(winner.get("patch"), dict):
+                    patch = MaintenancePatch.model_validate(winner["patch"])
+                    self._emit_trace(
+                        "maintenance_repeated_work_discarded",
+                        workspace_id=ctx.workspace_id,
+                        source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                        job_id=ctx.job_id,
+                        reason="candidate_already_accepted",
+                    )
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_before_graph_patch")
+                return
             result = apply_maintenance_patch_for_scope(
                 self.engines,
                 patch,
@@ -905,6 +1008,7 @@ class MaintenanceWorker(BaseWorker):
             budget_state["budget_scope"] = "maintenance_job"
         budget_state.setdefault("budget_kind", "token")
         budget_ledger: StateBackedBudgetLedger = StateBackedBudgetLedger(budget_state)
+        usage_persisted = False
         started_ms = int(time.time() * 1000)
         self._emit_trace(
             "maintenance_runtime_attempt_start",
@@ -951,6 +1055,10 @@ class MaintenanceWorker(BaseWorker):
                         "engines": self.engines,
                         "provider_settings": self.provider_settings,
                         "budget_ledger": budget_ledger,
+                        "before_authoritative_write": lambda _subject=None: self._assert_claim_owned(
+                            ctx,
+                            reason="claim_lost_before_maintenance_artifact",
+                        ),
                     }
                     continuation_run_id = str(payload.get("continuation_run_id") or "")
                     suspended_node_id = str(payload.get("suspended_node_id") or "")
@@ -1007,8 +1115,16 @@ class MaintenanceWorker(BaseWorker):
                     terminal_success = status in {"succeeded", "completed", "success", "finished"}
                     reply_status = "completed" if terminal_success else status
                     if terminal_success and ctx.job_id:
+                        if self._claim_lost.is_set():
+                            self._emit_stale_claim_discarded(ctx, reason="claim_lost_before_runtime_commit")
+                            return
                         if self._advance_maintenance_plan(ctx, budget_state=budget_state):
                             return
+                        if self._claim_lost.is_set():
+                            self._emit_stale_claim_discarded(ctx, reason="claim_lost_after_runtime_plan")
+                            return
+                        self._persist_maintenance_usage(ctx, budget_ledger, result)
+                        usage_persisted = True
                         self._emit_lane_reply(
                             workspace_id=ctx.workspace_id,
                             source_document_id=str(ctx.payload.get("source_document_id") or ""),
@@ -1087,34 +1203,45 @@ class MaintenanceWorker(BaseWorker):
                     if ctx.job_id:
                         self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
                 finally:
-                    try:
-                        persist_usage_events(
-                            self.engines.conversation.meta_sqlite,
-                            namespace=ns.usage_events,
-                            events=budget_ledger.events,
-                            workspace_id=ctx.workspace_id,
-                            attempt_id=str(
-                                getattr(locals().get("result"), "run_id", None)
-                                or uuid.uuid4()
-                            ),
-                            source_document_id=str(ctx.payload.get("source_document_id") or "") or None,
-                            operation_id=str(ctx.job_id or ctx.request_node_id),
-                            operation_kind=ctx.maintenance_kind,
-                            maintenance_job_id=str(ctx.job_id or ctx.request_node_id),
-                            provider=self.provider_settings.parser.provider,
-                            model=self.provider_settings.parser.model,
-                        )
-                        UsageProjection(
-                            self.engines.conversation.meta_sqlite,
-                            workspace_id=ctx.workspace_id,
-                            source_namespace=ns.usage_events,
-                            projection_namespace=ns.usage_projection,
-                        ).refresh()
-                    except Exception:
-                        logger.exception(
-                            "Failed to persist usage events for maintenance job %s",
-                            ctx.request_node_id,
-                        )
+                    if not usage_persisted:
+                        try:
+                            self._persist_maintenance_usage(
+                                ctx,
+                                budget_ledger,
+                                locals().get("result"),
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Failed to persist usage events for maintenance job %s",
+                                ctx.request_node_id,
+                            )
+
+    def _persist_maintenance_usage(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        budget_ledger: StateBackedBudgetLedger,
+        result: object | None,
+    ) -> None:
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        persist_usage_events(
+            self.engines.conversation.meta_sqlite,
+            namespace=ns.usage_events,
+            events=budget_ledger.events,
+            workspace_id=ctx.workspace_id,
+            attempt_id=str(getattr(result, "run_id", "") or uuid.uuid4()),
+            source_document_id=str(ctx.payload.get("source_document_id") or "") or None,
+            operation_id=str(ctx.job_id or ctx.request_node_id),
+            operation_kind=ctx.maintenance_kind,
+            maintenance_job_id=str(ctx.job_id or ctx.request_node_id),
+            provider=self.provider_settings.parser.provider,
+            model=self.provider_settings.parser.model,
+        )
+        UsageProjection(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=ctx.workspace_id,
+            source_namespace=ns.usage_events,
+            projection_namespace=ns.usage_projection,
+        ).refresh()
 
     def _requeue_suspended_maintenance_job(
         self,
@@ -1190,6 +1317,29 @@ class MaintenanceWorker(BaseWorker):
                 sink(payload)
             except Exception:
                 logger.exception("Maintenance trace sink failed for event %s", event)
+
+    def _emit_stale_claim_discarded(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        *,
+        reason: str,
+    ) -> None:
+        """Record a late attempt without replying, retrying, or acknowledging it."""
+        self._emit_trace(
+            "maintenance_repeated_work_discarded",
+            workspace_id=ctx.workspace_id,
+            source_document_id=str(ctx.payload.get("source_document_id") or ""),
+            request_node_id=ctx.request_node_id,
+            job_id=ctx.job_id,
+            maintenance_kind=ctx.maintenance_kind,
+            reason=reason,
+            authoritative_result=False,
+        )
+
+    def _assert_claim_owned(self, ctx: MaintenanceJobExecutionContext, *, reason: str) -> None:
+        if self._claim_lost.is_set():
+            self._emit_stale_claim_discarded(ctx, reason=reason)
+            raise RuntimeError("maintenance claim is no longer owned")
 
     def _emit_lane_reply(
         self,
@@ -1334,8 +1484,10 @@ class MaintenanceWorker(BaseWorker):
         _deps_raw = ctx.state_view.get("_deps")
         if isinstance(_deps_raw, dict):
             engines: NamespaceEngines | None = _deps_raw.get("engines")
+            before_write = _deps_raw.get("before_authoritative_write")
         else:
             engines = _deps_raw
+            before_write = None
         if not workspace_id or not engines:
             logger.error("Missing workspace_id or engines in distillation step context")
             return RunSuccess(state_update=[("u", {"error": "Missing context"})])
@@ -1397,6 +1549,7 @@ class MaintenanceWorker(BaseWorker):
                     source_cluster_id=None,
                 )]),
             ),
+            before_write=before_write if callable(before_write) else None,
         )
         for result in template_result.grouped_results:
             logger.info(
@@ -1489,7 +1642,13 @@ class MaintenanceWorker(BaseWorker):
             ),
         )
 
-    def _emit_execution_wisdom_from_history(self, workspace_id: str, engines: NamespaceEngines) -> list[str]:
+    def _emit_execution_wisdom_from_history(
+        self,
+        workspace_id: str,
+        engines: NamespaceEngines,
+        *,
+        before_write: Callable[[object], None] | None = None,
+    ) -> list[str]:
         """Analyze completed execution history and emit execution-derived wisdom."""
         if not workspace_id or not engines:
             return []
@@ -1548,6 +1707,7 @@ class MaintenanceWorker(BaseWorker):
                     "label": f"execution_failure_pattern:{pattern.step_op}",
                 },
             ),
+            before_write=before_write,
         )
 
         emitted = [result.step_op for result in result_items]
@@ -1564,7 +1724,12 @@ class MaintenanceWorker(BaseWorker):
         workspace_id = ctx.state_view.get("workspace_id")
         _deps_raw = ctx.state_view.get("_deps")
         engines = _deps_raw.get("engines") if isinstance(_deps_raw, dict) else _deps_raw
-        emitted = self._emit_execution_wisdom_from_history(workspace_id, engines)
+        before_write = _deps_raw.get("before_authoritative_write") if isinstance(_deps_raw, dict) else None
+        emitted = self._emit_execution_wisdom_from_history(
+            workspace_id,
+            engines,
+            before_write=before_write if callable(before_write) else None,
+        )
         return RunSuccess(
             state_update=[("u", {
                 "history_wisdom_complete": True,

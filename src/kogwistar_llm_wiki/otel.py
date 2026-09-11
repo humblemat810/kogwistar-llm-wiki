@@ -24,11 +24,43 @@ class LlmWikiTelemetry:
     """Small optional tracer facade with safe no-op behavior."""
 
     def __init__(self, *, service_name: str = "kogwistar-llm-wiki") -> None:
-        self.enabled = _env_bool("LLM_WIKI_OTEL_ENABLED", False) and trace is not None
+        self.packages_available = trace is not None
+        self.enabled = _env_bool("LLM_WIKI_OTEL_ENABLED", False) and self.packages_available
         self.service_name = service_name
         self._tracer: Tracer | None = None
         if self.enabled:
-            self._tracer = trace.get_tracer(service_name)  # type: ignore[union-attr]
+            self._tracer = self._configure_tracer(service_name)
+
+    @staticmethod
+    def _configure_tracer(service_name: str) -> Tracer | None:
+        if trace is None:
+            return None
+        # Respect an already-installed provider. The optional exporter setup
+        # keeps the base install no-op while making the Compose sink useful.
+        try:
+            from opentelemetry import trace as trace_api
+            from opentelemetry.sdk.resources import Resource
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+            provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
+            endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+            exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
+            provider.add_span_processor(BatchSpanProcessor(exporter))
+            trace_api.set_tracer_provider(provider)
+        except (ImportError, RuntimeError, ValueError):
+            # The API-only optional installation remains a valid no-op mode.
+            pass
+        return trace.get_tracer(service_name)  # type: ignore[union-attr]
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Toggle emission for the current process without changing config."""
+        self.enabled = bool(enabled) and self.packages_available
+        if self.enabled and trace is not None:
+            self._tracer = self._configure_tracer(self.service_name) or trace.get_tracer(self.service_name)
+        else:
+            self._tracer = None
 
     @classmethod
     def from_environment(cls) -> "LlmWikiTelemetry":
