@@ -120,16 +120,16 @@ local application build. For release `v0.3.1`, pull the published Torch-free
 LLM-Wiki image and point both application services at it:
 
 ```bash
-docker pull humblemat810/kogwistar-llm-wiki:v0.3.1
-LLM_WIKI_IMAGE=humblemat810/kogwistar-llm-wiki:v0.3.1 \
+docker pull profchan/kogwistar-llm-wiki:v0.3.1
+LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.3.1 \
   docker compose up -d
 ```
 
 PowerShell:
 
 ```powershell
-docker pull humblemat810/kogwistar-llm-wiki:v0.3.1
-$env:LLM_WIKI_IMAGE = "humblemat810/kogwistar-llm-wiki:v0.3.1"
+docker pull profchan/kogwistar-llm-wiki:v0.3.1
+$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.3.1"
 docker compose up -d
 ```
 
