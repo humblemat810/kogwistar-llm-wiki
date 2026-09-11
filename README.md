@@ -113,6 +113,33 @@ named volumes and workspace isolation.
 For prebuilt public images and the release workflow, see
 [`doc/docker_hub_publishing.md`](doc/docker_hub_publishing.md).
 
+### Use a published application image
+
+The GitHub repository includes the Compose files, but it does not require a
+local application build. For release `v0.3.1`, pull the published Torch-free
+LLM-Wiki image and point both application services at it:
+
+```bash
+docker pull humblemat810/kogwistar-llm-wiki:v0.3.1
+LLM_WIKI_IMAGE=humblemat810/kogwistar-llm-wiki:v0.3.1 \
+  docker compose up -d
+```
+
+PowerShell:
+
+```powershell
+docker pull humblemat810/kogwistar-llm-wiki:v0.3.1
+$env:LLM_WIKI_IMAGE = "humblemat810/kogwistar-llm-wiki:v0.3.1"
+docker compose up -d
+```
+
+This uses the repository's Compose definition and pulls the application image
+instead of running `docker compose up --build`. PostgreSQL/pgvector remains a
+separate infrastructure image pulled by Compose. The optional multimodal
+embedding image is also a separate image and is not included in this release;
+see [`doc/docker_deployment.md`](doc/docker_deployment.md) for its deployment
+overlays and tags.
+
 If you use VS Code, the launch presets already read `.env` and only prompt for
 the parser lane:
 - `Demo: Ollama (gemma4:e2b)`
