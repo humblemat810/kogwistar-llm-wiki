@@ -4,12 +4,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app/src \
-    LLM_WIKI_REPRESENTATION_DEVICE=cpu \
-    LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cpu
+    LLM_WIKI_EMBEDDING_DEVICE=cpu \
+    LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
 
 WORKDIR /app
-ARG LLM_WIKI_REPRESENTATION_TORCH_BACKEND=cpu
-ENV LLM_WIKI_REPRESENTATION_TORCH_BACKEND=${LLM_WIKI_REPRESENTATION_TORCH_BACKEND}
+ARG LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
+ARG LLM_WIKI_REPRESENTATION_TORCH_BACKEND=
+ENV LLM_WIKI_EMBEDDING_TORCH_BACKEND=${LLM_WIKI_EMBEDDING_TORCH_BACKEND}
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates \
@@ -23,7 +24,8 @@ COPY src/llm_wiki_representation_service ./src/llm_wiki_representation_service
 COPY requirements/multimodal ./requirements/multimodal
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir -r requirements/multimodal/torch-${LLM_WIKI_REPRESENTATION_TORCH_BACKEND}.txt \
+    && BACKEND="${LLM_WIKI_REPRESENTATION_TORCH_BACKEND:-$LLM_WIKI_EMBEDDING_TORCH_BACKEND}" \
+    && python -m pip install --no-cache-dir -r requirements/multimodal/torch-${BACKEND}.txt \
     && python -m pip install --no-cache-dir -e ./representation-contract --no-deps \
     && python -m pip install --no-cache-dir --no-deps -e ./representation-service \
     && python -m pip install --no-cache-dir \

@@ -47,7 +47,8 @@ and verification of workspace ACLs before exposure.
 The Settings console also includes a **Compose helper**. Select GPU, CPU, or
 text-only mode, choose PostgreSQL and an authentication mode, optionally
 include Grafana OTel and the OAuth example, and enter the immutable model
-revision for Qwen3-VL. The live preview uses the server-side validator. The
+revision for Qwen3-VL. The optional Qwen3-VL sidecar is named **Embedding
+Service** in the UI. The live preview uses the server-side validator. The
 standalone static helper at `public/compose.html` implements the same safe
 PostgreSQL topology for offline use and rejects embedded Chroma because REST
 and MCP are separate processes. Save the preview as a new YAML file, run

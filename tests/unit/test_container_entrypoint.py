@@ -125,7 +125,7 @@ def test_docker_multimodal_contract_is_explicit_and_opt_in() -> None:
 
     assert "LLM_WIKI_MULTIMODAL_TORCH_BACKEND" not in dockerfile
     assert "Dockerfile.representation-service" in compose_override
-    assert "requirements/multimodal/torch-${LLM_WIKI_REPRESENTATION_TORCH_BACKEND}.txt" in representation_dockerfile
+    assert "requirements/multimodal/torch-${BACKEND}.txt" in representation_dockerfile
     assert "fastapi" in representation_dockerfile
     assert "LLM_WIKI_REPRESENTATION_MODEL" in compose_override
     assert "LLM_WIKI_REPRESENTATION_MODEL_REVISION" in compose_override

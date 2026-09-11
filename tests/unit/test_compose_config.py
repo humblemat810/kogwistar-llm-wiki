@@ -27,9 +27,9 @@ def test_gpu_bundle_is_complete_without_secrets() -> None:
 def test_cpu_and_text_only_modes_have_expected_services() -> None:
     cpu = render_compose(ComposeOptions(mode="cpu", model_revision="abc123"))
     text_only = render_compose(ComposeOptions(mode="text-only"))
-    assert "LLM_WIKI_REPRESENTATION_DEVICE: cpu" in cpu
+    assert "LLM_WIKI_EMBEDDING_DEVICE: cpu" in cpu
     assert "driver: nvidia" not in cpu
-    assert "  representation:" not in text_only
+    assert "  embedding:" not in text_only
     with pytest.raises(ComposeConfigurationError, match="embedded Chroma"):
         render_compose(ComposeOptions(backend="chroma", mode="text-only"))
 

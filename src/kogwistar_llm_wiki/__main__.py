@@ -1039,8 +1039,9 @@ def main(argv: list[str] | None = None) -> int:
     mcp_p.set_defaults(func=_cmd_mcp)
 
     representation_p = sub.add_parser(
-        "representation-service",
-        help="Serve one isolated Qwen3-VL representation profile",
+        "embedding-service",
+        aliases=["representation-service"],
+        help="Serve one isolated Qwen3-VL embedding profile",
     )
     representation_p.set_defaults(func=_cmd_representation_service)
 

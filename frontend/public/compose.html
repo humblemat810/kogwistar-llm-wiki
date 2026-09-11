@@ -8,7 +8,7 @@ label{display:grid;gap:6px;margin:14px 0}input,select,button,textarea{font:inher
 button{cursor:pointer}textarea{width:100%;box-sizing:border-box;font:12px monospace}.error{color:#f5b94c}.hint{color:#9baed0}
 </style>
 <h1>LLM-Wiki Compose setup</h1>
-<p class="hint">Generate one self-contained PostgreSQL Compose bundle. Secrets remain environment placeholders.</p>
+<p class="hint">Generate one self-contained PostgreSQL bundle with an optional Embedding Service. Secrets remain environment placeholders.</p>
 <label>Graph backend
   <select id="backend"><option value="postgres">PostgreSQL / pgvector (recommended)</option><option value="chroma">Embedded Chroma (single-process only; unavailable in this bundle)</option></select>
 </label>
@@ -43,10 +43,11 @@ function generate(){
   ];
   for(const service of ["rest","mcp"]){const ports=lines.indexOf("    ports:",lines.indexOf("  "+service+":"));lines.splice(ports+2,0,"    extra_hosts: [\"host.docker.internal:host-gateway\"]");}
   if(multimodal){for(const service of ["rest","mcp"]){const environment=lines.indexOf("    environment:",lines.indexOf("  "+service+":"));lines.splice(environment,0,"      representation:","        condition: service_started");}lines.push("  representation:","    build:","      context: .","      dockerfile: Dockerfile.representation-service",`      args: {LLM_WIKI_REPRESENTATION_TORCH_BACKEND: ${torch}}`,"    environment:","      LLM_WIKI_REPRESENTATION_MODEL: Qwen/Qwen3-VL-Embedding-2B",`      LLM_WIKI_REPRESENTATION_MODEL_REVISION: ${revision}`,"      LLM_WIKI_REPRESENTATION_DIMENSION: 1024",`      LLM_WIKI_REPRESENTATION_DEVICE: ${device}`,`      LLM_WIKI_REPRESENTATION_TORCH_BACKEND: ${torch}`,"      HF_HOME: /var/lib/huggingface",`      LLM_WIKI_REPRESENTATION_TOKEN: "${env("LLM_WIKI_REPRESENTATION_TOKEN","")}"`,"    expose:","      - \"8790\"","    volumes:","      - representation_hf_cache:/var/lib/huggingface","    healthcheck:","      test: [\"CMD\", \"python\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/readyz', timeout=3)\"]","      interval: 10s","      timeout: 5s","      retries: 12","      start_period: 30s");}
+  if(multimodal){const build=lines.indexOf("    build:",lines.indexOf("  representation:"));lines.splice(build,0,`    image: ${env("LLM_WIKI_EMBEDDING_IMAGE","kogwistar-llm-wiki-embedding:local")}`);}
   if(otel){lines.push("  grafana:","    image: grafana/otel-lgtm:latest","    ports:","      - \"127.0.0.1:${GRAFANA_PORT:-3000}:3000\"");}
   if(oauth){lines.push("  oauth:","    image: ghcr.io/navikt/mock-oauth2-server:2.2.1","    profiles: [oauth]","    expose:","      - \"8080\"");}
   lines.push("volumes:","  postgres_data:","  app_data:");if(multimodal)lines.push("  representation_hf_cache:");
-  const y=lines.join("\n")+"\n";$("output").value=y;$("download").hidden=false;$("download").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([y],{type:"text/yaml"}));a.download="compose.generated.yml";a.click()};
+  const y=lines.join("\n").replaceAll("  representation:","  embedding:").replaceAll("      representation:","      embedding:").replaceAll("http://representation:8790","http://embedding:8790").replaceAll("representation_hf_cache","embedding_hf_cache").replaceAll("LLM_WIKI_REPRESENTATION_SERVICE","LLM_WIKI_EMBEDDING_SERVICE").replaceAll("LLM_WIKI_REPRESENTATION_MODEL","LLM_WIKI_EMBEDDING_MODEL").replaceAll("LLM_WIKI_REPRESENTATION_DIMENSION","LLM_WIKI_EMBEDDING_DIMENSION").replaceAll("LLM_WIKI_REPRESENTATION_DEVICE","LLM_WIKI_EMBEDDING_DEVICE").replaceAll("LLM_WIKI_REPRESENTATION_TORCH_BACKEND","LLM_WIKI_EMBEDDING_TORCH_BACKEND").replaceAll("LLM_WIKI_REPRESENTATION_TOKEN","LLM_WIKI_EMBEDDING_TOKEN")+"\n";$("output").value=y;$("download").hidden=false;$("download").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([y],{type:"text/yaml"}));a.download="compose.generated.yml";a.click()};
 }
 $("generate").onclick=generate;
 </script>

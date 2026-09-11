@@ -92,6 +92,20 @@ def test_qwen3_vl_revision_is_optional() -> None:
     ) == "rev-1"
 
 
+def test_embedding_service_names_prefer_clear_aliases_and_keep_legacy_fallback() -> None:
+    environ = {
+        "LLM_WIKI_EMBEDDING_SERVICE_URL": "http://embedding:8790",
+        "LLM_WIKI_REPRESENTATION_SERVICE_URL": "http://old-name:8790",
+        "LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS": "embedding",
+    }
+
+    assert multimodal_runtime.configured_representation_service_url(environ) == "http://embedding:8790"
+    assert multimodal_runtime.configured_representation_service_allowed_hosts(environ) == ("embedding",)
+    assert multimodal_runtime.configured_representation_service_url(
+        {"LLM_WIKI_REPRESENTATION_SERVICE_URL": "http://old-name:8790"}
+    ) == "http://old-name:8790"
+
+
 def test_remote_representation_requires_an_explicit_host_allowlist(monkeypatch) -> None:
     monkeypatch.setenv("LLM_WIKI_REPRESENTATION_SERVICE_URL", "http://representation:8790")
     monkeypatch.delenv("LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS", raising=False)

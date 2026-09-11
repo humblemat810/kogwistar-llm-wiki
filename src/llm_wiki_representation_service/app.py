@@ -51,7 +51,7 @@ def create_app(*, encoder: Any | None = None, config: RepresentationServiceConfi
             load_task.cancel()
             await asyncio.gather(load_task, return_exceptions=True)
 
-    app = FastAPI(title="LLM-Wiki Representation Service", version="1", lifespan=lifespan)
+    app = FastAPI(title="LLM-Wiki Embedding Service", version="1", lifespan=lifespan)
 
     @app.get("/healthz")
     def healthz() -> dict[str, object]:

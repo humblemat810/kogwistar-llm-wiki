@@ -207,7 +207,12 @@ The image default command is only a help display. Always provide an explicit
 service command in deployments so REST and MCP lifecycles remain independently
 supervisable.
 
-## Multimodal Representation Service
+## Multimodal Embedding Service
+
+This guide calls the sidecar the **Embedding Service** because its v1 contract
+returns embeddings. Internal package names and the legacy
+`Dockerfile.representation-service` filename remain for compatibility; they do
+not indicate a separate user-facing product.
 
 Production multimodal inference is a separate service so the REST and MCP
 images remain lightweight and Torch-free. GPU is the recommended deployment

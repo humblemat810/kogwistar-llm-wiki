@@ -43,7 +43,7 @@ variables. Operators can inspect the same profile data from the CLI:
 python -m kogwistar_llm_wiki embeddings inspect --workspace demo
 ```
 
-## Recipe: Multimodal Representation Service
+## Recipe: Multimodal Embedding Service
 
 Use the isolated FastAPI service for production Qwen3-VL inference. GPU is the
 practical default for this vision model. The app

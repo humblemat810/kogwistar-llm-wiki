@@ -86,7 +86,7 @@ def configured_representation_service_url(
     environ: dict[str, str] | None = None,
 ) -> str | None:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_REPRESENTATION_SERVICE_URL", "").strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_URL", values.get("LLM_WIKI_REPRESENTATION_SERVICE_URL", "")).strip()
     return value or None
 
 
@@ -94,7 +94,7 @@ def configured_representation_service_token(
     environ: dict[str, str] | None = None,
 ) -> str | None:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_REPRESENTATION_SERVICE_TOKEN", "").strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TOKEN", values.get("LLM_WIKI_REPRESENTATION_SERVICE_TOKEN", "")).strip()
     return value or None
 
 
@@ -102,15 +102,15 @@ def configured_representation_service_timeout(
     environ: dict[str, str] | None = None,
 ) -> float:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_REPRESENTATION_SERVICE_TIMEOUT_SECONDS", "30").strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS", values.get("LLM_WIKI_REPRESENTATION_SERVICE_TIMEOUT_SECONDS", "30")).strip()
     try:
         timeout = float(value)
     except ValueError as exc:
         raise ValueError(
-            "LLM_WIKI_REPRESENTATION_SERVICE_TIMEOUT_SECONDS must be a number"
+            "LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS must be a number"
         ) from exc
     if timeout <= 0:
-        raise ValueError("LLM_WIKI_REPRESENTATION_SERVICE_TIMEOUT_SECONDS must be positive")
+        raise ValueError("LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS must be positive")
     return timeout
 
 
@@ -118,15 +118,15 @@ def configured_representation_service_max_request_bytes(
     environ: dict[str, str] | None = None,
 ) -> int:
     values = environ if environ is not None else os.environ
-    value = values.get("LLM_WIKI_REPRESENTATION_SERVICE_MAX_REQUEST_BYTES", "5000000").strip()
+    value = values.get("LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES", values.get("LLM_WIKI_REPRESENTATION_SERVICE_MAX_REQUEST_BYTES", "5000000")).strip()
     try:
         limit = int(value)
     except ValueError as exc:
         raise ValueError(
-            "LLM_WIKI_REPRESENTATION_SERVICE_MAX_REQUEST_BYTES must be an integer"
+            "LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES must be an integer"
         ) from exc
     if limit <= 0:
-        raise ValueError("LLM_WIKI_REPRESENTATION_SERVICE_MAX_REQUEST_BYTES must be positive")
+        raise ValueError("LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES must be positive")
     return limit
 
 
@@ -136,7 +136,7 @@ def configured_representation_service_allowed_hosts(
     values = environ if environ is not None else os.environ
     return tuple(
         host.strip().lower()
-        for host in values.get("LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS", "").split(",")
+        for host in values.get("LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS", values.get("LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS", "")).split(",")
         if host.strip()
     )
 

@@ -63,7 +63,7 @@ def render_compose(options: ComposeOptions) -> str:
         raise ComposeConfigurationError("; ".join(errors))
     # Empty mode values re-enable legacy token auto-detection from .env.
     auth = options.auth_mode
-    representation_url = "http://representation:8790" if options.mode in {"cpu", "gpu"} else ""
+    embedding_url = "http://embedding:8790" if options.mode in {"cpu", "gpu"} else ""
     lines = [
         f"name: {options.project_name}",
         "services:",
@@ -102,12 +102,12 @@ def render_compose(options: ComposeOptions) -> str:
         "      KOGWISTAR_MAINTENANCE_BASE_URL: ${KOGWISTAR_MAINTENANCE_BASE_URL:-http://host.docker.internal:11434}",
         f"      LLM_WIKI_OTEL_ENABLED: \"${{LLM_WIKI_OTEL_ENABLED:-{'true' if options.with_otel else 'false'}}}\"",
         "      OTEL_EXPORTER_OTLP_ENDPOINT: \"${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4318}\"",
-        f"      LLM_WIKI_REPRESENTATION_SERVICE_URL: \"${{LLM_WIKI_REPRESENTATION_SERVICE_URL:-{representation_url}}}\"",
-        "      LLM_WIKI_REPRESENTATION_SERVICE_TOKEN: \"${LLM_WIKI_REPRESENTATION_SERVICE_TOKEN:-}\"",
-        f"      LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS: \"${{LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS:-{'representation' if representation_url else ''}}}\"",
-        f"      LLM_WIKI_MULTIMODAL_MODEL: \"${{LLM_WIKI_MULTIMODAL_MODEL:-{'Qwen/Qwen3-VL-Embedding-2B' if representation_url else ''}}}\"",
-        f"      LLM_WIKI_MULTIMODAL_DIMENSION: \"${{LLM_WIKI_MULTIMODAL_DIMENSION:-{options.representation_dimension if representation_url else ''}}}\"",
-        f"      LLM_WIKI_MULTIMODAL_MODEL_REVISION: \"${{LLM_WIKI_MULTIMODAL_MODEL_REVISION:-{options.model_revision if representation_url else ''}}}\"",
+        f"      LLM_WIKI_EMBEDDING_SERVICE_URL: \"${{LLM_WIKI_EMBEDDING_SERVICE_URL:-{embedding_url}}}\"",
+        "      LLM_WIKI_EMBEDDING_SERVICE_TOKEN: \"${LLM_WIKI_EMBEDDING_SERVICE_TOKEN:-}\"",
+        f"      LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS: \"${{LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS:-{'embedding' if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_MULTIMODAL_MODEL: \"${{LLM_WIKI_MULTIMODAL_MODEL:-{'Qwen/Qwen3-VL-Embedding-2B' if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_MULTIMODAL_DIMENSION: \"${{LLM_WIKI_MULTIMODAL_DIMENSION:-{options.representation_dimension if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_MULTIMODAL_MODEL_REVISION: \"${{LLM_WIKI_MULTIMODAL_MODEL_REVISION:-{options.model_revision if embedding_url else ''}}}\"",
         f"    command: [llm-wiki, --backend, {options.backend}, workbench, --workspace, \"${{LLM_WIKI_WORKSPACE:-default}}\", --host, 0.0.0.0, --port, '8765']",
         "    ports: ['127.0.0.1:${LLM_WIKI_REST_PORT:-8765}:8765']",
         "    extra_hosts: ['host.docker.internal:host-gateway']",
@@ -127,33 +127,33 @@ def render_compose(options: ComposeOptions) -> str:
         f"      LLM_WIKI_AUTH_MODE: \"{auth}\"",
         f"      LLM_WIKI_MCP_AUTH_REQUIRED: \"${{LLM_WIKI_MCP_AUTH_REQUIRED:-{'true' if options.auth_mode != 'disabled' else 'false'}}}\"",
         "      LLM_WIKI_MCP_TOKEN: \"${LLM_WIKI_MCP_TOKEN:-}\"",
-        f"      LLM_WIKI_REPRESENTATION_SERVICE_URL: \"${{LLM_WIKI_REPRESENTATION_SERVICE_URL:-{representation_url}}}\"",
-        "      LLM_WIKI_REPRESENTATION_SERVICE_TOKEN: \"${LLM_WIKI_REPRESENTATION_SERVICE_TOKEN:-}\"",
-        f"      LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS: \"${{LLM_WIKI_REPRESENTATION_SERVICE_ALLOWED_HOSTS:-{'representation' if representation_url else ''}}}\"",
+        f"      LLM_WIKI_EMBEDDING_SERVICE_URL: \"${{LLM_WIKI_EMBEDDING_SERVICE_URL:-{embedding_url}}}\"",
+        "      LLM_WIKI_EMBEDDING_SERVICE_TOKEN: \"${LLM_WIKI_EMBEDDING_SERVICE_TOKEN:-}\"",
+        f"      LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS: \"${{LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS:-{'embedding' if embedding_url else ''}}}\"",
         f"    command: [llm-wiki, --backend, {options.backend}, mcp, --transport, streamable-http, --host, 0.0.0.0, --port, '8780', --path, /mcp]",
         "    ports: ['127.0.0.1:${LLM_WIKI_MCP_PORT:-8780}:8780']",
         "    extra_hosts: ['host.docker.internal:host-gateway']",
         "    volumes: [app_data:/var/lib/llm-wiki]",
     ]
-    if representation_url:
+    if embedding_url:
         healthcheck_positions = [index for index, line in enumerate(lines) if line == "        condition: service_healthy"]
         for offset, position in enumerate(healthcheck_positions):
             insert_at = position + 1 + offset * 2
-            lines[insert_at:insert_at] = ["      representation:", "        condition: service_started"]
+            lines[insert_at:insert_at] = ["      embedding:", "        condition: service_started"]
     if options.mode in {"cpu", "gpu"}:
         lines.extend([
-            "  representation:",
+            "  embedding:",
             "    build:",
             "      context: .",
             "      dockerfile: Dockerfile.representation-service",
-            f"      args: {{LLM_WIKI_REPRESENTATION_TORCH_BACKEND: {'cu128' if options.mode == 'gpu' else 'cpu'}}}",
+            f"      args: {{LLM_WIKI_EMBEDDING_TORCH_BACKEND: {'cu128' if options.mode == 'gpu' else 'cpu'}}}",
             "    environment:",
-            "      LLM_WIKI_REPRESENTATION_MODEL: Qwen/Qwen3-VL-Embedding-2B",
-            f"      LLM_WIKI_REPRESENTATION_MODEL_REVISION: {options.model_revision}",
-            f"      LLM_WIKI_REPRESENTATION_DIMENSION: {options.representation_dimension}",
-            f"      LLM_WIKI_REPRESENTATION_DEVICE: {'cuda' if options.mode == 'gpu' else 'cpu'}",
-            f"      LLM_WIKI_REPRESENTATION_TORCH_BACKEND: {'cu128' if options.mode == 'gpu' else 'cpu'}",
-            "      LLM_WIKI_REPRESENTATION_TOKEN: \"${LLM_WIKI_REPRESENTATION_TOKEN:-}\"",
+            "      LLM_WIKI_EMBEDDING_MODEL: Qwen/Qwen3-VL-Embedding-2B",
+            f"      LLM_WIKI_EMBEDDING_MODEL_REVISION: {options.model_revision}",
+            f"      LLM_WIKI_EMBEDDING_DIMENSION: {options.representation_dimension}",
+            f"      LLM_WIKI_EMBEDDING_DEVICE: {'cuda' if options.mode == 'gpu' else 'cpu'}",
+            f"      LLM_WIKI_EMBEDDING_TORCH_BACKEND: {'cu128' if options.mode == 'gpu' else 'cpu'}",
+            "      LLM_WIKI_EMBEDDING_TOKEN: \"${LLM_WIKI_EMBEDDING_TOKEN:-}\"",
             "    expose: ['8790']",
             "    healthcheck:",
             '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8790/readyz\', timeout=3)"]',
@@ -161,7 +161,7 @@ def render_compose(options: ComposeOptions) -> str:
             "      timeout: 5s",
             "      retries: 12",
             "      start_period: 30s",
-            "    volumes: [representation_hf_cache:/var/lib/huggingface]",
+            "    volumes: [embedding_hf_cache:/var/lib/huggingface]",
         ])
     if options.mode == "gpu":
         lines.extend([
@@ -191,7 +191,7 @@ def render_compose(options: ComposeOptions) -> str:
     if options.backend == "postgres":
         lines.insert(-1, "  postgres_data:")
     if options.mode in {"cpu", "gpu"}:
-        lines.append("  representation_hf_cache:")
+        lines.append("  embedding_hf_cache:")
     return "\n".join(lines) + "\n"
 
 
@@ -209,9 +209,12 @@ def check_compose_text(text: str) -> dict[str, object]:
             checks[token] = "ok" if token in text else "missing"
             if token not in text:
                 errors.append(f"missing required PostgreSQL element: {token}")
-    if "LLM_WIKI_REPRESENTATION_DEVICE: cuda" in text and "driver: nvidia" not in text:
+    if "LLM_WIKI_EMBEDDING_DEVICE: cuda" in text and "driver: nvidia" not in text:
         errors.append("CUDA representation service requires an NVIDIA device reservation")
-    if "Qwen3-VL-Embedding-2B" in text and "LLM_WIKI_REPRESENTATION_MODEL_REVISION" not in text:
+    if "Qwen3-VL-Embedding-2B" in text and not any(
+        name in text
+        for name in ("LLM_WIKI_EMBEDDING_MODEL_REVISION", "LLM_WIKI_REPRESENTATION_MODEL_REVISION")
+    ):
         errors.append("Qwen3-VL representation requires an immutable model revision")
     return {"valid": not errors, "errors": errors, "checks": checks}
 

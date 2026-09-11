@@ -30,7 +30,7 @@ class RepresentationServiceConfig:
 
     def __post_init__(self) -> None:
         if not self.revision or not self.revision.strip():
-            raise ValueError("LLM_WIKI_REPRESENTATION_MODEL_REVISION is required and must be immutable; set a pinned revision")
+            raise ValueError("LLM_WIKI_EMBEDDING_MODEL_REVISION is required and must be immutable; set a pinned revision")
         if not MIN_DIMENSION <= self.dimension <= MAX_DIMENSION:
             raise ValueError("representation dimension must be between 64 and 2048")
         if self.device not in {"cpu", "cuda"}:
@@ -61,21 +61,30 @@ def _env(values: dict[str, str], name: str, default: str) -> str:
     return values.get(name, default).strip() or default
 
 
+def _embedding_env(values: dict[str, str], name: str, default: str) -> str:
+    """Prefer clear embedding names while accepting the legacy representation names."""
+    embedding_name = name.replace("LLM_WIKI_REPRESENTATION_", "LLM_WIKI_EMBEDDING_")
+    return _env(values, embedding_name, _env(values, name, default))
+
+
 def load_config(environ: dict[str, str] | None = None) -> RepresentationServiceConfig:
     values = environ if environ is not None else os.environ
-    revision = values.get("LLM_WIKI_REPRESENTATION_MODEL_REVISION", "").strip()
+    revision = values.get(
+        "LLM_WIKI_EMBEDDING_MODEL_REVISION",
+        values.get("LLM_WIKI_REPRESENTATION_MODEL_REVISION", ""),
+    ).strip()
     return RepresentationServiceConfig(
-        model=_env(values, "LLM_WIKI_REPRESENTATION_MODEL", DEFAULT_MODEL),
+        model=_embedding_env(values, "LLM_WIKI_REPRESENTATION_MODEL", DEFAULT_MODEL),
         revision=revision or None,
-        dimension=int(_env(values, "LLM_WIKI_REPRESENTATION_DIMENSION", "1024")),
-        device=_env(values, "LLM_WIKI_REPRESENTATION_DEVICE", "cpu").lower(),
-        torch_backend=_env(values, "LLM_WIKI_REPRESENTATION_TORCH_BACKEND", "cpu").lower(),
-        batch_size=int(_env(values, "LLM_WIKI_REPRESENTATION_BATCH_SIZE", "1")),
-        token=values.get("LLM_WIKI_REPRESENTATION_TOKEN") or None,
-        max_request_bytes=int(_env(values, "LLM_WIKI_REPRESENTATION_MAX_REQUEST_BYTES", "5000000")),
-        max_items=int(_env(values, "LLM_WIKI_REPRESENTATION_MAX_ITEMS", "32")),
+        dimension=int(_embedding_env(values, "LLM_WIKI_REPRESENTATION_DIMENSION", "1024")),
+        device=_embedding_env(values, "LLM_WIKI_REPRESENTATION_DEVICE", "cpu").lower(),
+        torch_backend=_embedding_env(values, "LLM_WIKI_REPRESENTATION_TORCH_BACKEND", "cpu").lower(),
+        batch_size=int(_embedding_env(values, "LLM_WIKI_REPRESENTATION_BATCH_SIZE", "1")),
+        token=values.get("LLM_WIKI_EMBEDDING_TOKEN", values.get("LLM_WIKI_REPRESENTATION_TOKEN")) or None,
+        max_request_bytes=int(_embedding_env(values, "LLM_WIKI_REPRESENTATION_MAX_REQUEST_BYTES", "5000000")),
+        max_items=int(_embedding_env(values, "LLM_WIKI_REPRESENTATION_MAX_ITEMS", "32")),
         model_cache_dir=values.get("HF_HOME") or None,
-        instruction=_env(values, "LLM_WIKI_REPRESENTATION_INSTRUCTION", "Represent the user's input."),
+        instruction=_embedding_env(values, "LLM_WIKI_REPRESENTATION_INSTRUCTION", "Represent the user's input."),
     )
 
 
