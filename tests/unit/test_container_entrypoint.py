@@ -33,7 +33,7 @@ def test_container_entrypoint_rejects_invalid_configuration(monkeypatch, capsys)
 
 
 def test_container_entrypoint_executes_requested_command_after_validation(monkeypatch):
-    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", dict)
     monkeypatch.setattr(container_entrypoint, "validate_configured_multimodal_runtime", lambda **_: None)
     captured = SimpleNamespace(executable=None, args=None, env=None)
 
@@ -90,7 +90,7 @@ def test_global_embedding_environment_passes_startup_validation(monkeypatch):
 
 
 def test_container_entrypoint_rejects_selected_multimodal_profile_mismatch(monkeypatch, capsys):
-    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", dict)
     monkeypatch.setenv("LLM_WIKI_MULTIMODAL_BACKEND", "transformers")
 
     assert container_entrypoint.main(["llm-wiki", "workbench"]) == 78
@@ -100,7 +100,7 @@ def test_container_entrypoint_rejects_selected_multimodal_profile_mismatch(monke
 
 
 def test_container_entrypoint_validates_vllm_before_exec(monkeypatch, capsys):
-    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", dict)
     monkeypatch.setattr(container_entrypoint, "build_configured_multimodal_encoder", lambda: object())
     monkeypatch.setenv("LLM_WIKI_MULTIMODAL_BACKEND", "vllm")
     monkeypatch.setenv("LLM_WIKI_EMBEDDING_VLLM_URL", "http://embedding:8000")
@@ -118,7 +118,7 @@ def test_container_entrypoint_validates_vllm_before_exec(monkeypatch, capsys):
 
 
 def test_container_entrypoint_rejects_incomplete_vllm_configuration(monkeypatch, capsys):
-    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", lambda: {})
+    monkeypatch.setattr(container_entrypoint, "_resolve_embedding_functions", dict)
     monkeypatch.setenv("LLM_WIKI_MULTIMODAL_BACKEND", "vllm")
     monkeypatch.setenv("LLM_WIKI_EMBEDDING_VLLM_URL", "http://embedding:8000")
     monkeypatch.delenv("LLM_WIKI_EMBEDDING_SERVICE_URL", raising=False)
@@ -139,11 +139,35 @@ def test_container_contract_keeps_entrypoint_and_compose_commands():
 
 def test_dockerfile_pins_and_build_checks_fastmcp_imports():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    constraints = (ROOT / "docker" / "container-constraints.txt").read_text(encoding="utf-8")
     parser_pyproject = (ROOT / "kg-doc-parser" / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"fastmcp==3.0.0"' in dockerfile
+    assert "COPY docker/container-constraints.txt" in dockerfile
+    assert "fastmcp==3.0.0" in constraints
     assert 'fastmcp = "3.0.0"' in parser_pyproject
     assert "from fastmcp import FastMCP" in dockerfile
     assert "from fastmcp.server.auth import StaticTokenVerifier, require_scopes" in dockerfile
+
+
+def test_application_dockerfile_separates_churn_layers_and_runtime_tools() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    runtime = dockerfile.split("FROM ${PYTHON_IMAGE} AS runtime", 1)[1]
+
+    assert "# syntax=docker/dockerfile:1.7" in dockerfile
+    assert "--mount=type=cache,target=/root/.cargo/registry" in dockerfile
+    assert "--mount=type=cache,target=/app/kogwistar/rust/target" in dockerfile
+    assert dockerfile.index("COPY kogwistar ./kogwistar") < dockerfile.index("COPY kg-doc-parser ./kg-doc-parser")
+    assert dockerfile.index("COPY kg-doc-parser ./kg-doc-parser") < dockerfile.index("COPY src ./src")
+    assert "COPY --from=app-builder --chown=10001:10001 /opt/venv /opt/venv" in dockerfile
+    assert "apt-get install" not in runtime
+    assert "rustup.sh" not in runtime
+    assert "RUN python -m pip uninstall -y maturin poetry-core wheel setuptools" in dockerfile
+    assert "KG_DOC_PARSER_JOBLIB_CACHE_DIR=/var/lib/llm-wiki/parser-cache" in dockerfile
+    assert "GKE_JOBLIB_CACHE_DIR=/var/lib/llm-wiki/kogwistar-cache" in dockerfile
+    assert "mkdir -p /app/.cache /app/.version_chain /app/.llm_cache /app/.kg_extract" in runtime
+    assert "chown 10001:10001 /app/.cache /app/.version_chain /app/.llm_cache" in runtime
+    assert "/app/.kg_extract /app/application_logs.db /var/lib/llm-wiki/logs" in runtime
+    assert "COPY kogwistar" not in runtime
+    assert "COPY kg-doc-parser" not in runtime
 
 
 def test_docker_multimodal_contract_is_explicit_and_opt_in() -> None:
@@ -153,7 +177,7 @@ def test_docker_multimodal_contract_is_explicit_and_opt_in() -> None:
 
     assert "LLM_WIKI_MULTIMODAL_TORCH_BACKEND" not in dockerfile
     assert "Dockerfile.embedding-service" in compose_override
-    assert "requirements/multimodal/torch-${BACKEND}.txt" in embedding_dockerfile
+    assert "requirements/multimodal/torch-${LLM_WIKI_EMBEDDING_TORCH_BACKEND}.txt" in embedding_dockerfile
     assert "fastapi" in embedding_dockerfile
     assert "LLM_WIKI_EMBEDDING_MODEL" in compose_override
     assert "LLM_WIKI_EMBEDDING_MODEL_REVISION" in compose_override
@@ -171,3 +195,19 @@ def test_embedding_image_isolated_from_application_dependencies() -> None:
         assert forbidden not in dockerfile.lower()
     assert "llm_wiki_embedding_contract" in dockerfile
     assert "llm_wiki_embedding_service" in dockerfile
+
+
+def test_embedding_dockerfile_keeps_runtime_dependencies_before_service_source() -> None:
+    dockerfile = (ROOT / "Dockerfile.embedding-service").read_text(encoding="utf-8")
+    runtime = dockerfile.split("FROM ${PYTHON_IMAGE} AS runtime", 1)[1]
+
+    assert "# syntax=docker/dockerfile:1.7" in dockerfile
+    assert dockerfile.index("COPY requirements/multimodal") < dockerfile.index(
+        "COPY src/llm_wiki_embedding_service"
+    )
+    assert dockerfile.index('python -m pip install -r "requirements/multimodal/torch-${LLM_WIKI_EMBEDDING_TORCH_BACKEND}.txt"') < dockerfile.index(
+        "COPY src/llm_wiki_embedding_service"
+    )
+    assert "COPY --from=embedding-builder --chown=10001:10001 /opt/venv /opt/venv" in dockerfile
+    assert "apt-get install" not in runtime
+    assert "COPY src/llm_wiki_embedding_service" not in runtime
