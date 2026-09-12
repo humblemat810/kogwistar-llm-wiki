@@ -26,13 +26,25 @@ checkpoint. Mount or configure the Hugging Face cache and set an immutable
 
 The workflows never store either value in the repository or image labels.
 
+To publish successful `main` builds to a second Docker Hub account, add the
+repository secrets `DOCKERHUB_SECONDARY_USERNAME` and
+`DOCKERHUB_SECONDARY_TOKEN`. The `publish-dockerhub-main.yml` workflow runs
+only after the `CI` workflow succeeds on `main`, checks out that exact tested
+commit, and publishes `main` plus a commit-specific `sha-...` tag. It does not
+publish release tags or embedding images.
+
 ## Publish An Application Release
+
+The application package version and release tag must match exactly. For
+example, `pyproject.toml` version `0.3.4` is published as `v0.3.4`; do not
+reuse an existing version tag. The local publishers and GitHub Actions verify
+the package version and reject an existing release tag by default.
 
 From PowerShell:
 
 ```powershell
-git tag v0.3.3
-git push origin v0.3.3
+git tag v0.3.4
+git push origin v0.3.4
 ```
 
 The tag publishes only the Torch-free application image. It receives the
@@ -101,6 +113,10 @@ The default target is `app`. Use explicit targets for the standalone images:
 The Bash publisher uses the equivalent `--target` values. The legacy
 `-SkipEmbedding`/`--skip-embedding` switches remain accepted as aliases for
 the default application target. `-Login`/`--login` runs the interactive login.
+
+Updating `latest` or intentionally replacing an existing tag requires the
+explicit `-AllowExistingTag`/`--allow-existing-tag` switch. Prefer a new
+versioned release instead.
 
 The scripts use `docker buildx build --load` so Dockerfile cache mounts work in
 local Docker Desktop builds. No model checkpoint is copied into either image.
