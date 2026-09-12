@@ -14,6 +14,7 @@ Options:
   --tag TAG                    Image tag (default: latest)
   --target TARGET              app, embedding-cpu, embedding-cuda12.8, or all
   --login                      Run docker login before building
+  --allow-existing-tag         Allow updating an existing tag (unsafe; explicit)
   --skip-embedding             Compatibility alias for --target app
   -h, --help                   Show this help
 
@@ -75,6 +76,7 @@ tag="latest"
 target="app"
 login=false
 skip_embedding=false
+allow_existing_tag=false
 
 while (($# > 0)); do
   case "$1" in
@@ -95,6 +97,10 @@ while (($# > 0)); do
       ;;
     --login)
       login=true
+      shift
+      ;;
+    --allow-existing-tag)
+      allow_existing_tag=true
       shift
       ;;
     --skip-embedding)
@@ -135,6 +141,49 @@ fi
 
 if [[ "$login" == true ]]; then
   docker_args login
+fi
+
+python_cmd="python3"
+command -v "$python_cmd" >/dev/null 2>&1 || python_cmd="python"
+"$python_cmd" "$repo_root/scripts/verify_release_version.py" --tag "$tag" || die "release version verification failed"
+
+remote_tag_exists() {
+  local image="$1"
+  local output
+  local status
+  set +e
+  output="$(docker buildx imagetools inspect "$image" 2>&1)"
+  status=$?
+  set -e
+  if ((status == 0)); then
+    return 0
+  fi
+  if grep -Eiq 'no such manifest|manifest unknown|not found' <<<"$output"; then
+    return 1
+  fi
+  die "could not verify whether Docker tag exists: $image\n$output"
+}
+
+publish_images=()
+if [[ "$target" == app || "$target" == all ]]; then
+  publish_images+=("${docker_hub_user}/kogwistar-llm-wiki:${tag}")
+fi
+if [[ "$target" == embedding-cpu || "$target" == all ]]; then
+  embedding_tag="latest-cpu"
+  [[ "$tag" == latest ]] || embedding_tag="${tag}-cpu"
+  publish_images+=("${docker_hub_user}/kogwistar-llm-wiki-embedding:${embedding_tag}")
+fi
+if [[ "$target" == embedding-cuda12.8 || "$target" == all ]]; then
+  embedding_tag="latest-cuda12.8"
+  [[ "$tag" == latest ]] || embedding_tag="${tag}-cuda12.8"
+  publish_images+=("${docker_hub_user}/kogwistar-llm-wiki-embedding:${embedding_tag}")
+fi
+if [[ "$allow_existing_tag" == false ]]; then
+  for image in "${publish_images[@]}"; do
+    if remote_tag_exists "$image"; then
+      die "Docker tag already exists: $image; choose a new package release or pass --allow-existing-tag explicitly"
+    fi
+  done
 fi
 
 case "$target" in
