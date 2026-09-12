@@ -140,6 +140,11 @@ embedding image is also a separate image and is not included in this release;
 see [`doc/docker_deployment.md`](doc/docker_deployment.md) for its deployment
 overlays and tags.
 
+Application releases publish only the Torch-free `profchan/kogwistar-llm-wiki`
+image. CPU and CUDA embedding images are published independently after their
+own runtime checks; see [`doc/docker_hub_publishing.md`](doc/docker_hub_publishing.md)
+for the explicit targets and commands.
+
 If you use VS Code, the launch presets already read `.env` and only prompt for
 the parser lane:
 - `Demo: Ollama (gemma4:e2b)`

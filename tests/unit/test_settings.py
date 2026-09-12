@@ -90,6 +90,21 @@ def test_settings_reports_otel_state_and_stages_toggle(tmp_path, monkeypatch):
         engines.close()
 
 
+def test_settings_reports_the_effective_otlp_endpoint(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLM_WIKI_OTEL_ENABLED", "false")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+    engines = build_in_memory_namespace_engines()
+    try:
+        snapshot = WorkbenchApi(
+            IngestPipeline(engines), settings_path=str(tmp_path / "desired.json")
+        ).get_settings(workspace_id="demo")
+        assert snapshot["effective"]["otel"]["configured"] is True
+        assert snapshot["effective"]["otel"]["endpoint"] == "http://collector:4318/v1/traces"
+    finally:
+        engines.close()
+
+
 def test_auth_mode_is_staged_and_requires_restart(tmp_path):
     engines = build_in_memory_namespace_engines()
     try:

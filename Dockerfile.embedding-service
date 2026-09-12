@@ -1,43 +1,65 @@
-FROM python:3.13-slim
+# syntax=docker/dockerfile:1.7
 
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+
+FROM ${PYTHON_IMAGE} AS embedding-builder
+
+ARG LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app/src \
-    LLM_WIKI_EMBEDDING_DEVICE=cpu \
-    LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    LLM_WIKI_EMBEDDING_TORCH_BACKEND=${LLM_WIKI_EMBEDDING_TORCH_BACKEND}
 
 WORKDIR /app
-ARG LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
-ENV LLM_WIKI_EMBEDDING_TORCH_BACKEND=${LLM_WIKI_EMBEDDING_TORCH_BACKEND}
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only the standalone service and its dependency-light contract.
-COPY embedding-contract/pyproject.toml ./embedding-contract/pyproject.toml
-COPY embedding-service/pyproject.toml ./embedding-service/pyproject.toml
-COPY src/llm_wiki_embedding_contract ./src/llm_wiki_embedding_contract
-COPY src/llm_wiki_embedding_service ./src/llm_wiki_embedding_service
-COPY requirements/multimodal ./requirements/multimodal
+RUN python -m venv /opt/venv \
+    && python -m pip install --upgrade pip setuptools wheel
 
-RUN python -m pip install --upgrade pip \
-    && BACKEND="${LLM_WIKI_EMBEDDING_TORCH_BACKEND}" \
-    && python -m pip install --no-cache-dir -r requirements/multimodal/torch-${BACKEND}.txt \
-    && python -m pip install --no-cache-dir -e ./embedding-contract --no-deps \
-    && python -m pip install --no-cache-dir --no-deps -e ./embedding-service \
-    && python -m pip install --no-cache-dir \
+# Install the large, stable runtime before copying service source. A source
+# change therefore reuses Torch and the inference stack from BuildKit cache.
+COPY requirements/multimodal ./requirements/multimodal
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -r "requirements/multimodal/torch-${LLM_WIKI_EMBEDDING_TORCH_BACKEND}.txt" \
+    && python -m pip install \
        "fastapi>=0.115,<1" "uvicorn[standard]>=0.30,<1" \
        "transformers>=4.57.0" "qwen-vl-utils>=0.0.14" \
        "accelerate>=1.10,<2" "Pillow>=10" "huggingface_hub>=0.26"
 
-RUN python -c "import llm_wiki_embedding_contract, llm_wiki_embedding_service; print('standalone embedding import check passed')"
+# The standalone contract and service are copied only after heavyweight
+# dependencies are installed. Neither package imports the main application.
+COPY embedding-contract/pyproject.toml ./embedding-contract/pyproject.toml
+COPY embedding-service/pyproject.toml ./embedding-service/pyproject.toml
+COPY src/llm_wiki_embedding_contract ./src/llm_wiki_embedding_contract
+COPY src/llm_wiki_embedding_service ./src/llm_wiki_embedding_service
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --no-build-isolation --no-deps ./embedding-contract \
+    && python -m pip install --no-build-isolation --no-deps ./embedding-service \
+    && python -m pip uninstall -y wheel setuptools
+
+FROM ${PYTHON_IMAGE} AS runtime
+
+ARG LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    LLM_WIKI_EMBEDDING_TORCH_BACKEND=${LLM_WIKI_EMBEDDING_TORCH_BACKEND} \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
+
+WORKDIR /app
+COPY --from=embedding-builder --chown=10001:10001 /opt/venv /opt/venv
 
 RUN useradd --create-home --uid 10001 llmwiki \
     && mkdir -p /var/lib/huggingface \
-    && chown -R llmwiki:llmwiki /app /var/lib/huggingface
+    && chown 10001:10001 /var/lib/huggingface
 USER llmwiki
+
+RUN python -c "import llm_wiki_embedding_contract, llm_wiki_embedding_service; print('standalone embedding import check passed')"
 
 EXPOSE 8790
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=5 \

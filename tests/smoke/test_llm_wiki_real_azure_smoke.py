@@ -60,6 +60,7 @@ def _resolve_real_azure_settings(model: str):
 
 
 @pytest.mark.manual
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "model",
     [

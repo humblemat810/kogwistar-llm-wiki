@@ -16,6 +16,7 @@ __pycache__
 **/.pytest-*
 **/.pytest*
 **/pytest-cache-files-*
+**/target
 **/.cache
 **/.joblib
 **/.gke-data

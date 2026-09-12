@@ -1,0 +1,3 @@
+# Keep the application, parser, and Kogwistar MCP contract on one tested
+# FastMCP release. This file is used only while building the application image.
+fastmcp==3.0.0

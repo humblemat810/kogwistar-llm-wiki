@@ -545,16 +545,20 @@ class WorkbenchApi:
 
 
 def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
+    def integer(name: str, default: int) -> int:
+        value = payload.get(name)
+        return default if value is None else int(value)
+
     return SemanticLensRequest(
         workspace_id=str(payload["workspace_id"]),
         graph_spaces=tuple(payload.get("graph_spaces") or (GraphSpace.CURATED_KG.value,)),
         query_text=str(payload.get("query_text") or ""),
         semantic_retrieval=bool(payload.get("semantic_retrieval", False)),
         explicit_anchor_ids=tuple(str(value) for value in (payload.get("explicit_anchor_ids") or ())),
-        hop_limit=int(payload.get("hop_limit", 1)),
-        max_nodes=int(payload.get("max_nodes", 40)),
-        max_edges=int(payload.get("max_edges", 80)),
-        max_hyperedges=int(payload.get("max_hyperedges", 12)),
+        hop_limit=integer("hop_limit", 1),
+        max_nodes=integer("max_nodes", 40),
+        max_edges=integer("max_edges", 80),
+        max_hyperedges=integer("max_hyperedges", 12),
         pinned_node_ids=tuple(str(value) for value in (payload.get("pinned_node_ids") or ())),
         source_watermark=payload.get("source_watermark"),
         include_tombstones=bool(payload.get("include_tombstones", False)),

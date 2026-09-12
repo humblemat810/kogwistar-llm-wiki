@@ -1,0 +1,92 @@
+name: Publish LLM-Wiki embedding images
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Embedding image to build
+        required: true
+        type: choice
+        options:
+          - embedding-cpu
+          - embedding-cuda12.8
+          - all
+        default: embedding-cuda12.8
+      tag:
+        description: Immutable release tag, for example v0.3.3
+        required: true
+        type: string
+      promote_latest:
+        description: Also move the matching latest-* alias
+        required: true
+        type: boolean
+        default: false
+      confirm:
+        description: I understand this publishes a standalone embedding image
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish-cpu:
+    if: inputs.confirm == true && (inputs.target == 'embedding-cpu' || inputs.target == 'all')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}-cpu
+      LATEST_TAG: latest-cpu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.embedding-service
+          build-args: LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
+          push: true
+          tags: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=embedding-cpu
+          cache-to: type=gha,mode=max,scope=embedding-cpu
+      - name: Promote latest CPU alias
+        if: inputs.promote_latest == true
+        run: >-
+          docker buildx imagetools create
+          --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.LATEST_TAG }}
+          docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
+
+  publish-cuda:
+    if: inputs.confirm == true && (inputs.target == 'embedding-cuda12.8' || inputs.target == 'all')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}-cuda12.8
+      LATEST_TAG: latest-cuda12.8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.embedding-service
+          build-args: LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128
+          push: true
+          tags: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=embedding-cuda12.8
+          cache-to: type=gha,mode=max,scope=embedding-cuda12.8
+      - name: Promote latest CUDA alias
+        if: inputs.promote_latest == true
+        run: >-
+          docker buildx imagetools create
+          --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.LATEST_TAG }}
+          docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}

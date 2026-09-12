@@ -21,6 +21,7 @@ from .multimodal_runtime import (
 from .provider_config import resolve_maintenance_provider_settings, resolve_parser_provider_settings
 from .model_catalog import _safe_endpoint
 from .identity import auth_mode
+from .otel import _trace_exporter_endpoint
 
 
 _DESIRED_KEYS = frozenset({
@@ -153,8 +154,8 @@ class SettingsService:
             "auth_mode": auth_mode(),
             "otel": {
                 "enabled": otel_enabled,
-                "configured": bool(os.getenv("LLM_WIKI_OTEL_ENABLED", "").strip()),
-                "endpoint": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+                "configured": _trace_exporter_endpoint() is not None,
+                "endpoint": _trace_exporter_endpoint(),
                 "service_name": os.getenv("LLM_WIKI_OTEL_SERVICE_NAME", "kogwistar-llm-wiki"),
                 "packages_available": telemetry is not None and getattr(telemetry, "packages_available", True),
             },

@@ -33,8 +33,10 @@ Current mitigation:
 Recommended commands:
 
 ```powershell
-# Default PR CI slice; includes tests auto-marked as `ci`.
-.\.venv\Scripts\python.exe -m pytest tests -q -m ci
+# Default PR CI slice; includes tests auto-marked as `ci` and prints the
+# slowest individual tests for timing visibility.
+.\.venv\Scripts\python.exe -m pytest tests -q -m "ci and not ci_full" `
+  --durations=25 --durations-min=0 -p no:cacheprovider
 
 # Normal run; uses the repo-local cache configured by pytest.ini.
 .\.venv\Scripts\python.exe -m pytest kogwistar/tests/core/test_job_queue_subsystem.py -q
@@ -42,6 +44,19 @@ Recommended commands:
 # If cache permissions are suspect and you only need a signal, disable cache.
 .\.venv\Scripts\python.exe -m pytest <test-target> -q -p no:cacheprovider
 ```
+
+## GitHub CI Boundary
+
+`.github/workflows/ci.yml` checks out the application together with pinned
+commits of the `kogwistar`, `kg-doc-parser`, and `kogwistar-obsidian-sink`
+sibling repositories. Its default Python job runs the `ci` marker while
+excluding `ci_full`; tests that use real providers are marked `manual`, and
+intentionally long tests are marked `slow`. The workflow runs Ruff and the
+vendored Rust workspace checks separately. Docker, live databases, Ollama,
+real LLM credentials, and GPU model tests remain opt-in.
+
+The Python job prints the slowest 25 tests using `--durations`, so a growing
+CI runtime is visible in the job log rather than hidden behind one total.
 
 ## Debug Run Mode
 
