@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kogwistar-llm-wiki"
-version = "0.3.2"
+version = "0.3.3"
 description = "LLM-Wiki: a continuously-learning knowledge system built on Kogwistar"
 readme = "README.md"
 license = { text = "MIT" }
