@@ -1,0 +1,180 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The application imports these sibling repositories at runtime. Keep CI
+  # aligned with the revisions used by publish-dockerhub.yml.
+  KOGWISTAR_REVISION: 6ff3b2f
+  KG_DOC_PARSER_REVISION: e8d969ce4f3ef74d2f99c4f6a93dfe29c6b45d13
+  OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
+
+jobs:
+  python-tests:
+    name: Provider-free Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v4
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v4
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v4
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set up Rust for the local Kogwistar package
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.91.1
+
+      - name: Install local packages and provider-free test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ./kogwistar
+          python -m pip install -e ./kg-doc-parser
+          python -m pip install -e ./kogwistar-obsidian-sink
+          python -m pip install -e ".[test,otel,agent]" --no-deps
+          python -m pip install \
+            "chromadb>=0.6" \
+            "fastmcp==3.0.0" \
+            "langchain-openai>=0.3" \
+            "opentelemetry-api>=1.25" \
+            "opentelemetry-sdk>=1.25" \
+            "opentelemetry-exporter-otlp-proto-http>=1.25" \
+            "pytest>=8" \
+            "pytest-anyio"
+
+      - name: Run provider-free CI marker
+        env:
+          LLM_WIKI_AUTH_MODE: disabled
+          LLM_WIKI_OTEL_ENABLED: "false"
+          KOGWISTAR_LOG_LEVEL: WARNING
+          LOG_LEVEL: WARNING
+        shell: bash
+        run: >-
+          python -m pytest -m "ci and not ci_full" tests -q
+          --durations=25 --durations-min=0 -p no:cacheprovider
+
+  python-lint:
+    name: Python lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v4
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v4
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v4
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned Ruff
+        shell: bash
+        run: python -m pip install --upgrade pip ruff==0.16.7
+
+      - name: Lint application-owned Python
+        shell: bash
+        run: python -m ruff check src tests scripts
+
+      - name: Lint pinned Kogwistar Python
+        shell: bash
+        working-directory: kogwistar
+        run: python -m ruff check .
+
+  rust:
+    name: Kogwistar Rust checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v4
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Set up pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.91.1
+          components: clippy,rustfmt
+
+      - name: Check formatting
+        working-directory: kogwistar/rust
+        run: cargo fmt --all -- --check
+
+      - name: Test Rust workspace
+        working-directory: kogwistar/rust
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Deny Clippy warnings
+        working-directory: kogwistar/rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings

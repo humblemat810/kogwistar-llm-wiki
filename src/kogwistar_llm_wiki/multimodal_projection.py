@@ -1282,7 +1282,6 @@ def build_configured_multimodal_encoder(
                 max_request_bytes=configured_embedding_service_max_request_bytes(),
                 expected_profile_fingerprint=(
                     os.environ.get("LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT")
-                    or os.environ.get("LLM_WIKI_EMBEDDING_PROFILE_FINGERPRINT")
                     or None
                 ),
                 allowed_hosts=allowed_hosts,

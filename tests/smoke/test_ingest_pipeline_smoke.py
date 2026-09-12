@@ -18,7 +18,7 @@ SMOKE_PARSER_CASES = [
         "ollama",
         "gemma4:e2b",
         id="ollama-gemma4",
-        marks=pytest.mark.manual,
+        marks=[pytest.mark.manual, pytest.mark.slow],
     ),
 ]
 

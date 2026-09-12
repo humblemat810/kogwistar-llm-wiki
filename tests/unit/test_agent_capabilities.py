@@ -435,6 +435,19 @@ def test_agent_result_limits_are_server_bounded():
     assert bounded["max_nodes"] == 0
 
 
+def test_agent_history_uses_default_for_explicit_null_limit():
+    captured: dict[str, object] = {}
+    gateway = AgentGateway(
+        SimpleNamespace(
+            get_history=lambda **kwargs: captured.update(kwargs) or [],
+        )
+    )
+
+    gateway.history({"workspace_id": "w", "limit": None})
+
+    assert captured["limit"] == 100
+
+
 def test_maintenance_rejects_malformed_budget_values():
     gateway = AgentGateway(SimpleNamespace())
     with pytest.raises(ValueError, match="max_steps"):

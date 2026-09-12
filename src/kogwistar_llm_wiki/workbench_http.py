@@ -30,6 +30,18 @@ def build_workbench_handler(
     # fails before the REST listener accepts requests.
     selected_auth_mode = auth_mode()
     class Handler(BaseHTTPRequestHandler):
+        def handle_one_request(self) -> None:  # noqa: N802
+            """Trace transport requests in addition to gateway operations."""
+            path = getattr(self, "path", "").split("?", 1)[0]
+            with gateway.telemetry.span(
+                "llm_wiki.http_request",
+                {
+                    "http.method": getattr(self, "command", "") or "",
+                    "http.target": path,
+                },
+            ):
+                super().handle_one_request()
+
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)

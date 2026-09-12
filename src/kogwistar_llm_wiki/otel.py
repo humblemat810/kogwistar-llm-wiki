@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import os
+import threading
 from typing import Iterator, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     from opentelemetry import trace
@@ -20,12 +22,22 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by minimal installs
     Tracer = object  # type: ignore[assignment,misc]
 
 
+_provider_lock = threading.Lock()
+_provider_configured = False
+_runtime_enabled: bool | None = None
+
+
 class LlmWikiTelemetry:
     """Small optional tracer facade with safe no-op behavior."""
 
     def __init__(self, *, service_name: str = "kogwistar-llm-wiki") -> None:
+        global _runtime_enabled
         self.packages_available = trace is not None
-        self.enabled = _env_bool("LLM_WIKI_OTEL_ENABLED", False) and self.packages_available
+        configured = _env_bool("LLM_WIKI_OTEL_ENABLED", False)
+        self.enabled = (
+            (_runtime_enabled if _runtime_enabled is not None else configured)
+            and self.packages_available
+        )
         self.service_name = service_name
         self._tracer: Tracer | None = None
         if self.enabled:
@@ -35,28 +47,14 @@ class LlmWikiTelemetry:
     def _configure_tracer(service_name: str) -> Tracer | None:
         if trace is None:
             return None
-        # Respect an already-installed provider. The optional exporter setup
-        # keeps the base install no-op while making the Compose sink useful.
-        try:
-            from opentelemetry import trace as trace_api
-            from opentelemetry.sdk.resources import Resource
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-            provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
-            endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-            exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
-            provider.add_span_processor(BatchSpanProcessor(exporter))
-            trace_api.set_tracer_provider(provider)
-        except (ImportError, RuntimeError, ValueError):
-            # The API-only optional installation remains a valid no-op mode.
-            pass
+        _ensure_tracer_provider(service_name)
         return trace.get_tracer(service_name)  # type: ignore[union-attr]
 
     def set_enabled(self, enabled: bool) -> None:
         """Toggle emission for the current process without changing config."""
-        self.enabled = bool(enabled) and self.packages_available
+        global _runtime_enabled
+        _runtime_enabled = bool(enabled)
+        self.enabled = _runtime_enabled and self.packages_available
         if self.enabled and trace is not None:
             self._tracer = self._configure_tracer(self.service_name) or trace.get_tracer(self.service_name)
         else:
@@ -68,6 +66,16 @@ class LlmWikiTelemetry:
 
     @contextmanager
     def span(self, name: str, attributes: Mapping[str, object] | None = None) -> Iterator[Span | None]:
+        # Facades are constructed by several application components. Consult
+        # the process-wide switch here so a settings toggle also affects
+        # instances that were created before the toggle.
+        if _runtime_enabled is False:
+            yield None
+            return
+        if self._tracer is None and _runtime_enabled is True:
+            self.enabled = self.packages_available
+            if self.enabled:
+                self._tracer = self._configure_tracer(self.service_name)
         if self._tracer is None:
             yield None
             return
@@ -92,6 +100,52 @@ def _env_bool(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _trace_exporter_endpoint() -> str | None:
+    """Resolve OTLP HTTP endpoints without relying on SDK constructor magic."""
+    signal_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    if signal_endpoint:
+        # Signal-specific endpoints are already expected to include /v1/traces.
+        return signal_endpoint
+
+    base_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not base_endpoint:
+        return None
+    parts = urlsplit(base_endpoint)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/v1/traces"):
+        path += "/v1/traces"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
+def _ensure_tracer_provider(service_name: str) -> None:
+    """Install the optional exporter once for the whole Python process."""
+    global _provider_configured
+    if trace is None or _provider_configured:
+        return
+    with _provider_lock:
+        if _provider_configured:
+            return
+        try:
+            from opentelemetry import trace as trace_api
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+            from opentelemetry.sdk.resources import Resource
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+            provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
+            endpoint = _trace_exporter_endpoint()
+            exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
+            provider.add_span_processor(BatchSpanProcessor(exporter))
+            trace_api.set_tracer_provider(provider)
+        except (ImportError, RuntimeError, ValueError):
+            # The API-only optional installation remains a valid no-op mode.
+            pass
+        finally:
+            # Do not repeatedly attempt global provider installation after an
+            # SDK or dependency rejects the optional exporter setup.
+            _provider_configured = True
 
 
 def _event_attributes(event: Mapping[str, object]) -> dict[str, str | int | float | bool]:

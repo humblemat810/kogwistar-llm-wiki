@@ -28,6 +28,25 @@ def test_workbench_api_returns_serializable_bounded_lens():
         engines.close()
 
 
+def test_workbench_api_uses_lens_defaults_for_explicit_null_limits():
+    engines = build_in_memory_namespace_engines()
+    try:
+        api = WorkbenchApi(IngestPipeline(engines))
+        payload = api.get_lens(
+            {
+                "workspace_id": "api-null-defaults",
+                "query_text": "nothing here",
+                "hop_limit": None,
+                "max_nodes": None,
+                "max_edges": None,
+                "max_hyperedges": None,
+            }
+        )
+        assert payload["workspace_id"] == "api-null-defaults"
+    finally:
+        engines.close()
+
+
 def test_validate_proposal_re_resolves_with_anchor_and_pin_context(monkeypatch):
     engines = build_in_memory_namespace_engines()
     try:

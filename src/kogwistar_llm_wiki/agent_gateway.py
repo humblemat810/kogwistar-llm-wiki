@@ -174,11 +174,13 @@ class AgentGateway:
         return self.api.get_lens(_bounded_lens_arguments(arguments))
 
     def history(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        raw_limit = arguments.get("limit")
+        limit = 100 if raw_limit is None else int(raw_limit)
         return {
             "records": self.api.get_history(
                 workspace_id=str(arguments["workspace_id"]),
                 session_id=str(arguments.get("session_id") or "") or None,
-                limit=min(1000, max(1, int(arguments.get("limit", 100)))),
+                limit=min(1000, max(1, limit)),
             )
         }
 

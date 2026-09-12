@@ -30,13 +30,19 @@ def _supports_gemini_mode() -> bool:
     ("parser_mode", "llm_provider", "llm_model"),
     [
         pytest.param("heuristic", None, None, id="heuristic"),
-        pytest.param("ollama", "ollama", "gemma3:4b", id="ollama", marks=pytest.mark.ci_full),
+        pytest.param(
+            "ollama",
+            "ollama",
+            "gemma3:4b",
+            id="ollama",
+            marks=[pytest.mark.manual, pytest.mark.slow],
+        ),
         pytest.param(
             "gemini",
             "gemini",
             "gemini-2.5-flash",
             id="gemini",
-            marks=pytest.mark.ci_full,
+            marks=[pytest.mark.manual, pytest.mark.slow],
         ),
     ],
 )
