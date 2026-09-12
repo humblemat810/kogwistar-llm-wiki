@@ -23,7 +23,7 @@ jobs:
     env:
       # Keep the application image reproducible even though these packages are
       # maintained as sibling repositories rather than Git submodules.
-      KOGWISTAR_REVISION: 6ff3b2f
+      KOGWISTAR_REVISION: 6ff3b2f4c4b84c20b0a6e0db7e5ffb2484ebe792
       KG_DOC_PARSER_REVISION: e8d969ce4f3ef74d2f99c4f6a93dfe29c6b45d13
       OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
     steps:
