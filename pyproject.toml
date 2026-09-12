@@ -106,6 +106,8 @@ embedding-cuda = [
 test = [
     "pytest>=8.0",
     "pytest-anyio",
+    "sqlalchemy>=2.0",
+    "langchain-ollama>=0.3.0",
 ]
 dev = [
     "kogwistar-llm-wiki[test,chromadb,otel,agent]",
