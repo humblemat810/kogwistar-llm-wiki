@@ -207,6 +207,33 @@ restore, re-embedding, validation, and cutover. There is no automatic in-place
 dimension migration. In-memory stores are process-local and do not provide
 durable profile compatibility across restarts.
 
+## `llm-wiki codex-memory`
+
+Validate or create an app-owned project-to-workspace binding and print safe
+MCP setup instructions. The helper does not edit global Codex configuration or
+write secrets. Use `--check-only` to validate without creating a missing
+binding:
+
+```powershell
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend postgres `
+  --dsn "$env:KOGWISTAR_POSTGRES_DSN" `
+  codex-memory --workspace my-project --project-root .
+
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend postgres `
+  --dsn "$env:KOGWISTAR_POSTGRES_DSN" `
+  codex-memory --workspace my-project --project-root . --check-only
+```
+
+The project binding is only a stable local project key and workspace ID.
+Memory capture remains disabled unless `LLM_WIKI_CODEX_MEMORY_ENABLED=true`;
+`memory_recall` and `memory_review` are read-only. Records must carry bounded
+repository or source-span evidence and cannot contain secrets, host paths, or
+raw transcripts.
+
 ## Test Commands
 
 ```powershell

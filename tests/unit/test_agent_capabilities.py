@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
+from kogwistar.runtime import BudgetAttribution, BudgetEvent, budget_event_to_dict
 
 from kogwistar_llm_wiki.agent_gateway import AgentGateway, _fetch_source_text
 from kogwistar_llm_wiki.workbench_api import WorkbenchApi
-from kogwistar_llm_wiki.worker import _durable_maintenance_usage, _maintenance_budget_state
-from kogwistar.runtime import BudgetAttribution, BudgetEvent, budget_event_to_dict
+from kogwistar_llm_wiki.worker import (
+    _durable_maintenance_usage,
+    _maintenance_budget_state,
+)
 
 
 def test_agent_capability_fake_payload_flow(pipeline):
@@ -186,7 +190,8 @@ def test_agent_gateway_exposes_only_semantic_capability_names(pipeline):
     gateway = AgentGateway(WorkbenchApi(pipeline))
     assert gateway.mcp_tool_names() == (
         "query", "search", "ingest", "source", "reingest", "maintain",
-        "status", "hypergraph_search", "history", "propose", "confirm",
+        "status", "hypergraph_search", "history", "memory_recall",
+        "memory_capture", "memory_review", "propose", "confirm",
     )
     assert set(gateway.mcp_tool_names()) == set(gateway.mcp_tool_descriptions())
     gateway.api.close()
@@ -239,7 +244,7 @@ def test_http_source_fetch_requires_allowlist_and_enforces_response_limit(monkey
         _fetch_source_text("http://127.0.0.1/source.txt")
 
     class Response:
-        headers = {"Content-Length": "4"}
+        headers: ClassVar[dict[str, str]] = {"Content-Length": "4"}
 
         def __enter__(self):
             return self

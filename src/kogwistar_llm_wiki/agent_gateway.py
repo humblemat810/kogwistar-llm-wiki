@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import asdict
 import json
 import os
-from pathlib import PurePosixPath
 import time
 import uuid
 from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from numbers import Real
+from pathlib import PurePosixPath
 from typing import Any
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
-from .otel import LlmWikiTelemetry
 from .inspection import build_workspace_quality_report
 from .models import IngestPipelineRequest
+from .otel import LlmWikiTelemetry
 from .utils import _temporary_namespace
 from .workbench_api import WorkbenchApi
 
@@ -129,7 +128,8 @@ class AgentGateway:
     def mcp_tool_names(self) -> tuple[str, ...]:
         return (
             "query", "search", "ingest", "source", "reingest", "maintain",
-            "status", "hypergraph_search", "history", "propose", "confirm",
+            "status", "hypergraph_search", "history", "memory_recall",
+            "memory_capture", "memory_review", "propose", "confirm",
         )
 
     def mcp_tool_descriptions(self) -> dict[str, str]:
@@ -143,6 +143,9 @@ class AgentGateway:
             "status": "Report wiki health, source state, graph quality, and maintenance state.",
             "hypergraph_search": "Inspect bounded raw graph and hypergraph structure read-only.",
             "history": "Inspect prior investigations, decisions, and grounding metadata.",
+            "memory_recall": "Recall bounded, evidence-backed project memory for relevant work.",
+            "memory_capture": "Capture a structured, evidence-backed project memory record.",
+            "memory_review": "Review project memory records, evidence, lifecycle, and conflicts.",
             "propose": "Validate a candidate durable knowledge change without applying it.",
             "confirm": "Explicitly approve and apply a previously validated knowledge change.",
         }
@@ -159,6 +162,9 @@ class AgentGateway:
                 "status": self.status,
                 "hypergraph_search": self.hypergraph_search,
                 "history": self.history,
+                "memory_recall": self.memory_recall,
+                "memory_capture": self.memory_capture,
+                "memory_review": self.memory_review,
                 "propose": self.propose,
                 "confirm": self.confirm,
             }
@@ -183,6 +189,35 @@ class AgentGateway:
                 limit=min(1000, max(1, limit)),
             )
         }
+
+    def memory_recall(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.recall_memory(
+            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            query_text=str(arguments.get("query_text") or ""),
+            include_inferred=bool(arguments.get("include_inferred", True)),
+            limit=arguments.get("limit"),
+        )
+
+    def memory_capture(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        payload = arguments.get("record")
+        if payload is None:
+            payload = arguments.get("records")
+        if payload is None:
+            raise ValueError("memory_capture requires record or records")
+        if isinstance(payload, Mapping):
+            return self.api.capture_memory(payload)
+        if isinstance(payload, list) and all(isinstance(item, Mapping) for item in payload):
+            return self.api.capture_memory(payload)
+        raise ValueError("memory_capture record(s) must be an object or list of objects")
+
+    def memory_review(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.review_memory(
+            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            kind=str(arguments.get("kind") or "").strip() or None,
+            confidence=str(arguments.get("confidence") or "").strip() or None,
+            lifecycle_status=str(arguments.get("lifecycle_status") or "").strip() or None,
+            limit=int(arguments.get("limit") or 50),
+        )
 
     def ingest(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         return self._ingest(arguments, reingest=False)
@@ -280,7 +315,7 @@ class AgentGateway:
         budgets = _budgets(arguments)
         raw_source_ids = arguments.get("source_document_ids") or ()
         if not isinstance(raw_source_ids, (list, tuple, set, frozenset)):
-            raise ValueError("source_document_ids must be a list of IDs")
+            raise TypeError("source_document_ids must be a list of IDs")
         source_ids = [str(value) for value in raw_source_ids if str(value).strip()]
         if not source_ids:
             source_ids = self._source_ids_for_topic(workspace_id, topic)
@@ -527,7 +562,7 @@ class AgentGateway:
         for status in ("PENDING", "DOING", "DONE", "FAILED"):
             try:
                 rows = self.api.pipeline.engines.conversation.jobs.list(namespace=ns.maintenance_jobs, status=status, limit=10_000)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 if errors is not None:
                     errors.append(f"{type(exc).__name__}: {exc}")
                 rows = []
@@ -632,11 +667,11 @@ def _bounded_lens_arguments(arguments: Mapping[str, Any]) -> dict[str, object]:
             continue
         value = result[name]
         if isinstance(value, bool):
-            raise ValueError(f"{name} must be a non-negative integer")
+            raise TypeError(f"{name} must be a non-negative integer")
         try:
             value = int(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must be a non-negative integer") from exc
+            raise TypeError(f"{name} must be a non-negative integer") from exc
         result[name] = max(0, min(value, upper_bound))
     return result
 
@@ -679,9 +714,11 @@ def _validate_agent_source_uri(source_uri: str) -> None:
     parsed = urlparse(source_uri)
     if not parsed.scheme or parsed.scheme.lower() in {"file", "data", "javascript"}:
         raise ValueError("local filesystem and executable source_uri schemes are not accepted")
-    if parsed.scheme.lower() in {"http", "https"}:
-        if not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
-            raise ValueError("source_uri must be a credential-free http(s) URL")
+    if (
+        parsed.scheme.lower() in {"http", "https"}
+        and (not parsed.hostname or parsed.username or parsed.password or parsed.fragment)
+    ):
+        raise ValueError("source_uri must be a credential-free http(s) URL")
 
 
 def _validate_reingest_revision(existing: Mapping[str, Any], provenance: object) -> None:

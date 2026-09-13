@@ -6,23 +6,26 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
+from .identity import auth_mode
+from .model_catalog import _safe_endpoint
 from .multimodal_runtime import (
+    configured_embedding_crop_token_budget,
+    configured_embedding_max_model_len,
+    configured_embedding_service_url,
+    configured_multimodal_backend,
     configured_multimodal_dimension,
     configured_multimodal_model,
-    configured_multimodal_backend,
-    configured_embedding_service_url,
     configured_vllm_url,
-    configured_embedding_max_model_len,
-    configured_embedding_crop_token_budget,
 )
-from .provider_config import resolve_maintenance_provider_settings, resolve_parser_provider_settings
-from .model_catalog import _safe_endpoint
-from .identity import auth_mode
 from .otel import _trace_exporter_endpoint
-
+from .provider_config import (
+    resolve_maintenance_provider_settings,
+    resolve_parser_provider_settings,
+)
 
 _DESIRED_KEYS = frozenset({
     "auth_mode",
@@ -36,6 +39,9 @@ _DESIRED_KEYS = frozenset({
     "maintenance_base_url",
     "embedding_max_model_len",
     "embedding_crop_token_budget",
+    "codex_memory_enabled",
+    "codex_memory_max_records_per_capture",
+    "codex_memory_max_recall_records",
 })
 _SECRET_WORDS = ("token", "secret", "password", "api_key", "credential")
 _WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router"})
@@ -55,8 +61,15 @@ def _redact(value: object) -> object:
 class SettingsService:
     """Expose safe operational state without becoming a second runtime config system."""
 
-    def __init__(self, pipeline: Any, *, path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        pipeline: Any,
+        *,
+        path: str | Path | None = None,
+        codex_memory: Any | None = None,
+    ) -> None:
         self.pipeline = pipeline
+        self.codex_memory = codex_memory
         self._runtime_multimodal_enabled: bool | None = None
         self._runtime_otel_enabled: bool | None = None
         configured_path = path or os.getenv("LLM_WIKI_SETTINGS_PATH")
@@ -73,10 +86,10 @@ class SettingsService:
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"cannot read desired settings: {exc}") from exc
         if not isinstance(payload, dict):
-            raise RuntimeError("desired settings must be a JSON object")
+            raise TypeError("desired settings must be a JSON object")
         values = payload.get("settings", payload)
         if not isinstance(values, dict):
-            raise RuntimeError("desired settings.settings must be a JSON object")
+            raise TypeError("desired settings.settings must be a JSON object")
         return {key: value for key, value in values.items() if key in _DESIRED_KEYS}
 
     def _save_desired(self, desired: Mapping[str, object]) -> None:
@@ -159,6 +172,18 @@ class SettingsService:
                 "service_name": os.getenv("LLM_WIKI_OTEL_SERVICE_NAME", "kogwistar-llm-wiki"),
                 "packages_available": telemetry is not None and getattr(telemetry, "packages_available", True),
             },
+            "codex_memory": {
+                "enabled": bool(
+                    getattr(self.codex_memory, "enabled", False)
+                    if self.codex_memory is not None
+                    else os.getenv("LLM_WIKI_CODEX_MEMORY_ENABLED", "").strip().lower()
+                    in {"1", "true", "yes", "on"}
+                ),
+                "max_records_per_capture": getattr(self.codex_memory, "max_records_per_capture", 8),
+                "max_recall_records": getattr(self.codex_memory, "max_recall_records", 12),
+                "policy": "grounded_plus_labeled_inference",
+                "raw_transcripts": False,
+            },
         }
         impact = self._impact(effective, desired)
         return _redact({
@@ -199,6 +224,19 @@ class SettingsService:
                     raise ValueError(f"{key} must be an integer") from exc
                 if next_desired[key] <= 0:
                     raise ValueError(f"{key} must be positive")
+        if "codex_memory_enabled" in next_desired and not isinstance(next_desired["codex_memory_enabled"], bool):
+            raise ValueError("codex_memory_enabled must be boolean")
+        for key, upper in (
+            ("codex_memory_max_records_per_capture", 32),
+            ("codex_memory_max_recall_records", 100),
+        ):
+            if key in next_desired:
+                try:
+                    next_desired[key] = int(next_desired[key])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{key} must be an integer") from exc
+                if not 1 <= next_desired[key] <= upper:
+                    raise ValueError(f"{key} must be between 1 and {upper}")
         if (
             "embedding_max_model_len" in next_desired
             and "embedding_crop_token_budget" in next_desired
@@ -228,6 +266,16 @@ class SettingsService:
                 return {"status": "rejected", "reason": "multimodal_embedding_service_not_configured", **snapshot}
             self._runtime_multimodal_enabled = desired["multimodal_enabled"]
             snapshot = self.snapshot(workspace_id=workspace_id)
+        if self.codex_memory is not None and isinstance(desired, Mapping):
+            if isinstance(desired.get("codex_memory_enabled"), bool):
+                self.codex_memory.enabled = desired["codex_memory_enabled"]
+            for key, attribute in (
+                ("codex_memory_max_records_per_capture", "max_records_per_capture"),
+                ("codex_memory_max_recall_records", "max_recall_records"),
+            ):
+                if key in desired:
+                    setattr(self.codex_memory, attribute, int(desired[key]))
+            snapshot = self.snapshot(workspace_id=workspace_id)
         if snapshot["restart_required"] or snapshot["reembedding_required"]:
             return {"status": "staged", "reason": "restart_and_or_reembedding_required", **snapshot}
         return {"status": "applied", "applied_live": ["multimodal_enabled"] if self._runtime_multimodal_enabled is not None else [], **snapshot}
@@ -254,6 +302,7 @@ class SettingsService:
             "parser": {"state": "up", "toggleable": False},
             "maintenance": {"state": "up", "toggleable": False},
             "otel_sink": {"state": "up" if otel.get("enabled") else "disabled", "toggleable": True, "description": "Optional OpenTelemetry trace sink for the configured collector."},
+            "codex_memory": {"state": "up" if effective.get("codex_memory", {}).get("enabled") else "disabled", "toggleable": True, "description": "Project-scoped evidence-backed memory artifacts; canonical graph edits still require propose and confirm."},
         }
 
     @staticmethod
@@ -272,6 +321,9 @@ class SettingsService:
             "otel_enabled": effective.get("otel", {}).get("enabled") if isinstance(effective.get("otel"), Mapping) else None,
             "embedding_max_model_len": effective.get("multimodal", {}).get("max_model_len") if isinstance(effective.get("multimodal"), Mapping) else None,
             "embedding_crop_token_budget": effective.get("multimodal", {}).get("crop_token_budget") if isinstance(effective.get("multimodal"), Mapping) else None,
+            "codex_memory_enabled": effective.get("codex_memory", {}).get("enabled") if isinstance(effective.get("codex_memory"), Mapping) else None,
+            "codex_memory_max_records_per_capture": effective.get("codex_memory", {}).get("max_records_per_capture") if isinstance(effective.get("codex_memory"), Mapping) else None,
+            "codex_memory_max_recall_records": effective.get("codex_memory", {}).get("max_recall_records") if isinstance(effective.get("codex_memory"), Mapping) else None,
         }
         pending_changes = sorted(
             key for key, value in desired.items()

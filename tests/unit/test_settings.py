@@ -2,7 +2,11 @@ import json
 
 import pytest
 
-from kogwistar_llm_wiki import IngestPipeline, WorkbenchApi, build_in_memory_namespace_engines
+from kogwistar_llm_wiki import (
+    IngestPipeline,
+    WorkbenchApi,
+    build_in_memory_namespace_engines,
+)
 from kogwistar_llm_wiki.settings import SettingsService
 
 
@@ -113,5 +117,42 @@ def test_auth_mode_is_staged_and_requires_restart(tmp_path):
         assert snapshot["desired"]["auth_mode"] == "kogwistar_jwt"
         assert snapshot["restart_required"] is True
         assert service.apply(workspace_id="default", confirmed=True)["status"] == "staged"
+    finally:
+        engines.close()
+
+
+def test_codex_memory_settings_are_visible_bounded_and_live_toggleable(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_CODEX_MEMORY_ENABLED", "false")
+    engines = build_in_memory_namespace_engines()
+    try:
+        api = WorkbenchApi(IngestPipeline(engines), settings_path=str(tmp_path / "desired.json"))
+        initial = api.get_settings(workspace_id="demo")
+        assert initial["effective"]["codex_memory"]["enabled"] is False
+        assert initial["components"]["codex_memory"]["toggleable"] is True
+        updated = api.update_desired_settings(
+            workspace_id="demo",
+            changes={
+                "codex_memory_enabled": True,
+                "codex_memory_max_records_per_capture": 4,
+            },
+        )
+        assert updated["desired"]["codex_memory_enabled"] is True
+        assert updated["desired"]["codex_memory_max_records_per_capture"] == 4
+        applied = api.apply_settings(workspace_id="demo", confirmed=True)
+        assert applied["status"] == "applied"
+        assert applied["effective"]["codex_memory"]["enabled"] is True
+        assert applied["effective"]["codex_memory"]["max_records_per_capture"] == 4
+    finally:
+        engines.close()
+
+
+def test_codex_memory_settings_reject_invalid_limits(tmp_path):
+    engines = build_in_memory_namespace_engines()
+    try:
+        service = SettingsService(IngestPipeline(engines), path=tmp_path / "desired.json")
+        with pytest.raises(ValueError, match="between 1 and 32"):
+            service.update_desired({"codex_memory_max_records_per_capture": 33})
+        with pytest.raises(ValueError, match="boolean"):
+            service.update_desired({"codex_memory_enabled": "true"})
     finally:
         engines.close()

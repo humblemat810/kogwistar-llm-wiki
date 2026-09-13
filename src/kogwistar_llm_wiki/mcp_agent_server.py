@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
 import os
+from typing import Any
 
 from .agent_gateway import AgentGateway
-from .identity import IdentityError, auth_mode, authenticate_bearer, authorize, claims_context
+from .identity import (
+    IdentityError,
+    auth_mode,
+    authenticate_bearer,
+    authorize,
+    claims_context,
+)
 
 
 def _env_value(name: str, fallback_name: str, default: str = "") -> str:
@@ -17,7 +23,12 @@ def _env_value(name: str, fallback_name: str, default: str = "") -> str:
 def build_agent_mcp(gateway: AgentGateway) -> Any:
     try:
         from fastmcp import FastMCP
-        from fastmcp.server.auth import AccessToken, StaticTokenVerifier, TokenVerifier, require_scopes
+        from fastmcp.server.auth import (
+            AccessToken,
+            StaticTokenVerifier,
+            TokenVerifier,
+            require_scopes,
+        )
         from fastmcp.server.dependencies import get_access_token
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Install the optional 'agent' extra to serve MCP: pip install -e '.[agent]'") from exc
@@ -88,7 +99,24 @@ def build_agent_mcp(gateway: AgentGateway) -> Any:
         if name == "propose" and not workspace:
             request = arguments.get("request")
             workspace = str(request.get("workspace_id") or "").strip() if isinstance(request, dict) else None
-        scope = "read" if name in {"query", "search", "source", "status", "hypergraph_search", "history"} else "write"
+        if name == "memory_capture" and not workspace:
+            candidates = arguments.get("records")
+            if candidates is None:
+                candidates = arguments.get("record")
+            if isinstance(candidates, dict):
+                workspace = str(candidates.get("workspace_id") or "").strip() or None
+            elif isinstance(candidates, list):
+                workspaces = {
+                    str(item.get("workspace_id") or "").strip()
+                    for item in candidates
+                    if isinstance(item, dict) and str(item.get("workspace_id") or "").strip()
+                }
+                if len(workspaces) == 1:
+                    workspace = next(iter(workspaces))
+        scope = "read" if name in {
+            "query", "search", "source", "status", "hypergraph_search", "history",
+            "memory_recall", "memory_review",
+        } else "write"
         authorize(identity, workspace_id=workspace, scope=scope)
         with claims_context(identity):
             return gateway.call_mcp_tool(name, arguments)
@@ -137,6 +165,32 @@ def build_agent_mcp(gateway: AgentGateway) -> Any:
     def history(workspace_id: str, session_id: str | None = None, limit: int = 100) -> dict[str, object]:
         """Inspect prior investigations, decisions, and grounding metadata."""
         return _call("history", {"workspace_id": workspace_id, "session_id": session_id, "limit": limit})
+
+    @mcp.tool(name="memory_recall", auth=read_auth)
+    def memory_recall(workspace_id: str, query_text: str = "", include_inferred: bool = True, limit: int = 12) -> dict[str, object]:
+        """Recall bounded, evidence-backed project memory for relevant work."""
+        return _call("memory_recall", {
+            "workspace_id": workspace_id,
+            "query_text": query_text,
+            "include_inferred": include_inferred,
+            "limit": limit,
+        })
+
+    @mcp.tool(name="memory_capture", auth=write_auth)
+    def memory_capture(record: dict[str, Any] | None = None, records: list[dict[str, Any]] | None = None) -> dict[str, object]:
+        """Capture structured, evidence-backed project memory when enabled."""
+        return _call("memory_capture", {"record": record, "records": records})
+
+    @mcp.tool(name="memory_review", auth=read_auth)
+    def memory_review(workspace_id: str, kind: str = "", confidence: str = "", lifecycle_status: str = "", limit: int = 50) -> dict[str, object]:
+        """Review project memory records, evidence, lifecycle, and conflicts."""
+        return _call("memory_review", {
+            "workspace_id": workspace_id,
+            "kind": kind,
+            "confidence": confidence,
+            "lifecycle_status": lifecycle_status,
+            "limit": limit,
+        })
 
     @mcp.tool(name="propose", auth=write_auth)
     def propose(request: dict[str, Any], proposal: dict[str, Any]) -> dict[str, object]:

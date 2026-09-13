@@ -23,6 +23,11 @@ daemon projection --workspace <id> --vault <path> [--interval <s>]
 daemon maintenance --workspace <id> [--interval <s>]
     Run the maintenance distillation daemon (blocking).
 
+codex-memory --workspace <id> --project-root <path>
+    Validate or create a project-to-workspace memory binding and print safe
+    Codex MCP configuration instructions. Place global options such as
+    --data-dir and --backend before this command.
+
 ``demo`` is intentionally single-process and ephemeral so it does not depend on
 any process-shared local backend.
 
@@ -40,11 +45,14 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import asdict
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .compose_config import ComposeOptions, check_compose_text, write_compose
+from .model_catalog import _safe_endpoint
 
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest, NamespaceEngines
@@ -63,7 +71,7 @@ def _conversation_persistence_kwargs(args: argparse.Namespace) -> dict[str, str]
     return {} if mode == "single_stage" else {"conversation_persistence_mode": mode}
 
 
-def _close_engines(engines: "NamespaceEngines") -> None:
+def _close_engines(engines: NamespaceEngines) -> None:
     """Close real engine bundles while remaining compatible with test doubles."""
     close = getattr(engines, "close", None)
     if callable(close):
@@ -79,7 +87,7 @@ def _build_engines(
     split_derived_knowledge: bool = False,
     conversation_persistence_mode: str = "single_stage",
     embedding_profile_mode: str = "enforce",
-) -> "NamespaceEngines":
+) -> NamespaceEngines:
     """Construct a NamespaceEngines bundle from the selected backend."""
     from kogwistar_llm_wiki.ingest_pipeline import (
         build_persistent_namespace_engines,
@@ -118,7 +126,7 @@ def _build_demo_engines(
     *,
     split_derived_knowledge: bool = False,
     conversation_persistence_mode: str = "single_stage",
-) -> "NamespaceEngines":
+) -> NamespaceEngines:
     from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 
     builder_kwargs: dict[str, object] = {
@@ -129,7 +137,7 @@ def _build_demo_engines(
     return build_in_memory_namespace_engines(**builder_kwargs)
 
 
-def _read_request_from_source(args: argparse.Namespace) -> tuple[Path, "IngestPipelineRequest"]:
+def _read_request_from_source(args: argparse.Namespace) -> tuple[Path, IngestPipelineRequest]:
     from kogwistar_llm_wiki.models import IngestPipelineRequest
 
     source_path = Path(args.source).expanduser().resolve()
@@ -154,7 +162,7 @@ def _read_request_from_source(args: argparse.Namespace) -> tuple[Path, "IngestPi
     return source_path, request
 
 
-def _read_demo_requests_from_source(args: argparse.Namespace) -> list[tuple[Path, "IngestPipelineRequest"]]:
+def _read_demo_requests_from_source(args: argparse.Namespace) -> list[tuple[Path, IngestPipelineRequest]]:
     from kogwistar_llm_wiki.models import IngestPipelineRequest
 
     source_path = Path(args.source).expanduser().resolve()
@@ -373,7 +381,7 @@ def _cmd_daemon_projection(args: argparse.Namespace) -> None:
         poll_interval=args.interval,
     )
 
-    def _stop(sig, frame) -> None:  # noqa: ANN001
+    def _stop(sig, frame) -> None:
         logger.info("Received signal %s — graceful stop requested for ProjectionDaemon", sig)
         daemon.stop()
 
@@ -399,7 +407,7 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
         poll_interval=args.interval,
     )
 
-    def _stop(sig, frame) -> None:  # noqa: ANN001
+    def _stop(sig, frame) -> None:
         logger.info("Received signal %s — graceful stop requested for MaintenanceDaemon", sig)
         daemon.stop()
 
@@ -409,7 +417,11 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
 
 
 def _cmd_workbench(args: argparse.Namespace) -> None:
-    from kogwistar_llm_wiki.codex_workbench_agent import CodexCliCockpitResponder, CodexCliSettings, HostCockpitResponder
+    from kogwistar_llm_wiki.codex_workbench_agent import (
+        CodexCliCockpitResponder,
+        CodexCliSettings,
+        HostCockpitResponder,
+    )
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.workbench_api import WorkbenchApi
     from kogwistar_llm_wiki.workbench_http import serve_workbench
@@ -505,10 +517,89 @@ def _cmd_embedding_service(args: argparse.Namespace) -> None:
     run_service()
 
 
+def _cmd_codex_memory(args: argparse.Namespace) -> None:
+    """Validate a project memory binding and print safe Codex MCP settings."""
+    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+
+    engines = _build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
+    try:
+        pipeline = IngestPipeline(engines)
+        api = WorkbenchApi(pipeline)
+        project_root = Path(args.project_root).expanduser().resolve()
+        project_key = sha256(str(project_root).encode("utf-8")).hexdigest()[:24]
+        binding_path = Path(args.binding_file).expanduser() if args.binding_file else None
+        if binding_path is None:
+            data_dir = args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR")
+            if data_dir:
+                binding_path = Path(data_dir) / "settings" / "codex-memory-bindings.json"
+        binding: dict[str, object] = {}
+        if binding_path is not None and binding_path.exists():
+            try:
+                loaded = json.loads(binding_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(f"cannot read Codex memory binding file: {exc}") from exc
+            if not isinstance(loaded, dict):
+                raise ValueError("Codex memory binding file must contain an object")
+            binding = loaded
+        bindings = binding.get("bindings", {})
+        if not isinstance(bindings, dict):
+            raise TypeError("Codex memory binding file bindings must be an object")
+        existing = bindings.get(project_key)
+        if isinstance(existing, dict) and str(existing.get("workspace_id") or "") != args.workspace:
+            raise ValueError(
+                f"project is already bound to workspace {existing.get('workspace_id')!r}; "
+                "use a new project root or change the binding explicitly"
+            )
+        if existing is None and binding_path is not None and not args.check_only:
+            binding_path.parent.mkdir(parents=True, exist_ok=True)
+            bindings[project_key] = {
+                "workspace_id": args.workspace,
+                "project_key": project_key,
+                "created_at_ms": int(time.time() * 1000),
+            }
+            binding = {"version": 1, "bindings": bindings}
+            binding_path.write_text(json.dumps(binding, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        mcp_url = _safe_endpoint(args.mcp_url).rstrip("/")
+        if not mcp_url:
+            raise ValueError("--mcp-url must be a credential-free http(s) URL")
+        token_configured = bool(os.getenv("LLM_WIKI_MCP_TOKEN", "").strip() or os.getenv("LLM_WIKI_API_TOKEN", "").strip())
+        print(json.dumps({
+            "status": "ok",
+            "workspace_id": args.workspace,
+            "project_key": project_key,
+            "binding_file": str(binding_path) if binding_path is not None else None,
+            "binding_written": existing is None and binding_path is not None and not args.check_only,
+            "readiness": api.readiness(),
+            "memory": {
+                "enabled": api.codex_memory.enabled,
+                "max_records_per_capture": api.codex_memory.max_records_per_capture,
+                "max_recall_records": api.codex_memory.max_recall_records,
+            },
+            "mcp": {
+                "server_name": "llm-wiki",
+                "url": f"{mcp_url}/mcp",
+                "authorization_required": token_configured,
+                "authorization": "Bearer <LLM_WIKI_MCP_TOKEN>" if token_configured else None,
+            },
+            "instructions": [
+                "Call memory_recall before relevant project planning, debugging, design, or continuation work.",
+                "Capture only structured project facts with bounded evidence; label inferred records.",
+                "Use memory_review when current evidence conflicts with prior memory.",
+                "Use propose and confirm for canonical graph changes.",
+            ],
+        }, indent=2, sort_keys=True))
+    finally:
+        _close_engines(engines)
+
+
 def _cmd_seed_bundle(args: argparse.Namespace) -> None:
     """Seed, optionally inspect through cockpit mode, and export a graph bundle."""
 
-    from kogwistar_llm_wiki.codex_workbench_agent import CodexCliCockpitResponder, CodexCliSettings
+    from kogwistar_llm_wiki.codex_workbench_agent import (
+        CodexCliCockpitResponder,
+        CodexCliSettings,
+    )
     from kogwistar_llm_wiki.graph_seed_bundle import (
         dump_seed_bundle,
         export_graph_seed_bundle,
@@ -642,7 +733,11 @@ def _cmd_archive_verify(args: argparse.Namespace) -> None:
 
 
 def _cmd_archive_restore(args: argparse.Namespace) -> None:
-    from kogwistar_llm_wiki.archive import inspect_archive, restore_archive, restore_backend_snapshot
+    from kogwistar_llm_wiki.archive import (
+        inspect_archive,
+        restore_archive,
+        restore_backend_snapshot,
+    )
 
     source_workspace = str(inspect_archive(args.archive)["workspace_id"])
     if args.use_backend_snapshot:
@@ -710,7 +805,7 @@ def _cmd_archive_catalog(args: argparse.Namespace) -> None:
     print(json.dumps(rows, indent=2, sort_keys=True))
 
 
-def _namespace_engine_items(engines: "NamespaceEngines"):
+def _namespace_engine_items(engines: NamespaceEngines):
     return (
         ("conversation", engines.conversation),
         ("workflow", engines.workflow),
@@ -1130,6 +1225,33 @@ def main(argv: list[str] | None = None) -> int:
         help="Acknowledge that existing vectors were verified against the configured profile",
     )
     embedding_adopt_p.set_defaults(func=_cmd_embeddings_adopt_legacy)
+
+    codex_memory_p = sub.add_parser(
+        "codex-memory",
+        help="Validate a project binding and print Codex MCP memory instructions",
+    )
+    codex_memory_p.add_argument("--workspace", required=True, help="Isolated LLM-Wiki workspace ID")
+    codex_memory_p.add_argument(
+        "--project-root",
+        default=".",
+        help="Project root used for the stable local binding key (default: current directory)",
+    )
+    codex_memory_p.add_argument(
+        "--mcp-url",
+        default="http://127.0.0.1:8780",
+        help="Base URL of the LLM-Wiki MCP server",
+    )
+    codex_memory_p.add_argument(
+        "--binding-file",
+        default=None,
+        help="Optional app-owned JSON binding file; defaults below --data-dir/settings",
+    )
+    codex_memory_p.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Validate without creating a missing project binding",
+    )
+    codex_memory_p.set_defaults(func=_cmd_codex_memory)
 
     compose_p = sub.add_parser("compose", help="Generate or validate a safe Docker Compose bundle")
     compose_sub = compose_p.add_subparsers(dest="compose_command", required=True)

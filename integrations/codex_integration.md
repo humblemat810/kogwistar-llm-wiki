@@ -13,6 +13,30 @@ For an MCP-capable Codex client, configure this remote server:
 http://127.0.0.1:8780/mcp
 ```
 
+## Project Memory
+
+Use one isolated LLM-Wiki workspace per project. The helper validates the
+backend, creates an app-owned project binding, and prints safe MCP setup
+instructions without changing global Codex configuration:
+
+```powershell
+python -m kogwistar_llm_wiki `
+  --data-dir .\data `
+  --backend postgres `
+  --dsn "$env:KOGWISTAR_POSTGRES_DSN" `
+  codex-memory --workspace my-project --project-root .
+```
+
+For read-only validation, add `--check-only`. Before project planning,
+debugging, design, or continuation, Codex should call `memory_recall`. Use
+`memory_capture` only for concise, durable facts with bounded repository or
+source-span evidence; label conclusions supported by evidence but not directly
+stated as `confidence: "inferred"`. Use `memory_review` when current evidence
+conflicts with prior memory. Set `LLM_WIKI_CODEX_MEMORY_ENABLED=true` to enable
+capture; it is disabled by default. Memory artifacts never contain raw
+transcripts or secrets, and canonical graph changes still require `propose`
+followed by `confirm`.
+
 Set the same bearer token configured by `LLM_WIKI_API_TOKEN` in the client
 configuration. For a host-driven cockpit, configure the container with
 `LLM_WIKI_COCKPIT_CALLBACK_URL` and explicitly allow its hostname through
@@ -57,7 +81,8 @@ the existing cockpit callback allowlist rather than exposing a remote command
 channel.
 
 The semantic MCP tools are `query`, `search`, `ingest`, `source`, `reingest`,
-`maintain`, `status`, `hypergraph_search`, `history`, `propose`, and `confirm`.
+`maintain`, `status`, `hypergraph_search`, `history`, `propose`, and `confirm`;
+project memory adds `memory_recall`, `memory_capture`, and `memory_review`.
 Use `propose` followed by explicit `confirm`; there is no direct graph-write
 tool. Configure `LLM_WIKI_MCP_TOKEN` and `LLM_WIKI_MCP_TOKEN_SCOPES` for the
 remote MCP transport.

@@ -145,6 +145,29 @@ image. CPU and CUDA embedding images are published independently after their
 own runtime checks; see [`doc/docker_hub_publishing.md`](doc/docker_hub_publishing.md)
 for the explicit targets and commands.
 
+### Codex project memory
+
+LLM-Wiki provides bounded, evidence-backed project memory through its existing
+MCP gateway. Use one isolated workspace per project and run the helper to
+validate the backend, create the app-owned project binding, and print safe
+client instructions:
+
+```bash
+python -m kogwistar_llm_wiki \
+  --data-dir ./data \
+  --backend postgres \
+  --dsn "$KOGWISTAR_POSTGRES_DSN" \
+  codex-memory --workspace my-project --project-root .
+```
+
+Memory capture is disabled by default. Enable it explicitly with
+`LLM_WIKI_CODEX_MEMORY_ENABLED=true`; `memory_recall` and `memory_review` stay
+read-only. Records require bounded repository or source-span evidence, reject
+secrets and host paths, and never retain raw transcripts. Canonical graph
+changes still require the existing `propose` and `confirm` flow. See
+[`integrations/codex_integration.md`](integrations/codex_integration.md) for
+MCP setup and the complete safety contract.
+
 If you use VS Code, the launch presets already read `.env` and only prompt for
 the parser lane:
 - `Demo: Ollama (gemma4:e2b)`

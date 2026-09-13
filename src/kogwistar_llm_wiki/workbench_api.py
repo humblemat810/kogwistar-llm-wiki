@@ -6,20 +6,35 @@ contains no web framework and delegates all graph access to ``IngestPipeline``.
 
 from __future__ import annotations
 
-import time
 import inspect
 import threading
+import time
 import uuid
-from typing import Any, Callable, Mapping, cast
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
+from .codex_memory import CodexMemoryService
+from .compose_config import (
+    ComposeOptions,
+    check_compose_text,
+    render_compose,
+    validate_options,
+)
 from .ingest_pipeline import IngestPipeline
 from .investigation_history import InvestigationHistoryRecord
-from .namespaces import GraphSpace
 from .maintenance_patch_apply import apply_maintenance_patch_for_scope
 from .maintenance_patches import MaintenancePatch
-from .semantic_lens import InvestigationOutcome, SemanticLensRequest, SemanticLensSnapshot, validate_edit_proposal
+from .model_catalog import available_models
+from .multimodal_remote import EmbeddingServiceUnavailable
+from .namespaces import GraphSpace
+from .semantic_lens import (
+    InvestigationOutcome,
+    SemanticLensRequest,
+    SemanticLensSnapshot,
+    validate_edit_proposal,
+)
+from .settings import SettingsService
 from .workbench import KnowledgeWorkbench, WorkbenchMode
-from .workbench_cockpit import CockpitResponder, WorkbenchCockpit, validate_cockpit_proposal
 from .workbench_background import (
     CodexWorkbenchDispatcher,
     CodexWorkbenchWorker,
@@ -27,10 +42,11 @@ from .workbench_background import (
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
-from .multimodal_remote import EmbeddingServiceUnavailable
-from .settings import SettingsService
-from .compose_config import ComposeOptions, check_compose_text, render_compose, validate_options
-from .model_catalog import available_models
+from .workbench_cockpit import (
+    CockpitResponder,
+    WorkbenchCockpit,
+    validate_cockpit_proposal,
+)
 
 AgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot], str]
 ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, ProgressCallback], str]
@@ -48,7 +64,12 @@ class WorkbenchApi:
         settings_path: str | None = None,
     ) -> None:
         self.pipeline = pipeline
-        self.settings = SettingsService(pipeline, path=settings_path)
+        self.codex_memory = CodexMemoryService(pipeline.engines)
+        self.settings = SettingsService(
+            pipeline,
+            path=settings_path,
+            codex_memory=self.codex_memory,
+        )
         self.agent_responder = agent_responder
         self.cockpit_responder = cockpit_responder
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
@@ -107,6 +128,43 @@ class WorkbenchApi:
         self, *, workspace_id: str, confirmed: bool
     ) -> dict[str, object]:
         return self.settings.apply(workspace_id=workspace_id, confirmed=confirmed)
+
+    def recall_memory(
+        self,
+        *,
+        workspace_id: str,
+        query_text: str = "",
+        include_inferred: bool = True,
+        limit: int | None = None,
+    ) -> dict[str, object]:
+        return self.codex_memory.recall(
+            workspace_id=workspace_id,
+            query_text=query_text,
+            include_inferred=include_inferred,
+            limit=limit,
+        )
+
+    def capture_memory(
+        self, payload: Mapping[str, object] | list[Mapping[str, object]]
+    ) -> dict[str, object]:
+        return self.codex_memory.capture(payload)
+
+    def review_memory(
+        self,
+        *,
+        workspace_id: str,
+        kind: str | None = None,
+        confidence: str | None = None,
+        lifecycle_status: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, object]:
+        return self.codex_memory.review(
+            workspace_id=workspace_id,
+            kind=kind,
+            confidence=confidence,
+            lifecycle_status=lifecycle_status,
+            limit=limit,
+        )
 
     def compose_preview(self, payload: Mapping[str, Any]) -> dict[str, object]:
         """Return a generated Compose bundle without writing files or secrets."""
@@ -176,7 +234,7 @@ class WorkbenchApi:
                 "reason": str(exc),
                 "hits": [],
             }
-        except Exception as exc:  # keep canonical graph query available on route errors
+        except Exception as exc:  # noqa: BLE001 - keep canonical graph query available on route errors
             return {
                 "status": "error",
                 "route": "multimodal_projection",
