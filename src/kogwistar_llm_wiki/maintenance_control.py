@@ -15,6 +15,21 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+DEFAULT_REQUEST_MAX_ROUNDS = 2
+REQUEST_MAX_ROUNDS_ENV = "LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS"
+
+
+def configured_default_request_max_rounds() -> int:
+    """Return the bounded default for requests that omit ``max_rounds``."""
+    raw = os.getenv(REQUEST_MAX_ROUNDS_ENV, str(DEFAULT_REQUEST_MAX_ROUNDS)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{REQUEST_MAX_ROUNDS_ENV} must be an integer from 1 to 100") from exc
+    if not 1 <= value <= 100:
+        raise ValueError(f"{REQUEST_MAX_ROUNDS_ENV} must be between 1 and 100")
+    return value
+
 
 def _bool_value(value: object, *, default: bool) -> bool:
     if value is None:
@@ -178,4 +193,11 @@ def send_control_command(data_dir: str | os.PathLike[str], **command: object) ->
         return {"ok": True, "persisted": True, **asdict(state)}
 
 
-__all__ = ["MaintenanceControl", "MaintenanceControlState", "send_control_command"]
+__all__ = [
+    "DEFAULT_REQUEST_MAX_ROUNDS",
+    "REQUEST_MAX_ROUNDS_ENV",
+    "MaintenanceControl",
+    "MaintenanceControlState",
+    "configured_default_request_max_rounds",
+    "send_control_command",
+]

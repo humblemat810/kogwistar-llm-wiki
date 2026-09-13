@@ -12,6 +12,20 @@ from kogwistar_llm_wiki.maintenance_context import (
     maintenance_execution_active,
     maintenance_execution_context,
 )
+from kogwistar_llm_wiki.maintenance_control import configured_default_request_max_rounds
+
+
+def test_default_request_rounds_are_two_and_configurable(monkeypatch) -> None:
+    monkeypatch.delenv("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", raising=False)
+    assert configured_default_request_max_rounds() == 2
+    monkeypatch.setenv("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "4")
+    assert configured_default_request_max_rounds() == 4
+
+
+def test_default_request_rounds_reject_invalid_values(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "0")
+    with pytest.raises(ValueError, match="between 1 and 100"):
+        configured_default_request_max_rounds()
 
 
 def test_maintenance_execution_context_is_scoped() -> None:

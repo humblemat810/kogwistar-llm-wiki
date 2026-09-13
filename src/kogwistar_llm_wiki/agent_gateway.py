@@ -15,6 +15,7 @@ from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 from .inspection import build_workspace_quality_report
+from .maintenance_control import configured_default_request_max_rounds
 from .models import IngestPipelineRequest
 from .otel import LlmWikiTelemetry
 from .utils import _temporary_namespace
@@ -321,6 +322,8 @@ class AgentGateway:
             isinstance(max_rounds, bool) or not isinstance(max_rounds, int) or max_rounds < 0
         ):
             raise TypeError("max_rounds must be a non-negative integer")
+        if max_rounds is None:
+            max_rounds = configured_default_request_max_rounds()
         raw_source_ids = arguments.get("source_document_ids") or ()
         if not isinstance(raw_source_ids, (list, tuple, set, frozenset)):
             raise TypeError("source_document_ids must be a list of IDs")

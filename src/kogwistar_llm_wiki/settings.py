@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .identity import auth_mode
+from .maintenance_control import configured_default_request_max_rounds
 from .model_catalog import _safe_endpoint
 from .multimodal_runtime import (
     configured_embedding_crop_token_budget,
@@ -42,6 +43,7 @@ _DESIRED_KEYS = frozenset({
     "codex_memory_enabled",
     "codex_memory_max_records_per_capture",
     "codex_memory_max_recall_records",
+    "maintenance_default_request_max_rounds",
 })
 _SECRET_WORDS = ("token", "secret", "password", "api_key", "credential")
 _WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router"})
@@ -149,7 +151,7 @@ class SettingsService:
             "backend": self._backend_name(),
             "data_dir": os.getenv("KOGWISTAR_DATA_DIR"),
             "parser": {"provider": parser.provider, "model": parser.model, "base_url": _safe_endpoint(parser.base_url or ""), "temperature": parser.temperature},
-            "maintenance": {"provider": maintenance.provider, "model": maintenance.model, "base_url": _safe_endpoint(maintenance.base_url or ""), "temperature": maintenance.temperature},
+            "maintenance": {"provider": maintenance.provider, "model": maintenance.model, "base_url": _safe_endpoint(maintenance.base_url or ""), "temperature": maintenance.temperature, "default_request_max_rounds": configured_default_request_max_rounds()},
             "embeddings": self._effective_embeddings(),
             "multimodal": {
                 "enabled": multimodal_enabled,
@@ -237,6 +239,13 @@ class SettingsService:
                     raise ValueError(f"{key} must be an integer") from exc
                 if not 1 <= next_desired[key] <= upper:
                     raise ValueError(f"{key} must be between 1 and {upper}")
+        if "maintenance_default_request_max_rounds" in next_desired:
+            try:
+                next_desired["maintenance_default_request_max_rounds"] = int(next_desired["maintenance_default_request_max_rounds"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("maintenance_default_request_max_rounds must be an integer") from exc
+            if not 1 <= next_desired["maintenance_default_request_max_rounds"] <= 100:
+                raise ValueError("maintenance_default_request_max_rounds must be between 1 and 100")
         if (
             "embedding_max_model_len" in next_desired
             and "embedding_crop_token_budget" in next_desired
@@ -307,7 +316,7 @@ class SettingsService:
 
     @staticmethod
     def _impact(effective: Mapping[str, object], desired: Mapping[str, object]) -> dict[str, object]:
-        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget"}
+        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget", "maintenance_default_request_max_rounds"}
         parser = effective.get("parser", {})
         maintenance = effective.get("maintenance", {})
         effective_values = {
@@ -324,6 +333,7 @@ class SettingsService:
             "codex_memory_enabled": effective.get("codex_memory", {}).get("enabled") if isinstance(effective.get("codex_memory"), Mapping) else None,
             "codex_memory_max_records_per_capture": effective.get("codex_memory", {}).get("max_records_per_capture") if isinstance(effective.get("codex_memory"), Mapping) else None,
             "codex_memory_max_recall_records": effective.get("codex_memory", {}).get("max_recall_records") if isinstance(effective.get("codex_memory"), Mapping) else None,
+            "maintenance_default_request_max_rounds": effective.get("maintenance", {}).get("default_request_max_rounds") if isinstance(effective.get("maintenance"), Mapping) else None,
         }
         pending_changes = sorted(
             key for key, value in desired.items()
