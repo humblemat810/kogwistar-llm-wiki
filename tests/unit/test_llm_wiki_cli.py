@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
+
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
 from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch
 from kogwistar_llm_wiki.maintenance_patches import (
@@ -118,10 +118,10 @@ class _FakeGraphItem:
 
 
 class _FakeGraphRead:
-    def __init__(self, engine: "_FakeGraphEngine"):
+    def __init__(self, engine: _FakeGraphEngine):
         self.engine = engine
 
-    def get_nodes(self, *, where=None, ids=None, limit=10_000, resolve_mode=None):  # noqa: ANN001
+    def get_nodes(self, *, where=None, ids=None, limit=10_000, resolve_mode=None):
         if ids:
             wanted = {str(item) for item in ids}
             return [item for item in self.engine.nodes_for_current_namespace() if item.id in wanted]
@@ -133,7 +133,7 @@ class _FakeGraphRead:
             if not artifact_kind or str(item.metadata.get("artifact_kind") or "") == artifact_kind
         ]
 
-    def get_edges(self, *, where=None, limit=10_000, resolve_mode=None):  # noqa: ANN001
+    def get_edges(self, *, where=None, limit=10_000, resolve_mode=None):
         return list(self.engine.edges_for_current_namespace())
 
 

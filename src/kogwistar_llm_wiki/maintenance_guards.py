@@ -6,7 +6,6 @@ from typing import Literal
 
 from kogwistar.id_provider import stable_id
 
-
 GuardStatus = Literal["ready", "blocked", "stale"]
 
 

@@ -7,14 +7,22 @@ the proposal non-authoritative until a user explicitly confirms it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal, Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .maintenance_patches import MaintenancePatch, MaintenancePatchOperation, validate_maintenance_patch
-from .semantic_lens import SemanticLensRequest, SemanticLensSnapshot, validate_edit_proposal
-
+from .maintenance_patches import (
+    MaintenancePatch,
+    MaintenancePatchOperation,
+    validate_maintenance_patch,
+)
+from .semantic_lens import (
+    SemanticLensRequest,
+    SemanticLensSnapshot,
+    validate_edit_proposal,
+)
 
 CockpitActionKind = Literal[
     "answer",
@@ -59,7 +67,7 @@ class CockpitAction(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _shape_matches_action(self) -> "CockpitAction":
+    def _shape_matches_action(self) -> CockpitAction:
         if self.kind == "propose_patch" and self.patch is None:
             raise ValueError("propose_patch requires patch")
         if self.kind != "propose_patch" and self.patch is not None:

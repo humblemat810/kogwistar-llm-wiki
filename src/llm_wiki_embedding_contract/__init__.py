@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
-import json
-import math
 from typing import Literal
 
 EmbeddingKind = Literal["single_vector", "dense", "late_interaction"]
@@ -76,7 +76,7 @@ class EmbeddingProfile:
         return sha256(encoded).hexdigest()
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "EmbeddingProfile":
+    def from_payload(cls, payload: Mapping[str, object]) -> EmbeddingProfile:
         try:
             return cls(
                 provider=str(payload["provider"]),
@@ -107,7 +107,7 @@ class EmbeddingProfile:
 def validate_asset_bytes(data: bytes, *, content_type: str, expected_sha256: str) -> bytes:
     if not isinstance(data, bytes) or not data:
         raise ContractValidationError("asset must contain non-empty bytes")
-    if not (content_type.startswith("image/") or content_type.startswith("video/") or content_type == "application/pdf"):
+    if not (content_type.startswith(("image/", "video/")) or content_type == "application/pdf"):
         raise ContractValidationError("asset content type is not supported")
     actual = sha256(data).hexdigest()
     if expected_sha256.lower() != actual:
@@ -132,6 +132,12 @@ def validate_dense_vectors(value: object, *, dimension: int) -> EmbeddingSet:
 
 
 __all__ = [
-    "EmbeddingProfile", "EmbeddingKind", "EmbeddingSet", "SimilarityMetric",
-    "SourceModality", "ContractValidationError", "validate_asset_bytes", "validate_dense_vectors",
+    "ContractValidationError",
+    "EmbeddingKind",
+    "EmbeddingProfile",
+    "EmbeddingSet",
+    "SimilarityMetric",
+    "SourceModality",
+    "validate_asset_bytes",
+    "validate_dense_vectors",
 ]

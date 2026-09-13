@@ -1,16 +1,16 @@
+from kogwistar_llm_wiki.maintenance_designs import (
+    build_graph_patch_apply_design,
+    build_graph_patch_proposal_design,
+)
 from kogwistar_llm_wiki.maintenance_policy import (
     DERIVED_KNOWLEDGE_WORKFLOW_ID,
     EXECUTION_WISDOM_WORKFLOW_ID,
     GRAPH_PATCH_APPLY_WORKFLOW_ID,
     GRAPH_PATCH_PROPOSAL_WORKFLOW_ID,
-    is_graph_patch_kind,
     is_execution_wisdom_kind,
+    is_graph_patch_kind,
     normalize_maintenance_kind,
     workflow_id_for_maintenance_kind,
-)
-from kogwistar_llm_wiki.maintenance_designs import (
-    build_graph_patch_apply_design,
-    build_graph_patch_proposal_design,
 )
 
 

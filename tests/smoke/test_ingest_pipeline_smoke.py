@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig, ProviderEndpointConfig, WorkflowProviderSettings
-
+from kg_doc_parser.workflow_ingest.providers import (
+    EmbeddingProviderConfig,
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
 
 SMOKE_PARSER_CASES = [
     pytest.param(

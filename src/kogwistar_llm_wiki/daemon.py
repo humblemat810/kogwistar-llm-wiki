@@ -18,12 +18,17 @@ Design notes
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
-from pathlib import Path
 import socket
 import threading
+import time
 import uuid
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 from kogwistar.engine_core import (
     OutputReconciliationState,
@@ -31,10 +36,17 @@ from kogwistar.engine_core import (
     RecoverySurface,
 )
 
+from .maintenance_control import MaintenanceControl, MaintenanceControlState
+from .maintenance_selection import select_embedding_exploration
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
-from .provider_config import provider_config_summary, resolve_maintenance_provider_settings
+from .otel import LlmWikiTelemetry
 from .projection_worker import ProjectionWorker
+from .provider_config import (
+    provider_config_summary,
+    resolve_maintenance_provider_settings,
+)
+from .utils import _temporary_namespace
 from .worker import MaintenanceWorker
 
 logger = logging.getLogger(__name__)
@@ -43,7 +55,7 @@ logger = logging.getLogger(__name__)
 def _host_name() -> str | None:
     try:
         return socket.gethostname()
-    except Exception:
+    except OSError:
         return None
 
 
@@ -374,18 +386,73 @@ class MaintenanceDaemon:
         engines: NamespaceEngines,
         workspace_id: str,
         poll_interval: float = 10.0,
+        *,
+        data_dir: str | os.PathLike[str] | None = None,
+        background_interval: float = 600.0,
     ) -> None:
         self.engines = engines
         self.workspace_id = workspace_id
         self.poll_interval = poll_interval
+        self.background_interval = max(1.0, float(background_interval))
+        self.control = MaintenanceControl(data_dir) if data_dir else None
+        self.control_state = self.control.get() if self.control else MaintenanceControlState()
+        self._background_state_path = (
+            Path(data_dir) / "maintenance" / "background_state.json" if data_dir else None
+        )
+        self._background_state = self._load_background_state()
+        self._last_background_cycle_at_ms = int(self._background_state.get("last_cycle_at_ms") or 0)
+        self._cycle_number = int(self._background_state.get("cycle_number") or 0)
+        self._recent_background_ids = {
+            str(item)
+            for item in (self._background_state.get("recent_candidate_ids") or [])
+            if str(item).strip()
+        }
         self.provider_settings = resolve_maintenance_provider_settings()
-        self._worker = MaintenanceWorker(engines, provider_settings=self.provider_settings)
+        self.telemetry = LlmWikiTelemetry.from_environment()
+        self._worker = MaintenanceWorker(
+            engines,
+            provider_settings=self.provider_settings,
+            trace_sink=self.telemetry.instrument_event,
+        )
         self._stop_event = threading.Event()
         self._instance_id = f"maintenance-{uuid.uuid4().hex}"
 
     def stop(self) -> None:
         """Signal the daemon to exit after the current poll cycle."""
         self._stop_event.set()
+
+    def _load_background_state(self) -> dict[str, Any]:
+        path = getattr(self, "_background_state_path", None)
+        if path is None:
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _persist_background_state(
+        self,
+        *,
+        cycle_number: int,
+        cycle_seed: int,
+        selected_ids: set[str],
+        now_ms: int,
+    ) -> None:
+        path = getattr(self, "_background_state_path", None)
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "cycle_number": int(cycle_number),
+            "cycle_seed": int(cycle_seed),
+            "last_cycle_at_ms": int(now_ms),
+            "recent_selection_watermark": int(now_ms),
+            "recent_candidate_ids": sorted(selected_ids),
+        }
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(path)
 
     def recover_startup_state(self) -> RecoveryReport:
         _declare_service_health(
@@ -396,7 +463,12 @@ class MaintenanceDaemon:
             deterministic=False,
             llm_assisted=True,
             operator_tags=["maintenance", "distillation", "execution_wisdom"],
-            config_metadata={"provider_settings": provider_config_summary(self.provider_settings)},
+            config_metadata={
+                "provider_settings": provider_config_summary(self.provider_settings),
+                "request_enabled": self.control_state.request_enabled,
+                "background_enabled": self.control_state.background_enabled,
+                "background_interval_seconds": self.background_interval,
+            },
             status="starting",
         )
         return _core_startup_recovery(
@@ -415,14 +487,21 @@ class MaintenanceDaemon:
             self.poll_interval,
         )
         _log_startup_recovery("MaintenanceDaemon", self.recover_startup_state())
+        if self.control:
+            self.control.serve(self._stop_event)
         while not self._stop_event.is_set():
             try:
+                if self.control:
+                    self.control_state = self.control.get()
                 _heartbeat_service_health(
                     self.engines,
                     workspace_id=self.workspace_id,
                     service_kind="maintenance_daemon",
                     instance_id=self._instance_id,
                 )
+                self._schedule_background_cycle(self.control_state)
+                self._worker.request_enabled = self.control_state.request_enabled
+                self._worker.background_enabled = self.control_state.background_enabled
                 self._worker.process_pending_jobs(self.workspace_id)
             except Exception as exc:
                 _heartbeat_service_health(
@@ -442,6 +521,123 @@ class MaintenanceDaemon:
             instance_id=self._instance_id,
         )
         logger.info("MaintenanceDaemon stopped - workspace=%s", self.workspace_id)
+
+    def _schedule_background_cycle(self, state: MaintenanceControlState) -> None:
+        """Queue one bounded, auditable background pass when the LLM is free."""
+        now_ms = int(time.time() * 1000)
+        last_cycle_at_ms = int(getattr(self, "_last_background_cycle_at_ms", 0) or 0)
+        if not state.background_enabled or (
+            last_cycle_at_ms and now_ms - last_cycle_at_ms < self.background_interval * 1000
+        ):
+            return
+        jobs = self.engines.conversation.jobs
+        active = jobs.list(namespace=WorkspaceNamespaces(self.workspace_id).maintenance_jobs, status="DOING", limit=50)
+        queued = jobs.list(namespace=WorkspaceNamespaces(self.workspace_id).maintenance_jobs, status="PENDING", limit=50)
+        if active or any(
+            str(getattr(job, "payload", {}).get("mode") or "request") != "background"
+            for job in queued
+        ):
+            return
+        cycle_number = int(getattr(self, "_cycle_number", 0)) + 1
+        seed_material = f"{self.workspace_id}:{cycle_number}".encode()
+        cycle_seed = int.from_bytes(hashlib.sha256(seed_material).digest()[:8], "big")
+        ns = WorkspaceNamespaces(self.workspace_id)
+        try:
+            with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
+                nodes = self.engines.kg.read.get_nodes(limit=500)
+        except Exception as exc:  # noqa: BLE001 - backend failures degrade exploration only
+            logger.warning("Background maintenance selection degraded: %s", exc)
+            nodes = []
+        scoped_nodes = []
+        for node in nodes:
+            metadata = getattr(node, "metadata", {})
+            declared_workspace = (
+                str(metadata.get("workspace_id") or "").strip()
+                if isinstance(metadata, Mapping)
+                else ""
+            )
+            if not declared_workspace or declared_workspace == self.workspace_id:
+                scoped_nodes.append(node)
+        nodes = scoped_nodes
+        recent = sorted(
+            (node for node in nodes if getattr(node, "safe_get_id", lambda: "")()),
+            key=lambda node: str(getattr(node, "metadata", {}).get("updated_at_ms", "")),
+            reverse=True,
+        )[:6]
+        explored, strategy = select_embedding_exploration(
+            nodes,
+            dimension=next(
+                (
+                    len(getattr(node, "embedding", []))
+                    for node in nodes
+                    if getattr(node, "embedding", None)
+                ),
+                1,
+            ),
+            cycle_seed=cycle_seed,
+            max_candidates=6,
+            excluded_ids={str(node.safe_get_id()) for node in recent}
+            | set(getattr(self, "_recent_background_ids", set())),
+        )
+        selected = [
+            {"candidate_id": str(node.safe_get_id()), "reason": "recent_interest", "score": None}
+            for node in recent
+        ] + [item.as_dict() for item in explored]
+        payload = {
+            "workspace_id": self.workspace_id,
+            "maintenance_kind": "distill",
+            "mode": "background",
+            "maintenance_origin": "background",
+            "selection_strategy": "recent_interest_and_embedding_probe",
+            "embedding_exploration": {
+                "profile": os.environ.get("KOGWISTAR_LLM_WIKI_EMBED_PROFILE", "unknown"),
+                "dimension": len(getattr(nodes[0], "embedding", []) or []) if nodes else None,
+                "probe_seed": cycle_seed,
+                "strategy": strategy,
+                "candidates": [item.as_dict() for item in explored],
+            },
+            "candidates": selected,
+            "candidate_exclusions": sorted({str(node.safe_get_id()) for node in recent}),
+            "recent_selection_watermark": int(time.time() * 1000),
+            "stop_reason": None,
+            "maintenance_round": 0,
+            "maintenance_max_rounds": 1,
+            "budgets": {"max_steps": 1},
+        }
+        selected_ids = {
+            str(item["candidate_id"])
+            for item in selected
+            if str(item.get("candidate_id") or "").strip()
+        }
+        # Reserve the cycle before queueing. A crash may skip a cycle, but it
+        # can never reuse a previously committed seed or job identity.
+        self._persist_background_state(
+            cycle_number=cycle_number,
+            cycle_seed=cycle_seed,
+            selected_ids=selected_ids,
+            now_ms=now_ms,
+        )
+        self._cycle_number = cycle_number
+        self._last_background_cycle_at_ms = now_ms
+        self._recent_background_ids = selected_ids
+        job_id = f"background-maintenance:{self.workspace_id}:{cycle_number}"
+        jobs.enqueue(
+            job_id=job_id,
+            namespace=ns.maintenance_jobs,
+            entity_kind="maintenance_cycle",
+            entity_id=job_id,
+            job_kind="maintenance_job:distill",
+            payload=payload,
+            max_retries=1,
+        )
+        self._worker._emit_trace(
+            "maintenance_background_cycle_scheduled",
+            workspace_id=self.workspace_id,
+            cycle_number=cycle_number,
+            cycle_seed=cycle_seed,
+            selected_count=len(selected),
+            exploration_strategy=strategy,
+        )
 
 
 __all__ = ["MaintenanceDaemon", "ProjectionDaemon"]

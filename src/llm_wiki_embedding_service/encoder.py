@@ -6,7 +6,11 @@ from collections.abc import Mapping, Sequence
 from io import BytesIO
 from typing import Any
 
-from llm_wiki_embedding_contract import ContractValidationError, EmbeddingProfile, validate_dense_vectors
+from llm_wiki_embedding_contract import (
+    ContractValidationError,
+    EmbeddingProfile,
+    validate_dense_vectors,
+)
 
 from .config import MAX_DIMENSION, MIN_DIMENSION, EmbeddingServiceConfig
 
@@ -28,7 +32,7 @@ class Qwen3VLDenseEncoder:
         self.instruction = instruction
 
     @classmethod
-    def from_pretrained(cls, config: EmbeddingServiceConfig) -> "Qwen3VLDenseEncoder":
+    def from_pretrained(cls, config: EmbeddingServiceConfig) -> Qwen3VLDenseEncoder:
         if not MIN_DIMENSION <= config.dimension <= MAX_DIMENSION:
             raise ValueError("embedding dimension must be between 64 and 2048")
         try:
@@ -131,4 +135,4 @@ def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
             raise RuntimeError("CUDA embedding requires accelerate") from exc
 
 
-__all__ = ["Qwen3VLDenseEncoder", "EmbeddingInferenceError"]
+__all__ = ["EmbeddingInferenceError", "Qwen3VLDenseEncoder"]

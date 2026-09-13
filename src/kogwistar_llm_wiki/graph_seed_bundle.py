@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .models import NamespaceEngines
 from .namespaces import GraphSpace, WorkspaceNamespaces
@@ -36,7 +35,7 @@ class SeedMention(BaseModel):
     end_char: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
-    def offsets_are_paired(self) -> "SeedMention":
+    def offsets_are_paired(self) -> SeedMention:
         if (self.start_char is None) != (self.end_char is None):
             raise ValueError("start_char and end_char must both be present or both be omitted")
         if self.start_char is not None and self.end_char is not None and self.end_char <= self.start_char:
@@ -93,7 +92,7 @@ class GraphSeedBundle(BaseModel):
     acceptance_queries: list[SeedAcceptanceQuery] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_graph(self) -> "GraphSeedBundle":
+    def validate_graph(self) -> GraphSeedBundle:
         source_ids = _unique_ids("source", [source.id for source in self.sources])
         node_ids = _unique_ids("node", [node.id for node in self.nodes])
         relation_ids = _unique_ids("relation", [item.id for item in (*self.edges, *self.hyperedges)])
@@ -135,7 +134,7 @@ class GraphSeedBundle(BaseModel):
                 )
         return self
 
-    def canonicalized(self) -> "GraphSeedBundle":
+    def canonicalized(self) -> GraphSeedBundle:
         source_by_id = {source.id: source for source in self.sources}
 
         def canonical_mention(mention: SeedMention) -> SeedMention:

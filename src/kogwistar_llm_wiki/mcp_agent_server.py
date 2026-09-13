@@ -147,9 +147,9 @@ def build_agent_mcp(gateway: AgentGateway) -> Any:
         return _call("reingest", {"workspace_id": workspace_id, "source_uri": source_uri, "source_document_id": source_document_id, "raw_text": raw_text, "title": title, "provenance_policy": provenance_policy, "provenance": provenance})
 
     @mcp.tool(name="maintain", auth=write_auth)
-    def maintain(workspace_id: str, topic: str = "", objective: str = "", source_document_ids: list[str] | None = None, max_time_seconds: float | None = None, max_llm_calls: int | None = None, max_tokens: int | None = None, max_cost_usd: float | None = None, max_steps: int | None = None) -> dict[str, object]:
-        """Queue maintenance for a topic or explicit source_document_ids."""
-        return _call("maintain", {"workspace_id": workspace_id, "topic": topic, "objective": objective, "source_document_ids": source_document_ids, "max_time_seconds": max_time_seconds, "max_llm_calls": max_llm_calls, "max_tokens": max_tokens, "max_cost_usd": max_cost_usd, "max_steps": max_steps})
+    def maintain(workspace_id: str, topic: str = "", objective: str = "", source_document_ids: list[str] | None = None, seed_node_ids: list[str] | None = None, maintenance_context: dict[str, Any] | None = None, max_rounds: int | None = None, max_time_seconds: float | None = None, max_llm_calls: int | None = None, max_tokens: int | None = None, max_cost_usd: float | None = None, max_steps: int | None = None) -> dict[str, object]:
+        """Queue bounded maintenance with optional structured prior-round context."""
+        return _call("maintain", {"workspace_id": workspace_id, "topic": topic, "objective": objective, "source_document_ids": source_document_ids, "seed_node_ids": seed_node_ids, "maintenance_context": maintenance_context, "max_rounds": max_rounds, "max_time_seconds": max_time_seconds, "max_llm_calls": max_llm_calls, "max_tokens": max_tokens, "max_cost_usd": max_cost_usd, "max_steps": max_steps})
 
     @mcp.tool(name="status", auth=read_auth)
     def status(workspace_id: str) -> dict[str, object]:

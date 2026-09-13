@@ -1,7 +1,6 @@
 from pathlib import Path
 
 
-
 def test_build_obsidian_vault_materializes_expected_files(pipeline, ingest_request, tmp_path: Path):
     ingest_request = ingest_request.model_copy(update={"promotion_mode": "sync"})
     pipeline.run(ingest_request)

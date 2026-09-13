@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
-
 
 DEFAULT_DOCUMENT_MAINTENANCE_PLAN: tuple[str, ...] = (
     "document_seed_graph",
@@ -56,7 +55,7 @@ def decide_next_maintenance_phase(
             next_index=current_index,
             reason="stop_requested",
         )
-    if max_rounds > 0 and completed_rounds >= max_rounds:
+    if max_rounds > 0 and completed_rounds + 1 >= max_rounds:
         return MaintenancePlanDecision(
             current_kind=current_kind,
             next_kind=None,
@@ -65,6 +64,14 @@ def decide_next_maintenance_phase(
             reason="max_rounds_reached",
         )
     if not plan:
+        if max_rounds > 0 and completed_rounds < max_rounds:
+            return MaintenancePlanDecision(
+                current_kind=current_kind,
+                next_kind=current_kind,
+                current_index=current_index,
+                next_index=current_index + 1,
+                reason="next_bounded_round_available",
+            )
         return MaintenancePlanDecision(
             current_kind=current_kind,
             next_kind=None,

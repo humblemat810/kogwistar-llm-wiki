@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import multiprocessing
@@ -9,17 +8,18 @@ import os
 import queue
 import re
 import shutil
-import time
-import threading
 import sys
+import threading
+import time
 import traceback
 import zipfile
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 
 if os.getenv("KOGWISTAR_LLM_WIKI_LONGRUN") == "1" or os.getenv("KOGWISTAR_LONGRUN_LIVE_TRACE") == "1":
     print(
@@ -39,34 +39,44 @@ from kg_doc_parser.workflow_ingest.providers import (
     ProviderEndpointConfig,
     WorkflowProviderSettings,
 )
-
+from kogwistar.engine_core import RecoverySurface
+from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime import MappingStepResolver
-from kogwistar.runtime.models import RunSuccess, RunSuspended, WorkflowEdge, WorkflowNode
+from kogwistar.runtime.models import (
+    RunSuccess,
+    RunSuspended,
+    WorkflowEdge,
+    WorkflowNode,
+)
 from kogwistar.runtime.runtime import RunResult, WorkflowRuntime
-from kogwistar.engine_core.models import Grounding, Span
-from kogwistar.engine_core import RecoverySurface
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
+from kogwistar_llm_wiki.debug_run import (
+    LiveTracePrinter,
+    aggregate_stage_timings,
+    env_flag_enabled,
+)
 from kogwistar_llm_wiki.ingest_pipeline import (
     build_persistent_namespace_engines,
     build_postgres_namespace_engines,
 )
-from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
-from kogwistar_llm_wiki.debug_run import LiveTracePrinter, aggregate_stage_timings, env_flag_enabled
 from kogwistar_llm_wiki.longrun_parser_worker import (
     _basic_sense_eval_from_graph_payload,
     run_longrun_parser_child,
 )
-from kogwistar_llm_wiki.provider_config import normalize_provider_name, resolve_parser_provider_settings
+from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.maintenance_policy import DERIVED_KNOWLEDGE_WORKFLOW_ID
+from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.provider_config import (
+    normalize_provider_name,
+    resolve_parser_provider_settings,
+)
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
-from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
-
 
 STATUSES = {
     "PENDING",
@@ -386,7 +396,7 @@ class LongRunConfig:
         return accepted_fingerprints
 
     @classmethod
-    def from_env(cls) -> "LongRunConfig":
+    def from_env(cls) -> LongRunConfig:
         doc_count = int(os.getenv("KOGWISTAR_LONGRUN_DOC_COUNT", "20"))
         if doc_count < 20 and os.getenv("KOGWISTAR_LONGRUN_ALLOW_SMALL") != "1":
             raise ValueError(
@@ -823,7 +833,7 @@ class ErrorCircuitBreaker:
 class DiagnosticDumper:
     """Writes an uploadable long-run diagnostic bundle from current harness state."""
 
-    def __init__(self, run_dir: Path, harness: "LongRunHarness") -> None:
+    def __init__(self, run_dir: Path, harness: LongRunHarness) -> None:
         self.run_dir = run_dir
         self.harness = harness
         self.dump_dir = run_dir / "dump"
@@ -1590,7 +1600,7 @@ class LongRunHarness:
                     duration_ms=round((time.monotonic() - invariant_started) * 1000),
                     total_finalize_duration_ms=round((time.monotonic() - finalize_started) * 1000),
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._emit_live_failure(
                     stage="run_invariant_failure",
                     message=f"{type(exc).__name__}: {exc}",
@@ -1648,7 +1658,7 @@ class LongRunHarness:
                 reason=reason,
                 duration_ms=round((time.monotonic() - close_started) * 1000),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._emit_live_failure(
                 stage="runtime_cleanup_failure",
                 message=f"{type(exc).__name__}: {exc}",
@@ -2470,8 +2480,7 @@ class LongRunHarness:
                 and row.get("phase") == "claim_document"
                 and int(row.get("timestamp_ms") or 0) > reopened_at
             )
-            if recovery_claims < record.recovery_attempt_count:
-                record.recovery_attempt_count = recovery_claims
+            record.recovery_attempt_count = min(record.recovery_attempt_count, recovery_claims)
 
     def _prepare_failed_document_recovery(self) -> None:
         """Reopen a bounded set of terminal failures without erasing history."""
@@ -2663,7 +2672,7 @@ class LongRunHarness:
                         for event in failure_usage_events
                         if isinstance(event, dict) and event.get("event_id")
                     }
-                    self.pipeline._persist_parser_usage_events(  # noqa: SLF001 - parent owns attribution
+                    self.pipeline._persist_parser_usage_events(
                         request=request,
                         source_document_id=source_document_id,
                         provider=self.config.parser_provider,
@@ -2672,7 +2681,7 @@ class LongRunHarness:
                         usage_events=list(unique_events.values()) or failure_usage_events,
                     )
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 code = classify_exception(exc, phase="parse_document")
                 if code in RECOVERABLE_LLM_QUALITY_FAILURES:
                     code = "document_parse_failed"
@@ -2726,11 +2735,11 @@ class LongRunHarness:
                     source_document_id=source_document_id,
                 )
                 record.parsed_node_ids = [
-                    str(getattr(node, "id"))
+                    str(node.id)
                     for node in getattr(record.graph_extraction, "nodes", [])
                 ]
                 record.parsed_edge_ids = [
-                    str(getattr(edge, "id"))
+                    str(edge.id)
                     for edge in getattr(record.graph_extraction, "edges", [])
                 ]
                 self.pipeline.ingest_parse_result(
@@ -2741,7 +2750,7 @@ class LongRunHarness:
                 )
                 usage_events = list(getattr(record.parse_result, "usage_events", []) or [])
                 if usage_events:
-                    self.pipeline._persist_parser_usage_events(  # noqa: SLF001 - parent owns attribution
+                    self.pipeline._persist_parser_usage_events(
                         request=request,
                         source_document_id=source_document_id,
                         provider=self.config.parser_provider,
@@ -2754,7 +2763,7 @@ class LongRunHarness:
                     source_document_id=source_document_id,
                     stage="parsed_graph_persisted",
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise LongRunDocumentError(
                     "document_persist_failed_after_retries",
                     str(exc),
@@ -2792,7 +2801,7 @@ class LongRunHarness:
                     source_document_id=source_document_id,
                     namespace=ns.conv_bg,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise LongRunDocumentError(
                     "document_persist_failed_after_retries",
                     str(exc),
@@ -2925,7 +2934,7 @@ class LongRunHarness:
                         doc_id=record.doc_id,
                         reason="single_foreground_maintenance_worker",
                     )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 code = classify_exception(exc, phase="observe_background_maintenance")
                 if code in RECOVERABLE_LLM_QUALITY_FAILURES:
                     record.llm_quality_failures.append(code)
@@ -3034,7 +3043,7 @@ class LongRunHarness:
         """Best-effort snapshotting must not hide the already-recorded root failure."""
         try:
             self.dumper.dump(reason=reason, final=final)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._emit_live_failure(
                 stage="diagnostic_dump_failure",
                 message=f"{type(exc).__name__}: {exc}",
@@ -3337,7 +3346,7 @@ class LongRunHarness:
 
     @staticmethod
     def _node_rows_with_metadata(engine: Any, *, where: dict[str, Any], limit: int = 10_000) -> list[dict[str, Any]]:
-        got = engine.read._node_get_raw(  # noqa: SLF001 - harness needs metadata-only inspection
+        got = engine.read._node_get_raw(
             where=where,
             limit=limit,
             include=["metadatas"],
@@ -5213,15 +5222,15 @@ def test_longrun_fair_maintenance_slice_config_is_fingerprinted(
 
 
 def test_longrun_maintenance_workers_are_execution_config_not_fingerprint() -> None:
-    base = dict(
-        enabled=False,
-        mode="fresh",
-        backend="postgres",
-        operation_mode="maintenance_first",
-        maintenance_schedule_mode="fair_slices",
-        maintenance_steps_per_slice=2,
-        doc_count=2,
-    )
+    base = {
+        "enabled": False,
+        "mode": "fresh",
+        "backend": "postgres",
+        "operation_mode": "maintenance_first",
+        "maintenance_schedule_mode": "fair_slices",
+        "maintenance_steps_per_slice": 2,
+        "doc_count": 2,
+    }
     one = LongRunConfig(maintenance_workers=1, **base)
     two = LongRunConfig(maintenance_workers=2, **base)
 
@@ -5491,16 +5500,16 @@ def test_longrun_config_rejects_invalid_conversation_persistence_mode() -> None:
 
 
 def test_longrun_corpus_fingerprint_changes_across_operation_modes() -> None:
-    base = dict(
-        enabled=False,
-        mode="auto",
-        doc_count=20,
-        parser_lane="workflow_layered",
-        ollama_model="gemma4:e2b",
-        ollama_base_url="http://localhost:11434",
-        max_repeated_systemic_errors=3,
-        max_post_doc_maintenance_steps=1,
-    )
+    base = {
+        "enabled": False,
+        "mode": "auto",
+        "doc_count": 20,
+        "parser_lane": "workflow_layered",
+        "ollama_model": "gemma4:e2b",
+        "ollama_base_url": "http://localhost:11434",
+        "max_repeated_systemic_errors": 3,
+        "max_post_doc_maintenance_steps": 1,
+    }
     parse_first = LongRunConfig(operation_mode="parse_first", **base)
     maintenance_first = LongRunConfig(operation_mode="maintenance_first", **base)
     hybrid = LongRunConfig(operation_mode="hybrid", **base)
@@ -5509,17 +5518,17 @@ def test_longrun_corpus_fingerprint_changes_across_operation_modes() -> None:
 
 
 def test_longrun_corpus_fingerprint_changes_across_proposal_modes() -> None:
-    base = dict(
-        enabled=False,
-        mode="auto",
-        doc_count=20,
-        operation_mode="parse_first",
-        parser_lane="workflow_layered",
-        ollama_model="gemma4:e2b",
-        ollama_base_url="http://localhost:11434",
-        max_repeated_systemic_errors=3,
-        max_post_doc_maintenance_steps=1,
-    )
+    base = {
+        "enabled": False,
+        "mode": "auto",
+        "doc_count": 20,
+        "operation_mode": "parse_first",
+        "parser_lane": "workflow_layered",
+        "ollama_model": "gemma4:e2b",
+        "ollama_base_url": "http://localhost:11434",
+        "max_repeated_systemic_errors": 3,
+        "max_post_doc_maintenance_steps": 1,
+    }
     children = LongRunConfig(parser_proposal_mode="children", **base)
     boundaries = LongRunConfig(parser_proposal_mode="boundaries", **base)
 
@@ -5527,17 +5536,17 @@ def test_longrun_corpus_fingerprint_changes_across_proposal_modes() -> None:
 
 
 def test_longrun_corpus_fingerprint_changes_across_corpus_profiles() -> None:
-    base = dict(
-        enabled=False,
-        mode="auto",
-        doc_count=20,
-        operation_mode="parse_first",
-        parser_lane="workflow_layered",
-        ollama_model="gemma4:e2b",
-        ollama_base_url="http://localhost:11434",
-        max_repeated_systemic_errors=3,
-        max_post_doc_maintenance_steps=1,
-    )
+    base = {
+        "enabled": False,
+        "mode": "auto",
+        "doc_count": 20,
+        "operation_mode": "parse_first",
+        "parser_lane": "workflow_layered",
+        "ollama_model": "gemma4:e2b",
+        "ollama_base_url": "http://localhost:11434",
+        "max_repeated_systemic_errors": 3,
+        "max_post_doc_maintenance_steps": 1,
+    }
     stress = LongRunConfig(corpus_profile="watershed_stress", **base)
     daily_life = LongRunConfig(corpus_profile="daily_life", **base)
 
@@ -5545,16 +5554,16 @@ def test_longrun_corpus_fingerprint_changes_across_corpus_profiles() -> None:
 
 
 def test_longrun_corpus_fingerprint_ignores_run_mode_and_budgets() -> None:
-    base = dict(
-        enabled=False,
-        doc_count=20,
-        operation_mode="parse_first",
-        parser_lane="workflow_layered",
-        parser_provider="azure",
-        parser_model="gpt-5-mini",
-        max_repeated_systemic_errors=3,
-        max_post_doc_maintenance_steps=1,
-    )
+    base = {
+        "enabled": False,
+        "doc_count": 20,
+        "operation_mode": "parse_first",
+        "parser_lane": "workflow_layered",
+        "parser_provider": "azure",
+        "parser_model": "gpt-5-mini",
+        "max_repeated_systemic_errors": 3,
+        "max_post_doc_maintenance_steps": 1,
+    }
     fresh = LongRunConfig(mode="fresh", max_llm_calls=100, max_runtime_seconds=1200, **base)
     continue_run = LongRunConfig(mode="continue", max_llm_calls=250, max_runtime_seconds=2400, **base)
     auto = LongRunConfig(mode="auto", max_llm_calls=500, max_runtime_seconds=3600, **base)
@@ -5563,17 +5572,17 @@ def test_longrun_corpus_fingerprint_ignores_run_mode_and_budgets() -> None:
 
 
 def test_longrun_corpus_fingerprint_ignores_document_limit() -> None:
-    base = dict(
-        enabled=False,
-        mode="auto",
-        doc_count=20,
-        operation_mode="parse_first",
-        parser_lane="workflow_layered",
-        parser_provider="azure",
-        parser_model="gpt-5-mini",
-        max_repeated_systemic_errors=3,
-        max_post_doc_maintenance_steps=1,
-    )
+    base = {
+        "enabled": False,
+        "mode": "auto",
+        "doc_count": 20,
+        "operation_mode": "parse_first",
+        "parser_lane": "workflow_layered",
+        "parser_provider": "azure",
+        "parser_model": "gpt-5-mini",
+        "max_repeated_systemic_errors": 3,
+        "max_post_doc_maintenance_steps": 1,
+    }
     limited = LongRunConfig(doc_limit=2, **base)
     complete = LongRunConfig(doc_limit=None, **base)
 
@@ -5581,17 +5590,17 @@ def test_longrun_corpus_fingerprint_ignores_document_limit() -> None:
 
 
 def test_longrun_corpus_fingerprint_ignores_resume_probe() -> None:
-    base = dict(
-        enabled=False,
-        mode="auto",
-        doc_count=20,
-        operation_mode="parse_first",
-        parser_lane="workflow_layered",
-        parser_provider="azure",
-        parser_model="gpt-5-mini",
-        max_repeated_systemic_errors=3,
-        max_post_doc_maintenance_steps=1,
-    )
+    base = {
+        "enabled": False,
+        "mode": "auto",
+        "doc_count": 20,
+        "operation_mode": "parse_first",
+        "parser_lane": "workflow_layered",
+        "parser_provider": "azure",
+        "parser_model": "gpt-5-mini",
+        "max_repeated_systemic_errors": 3,
+        "max_post_doc_maintenance_steps": 1,
+    }
     normal = LongRunConfig(resume_probe_enabled=False, **base)
     probe = LongRunConfig(resume_probe_enabled=True, **base)
 
@@ -5617,13 +5626,13 @@ def test_longrun_accepts_historical_fingerprint_without_run_control_fields() -> 
 
 
 def test_longrun_parser_workers_are_bounded_but_do_not_change_fingerprint() -> None:
-    base = dict(
-        enabled=False,
-        mode="fresh",
-        doc_count=3,
-        backend="pgvector",
-        dsn="postgresql://user:pass@localhost/db",
-    )
+    base = {
+        "enabled": False,
+        "mode": "fresh",
+        "doc_count": 3,
+        "backend": "pgvector",
+        "dsn": "postgresql://user:pass@localhost/db",
+    }
     one = LongRunConfig(parser_workers=1, **base)
     two = LongRunConfig(parser_workers=2, **base)
 
@@ -5662,16 +5671,16 @@ def test_longrun_different_fingerprint_isolated_from_existing_run_dir(tmp_path: 
 
 
 def test_longrun_experiment_run_changes_fingerprint_for_repeat_comparison():
-    base = dict(
-        enabled=False,
-        mode="fresh",
-        doc_count=20,
-        backend="pgvector",
-        dsn="postgresql://user:pass@localhost/db",
-        parser_provider="azure",
-        parser_model="gpt-5-mini",
-        parser_proposal_mode="boundaries",
-    )
+    base = {
+        "enabled": False,
+        "mode": "fresh",
+        "doc_count": 20,
+        "backend": "pgvector",
+        "dsn": "postgresql://user:pass@localhost/db",
+        "parser_provider": "azure",
+        "parser_model": "gpt-5-mini",
+        "parser_proposal_mode": "boundaries",
+    }
     run_one = LongRunConfig(experiment_run="1", **base)
     run_two = LongRunConfig(experiment_run="2", **base)
 
@@ -5833,9 +5842,9 @@ def test_longrun_finalization_trace_reports_slow_phases(tmp_path: Path) -> None:
     harness._poll_projection_once = lambda: None  # type: ignore[method-assign]
     harness._verify_run_invariants = lambda: None  # type: ignore[method-assign]
     harness.dumper.dump = lambda **_: None  # type: ignore[method-assign]
-    harness.recovery_summary = lambda: {}  # type: ignore[method-assign]
-    harness.maintenance_summary = lambda: {}  # type: ignore[method-assign]
-    harness.projection_summary = lambda: {}  # type: ignore[method-assign]
+    harness.recovery_summary = dict  # type: ignore[method-assign]
+    harness.maintenance_summary = dict  # type: ignore[method-assign]
+    harness.projection_summary = dict  # type: ignore[method-assign]
     harness._engines = SimpleNamespace(close=lambda: None)
 
     harness._finalize_run(started=time.monotonic())
@@ -6842,7 +6851,7 @@ def test_longrun_final_report_renders_parser_eval_summary(
             "missing_document_ids": [],
         },
     )
-    monkeypatch.setattr(harness, "graph_export", lambda: {})
+    monkeypatch.setattr(harness, "graph_export", dict)
     monkeypatch.setattr(
         harness,
         "recovery_summary",
@@ -7025,7 +7034,7 @@ def test_longrun_parent_persists_per_document_usage_attribution(tmp_path: Path):
         "meta": {"provider_run_id": "provider-run-1"},
     }
 
-    harness.pipeline._persist_parser_usage_events(  # noqa: SLF001 - regression of parent handoff
+    harness.pipeline._persist_parser_usage_events(
         request=request,
         source_document_id="source-doc-1",
         provider="fake",

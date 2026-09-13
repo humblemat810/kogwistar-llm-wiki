@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterable
+from collections.abc import Iterable
 
 from kogwistar.runtime.budget import BudgetEvent
 from kogwistar.runtime.budget_adapters import summarize_budget_events

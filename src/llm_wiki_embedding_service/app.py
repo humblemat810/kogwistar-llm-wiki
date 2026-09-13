@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-import base64
 import asyncio
+import base64
+import hmac
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
-import hmac
 from typing import Any
 
 from fastapi import FastAPI, Request
 
-from llm_wiki_embedding_contract import ContractValidationError, validate_asset_bytes, validate_dense_vectors
+from llm_wiki_embedding_contract import (
+    ContractValidationError,
+    validate_asset_bytes,
+    validate_dense_vectors,
+)
 
 from .config import EmbeddingServiceConfig, load_config
 from .encoder import Qwen3VLDenseEncoder
@@ -41,7 +45,7 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
                     state["encoder"] = await asyncio.to_thread(
                         Qwen3VLDenseEncoder.from_pretrained, selected
                     )
-                except Exception as exc:  # readiness reports model failures
+                except Exception as exc:  # noqa: BLE001 - readiness reports model failures
                     state["load_error"] = str(exc)
 
             load_task = asyncio.create_task(load_model())
@@ -143,4 +147,4 @@ def _represent_payload(payload: object, encoder: Any, config: EmbeddingServiceCo
     return {"contract_version": "v1", "request_id": str(payload.get("request_id", "")), "profile": _profile(config), "results": results}
 
 
-__all__ = ["create_app", "_represent_payload"]
+__all__ = ["_represent_payload", "create_app"]

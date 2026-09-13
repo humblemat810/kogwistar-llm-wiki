@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pytest
+from kogwistar.engine_core.models import Grounding, Node, Span
 from pydantic import ValidationError
 
+from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch
 from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
@@ -12,13 +14,12 @@ from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceScope,
     validate_maintenance_patch,
 )
-from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch
 
 
-def _provenance() -> MaintenanceProvenance:
+def _provenance(doc_id: str = "doc-1") -> MaintenanceProvenance:
     return MaintenanceProvenance(
-        source_document_id="doc-1",
-        source_span_ids=["span-1"],
+        source_document_id=doc_id,
+        source_pointers=[{"doc_id": doc_id, "start_char": 0, "end_char": 8}],
         maintenance_run_id="run-1",
         confidence=0.91,
     )
@@ -38,6 +39,100 @@ def _cross_doc_provenance(confidence: float = 0.91) -> MaintenanceProvenance:
 
 def _scope() -> MaintenanceScope:
     return MaintenanceScope(workspace_id="demo")
+
+
+def test_maintenance_cannot_tombstone_raw_source_fact() -> None:
+    engine = _FakeEngine()
+    raw_node = Node(
+        id="raw-source-1",
+        label="Original document",
+        type="entity",
+        summary="The exact source snapshot",
+        doc_id="doc-1",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation("raw-source-1")])],
+        metadata={
+            "artifact_kind": "source_revision",
+            "graph_space": "source",
+            "source_raw_text": "The original spelling is preserved.",
+        },
+    )
+    engine.nodes[raw_node.id] = raw_node
+    patch = MaintenancePatch(
+        patch_id="patch-raw-source",
+        intent=MaintenanceIntent.CORRECT_FACT,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-tombstone-raw-source",
+                kind=MaintenanceOperationKind.TOMBSTONE_NODE,
+                target_id=raw_node.id,
+                reason="maintenance guessed the source had a typo",
+                provenance=_provenance(),
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch(engine, patch, active_node_ids={raw_node.id})
+
+    assert result.status == "rejected"
+    assert any(issue.code == "raw_fact_mutation_forbidden" for issue in result.validation.issues)
+    assert engine.tombstone_node_calls == []
+    assert raw_node.metadata.get("lifecycle_status") == "active"
+    assert raw_node.metadata["source_raw_text"] == "The original spelling is preserved."
+
+
+def test_maintenance_can_add_interpretation_and_support_edge_to_raw_fact() -> None:
+    engine = _FakeEngine()
+    raw_node = Node(
+        id="raw-source-2",
+        label="Original statement",
+        type="entity",
+        summary="A user-authored statement",
+        doc_id="conversation-1",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation("raw-source-2")])],
+        metadata={"artifact_kind": "lane_message", "conversation_id": "conversation-1"},
+    )
+    engine.nodes[raw_node.id] = raw_node
+    patch = MaintenancePatch(
+        patch_id="patch-interpretation",
+        intent=MaintenanceIntent.DERIVE_ENTITY,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-add-interpretation",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="ws:demo:interpretation:1",
+                label="Corrected interpretation guess",
+                node_type="interpretation_guess",
+                properties={"interpretation_status": "inferred"},
+                provenance=_provenance("conversation-1"),
+            ),
+            MaintenancePatchOperation(
+                operation_id="op-supports-interpretation",
+                kind=MaintenanceOperationKind.ADD_EDGE,
+                edge_id="ws:demo:edge:interpretation-1",
+                from_node_id="ws:demo:interpretation:1",
+                to_node_id=raw_node.id,
+                relation="interprets",
+                reason="Possible correction without changing the original statement",
+                provenance=_provenance("conversation-1"),
+            ),
+        ],
+    )
+
+    result = apply_maintenance_patch(
+        engine,
+        patch,
+        active_node_ids={raw_node.id},
+        namespace_prefix="ws:demo:",
+    )
+
+    assert result.status == "applied"
+    assert engine.tombstone_node_calls == []
+    assert engine.nodes[raw_node.id].summary == "A user-authored statement"
+    assert "ws:demo:interpretation:1" in engine.nodes
+    assert engine.nodes["ws:demo:interpretation:1"].metadata["node_type"] == "interpretation_guess"
+    assert "ws:demo:edge:interpretation-1" in engine.edges
 
 
 def test_maintenance_patch_accepts_add_tombstone_vocabulary() -> None:
@@ -204,7 +299,7 @@ def test_maintenance_patch_validation_requires_supersession_lineage() -> None:
 
 
 class _FakeRead:
-    def __init__(self, engine: "_FakeEngine") -> None:
+    def __init__(self, engine: _FakeEngine) -> None:
         self.engine = engine
 
     def get_nodes(self, ids=None, resolve_mode="active_only", **_kwargs):
@@ -235,7 +330,7 @@ class _FakeRead:
 
 
 class _FakeWrite:
-    def __init__(self, engine: "_FakeEngine") -> None:
+    def __init__(self, engine: _FakeEngine) -> None:
         self.engine = engine
 
     def add_node(self, node) -> None:

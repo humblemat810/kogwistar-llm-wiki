@@ -72,6 +72,20 @@ llm-wiki daemon maintenance \
   [--interval <seconds>]
 ```
 
+The daemon also supports an independent background cycle. It is disabled by
+default and uses a deterministic embedding-space probe for its exploration
+half. Set `--background-interval` to control the cycle cadence. Request and
+background processing can be switched independently from inside the container;
+these controls are deliberately not REST or MCP operations:
+
+```powershell
+docker exec llm-wiki-memory-maintenance-1 llm-wiki --data-dir /var/lib/llm-wiki daemon maintenance-control --request-enabled true --background-enabled false
+```
+
+The command persists the state and updates a running daemon through its local
+control socket. `--runtime-only` changes only the current process. Queued jobs
+remain durable when a mode is disabled.
+
 Startup recovery passes maintenance daemon health into core and uses the core
 report for queue/lane/checkpoint/run/dead-letter visibility.
 

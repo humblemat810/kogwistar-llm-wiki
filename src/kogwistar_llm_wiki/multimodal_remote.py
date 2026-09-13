@@ -8,15 +8,15 @@ Stage 2 storage remain owned by LLM-Wiki.
 from __future__ import annotations
 
 import base64
+import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
-import json
-import math
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from .multimodal_projection import (
@@ -280,9 +280,9 @@ def _http_error_detail(error: HTTPError) -> str:
 
 
 __all__ = [
-    "RemoteMultimodalEncoder",
     "EmbeddingProtocolError",
     "EmbeddingServiceError",
     "EmbeddingServiceSettings",
     "EmbeddingServiceUnavailable",
+    "RemoteMultimodalEncoder",
 ]

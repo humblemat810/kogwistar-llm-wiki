@@ -1,8 +1,7 @@
+import json
+
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
-
-
-import json
 
 
 def _decode_metadata_json(value):

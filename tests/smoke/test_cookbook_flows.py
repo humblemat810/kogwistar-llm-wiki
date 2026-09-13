@@ -4,9 +4,13 @@ import json
 from pathlib import Path
 
 import pytest
-
 from kogwistar.engine_core import EntityEventEnvelope
-from kogwistar_llm_wiki import IngestPipeline, WorkbenchApi, build_in_memory_namespace_engines
+
+from kogwistar_llm_wiki import (
+    IngestPipeline,
+    WorkbenchApi,
+    build_in_memory_namespace_engines,
+)
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
 from kogwistar_llm_wiki.archive import create_archive, restore_archive, verify_archive

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 
+import pytest
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
-from types import SimpleNamespace
-import pytest
+
 
 class _FakeParseResult:
     def __init__(self, title: str):

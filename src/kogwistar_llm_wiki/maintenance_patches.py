@@ -56,7 +56,7 @@ class MaintenanceScope(BaseModel):
     thread_id: str | None = None
 
     @model_validator(mode="after")
-    def _scope_ids_match_kind(self) -> "MaintenanceScope":
+    def _scope_ids_match_kind(self) -> MaintenanceScope:
         if self.scope_kind == "conversation" and not self.conversation_id:
             raise ValueError("conversation scope requires conversation_id")
         if self.scope_kind == "thread" and not self.thread_id:
@@ -74,7 +74,7 @@ class MaintenanceProvenance(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
     @model_validator(mode="after")
-    def _requires_grounding(self) -> "MaintenanceProvenance":
+    def _requires_grounding(self) -> MaintenanceProvenance:
         if not self.source_document_id and not self.source_span_ids and not self.source_pointers:
             raise ValueError("provenance requires source_document_id, source_span_ids, or source_pointers")
         return self
@@ -99,7 +99,7 @@ class MaintenancePatchOperation(BaseModel):
     reason: str | None = None
 
     @model_validator(mode="after")
-    def _shape_matches_kind(self) -> "MaintenancePatchOperation":
+    def _shape_matches_kind(self) -> MaintenancePatchOperation:
         if self.kind == MaintenanceOperationKind.ADD_NODE:
             if not self.node_id:
                 raise ValueError("ADD_NODE requires node_id")
@@ -112,8 +112,7 @@ class MaintenancePatchOperation(BaseModel):
         elif self.kind == MaintenanceOperationKind.TOMBSTONE_EDGE:
             if not (self.target_id or self.edge_id):
                 raise ValueError("TOMBSTONE_EDGE requires target_id or edge_id")
-        elif self.kind == MaintenanceOperationKind.REQUEST_REVIEW:
-            if not self.reason:
+        elif self.kind == MaintenanceOperationKind.REQUEST_REVIEW and not self.reason:
                 raise ValueError("REQUEST_REVIEW requires reason")
         return self
 
@@ -145,7 +144,7 @@ class MaintenancePatch(BaseModel):
     rationale: str | None = None
 
     @model_validator(mode="after")
-    def _requires_operations(self) -> "MaintenancePatch":
+    def _requires_operations(self) -> MaintenancePatch:
         if not self.operations:
             raise ValueError("MaintenancePatch requires at least one operation")
         return self
@@ -338,8 +337,11 @@ def validate_maintenance_patch(
                         )
                     )
 
-        if patch.intent == MaintenanceIntent.RETRACT_CROSSLINK and operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE:
-            if operation.reason is None or not operation.reason.strip():
+        if (
+            patch.intent == MaintenanceIntent.RETRACT_CROSSLINK
+            and operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE
+            and (operation.reason is None or not operation.reason.strip())
+        ):
                 issues.append(
                     MaintenancePatchValidationIssue(
                         operation_id=operation.operation_id,

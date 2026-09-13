@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+
 from kogwistar.engine_core.jobs import JobQueueItem
 
 from .models import NamespaceEngines
@@ -112,7 +113,7 @@ class ProjectionWorker:
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except Exception:
+            except Exception:  # noqa: BLE001 - corrupt optional payload is treated as empty
                 payload = {}
         if not isinstance(payload, dict):
             payload = {}
@@ -160,12 +161,12 @@ class ProjectionWorker:
         workspace_id: str,
         req_node_id: str,
         status: str,
-        ns: "WorkspaceNamespaces",
+        ns: WorkspaceNamespaces,
         promoted_entity_id: str,
         error: str | None = None,
     ) -> None:
         """Append-only status event — never updates the original request node."""
-        from kogwistar.engine_core.models import Node, Grounding, Span
+        from kogwistar.engine_core.models import Grounding, Node, Span
         from kogwistar.id_provider import stable_id
 
         event_id = str(stable_id("projection_status", req_node_id, promoted_entity_id, status))

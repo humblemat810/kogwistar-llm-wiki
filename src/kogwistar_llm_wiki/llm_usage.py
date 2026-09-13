@@ -3,15 +3,17 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from types import SimpleNamespace
-from typing import Callable, Sequence
 
-from langchain_core.callbacks import BaseCallbackHandler
-from kogwistar.runtime.budget import BudgetAttribution, BudgetEvent, StateBackedBudgetLedger
+from kogwistar.runtime.budget import (
+    BudgetAttribution,
+    BudgetEvent,
+    StateBackedBudgetLedger,
+)
 from kogwistar.runtime.budget_adapters import adapt_budget_events
 from kogwistar.runtime.pricing import TokenPricing, estimate_token_cost_usd
-
+from langchain_core.callbacks import BaseCallbackHandler
 
 _USAGE_KEYS = ("usage_metadata", "token_usage", "usage")
 

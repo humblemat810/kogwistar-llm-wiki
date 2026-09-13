@@ -18,7 +18,6 @@ from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
 from .utils import _temporary_namespace
 
-
 DisambiguationAnswerSource = Literal["user", "reviewer", "policy"]
 
 

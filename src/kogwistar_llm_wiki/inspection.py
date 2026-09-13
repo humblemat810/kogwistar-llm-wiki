@@ -369,13 +369,13 @@ def _model_dump_jsonable(entity: object) -> dict[str, object]:
 
 
 __all__ = [
-    "GraphArtifactDump",
     "EdgeSample",
+    "GraphArtifactDump",
     "GraphSpaceCount",
     "NodeSample",
     "RawGraphEdgeDump",
     "RawGraphNodeDump",
     "WorkspaceQualityReport",
-    "build_workspace_quality_report",
     "build_workspace_graph_artifact_dump",
+    "build_workspace_quality_report",
 ]

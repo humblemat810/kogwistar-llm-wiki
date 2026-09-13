@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Literal
-
-from pydantic import BaseModel
-from pydantic_extension.model_slicing import ModeSlicingMixin, DtoType
+from typing import Literal
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar_obsidian_sink.core.models import ProjectionEntity
+from pydantic import BaseModel
+from pydantic_extension.model_slicing import DtoType, ModeSlicingMixin
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +36,7 @@ class MaintenanceJobRequest:
 class MaintenanceJobResult:
     job_id: str
     job_type: str
-    outputs: Dict[str, object]
+    outputs: dict[str, object]
     review_required: bool
     emitted_event_ids: list[str]
     status: str = "completed"

@@ -30,12 +30,12 @@ services:
         mkdir -p /var/lib/llm-wiki/conversation /var/lib/llm-wiki/knowledge
         /var/lib/llm-wiki/wisdom /var/lib/llm-wiki/workflow
         /var/lib/llm-wiki/logs /var/lib/llm-wiki/parser-cache
-        /var/lib/llm-wiki/kogwistar-cache &&
+        /var/lib/llm-wiki/kogwistar-cache /var/lib/llm-wiki/maintenance &&
         chown 10001:10001 /var/lib/llm-wiki
         /var/lib/llm-wiki/conversation /var/lib/llm-wiki/knowledge
         /var/lib/llm-wiki/wisdom /var/lib/llm-wiki/workflow
         /var/lib/llm-wiki/logs /var/lib/llm-wiki/parser-cache
-        /var/lib/llm-wiki/kogwistar-cache
+        /var/lib/llm-wiki/kogwistar-cache /var/lib/llm-wiki/maintenance
     volumes:
       - app_data:/var/lib/llm-wiki
     restart: "no"

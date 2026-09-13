@@ -4,9 +4,7 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock
 
-
-from kogwistar_llm_wiki.utils import _temporary_namespace, _NamespacedEngineProxy
-
+from kogwistar_llm_wiki.utils import _NamespacedEngineProxy, _temporary_namespace
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -133,7 +131,7 @@ class TestTemporaryNamespace:
                     # The proxy seen by this thread's subsystems should carry its namespace.
                     seen = engine.write._e.namespace
                     observed[ns] = seen
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - test captures worker failures
                 errors.append(e)
 
         t1 = threading.Thread(target=worker, args=("ns_alpha",))

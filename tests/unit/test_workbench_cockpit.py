@@ -12,6 +12,7 @@ from kogwistar_llm_wiki import (
     WorkspaceNamespaces,
     build_in_memory_namespace_engines,
 )
+from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
@@ -20,12 +21,11 @@ from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceProvenance,
     MaintenanceScope,
 )
-from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.workbench_cockpit import (
     CockpitAction,
-    WorkbenchCockpit,
     CockpitLimits,
+    WorkbenchCockpit,
     validate_cockpit_proposal,
 )
 

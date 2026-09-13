@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
+import pytest
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
+
 from kogwistar_llm_wiki import ingest_pipeline
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 

@@ -6,13 +6,13 @@ import os
 import sys
 
 from .ingest_pipeline import _resolve_embedding_functions
+from .multimodal_projection import build_configured_multimodal_encoder
 from .multimodal_runtime import (
-    configured_multimodal_backend,
     configured_embedding_service_url,
+    configured_multimodal_backend,
     configured_vllm_url,
     validate_configured_multimodal_runtime,
 )
-from .multimodal_projection import build_configured_multimodal_encoder
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
             # The base app image is Torch-free. Local adapters remain available
             # only when constructed directly by developer/test code.
             validate_configured_multimodal_runtime(require_device=True)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - convert all startup failures to a clear exit message
         print(
             "llm-wiki container configuration invalid: "
             f"{exc}\n"

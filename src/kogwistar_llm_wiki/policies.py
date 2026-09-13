@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 from kogwistar.engine_core.models import Node
 from kogwistar.policy import (
     DefaultArtifactVisibilityPolicy,
     DefaultDerivedKnowledgePolicy,
-    DefaultPromotionPolicy,
     DefaultProjectionEligibilityPolicy,
+    DefaultPromotionPolicy,
     DefaultWisdomPolicy,
     PromotionContext,
     PromotionDecision,
@@ -263,13 +263,13 @@ def build_default_policies() -> LlmWikiPolicies:
 
 
 __all__ = [
-    "LlmWikiPolicies",
     "LlmWikiArtifactTaxonomy",
+    "LlmWikiDerivedKnowledgePolicy",
+    "LlmWikiLifecyclePolicy",
+    "LlmWikiPolicies",
+    "LlmWikiProjectionPolicy",
     "LlmWikiPromotionPolicy",
     "LlmWikiVisibilityPolicy",
-    "LlmWikiDerivedKnowledgePolicy",
     "LlmWikiWisdomPolicy",
-    "LlmWikiLifecyclePolicy",
-    "LlmWikiProjectionPolicy",
     "build_default_policies",
 ]

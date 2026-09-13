@@ -7,8 +7,8 @@ shared disambiguation model helpers.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from .entity_disambiguation import (
     DisambiguationArtifactStatus,
@@ -151,9 +151,7 @@ def _is_eligible(
         return False
     if int(candidate.score_bundle.usage_frequency) < int(policy.min_usage_frequency):
         return False
-    if not str(candidate.question or "").strip():
-        return False
-    return True
+    return str(candidate.question or "").strip()
 
 
 def _score_candidate(candidate: DisambiguationCandidate) -> DisambiguationReviewPick:

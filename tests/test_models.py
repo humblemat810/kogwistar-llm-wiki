@@ -1,4 +1,8 @@
-from kogwistar_llm_wiki import IngestPipelineArtifacts, IngestPipelineRequest, NamespaceEngines
+from kogwistar_llm_wiki import (
+    IngestPipelineArtifacts,
+    IngestPipelineRequest,
+    NamespaceEngines,
+)
 
 
 def test_package_root_import_smoke():

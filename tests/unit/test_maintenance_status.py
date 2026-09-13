@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.maintenance_patches import MaintenanceIntent, MaintenancePatchStatus
-from kogwistar_llm_wiki.maintenance_status import DocumentGraphStatus, graph_status_for_patch
+from kogwistar_llm_wiki.maintenance_patches import (
+    MaintenanceIntent,
+    MaintenancePatchStatus,
+)
+from kogwistar_llm_wiki.maintenance_status import (
+    DocumentGraphStatus,
+    graph_status_for_patch,
+)
 
 
 def test_graph_status_for_patch_covers_document_lifecycle() -> None:

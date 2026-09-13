@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from kogwistar.engine_core.engine import (
     GraphKnowledgeEngine,
+)
+from kogwistar.engine_core.engine import (
     _NamespacedEngineProxy as _CoreNamespacedEngineProxy,
+)
+from kogwistar.engine_core.engine import (
     scoped_namespace as _core_scoped_namespace,
 )
-
 
 # Re-export the core namespace proxy so app tests and runtime use the same
 # implementation that ``kogwistar.engine_core.engine.scoped_namespace`` binds.

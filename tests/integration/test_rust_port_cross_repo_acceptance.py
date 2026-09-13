@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import difflib
+import json
 from pathlib import Path
 
 import pytest
-
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
@@ -14,11 +13,11 @@ from kg_doc_parser.workflow_ingest.providers import (
 )
 from kogwistar._rust_bridge import store_sqlite
 from kogwistar.engine_core.engine_sqlite import EngineSQLite
-from kogwistar_llm_wiki.namespaces import GraphSpace
 from kogwistar_obsidian_sink.cdc.event_consumer import JsonlEventConsumer
 from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuckProvider
 from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 
+from kogwistar_llm_wiki.namespaces import GraphSpace
 
 pytestmark = [pytest.mark.ci_full, pytest.mark.integration]
 

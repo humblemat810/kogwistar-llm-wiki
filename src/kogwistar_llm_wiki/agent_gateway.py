@@ -313,6 +313,14 @@ class AgentGateway:
         if not workspace_id or not topic and not arguments.get("source_document_ids"):
             raise ValueError("maintain requires workspace_id and topic or source_document_ids")
         budgets = _budgets(arguments)
+        maintenance_context = arguments.get("maintenance_context")
+        if maintenance_context is not None and not isinstance(maintenance_context, Mapping):
+            raise TypeError("maintenance_context must be an object")
+        max_rounds = arguments.get("max_rounds")
+        if max_rounds is not None and (
+            isinstance(max_rounds, bool) or not isinstance(max_rounds, int) or max_rounds < 0
+        ):
+            raise TypeError("max_rounds must be a non-negative integer")
         raw_source_ids = arguments.get("source_document_ids") or ()
         if not isinstance(raw_source_ids, (list, tuple, set, frozenset)):
             raise TypeError("source_document_ids must be a list of IDs")
@@ -337,13 +345,20 @@ class AgentGateway:
         ns = self.api.pipeline.namespaces_for(workspace_id)
         source_requests, skipped_source_ids = _limit_budgeted_sources(source_requests, budgets)
         for index, (source_id, request) in enumerate(source_requests):
+            raw_seed_ids = arguments.get("seed_node_ids") or []
+            if not isinstance(raw_seed_ids, (list, tuple, set, frozenset)):
+                raise TypeError("seed_node_ids must be a list of IDs")
             job_id = self.api.pipeline.create_maintenance_request(
                 request=request,
                 source_document_id=source_id,
                 namespace=ns.conv_bg,
                 maintenance_kind=str(arguments.get("maintenance_kind") or "document_propose_crosslinks"),
+                topic=topic or None,
                 objective=objective or None,
                 budgets=_partition_budgets(budgets, len(source_requests), index),
+                seed_node_ids=[str(value) for value in raw_seed_ids if str(value).strip()],
+                maintenance_context=maintenance_context,
+                max_rounds=max_rounds,
             )
             jobs.append(job_id)
         return {

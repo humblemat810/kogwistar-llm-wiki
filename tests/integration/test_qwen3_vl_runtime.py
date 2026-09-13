@@ -9,7 +9,6 @@ import pytest
 
 from scripts.benchmark_multimodal import run_multimodal_benchmark
 
-
 pytestmark = [pytest.mark.manual, pytest.mark.slow]
 
 

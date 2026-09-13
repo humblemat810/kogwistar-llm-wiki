@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from pathlib import Path
 
 import pytest
-
-from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
 from kg_doc_parser.workflow_ingest import service as workflow_service
+from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
 from kg_doc_parser.workflow_ingest.semantics import SemanticNode
+
 from kogwistar_llm_wiki import longrun_parser_worker as worker
 
 

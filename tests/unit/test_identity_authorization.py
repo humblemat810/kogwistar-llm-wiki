@@ -4,8 +4,8 @@ import json
 
 import pytest
 from jose import jwt
-
 from kogwistar.server.auth_middleware import claims_ctx
+
 from kogwistar_llm_wiki.identity import (
     IdentityError,
     authenticate_bearer,

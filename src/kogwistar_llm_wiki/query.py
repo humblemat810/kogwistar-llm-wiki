@@ -6,8 +6,8 @@ do not need to reach into engine namespaces directly.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Node

@@ -6,23 +6,41 @@ creation, and the app-level projection/query helpers into one place.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
-import hashlib
 import shutil
-import time
-from pathlib import Path
 import tempfile
+import time
 import uuid
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable, Literal, Mapping, Protocol, Sequence
+from typing import Literal, Protocol
 
-from .utils import _temporary_namespace
+from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
+    parser_llm_cache_transaction,
+)
+from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+from kg_doc_parser.workflow_ingest.providers import (
+    EmbeddingProviderConfig,
+    build_embedding_function,
+)
+from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 from kogwistar.engine_core import GraphKnowledgeEngine
-from kogwistar.engine_core.embedding_profile import EmbeddingProfile, endpoint_fingerprint
+from kogwistar.engine_core.embedding_profile import (
+    EmbeddingProfile,
+    endpoint_fingerprint,
+)
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
-from kogwistar.engine_core.models import Document, GraphExtractionWithIDs, Grounding, Node, Span
+from kogwistar.engine_core.models import (
+    Document,
+    GraphExtractionWithIDs,
+    Grounding,
+    Node,
+    Span,
+)
 from kogwistar.id_provider import stable_id
 from kogwistar.logical_refs import (
     LogicalRef,
@@ -31,17 +49,10 @@ from kogwistar.logical_refs import (
     logical_ref_id,
 )
 from kogwistar.policy import PromotionDecision
-from kogwistar.runtime.budget import budget_event_from_dict
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
-from kg_doc_parser.semantic_document_splitting_layerwise_edits import parser_llm_cache_transaction
-from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
-from kg_doc_parser.workflow_ingest.providers import (
-    EmbeddingProviderConfig,
-    build_embedding_function,
-)
+from kogwistar.runtime.budget import budget_event_from_dict
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
-from .provider_config import normalize_provider_name, resolve_parser_provider_settings
+
 from .debug_run import (
     LiveTracePrinter,
     ParseStatisticsStore,
@@ -51,23 +62,12 @@ from .debug_run import (
     env_flag_enabled,
     now_ms,
 )
-from .longrun_parser_worker import run_workflow_layered_parse
-from .otel import LlmWikiTelemetry
-from .models import (
-    IngestPipelineArtifacts,
-    IngestPipelineRequest,
-    ObsidianBuildResult,
-    NamespaceEngines,
-    ProjectionSnapshot,
+from .investigation_history import (
+    InvestigationHistoryRecord,
+    InvestigationHistoryService,
 )
-from .query import GraphSpaceQueryResult, GraphSpaceQueryService
-from .policies import LlmWikiPolicies, build_default_policies
-from .namespaces import GraphSpace, WorkspaceNamespaces
-from .projection import ProjectionManager
-from .usage_projection import UsageProjection, UsageProjectionSnapshot, persist_usage_events
-from .review_query import ReviewQueryService
-from .semantic_lens import SemanticLensRequest, SemanticLensService, SemanticLensSnapshot, InvestigationOutcome
-from .investigation_history import InvestigationHistoryRecord, InvestigationHistoryService
+from .longrun_parser_worker import run_workflow_layered_parse
+from .maintenance_context import bound_maintenance_context, maintenance_execution_active
 from .maintenance_guards import (
     SourceRevision,
     build_source_revision,
@@ -76,6 +76,13 @@ from .maintenance_guards import (
     source_digest,
 )
 from .maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
+from .models import (
+    IngestPipelineArtifacts,
+    IngestPipelineRequest,
+    NamespaceEngines,
+    ObsidianBuildResult,
+    ProjectionSnapshot,
+)
 from .multimodal_projection import (
     AssetResolver,
     MultimodalEncoder,
@@ -87,6 +94,25 @@ from .multimodal_projection import (
     embed_pending,
 )
 from .multimodal_sources import MultimodalSourceBundle, build_source_bundle
+from .namespaces import GraphSpace, WorkspaceNamespaces
+from .otel import LlmWikiTelemetry
+from .policies import LlmWikiPolicies, build_default_policies
+from .projection import ProjectionManager
+from .provider_config import normalize_provider_name, resolve_parser_provider_settings
+from .query import GraphSpaceQueryResult, GraphSpaceQueryService
+from .review_query import ReviewQueryService
+from .semantic_lens import (
+    InvestigationOutcome,
+    SemanticLensRequest,
+    SemanticLensService,
+    SemanticLensSnapshot,
+)
+from .usage_projection import (
+    UsageProjection,
+    UsageProjectionSnapshot,
+    persist_usage_events,
+)
+from .utils import _temporary_namespace
 
 
 def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
@@ -640,7 +666,10 @@ def _build_postgres_engine(
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:
-    from kogwistar.engine_core.engine_postgres import EnginePostgresConfig, build_postgres_backend
+    from kogwistar.engine_core.engine_postgres import (
+        EnginePostgresConfig,
+        build_postgres_backend,
+    )
 
     persist_directory.mkdir(parents=True, exist_ok=True)
     backend, _ = build_postgres_backend(
@@ -801,7 +830,7 @@ class IngestPipeline:
         if self.multimodal_projection_store is None or self.multimodal_encoder is None:
             raise RuntimeError("multimodal projection and encoder must both be configured")
         if not isinstance(self.multimodal_encoder, MultimodalImageQueryEncoder):
-            raise RuntimeError("configured multimodal encoder does not support image queries")
+            raise TypeError("configured multimodal encoder does not support image queries")
         query_vectors = self.multimodal_encoder.encode_image_queries(
             images, batch_size=batch_size
         )
@@ -1516,7 +1545,7 @@ class IngestPipeline:
                 last_materialized_seq=usage_snapshot.last_materialized_seq,
                 materialization_status=usage_snapshot.materialization_status,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - projection refresh must not fail ingestion
             self._trace_event(
                 "usage_projection_refresh_failed",
                 workspace_id=request.workspace_id,
@@ -1879,10 +1908,21 @@ class IngestPipeline:
         source_document_id: str,
         namespace: str,
         maintenance_kind: str | None = None,
+        topic: str | None = None,
         objective: str | None = None,
         budgets: Mapping[str, object] | None = None,
+        seed_node_ids: Sequence[str] | None = None,
+        maintenance_context: Mapping[str, object] | None = None,
+        max_rounds: int | None = None,
     ) -> str:
+        if maintenance_execution_active():
+            raise RuntimeError(
+                "maintenance execution cannot create a new maintenance request; "
+                "follow-up phases must reuse the current leased job"
+            )
         maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
+        seed_node_ids = [str(value) for value in (seed_node_ids or [source_document_id]) if str(value).strip()]
+        topic = str(topic or "").strip() or None
         revision = self.source_revision(request=request, source_document_id=source_document_id)
         required_stage = required_stage_for_maintenance(maintenance_kind)
         request_fingerprint = str(
@@ -1890,6 +1930,9 @@ class IngestPipeline:
                 "kogwistar_llm_wiki.maintenance_request_parameters",
                 objective or "",
                 json.dumps(dict(budgets or {}), sort_keys=True, default=str),
+                topic or "",
+                json.dumps(sorted(seed_node_ids), separators=(",", ":")),
+                json.dumps(bound_maintenance_context(maintenance_context), sort_keys=True),
             )
         )
         self._trace_step(
@@ -1930,6 +1973,13 @@ class IngestPipeline:
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
                     "objective": objective,
+                    "topic": topic,
+                    "mode": "request",
+                    "maintenance_origin": "request",
+                    "selection_strategy": "connected_semantic_evidence_history",
+                    "seed_node_ids": seed_node_ids,
+                    "maintenance_context": _metadata_digest_value(bound_maintenance_context(maintenance_context)),
+                    "maintenance_max_rounds": max(0, int(max_rounds or 0)),
                     "request_fingerprint": request_fingerprint,
                     "budgets": _metadata_digest_value(dict(budgets or {})),
                 },
@@ -1976,6 +2026,13 @@ class IngestPipeline:
                     "source_digest": revision.source_digest,
                     "required_stage": required_stage,
                     "objective": objective,
+                    "topic": topic,
+                    "mode": "request",
+                    "maintenance_origin": "request",
+                    "selection_strategy": "connected_semantic_evidence_history",
+                    "seed_node_ids": seed_node_ids,
+                    "maintenance_context": bound_maintenance_context(maintenance_context),
+                    "maintenance_max_rounds": max(0, int(max_rounds or 0)),
                     "request_fingerprint": request_fingerprint,
                     "budgets": dict(budgets or {}),
                 },
@@ -2011,6 +2068,10 @@ class IngestPipeline:
                 required_stage=required_stage,
                 objective=objective,
                 budgets=budgets,
+                topic=topic,
+                seed_node_ids=seed_node_ids,
+                maintenance_context=maintenance_context,
+                max_rounds=max_rounds,
             )
         self._trace_step(
             "create_maintenance_request_complete",
@@ -2478,12 +2539,28 @@ class IngestPipeline:
         required_stage: str = "parsed_graph_persisted",
         objective: str | None = None,
         budgets: Mapping[str, object] | None = None,
+        topic: str | None = None,
+        seed_node_ids: Sequence[str] | None = None,
+        maintenance_context: Mapping[str, object] | None = None,
+        max_rounds: int | None = None,
     ) -> str:
+        if maintenance_execution_active():
+            raise RuntimeError(
+                "maintenance execution cannot enqueue a new maintenance job; "
+                "follow-up phases must reuse the current leased job"
+            )
         payload = {
             "workspace_id": request.workspace_id,
             "request_node_id": request_node_id,
             "source_document_id": source_document_id,
             "maintenance_kind": maintenance_kind,
+            "topic": str(topic or "").strip() or None,
+            "mode": "request",
+            "selection_strategy": "connected_semantic_evidence_history",
+            "seed_node_ids": [str(value) for value in (seed_node_ids or [source_document_id]) if str(value).strip()],
+            "maintenance_context": bound_maintenance_context(maintenance_context),
+            "maintenance_round": 0,
+            "maintenance_max_rounds": max(0, int(max_rounds or 0)),
             "lane_message_id": lane_message_id,
             "source_revision_id": source_revision_id,
             "source_digest": source_digest,
@@ -2497,7 +2574,7 @@ class IngestPipeline:
                     "maintenance_plan": list(DEFAULT_DOCUMENT_MAINTENANCE_PLAN),
                     "maintenance_phase_index": 0,
                     "maintenance_round": 0,
-                    "maintenance_max_rounds": 0,
+                    "maintenance_max_rounds": max(0, int(max_rounds or 0)),
                 }
             )
         job_id = request_node_id

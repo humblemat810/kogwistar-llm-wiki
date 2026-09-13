@@ -7,7 +7,6 @@ from typing import Literal
 from .ingest_pipeline import IngestPipeline
 from .models import IngestPipelineArtifacts, IngestPipelineRequest
 
-
 OperationMode = Literal["parse_first", "maintenance_first", "hybrid"]
 
 

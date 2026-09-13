@@ -7,10 +7,10 @@ remain the authoritative stores.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import os
 import threading
-from typing import Iterator, Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from urllib.parse import urlsplit, urlunsplit
 
 try:
@@ -31,7 +31,6 @@ class LlmWikiTelemetry:
     """Small optional tracer facade with safe no-op behavior."""
 
     def __init__(self, *, service_name: str = "kogwistar-llm-wiki") -> None:
-        global _runtime_enabled
         self.packages_available = trace is not None
         configured = _env_bool("LLM_WIKI_OTEL_ENABLED", False)
         self.enabled = (
@@ -61,7 +60,7 @@ class LlmWikiTelemetry:
             self._tracer = None
 
     @classmethod
-    def from_environment(cls) -> "LlmWikiTelemetry":
+    def from_environment(cls) -> LlmWikiTelemetry:
         return cls(service_name=os.getenv("LLM_WIKI_OTEL_SERVICE_NAME", "kogwistar-llm-wiki"))
 
     @contextmanager
@@ -89,7 +88,7 @@ class LlmWikiTelemetry:
 
     def instrument_event(self, event: Mapping[str, object]) -> None:
         """Represent an existing app trace event as a short OTel span."""
-        name = str(event.get("type") or event.get("message") or "llm_wiki.event")
+        name = str(event.get("event") or event.get("type") or event.get("message") or "llm_wiki.event")
         with self.span(f"llm_wiki.{name}", _event_attributes(event)) as current:
             if current is not None:
                 current.add_event("llm_wiki.event", attributes=_event_attributes(event))
@@ -129,7 +128,9 @@ def _ensure_tracer_provider(service_name: str) -> None:
             return
         try:
             from opentelemetry import trace as trace_api
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import BatchSpanProcessor

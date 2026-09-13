@@ -3,26 +3,26 @@ from __future__ import annotations
 import json
 import threading
 import time
-
-import pytest
 from pathlib import Path
 from types import SimpleNamespace
-import kogwistar.engine_core.in_memory_meta as in_memory_meta
-from kogwistar.runtime import BudgetAttribution, BudgetEvent
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
-import kogwistar_llm_wiki.worker as worker_module
-from kogwistar_llm_wiki.projection_worker import ProjectionWorker
-from kogwistar_llm_wiki.worker import MaintenanceWorker
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.utils import _temporary_namespace
-from kogwistar.engine_core.jobs import DurableQueueUnavailableError
+
+import pytest
+from kogwistar.engine_core import in_memory_meta
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
-from kogwistar.engine_core.jobs import JobQueueSubsystem
-from kogwistar_llm_wiki.maintenance_strategies import MaintenanceJobExecutionContext
+from kogwistar.engine_core.jobs import DurableQueueUnavailableError, JobQueueSubsystem
+from kogwistar.runtime import BudgetAttribution, BudgetEvent
+
+import kogwistar_llm_wiki.worker as worker_module
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
+from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
+from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.maintenance_patches import MaintenancePatch
 from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
-from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
+from kogwistar_llm_wiki.maintenance_strategies import MaintenanceJobExecutionContext
+from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar_llm_wiki.worker import MaintenanceWorker
 
 
 def _job_field(job, name: str):
@@ -250,7 +250,9 @@ def test_expired_maintenance_claim_cannot_be_completed_by_stale_worker() -> None
             worker._advance_maintenance_plan = lambda _ctx: False
 
             def handle_job(_workspace_id: str, job) -> None:
-                from kogwistar_llm_wiki.maintenance_strategies import MaintenanceJobExecutionContext
+                from kogwistar_llm_wiki.maintenance_strategies import (
+                    MaintenanceJobExecutionContext,
+                )
 
                 ctx = MaintenanceJobExecutionContext(
                     workspace_id="workspace-race",

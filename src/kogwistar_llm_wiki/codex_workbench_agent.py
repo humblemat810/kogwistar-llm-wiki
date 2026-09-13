@@ -2,28 +2,28 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import copy
 import json
 import os
-from pathlib import Path
 import queue
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Sequence
 from collections import deque
-from typing import Literal, Mapping, Protocol
-from urllib.parse import urlparse
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Protocol
 from urllib import request as urllib_request
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .semantic_lens import SemanticLensRequest, SemanticLensSnapshot
-from .workbench_cockpit import CockpitAction, CockpitActionKind, CockpitObservation
 from .workbench_background import ProgressCallback
+from .workbench_cockpit import CockpitAction, CockpitActionKind, CockpitObservation
 
 LineSink = Callable[[str], None]
 
@@ -60,7 +60,7 @@ class CodexRunner(Protocol):
     def run(
         self,
         *,
-        settings: "CodexCliSettings",
+        settings: CodexCliSettings,
         prompt: str,
         progress: ProgressCallback,
         trace_line: LineSink | None = None,
@@ -289,7 +289,9 @@ class CodexAppServerRunner:
                 except json.JSONDecodeError as exc:
                     raise RuntimeError(f"Codex App Server emitted invalid JSON: {line!r}") from exc
                 if not isinstance(message, dict):
-                    raise RuntimeError("Codex App Server emitted a non-object JSON message")
+                    raise RuntimeError(  # noqa: TRY004 - protocol failure, not caller type validation
+                        "Codex App Server emitted a non-object JSON message"
+                    )
                 return message
 
         def handle_notification(message: Mapping[str, object]) -> None:

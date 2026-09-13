@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
+from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
 from kogwistar.runtime.budget import BudgetEvent
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 

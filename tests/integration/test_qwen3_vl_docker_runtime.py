@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import json
-from hashlib import sha256
 import os
 import socket
 import subprocess
@@ -12,10 +11,10 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
-
 
 pytestmark = [pytest.mark.manual, pytest.mark.slow, pytest.mark.integration, pytest.mark.e2e]
 
@@ -63,6 +62,7 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
         encoding="utf-8",
         errors="replace",
         text=True,
+        check=False,
     ).returncode != 0:
         pytest.fail(f"Docker image is missing; build {image} before running this test")
     if local_model_dir and not Path(local_model_dir).is_dir():
@@ -94,7 +94,7 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
     timings: dict[str, float] = {}
     test_started = time.perf_counter()
     start_started = time.perf_counter()
-    started = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace", text=True)
+    started = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace", text=True, check=False)
     timings["docker_start_ms"] = round((time.perf_counter() - start_started) * 1000, 1)
     if started.returncode != 0:
         pytest.fail(started.stderr.strip() or started.stdout.strip())
@@ -117,6 +117,7 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
                     encoding="utf-8",
                     errors="replace",
                     text=True,
+                    check=False,
                 )
                 if state.returncode == 0 and state.stdout.strip() in {"exited", "dead"}:
                     logs = subprocess.run(
@@ -125,6 +126,7 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
                         encoding="utf-8",
                         errors="replace",
                         text=True,
+                        check=False,
                     )
                     pytest.fail(f"Qwen3-VL Docker service exited during startup: {last_error}\n{logs.stdout}\n{logs.stderr}")
                 time.sleep(2)
@@ -135,6 +137,7 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
                 encoding="utf-8",
                 errors="replace",
                 text=True,
+                check=False,
             )
             pytest.fail(f"Qwen3-VL Docker service did not become ready: {last_error}\n{logs.stdout}\n{logs.stderr}")
 
@@ -177,6 +180,7 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
             encoding="utf-8",
             errors="replace",
             text=True,
+            check=False,
         )
         subprocess.run(
             ["docker", "rm", "--force", container],
@@ -184,6 +188,7 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
             encoding="utf-8",
             errors="replace",
             text=True,
+            check=False,
         )
         timings["cleanup_ms"] = round((time.perf_counter() - cleanup_started) * 1000, 1)
         timings["total_ms"] = round((time.perf_counter() - test_started) * 1000, 1)

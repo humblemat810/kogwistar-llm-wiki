@@ -60,7 +60,7 @@ def available_models(role: str, *, provider: str | None = None, base_url: str | 
             entries = payload.get("models", []) if provider == "ollama" else payload.get("data", [])
             models.extend(str(entry.get("name") or entry.get("id")) for entry in entries if isinstance(entry, dict))
             source = "provider"
-        except Exception:  # discovery must never block settings or startup
+        except Exception:  # noqa: BLE001 - provider discovery is best-effort
             source = "unavailable"
     deduplicated = sorted({model for model in models if model and model != "None"})
     return {"role": role, "provider": provider, "base_url": base_url, "models": deduplicated, "source": source}

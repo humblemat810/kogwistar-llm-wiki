@@ -17,6 +17,29 @@ Maintenance currently has two distinct outputs:
 - `derived_knowledge` for cross-document label-merge synthesis, stored under a separate derived-KG namespace
 - `execution_wisdom` for reusable lessons derived from workflow failures and repeated maintenance outcomes
 
+### Maintenance modes
+
+The optional `maintenance` service in `compose.memory-agent.yml` drains the
+same durable queue as user-triggered maintenance. Request jobs retain their
+original time, call, token, cost, step, and round budgets. They select direct
+neighbors first, then embedding-similar and shared-evidence/history candidates;
+selection reasons are recorded in job metadata and traces. Background cycles
+are independent, disabled by default, and use a 50/50 recent-interest and
+embedding-probe split. If embeddings are unavailable, only the exploration
+half is degraded.
+
+Start the service with the base file and memory overlay, then control the two
+switches from inside the maintenance container. The command persists the
+desired state and updates a running daemon immediately:
+
+```powershell
+docker exec llm-wiki-memory-maintenance-1 llm-wiki --data-dir /var/lib/llm-wiki daemon maintenance-control --request-enabled true --background-enabled false
+```
+
+Use `--runtime-only` for a temporary change. Disabling a mode retains queued
+jobs; it does not cancel or rewrite workflow history. The control socket is
+local to the container and is not exposed through REST or MCP.
+
 | Layer | Role |
 |---|---|
 | **conversation** | Working memory — parsed artifacts, candidate links, maintenance jobs |
@@ -300,7 +323,8 @@ See [QUICKSTART.md](QUICKSTART.md) for the full step-by-step tutorial.
 llm-wiki demo --workspace <id> --source <path> --vault <path> [--title <text>] [--promotion-mode sync|pending]
 llm-wiki [--backend chroma|postgres --dsn <postgres-dsn>] ingest --workspace <id> --source <path> [--title <text>] [--promotion-mode sync|pending]
 llm-wiki [--backend chroma|postgres --dsn <postgres-dsn>] daemon projection  --workspace <id> --vault <path> [--interval <s>]
-llm-wiki [--backend chroma|postgres --dsn <postgres-dsn>] daemon maintenance --workspace <id>                [--interval <s>]
+llm-wiki [--backend chroma|postgres --dsn <postgres-dsn>] daemon maintenance --workspace <id>                [--interval <s>] [--background-interval <s>]
+llm-wiki [--data-dir <path>] daemon maintenance-control [--request-enabled true|false] [--background-enabled true|false]
 ```
 
 Full reference: [doc/cli_reference.md](doc/cli_reference.md)

@@ -6,7 +6,6 @@ import importlib
 import os
 from typing import Literal, cast
 
-
 TorchBackend = Literal["none", "cpu", "cu126", "cu128"]
 MultimodalBackend = Literal["none", "transformers", "vllm", "legacy-colqwen"]
 SUPPORTED_TORCH_BACKENDS: tuple[TorchBackend, ...] = ("none", "cpu", "cu126", "cu128")

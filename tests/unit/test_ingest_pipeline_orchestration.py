@@ -4,8 +4,8 @@ import json
 from unittest.mock import Mock
 
 import pytest
-
 from kogwistar.id_provider import stable_id
+
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 
 

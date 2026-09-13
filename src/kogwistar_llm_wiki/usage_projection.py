@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime import (
@@ -13,12 +13,11 @@ from kogwistar.runtime import (
     BudgetEvent,
     ProjectionCheckpoint,
     ProjectionLoadResult,
-    refresh_checkpointed_named_projection,
     budget_event_from_dict,
     budget_event_to_dict,
+    refresh_checkpointed_named_projection,
 )
 from kogwistar.runtime.budget_adapters import summarize_budget_events
-
 
 USAGE_PROJECTION_SCHEMA_VERSION = 1
 USAGE_EVENT_KIND = "usage_event"
@@ -260,7 +259,7 @@ def _event_groups(event: BudgetEvent) -> dict[str, list[str]]:
 def _decode_projection(row: Mapping[str, Any]) -> dict[str, Any]:
     payload = row.get("payload")
     if not isinstance(payload, dict):
-        raise ValueError("usage projection payload must be an object")
+        raise ValueError("usage projection payload must be an object")  # noqa: TRY004
     if int(row.get("projection_schema_version") or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
         raise ValueError("usage projection schema version is incompatible")
     if int(payload.get("projection_schema_version") or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
@@ -342,7 +341,7 @@ class UsageProjection:
     def _decode_event(self, payload_json: str) -> BudgetEvent:
         payload = json.loads(payload_json)
         if not isinstance(payload, dict):
-            raise ValueError("usage event payload must be an object")
+            raise ValueError("usage event payload must be an object")  # noqa: TRY004
         return budget_event_from_dict(payload)
 
     def _apply_event(self, state: _UsageProjectionState, event: BudgetEvent, _seq: int) -> None:

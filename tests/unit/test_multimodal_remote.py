@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 from types import SimpleNamespace
+from typing import Self
 from urllib.error import URLError
 
 import pytest
@@ -13,10 +14,10 @@ from kogwistar_llm_wiki.multimodal_projection import (
     ProjectionIntegrityError,
 )
 from kogwistar_llm_wiki.multimodal_remote import (
-    RemoteMultimodalEncoder,
     EmbeddingProtocolError,
     EmbeddingServiceSettings,
     EmbeddingServiceUnavailable,
+    RemoteMultimodalEncoder,
 )
 from llm_wiki_embedding_service.app import _represent_payload
 from llm_wiki_embedding_service.config import EmbeddingServiceConfig
@@ -32,7 +33,7 @@ class _Response:
     def __init__(self, payload: object) -> None:
         self.payload = payload
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_: object) -> None:

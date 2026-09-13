@@ -6,7 +6,10 @@ from typing import Any
 
 from kg_doc_parser.workflow_ingest import page_index
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.providers import ProviderEndpointConfig, WorkflowProviderSettings
+from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
 
 
 def _retry_test_settings() -> WorkflowProviderSettings:
@@ -63,7 +66,7 @@ def _build_assignments(candidates: list[dict[str, Any]], *, nested: bool) -> lis
 @dataclass
 class _FakeStructuredResponse:
     schema: Any
-    model: "_RetryAwareChatModel"
+    model: _RetryAwareChatModel
 
     def invoke(self, messages, config=None):
         prompt = str(messages[-1].content)
