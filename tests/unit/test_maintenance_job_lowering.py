@@ -5,7 +5,10 @@ from kogwistar_llm_wiki.maintenance_job_lowering import (
     maintenance_intent_for_job_kind,
 )
 from kogwistar_llm_wiki.maintenance_patches import MaintenanceOperationKind
-from kogwistar_llm_wiki.maintenance_policy import GRAPH_PATCH_APPLY_KINDS, GRAPH_PATCH_PROPOSAL_KINDS
+from kogwistar_llm_wiki.maintenance_policy import (
+    GRAPH_PATCH_APPLY_KINDS,
+    GRAPH_PATCH_PROPOSAL_KINDS,
+)
 
 
 def test_graph_patch_job_kinds_lower_to_typed_review_patches() -> None:

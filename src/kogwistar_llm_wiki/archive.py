@@ -13,16 +13,16 @@ import shutil
 import tarfile
 import tempfile
 import uuid
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any
 
 from kogwistar.engine_core.event_envelope import EntityEventEnvelope
 
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
 from .utils import _temporary_namespace
-
 
 ARCHIVE_FORMAT_VERSION = 2
 _READABLE_ARCHIVE_FORMATS = {1, ARCHIVE_FORMAT_VERSION}
@@ -281,7 +281,7 @@ def _verify_artifact_payloads(*, archive_path: str | Path, manifest: Mapping[str
             seen.add(member.name)
         missing = set(declared) - seen
         if missing:
-            raise ArchiveError(f"archive payload is missing: {sorted(missing)[0]!r}")
+            raise ArchiveError(f"archive payload is missing: {min(missing)!r}")
 
 
 def _iter_archive_events(path: str | Path) -> Iterator[EntityEventEnvelope]:
@@ -381,7 +381,7 @@ def _restore_artifacts(
         restored += 1
     missing = set(expected_entries or {}) - seen
     if missing:
-        raise ArchiveError(f"archive artifact is missing: {sorted(missing)[0]!r}")
+        raise ArchiveError(f"archive artifact is missing: {min(missing)!r}")
     return restored
 
 
@@ -446,7 +446,7 @@ def create_archive(
             for spec in specs:
                 start = ranges[spec.namespace]["from_seq"]
                 end = ranges[spec.namespace]["to_seq"]
-                reader = _event_reader(getattr(spec.engine, "meta_sqlite"))
+                reader = _event_reader(spec.engine.meta_sqlite)
                 expected = start
                 for event in reader(namespace=spec.namespace, from_seq=start, to_seq=end):
                     if event.seq != expected:
@@ -608,7 +608,7 @@ def restore_archive(
             if event.seq != expected:
                 raise ArchiveError(f"restore requires a complete event range in {namespace!r}")
             expected += 1
-        existing = list(_event_reader(getattr(target_specs[namespace].engine, "meta_sqlite"))(
+        existing = list(_event_reader(target_specs[namespace].engine.meta_sqlite)(
             namespace=namespace, from_seq=1, to_seq=1
         ))
         if existing:
@@ -634,7 +634,7 @@ def restore_archive(
             previous_artifacts.update(expected)
 
     for namespace, rows in grouped.items():
-        writer = _event_writer(getattr(target_specs[namespace].engine, "meta_sqlite"))
+        writer = _event_writer(target_specs[namespace].engine.meta_sqlite)
         for event in rows:
             writer(event)
     replayed = 0

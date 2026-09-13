@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from kogwistar.engine_core.models import Grounding, Node, Span
+
 from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceIntent,
@@ -20,6 +22,51 @@ def _provenance(doc_id: str = "conversation:demo:message:1") -> MaintenanceProve
         maintenance_run_id="run-scope",
         confidence=0.88,
     )
+
+
+def test_workspace_patch_cannot_reach_raw_source_namespace(pipeline) -> None:
+    workspace_id = "scope-raw-source"
+    ns = WorkspaceNamespaces(workspace_id)
+    raw_node = Node(
+        id="source-revision:immutable",
+        label="Source snapshot",
+        type="entity",
+        summary="Exact source content",
+        doc_id="source-doc",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation("source-revision:immutable")])],
+        metadata={
+            "workspace_id": workspace_id,
+            "graph_space": "source",
+            "artifact_kind": "source_revision",
+            "source_raw_text": "Do not rewrite this snapshot.",
+        },
+    )
+    with _temporary_namespace(pipeline.engines.kg, ns.source_space):
+        pipeline.engines.kg.write.add_node(raw_node)
+
+    patch = MaintenancePatch(
+        patch_id="patch-cross-space-raw-source",
+        intent=MaintenanceIntent.CORRECT_FACT,
+        scope=MaintenanceScope(workspace_id=workspace_id),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-tombstone-source",
+                kind=MaintenanceOperationKind.TOMBSTONE_NODE,
+                target_id=raw_node.id,
+                reason="incorrectly guessed source typo",
+                provenance=_provenance("source-doc"),
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch_for_scope(pipeline.engines, patch)
+
+    assert result.status == "rejected"
+    assert any(issue.code == "raw_fact_mutation_forbidden" for issue in result.validation.issues)
+    with _temporary_namespace(pipeline.engines.kg, ns.source_space):
+        persisted = pipeline.engines.kg.read.get_nodes(ids=[raw_node.id], resolve_mode="include_tombstones")
+    assert len(persisted) == 1
+    assert persisted[0].metadata.get("lifecycle_status") == "active"
 
 
 def test_conversation_scoped_patch_does_not_leak_to_workspace_kg(pipeline) -> None:

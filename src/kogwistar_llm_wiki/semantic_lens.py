@@ -7,13 +7,14 @@ their existing shapes.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import json
 import re
 import time
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 from .models import NamespaceEngines
 from .namespaces import GraphSpace, WorkspaceNamespaces
@@ -275,7 +276,7 @@ class SemanticLensService:
         ns = WorkspaceNamespaces(request.workspace_id)
         merged = list(results)
         seen = {str(getattr(item.node, "id", "") or "") for item in merged}
-        as_of = datetime.now(timezone.utc)
+        as_of = datetime.now(UTC)
         for graph_space in {_normalize_space(space) for space in request.graph_spaces}:
             namespace = _namespace_for(ns, graph_space)
             if namespace is None:
@@ -540,10 +541,10 @@ __all__ = [
     "LensEdge",
     "LensNode",
     "LensParticipation",
+    "ProposalValidation",
     "SelectionExplanation",
     "SemanticLensRequest",
     "SemanticLensService",
     "SemanticLensSnapshot",
-    "ProposalValidation",
     "validate_edit_proposal",
 ]

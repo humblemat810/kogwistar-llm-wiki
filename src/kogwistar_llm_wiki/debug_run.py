@@ -7,9 +7,10 @@ import re
 import sqlite3
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
 def now_ms() -> int:

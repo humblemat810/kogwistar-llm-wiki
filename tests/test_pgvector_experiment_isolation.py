@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 
 import pytest
-import tests.conftest as test_conf
 
+import tests.conftest as test_conf
 
 pytestmark = pytest.mark.ci
 

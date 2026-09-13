@@ -9,8 +9,7 @@ from fastapi.testclient import TestClient
 
 from llm_wiki_embedding_contract import EmbeddingProfile
 from llm_wiki_embedding_service.app import create_app
-from llm_wiki_embedding_service.config import EmbeddingServiceConfig
-from llm_wiki_embedding_service.config import load_config
+from llm_wiki_embedding_service.config import EmbeddingServiceConfig, load_config
 
 
 class _FakeEncoder:

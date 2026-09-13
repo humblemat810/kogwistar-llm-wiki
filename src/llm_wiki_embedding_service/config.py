@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from hashlib import sha256
-import os
 
 from llm_wiki_embedding_contract import EmbeddingProfile
 
@@ -84,4 +84,4 @@ def load_config(environ: dict[str, str] | None = None) -> EmbeddingServiceConfig
     )
 
 
-__all__ = ["EmbeddingServiceConfig", "load_config", "DEFAULT_MODEL", "MIN_DIMENSION", "MAX_DIMENSION"]
+__all__ = ["DEFAULT_MODEL", "MAX_DIMENSION", "MIN_DIMENSION", "EmbeddingServiceConfig", "load_config"]

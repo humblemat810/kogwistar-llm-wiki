@@ -53,6 +53,27 @@ def test_planner_stops_at_per_document_round_limit() -> None:
     assert decision.reason == "max_rounds_reached"
 
 
+def test_unplanned_maintenance_can_repeat_with_an_explicit_round_limit() -> None:
+    decision = decide_next_maintenance_phase(
+        {"maintenance_round": 3, "maintenance_max_rounds": 10},
+        completed_kind="document_propose_crosslinks",
+    )
+
+    assert decision.next_kind == "document_propose_crosslinks"
+    assert decision.next_index == 1
+    assert decision.reason == "next_bounded_round_available"
+
+
+def test_round_limit_counts_total_attempts_from_zero_based_rounds() -> None:
+    decision = decide_next_maintenance_phase(
+        {"maintenance_round": 9, "maintenance_max_rounds": 10},
+        completed_kind="document_propose_crosslinks",
+    )
+
+    assert not decision.should_continue
+    assert decision.reason == "max_rounds_reached"
+
+
 def test_planner_normalizes_fake_payload_shape_without_mutating_it() -> None:
     payload = {"maintenance_plan": [" seed ", "", "document_parse_graph"]}
 

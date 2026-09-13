@@ -1,20 +1,19 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
+from kogwistar.engine_core.models import Grounding, Span
+from kogwistar.runtime.models import WorkflowStepExecNode
 from pydantic import ValidationError
-
-from tests.conftest import _build_engine
 
 from kogwistar_llm_wiki import IngestPipeline, NamespaceEngines
 from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.worker import MaintenanceWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
-from kogwistar.engine_core.models import Grounding, Span
-from kogwistar.runtime.models import WorkflowStepExecNode
-import json
+from kogwistar_llm_wiki.worker import MaintenanceWorker
+from tests.conftest import _build_engine
 
 
 def _decode_metadata_json(value):

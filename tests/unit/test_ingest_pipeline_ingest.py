@@ -1,4 +1,5 @@
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+
 from kogwistar_llm_wiki.models import IngestPipelineRequest
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace

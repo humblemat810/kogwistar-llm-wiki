@@ -7,14 +7,18 @@ understands and applies the llm-wiki workspace boundary before dispatch.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
 import json
 import os
 import secrets
-from typing import Iterator, Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
 
-from kogwistar.server.auth_middleware import reset_claims_ctx, set_claims_ctx, verify_jwt
+from kogwistar.server.auth_middleware import (
+    reset_claims_ctx,
+    set_claims_ctx,
+    verify_jwt,
+)
 
 
 class IdentityError(ValueError):
@@ -129,7 +133,7 @@ def authenticate_bearer(value: str | None) -> LlmWikiIdentity | None:
         if not matched_api and not matched_mcp:
             raise IdentityError("invalid bearer token", status=401)
         scopes = _items(
-            (os.getenv("LLM_WIKI_MCP_TOKEN_SCOPES", "read,write") if matched_mcp else os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write"))
+            os.getenv("LLM_WIKI_MCP_TOKEN_SCOPES", "read,write") if matched_mcp else os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write")
         )
         claims: dict[str, object] = {
             "sub": "llm-wiki-static-client",

@@ -405,6 +405,8 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
         engines=engines,
         workspace_id=args.workspace,
         poll_interval=args.interval,
+        data_dir=args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
+        background_interval=args.background_interval,
     )
 
     def _stop(sig, frame) -> None:
@@ -414,6 +416,20 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
     daemon.run()
+
+
+def _cmd_maintenance_control(args: argparse.Namespace) -> None:
+    """Change maintenance modes without opening the database or HTTP API."""
+    from .maintenance_control import send_control_command
+
+    result = send_control_command(
+        args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
+        request_enabled=args.request_enabled,
+        background_enabled=args.background_enabled,
+        persist=not args.runtime_only,
+        actor="llm-wiki-maintenance-control",
+    )
+    print(json.dumps(result, sort_keys=True))
 
 
 def _cmd_workbench(args: argparse.Namespace) -> None:
@@ -1290,7 +1306,14 @@ def main(argv: list[str] | None = None) -> int:
     maint_p = daemon_sub.add_parser("maintenance", help="Maintenance distillation daemon")
     maint_p.add_argument("--workspace", required=True, help="Workspace ID")
     maint_p.add_argument("--interval", type=float, default=10.0, help="Poll interval (seconds)")
+    maint_p.add_argument("--background-interval", type=float, default=600.0, help="Background cycle interval (seconds)")
     maint_p.set_defaults(func=_cmd_daemon_maintenance)
+
+    control_p = daemon_sub.add_parser("maintenance-control", help="Change maintenance modes through the local daemon control channel")
+    control_p.add_argument("--request-enabled", choices=["true", "false"], default=None)
+    control_p.add_argument("--background-enabled", choices=["true", "false"], default=None)
+    control_p.add_argument("--runtime-only", action="store_true", help="Do not persist the requested state")
+    control_p.set_defaults(func=_cmd_maintenance_control)
 
     args = parser.parse_args(argv)
     args.func(args)

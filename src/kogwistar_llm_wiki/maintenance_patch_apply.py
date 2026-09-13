@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
-from typing import Callable, Mapping, Protocol, cast, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
-from kogwistar.engine_core.models import Edge, Grounding, MentionVerification, Node, Span
 from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core.models import (
+    Edge,
+    Grounding,
+    MentionVerification,
+    Node,
+    Span,
+)
 from kogwistar.id_provider import stable_id
 from kogwistar.typing_interfaces import WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
@@ -20,14 +27,24 @@ from .maintenance_patches import (
     validate_maintenance_patch,
 )
 from .maintenance_status import graph_status_for_patch
-from .namespaces import WorkspaceNamespaces
 from .models import NamespaceEngines
+from .namespaces import WorkspaceNamespaces
 from .utils import _temporary_namespace
-
 
 JsonScalar = str | int | float | bool | None
 EngineUnitOfWork = AbstractContextManager[object | None]
 MaintenanceEntity = Node | Edge
+
+
+_IMMUTABLE_RAW_ARTIFACT_KINDS = frozenset(
+    {
+        "source_document",
+        "source_revision",
+        "source_readiness",
+        "source_map_seed",
+        "lane_message",
+    }
+)
 
 
 class _StaleMaintenancePatch(Exception):
@@ -104,6 +121,8 @@ def apply_maintenance_patch(
     namespace_prefix: str | None = None,
     emit_artifact: bool = True,
     expected_revisions: Mapping[str, str | int | None] | None = None,
+    protected_raw_node_ids: set[str] | None = None,
+    protected_raw_edge_ids: set[str] | None = None,
 ) -> MaintenancePatchApplyResult:
     """Validate and apply a maintenance patch through kogwistar graph primitives.
 
@@ -119,6 +138,17 @@ def apply_maintenance_patch(
         active_edge_ids=active_edge_ids,
         namespace_prefix=namespace_prefix,
     )
+    raw_fact_issues = _immutable_raw_fact_issues(
+        engine,
+        patch,
+        protected_raw_node_ids=protected_raw_node_ids,
+        protected_raw_edge_ids=protected_raw_edge_ids,
+    )
+    if raw_fact_issues:
+        validation = MaintenancePatchValidationReport(
+            valid=False,
+            issues=[*validation.issues, *raw_fact_issues],
+        )
     if not validation.valid:
         artifact_id = _emit_patch_artifact(engine, patch, validation, [], MaintenancePatchStatus.REJECTED) if emit_artifact else None
         return MaintenancePatchApplyResult(
@@ -151,7 +181,7 @@ def apply_maintenance_patch(
             operation_results=operation_results,
             artifact_id=artifact_id,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - malformed maintenance operations become review items
         status = MaintenancePatchStatus.NEEDS_REVIEW
         operation_results.append(
             MaintenancePatchOperationApplyResult(
@@ -183,6 +213,11 @@ def apply_maintenance_patch_for_scope(
     """Apply a patch to the graph space implied by its maintenance scope."""
 
     ns = WorkspaceNamespaces(patch.scope.workspace_id)
+    protected_raw_node_ids, protected_raw_edge_ids = _raw_fact_ids_for_workspace(
+        engines,
+        ns,
+        patch,
+    )
     if patch.scope.scope_kind == "workspace":
         with _temporary_namespace(engines.kg, ns.curated_kg_space):
             return apply_maintenance_patch(
@@ -191,6 +226,8 @@ def apply_maintenance_patch_for_scope(
                 namespace_prefix=namespace_prefix,
                 emit_artifact=emit_artifact,
                 expected_revisions=expected_revisions,
+                protected_raw_node_ids=protected_raw_node_ids,
+                protected_raw_edge_ids=protected_raw_edge_ids,
             )
 
     with _temporary_namespace(engines.conversation, ns.conv_bg):
@@ -216,7 +253,128 @@ def apply_maintenance_patch_for_scope(
             namespace_prefix=namespace_prefix,
             emit_artifact=emit_artifact,
             expected_revisions=expected_revisions,
+            protected_raw_node_ids=protected_raw_node_ids,
+            protected_raw_edge_ids=protected_raw_edge_ids,
         )
+
+
+def _immutable_raw_fact_issues(
+    engine: _MaintenanceEngineLike,
+    patch: MaintenancePatch,
+    *,
+    protected_raw_node_ids: set[str] | None = None,
+    protected_raw_edge_ids: set[str] | None = None,
+) -> list[MaintenancePatchValidationIssue]:
+    """Reject maintenance attempts to rewrite raw source or conversation facts."""
+
+    protected_nodes = set(protected_raw_node_ids or set())
+    protected_edges = set(protected_raw_edge_ids or set())
+    node_targets = {
+        str(operation.tombstone_target_id)
+        for operation in patch.operations
+        if operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE and operation.tombstone_target_id
+    }
+    edge_targets = {
+        str(operation.tombstone_target_id)
+        for operation in patch.operations
+        if operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE and operation.tombstone_target_id
+    }
+    for entity in _read_entities_by_ids(engine, "node", node_targets):
+        if _is_immutable_raw_fact(entity):
+            protected_nodes.add(str(entity.id))
+    for entity in _read_entities_by_ids(engine, "edge", edge_targets):
+        if _is_immutable_raw_fact(entity):
+            protected_edges.add(str(entity.id))
+
+    issues: list[MaintenancePatchValidationIssue] = []
+    for operation in patch.operations:
+        target_id = operation.tombstone_target_id
+        if operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE and target_id in protected_nodes:
+            issues.append(
+                MaintenancePatchValidationIssue(
+                    operation_id=operation.operation_id,
+                    code="raw_fact_mutation_forbidden",
+                    message=(
+                        "maintenance cannot tombstone a raw source or conversation fact; "
+                        "add a grounded interpretation node and support edge instead"
+                    ),
+                )
+            )
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE and target_id in protected_edges:
+            issues.append(
+                MaintenancePatchValidationIssue(
+                    operation_id=operation.operation_id,
+                    code="raw_fact_mutation_forbidden",
+                    message=(
+                        "maintenance cannot tombstone an edge belonging to a raw source or "
+                        "conversation fact"
+                    ),
+                )
+            )
+    return issues
+
+
+def _raw_fact_ids_for_workspace(
+    engines: NamespaceEngines,
+    ns: WorkspaceNamespaces,
+    patch: MaintenancePatch,
+) -> tuple[set[str], set[str]]:
+    """Find immutable targets even when they live outside the patch destination space."""
+
+    node_targets = {
+        str(operation.tombstone_target_id)
+        for operation in patch.operations
+        if operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE and operation.tombstone_target_id
+    }
+    edge_targets = {
+        str(operation.tombstone_target_id)
+        for operation in patch.operations
+        if operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE and operation.tombstone_target_id
+    }
+    protected_nodes: set[str] = set()
+    protected_edges: set[str] = set()
+    locations = (
+        (engines.kg, ns.source_space),
+        (engines.conversation, ns.conv_fg),
+        (engines.conversation, ns.conv_bg),
+    )
+    for engine, namespace in locations:
+        with _temporary_namespace(engine, namespace):
+            for entity in _read_entities_by_ids(engine, "node", node_targets):
+                if _is_immutable_raw_fact(entity):
+                    protected_nodes.add(str(entity.id))
+            for entity in _read_entities_by_ids(engine, "edge", edge_targets):
+                if _is_immutable_raw_fact(entity):
+                    protected_edges.add(str(entity.id))
+    return protected_nodes, protected_edges
+
+
+def _read_entities_by_ids(
+    engine: _MaintenanceEngineLike,
+    kind: str,
+    ids: set[str],
+) -> list[MaintenanceEntity]:
+    if not ids:
+        return []
+    read = getattr(engine, "read", engine)
+    getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
+    if not callable(getter):
+        return []
+    try:
+        return list(getter(ids=sorted(ids), resolve_mode="include_tombstones"))
+    except TypeError:
+        return list(getter(ids=sorted(ids)))
+
+
+def _is_immutable_raw_fact(entity: MaintenanceEntity) -> bool:
+    metadata = dict(getattr(entity, "metadata", None) or {})
+    artifact_kind = str(metadata.get("artifact_kind") or "").strip().lower()
+    return (
+        artifact_kind in _IMMUTABLE_RAW_ARTIFACT_KINDS
+        or artifact_kind.startswith("source_")
+        or str(metadata.get("graph_space") or "").strip().lower() == "source"
+        or metadata.get("raw_fact") is True
+    )
 
 
 def _non_workspace_scope_issues(
@@ -295,7 +453,7 @@ def _entity_revisions(getter: Callable[..., list[MaintenanceEntity]], ids: list[
     except TypeError:
         items = getter(ids=ids)
     return {
-        str(getattr(item, "id")): _revision_from_entity(item)
+        str(item.id): _revision_from_entity(item)
         for item in items
         if getattr(item, "id", None)
     }
@@ -330,7 +488,7 @@ def _read_active_ids(engine: _MaintenanceEngineLike, kind: str) -> set[str]:
         items = getter(resolve_mode="active_only")
     except TypeError:
         items = getter()
-    return {str(getattr(item, "id")) for item in items if getattr(item, "id", None)}
+    return {str(item.id) for item in items if getattr(item, "id", None)}
 
 
 def _exists(engine: _MaintenanceEngineLike, kind: str, entity_id: str, *, include_tombstones: bool = False) -> bool:
@@ -365,7 +523,7 @@ def _is_tombstoned(engine: _MaintenanceEngineLike, kind: str, entity_id: str) ->
 def _apply_operation(
     engine: _MaintenanceEngineLike,
     patch: MaintenancePatch,
-    operation: "MaintenancePatchOperation",
+    operation: MaintenancePatchOperation,
 ) -> MaintenancePatchOperationApplyResult:
     if operation.kind == MaintenanceOperationKind.NOOP:
         return MaintenancePatchOperationApplyResult(operation_id=operation.operation_id, kind=operation.kind, status="skipped")
@@ -407,7 +565,7 @@ def _write(engine: _MaintenanceEngineLike) -> WriteLike:
     return getattr(engine, "write", engine)
 
 
-def _node_from_operation(patch: MaintenancePatch, operation: "MaintenancePatchOperation") -> Node:
+def _node_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOperation) -> Node:
     metadata = _operation_metadata(patch, operation)
     return Node(
         id=operation.node_id,
@@ -421,7 +579,7 @@ def _node_from_operation(patch: MaintenancePatch, operation: "MaintenancePatchOp
     )
 
 
-def _edge_from_operation(patch: MaintenancePatch, operation: "MaintenancePatchOperation") -> Edge:
+def _edge_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOperation) -> Edge:
     metadata = _operation_metadata(patch, operation)
     return Edge(
         id=operation.edge_id,
@@ -440,7 +598,7 @@ def _edge_from_operation(patch: MaintenancePatch, operation: "MaintenancePatchOp
     )
 
 
-def _operation_metadata(patch: MaintenancePatch, operation: "MaintenancePatchOperation") -> dict[str, JsonScalar]:
+def _operation_metadata(patch: MaintenancePatch, operation: MaintenancePatchOperation) -> dict[str, JsonScalar]:
     provenance = operation.provenance
     metadata: dict[str, JsonScalar] = {
         "artifact_kind": "maintenance_patch_operation",
@@ -452,6 +610,7 @@ def _operation_metadata(patch: MaintenancePatch, operation: "MaintenancePatchOpe
         "patch_id": patch.patch_id,
         "operation_id": operation.operation_id,
         "operation_kind": operation.kind.value,
+        "node_type": operation.node_type,
         "maintenance_run_id": provenance.maintenance_run_id if provenance else None,
         "confidence": provenance.confidence if provenance else None,
         "supersedes_ids": ",".join(operation.supersedes_ids),
@@ -472,14 +631,14 @@ def _operation_metadata(patch: MaintenancePatch, operation: "MaintenancePatchOpe
     return {key: value for key, value in metadata.items() if value not in (None, "")}
 
 
-def _source_document_id(operation: "MaintenancePatchOperation") -> str:
+def _source_document_id(operation: MaintenancePatchOperation) -> str:
     provenance = operation.provenance
     if provenance and provenance.source_document_id:
         return provenance.source_document_id
     return "maintenance"
 
 
-def _span_from_operation(operation: "MaintenancePatchOperation") -> Span:
+def _span_from_operation(operation: MaintenancePatchOperation) -> Span:
     provenance = operation.provenance
     pointer: dict[str, str | int | float | bool | None] = {}
     if provenance and provenance.source_pointers:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Self
 
 import pytest
 
@@ -12,7 +13,6 @@ from kogwistar_llm_wiki.multimodal_projection import (
 )
 from kogwistar_llm_wiki.multimodal_remote import EmbeddingProtocolError
 from kogwistar_llm_wiki.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
-
 
 IMAGE = b"small-image"
 IMAGE_DIGEST = "@sha256:" + "a" * 64
@@ -24,7 +24,7 @@ class _Response:
     def __init__(self, payload: object | None = None) -> None:
         self.payload = payload
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_: object) -> None:

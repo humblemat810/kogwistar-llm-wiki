@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Callable, Literal, Mapping, Protocol
+from typing import Literal, Protocol
 
-from .investigation_history import InvestigationHistoryRecord, InvestigationHistoryService
+from .investigation_history import (
+    InvestigationHistoryRecord,
+    InvestigationHistoryService,
+)
 from .semantic_lens import (
     InvestigationOutcome,
+    ProposalValidation,
     SemanticLensRequest,
     SemanticLensService,
     SemanticLensSnapshot,
-    ProposalValidation,
     validate_edit_proposal,
 )
 

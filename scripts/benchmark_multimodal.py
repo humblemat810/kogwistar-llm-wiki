@@ -9,20 +9,20 @@ comparison. ``colqwen`` remains an explicit legacy comparison route.
 from __future__ import annotations
 
 import argparse
+import json
+import time
 from dataclasses import asdict, dataclass
 from io import BytesIO
-import json
 from statistics import mean, median
-import time
 from typing import Any
 from urllib.request import Request, urlopen
 
 from kogwistar_llm_wiki.multimodal_projection import (
     ColQwenNativeEncoder,
-    Qwen3VLDenseEncoder,
     FakeMultimodalEncoder,
     MultimodalEncoder,
     MultimodalSourceUnit,
+    Qwen3VLDenseEncoder,
 )
 from kogwistar_llm_wiki.multimodal_sources import MappingAssetResolver
 from kogwistar_llm_wiki.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
@@ -199,8 +199,8 @@ def run_multimodal_benchmark(
         if service_batch_size is None or service_batch_size <= 0:
             raise ValueError("--service-batch-size is required and must be positive for the remote backend")
         from kogwistar_llm_wiki.multimodal_remote import (
-            RemoteMultimodalEncoder,
             EmbeddingServiceSettings,
+            RemoteMultimodalEncoder,
         )
         from llm_wiki_embedding_service.config import EmbeddingServiceConfig
 

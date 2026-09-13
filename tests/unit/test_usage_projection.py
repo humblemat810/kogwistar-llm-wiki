@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from kogwistar.runtime import BudgetAttribution, BudgetEvent
+
 from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.usage_projection import UsageProjection, append_usage_event, persist_usage_events
+from kogwistar_llm_wiki.usage_projection import (
+    UsageProjection,
+    append_usage_event,
+    persist_usage_events,
+)
 
 
 def _projection(tmp_path):

@@ -7,9 +7,9 @@ agreement checks.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
 
 
 class GraphSpace(str, Enum):
@@ -165,6 +165,4 @@ def namespace_matches_graph_space_metadata(namespace: str, metadata: Mapping[str
         return False
     if str(meta.get("graph_space") or "") != graph_space:
         return False
-    if lane is not None and str(meta.get("graph_lane") or "") != lane:
-        return False
-    return True
+    return not (lane is not None and str(meta.get("graph_lane") or "") != lane)

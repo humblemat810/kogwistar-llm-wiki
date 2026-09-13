@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-
 from kogwistar.logical_refs import LogicalRef
+
 from kogwistar_llm_wiki.multimodal_grounding import (
     EvidenceClosureValidator,
     EvidencePack,

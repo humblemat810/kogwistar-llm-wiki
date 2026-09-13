@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel
-from pydantic_extension.model_slicing import ModeSlicingMixin, DtoType, BackendType
+from pydantic_extension.model_slicing import BackendType, DtoType, ModeSlicingMixin
 
 
 class MessageEnvelope(ModeSlicingMixin, BaseModel):
     target: DtoType[Literal["foreground", "background"]] | DtoType[str]
     payload: DtoType[object]
     intent: DtoType[Literal["request", "notification", "alert"]] = "notification"
-    provenance_id: DtoType[Optional[str]] = None
+    provenance_id: DtoType[str | None] = None
     
     # Internal metadata not shared with DTO by default if we want
-    internal_trace_id: BackendType[Optional[str]] = None
+    internal_trace_id: BackendType[str | None] = None
 
 
 class MessageChannel:
@@ -26,7 +27,7 @@ class MessageChannel:
         payload: object,
         target: Literal["foreground", "background"] | str,
         intent: Literal["request", "notification", "alert"] = "notification",
-        provenance_id: Optional[str] = None
+        provenance_id: str | None = None
     ) -> dict[str, object]:
         """
         Wraps a payload into a MessageEnvelope and returns its DTO view.

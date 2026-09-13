@@ -6,15 +6,15 @@ profile identity, and projection persistence. vLLM only performs inference.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from hashlib import sha256
 import base64
 import json
 import math
 import re
+from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -35,7 +35,6 @@ from .multimodal_remote import (
     EmbeddingServiceUnavailable,
     _asset_bytes,
 )
-
 
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-fA-F]{64}$")
 DEFAULT_VLLM_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
@@ -148,7 +147,7 @@ def _content_parts(
                 "image/png" if unit.modality in {"image", "chart", "table", "pdf_page"} else "video/mp4",
             )
         )
-        if not (content_type.startswith("image/") or content_type.startswith("video/")):
+        if not (content_type.startswith(("image/", "video/"))):
             raise ProjectionIntegrityError(
                 f"vLLM requires image/video bytes for unit {unit.view_id!r}"
             )
@@ -429,8 +428,8 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
 
 
 __all__ = [
-    "DEFAULT_VLLM_MODEL",
     "DEFAULT_VLLM_DIMENSION",
+    "DEFAULT_VLLM_MODEL",
     "VllmEmbeddingSettings",
     "VllmMultimodalEncoder",
 ]

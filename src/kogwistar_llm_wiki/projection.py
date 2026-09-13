@@ -17,11 +17,10 @@ from kogwistar_obsidian_sink.core.models import ProjectionEntity, SemanticRelati
 from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuckProvider
 from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 
-from .models import NamespaceEngines, ProjectionSnapshot, ObsidianBuildResult
-from .policies import LlmWikiPolicies, build_default_policies
+from .models import NamespaceEngines, ObsidianBuildResult, ProjectionSnapshot
 from .namespaces import GraphSpace, WorkspaceNamespaces
+from .policies import LlmWikiPolicies, build_default_policies
 from .utils import _temporary_namespace
-
 
 logger = logging.getLogger(__name__)
 
@@ -183,12 +182,14 @@ class ProjectionManager:
             node_space = self._node_graph_space(node)
             if node_space not in requested_space_values:
                 continue
-            if manifest_ids is not None:
-                if node_id not in manifest_ids:
-                    continue
-            elif node_space == GraphSpace.CURATED_KG.value:
-                if not self.policies.projection.is_projection_eligible(dict(getattr(node, "metadata", None) or {})):
-                    continue
+            if manifest_ids is not None and node_id not in manifest_ids:
+                continue
+            if (
+                manifest_ids is None
+                and node_space == GraphSpace.CURATED_KG.value
+                and not self.policies.projection.is_projection_eligible(dict(getattr(node, "metadata", None) or {}))
+            ):
+                continue
             selected.append(node)
             seen_ids.add(node_id)
         return selected
@@ -264,7 +265,7 @@ class ProjectionManager:
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except Exception:
+            except Exception:  # noqa: BLE001 - corrupt optional manifest is treated as absent
                 return None
         if not isinstance(payload, dict):
             return None

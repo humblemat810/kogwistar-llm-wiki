@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from types import SimpleNamespace
 
-from joblib import Memory
-import pytest
-from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 import kg_doc_parser.semantic_document_splitting_layerwise_edits as layerwise_edits
+import pytest
+from joblib import Memory
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+
+from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.debug_run import (
     LiveTracePrinter,
     ParseStatisticsStore,
@@ -190,24 +191,24 @@ def test_env_flag_enabled_parses_live_trace_flags(monkeypatch):
 def test_parse_statistics_store_latest_rows_returns_newest_first(tmp_path):
     debug_dir = configure_debug_logging(tmp_path / "debug-order")
     store = ParseStatisticsStore(debug_dir / "llm_wiki_stats.sqlite3")
-    base_kwargs = dict(
-        workspace_id="demo",
-        source_document_id="doc-1",
-        source_uri="file:///demo.md",
-        title="Demo",
-        raw_text="alpha beta gamma",
-        parser_lane="workflow_layered",
-        parser_mode="azure_openai",
-        proposal_mode="boundaries",
-        provider="azure",
-        model="gpt-5-mini",
-        parse_runtime_ms=1,
-        semantic_tree=_tree(_tree(_tree()), _tree(_tree())),
-        graph_payload={"nodes": [], "edges": []},
-        diagnostics={},
-        evaluation={},
-        status="ok",
-    )
+    base_kwargs = {
+        "workspace_id": "demo",
+        "source_document_id": "doc-1",
+        "source_uri": "file:///demo.md",
+        "title": "Demo",
+        "raw_text": "alpha beta gamma",
+        "parser_lane": "workflow_layered",
+        "parser_mode": "azure_openai",
+        "proposal_mode": "boundaries",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "parse_runtime_ms": 1,
+        "semantic_tree": _tree(_tree(_tree()), _tree(_tree())),
+        "graph_payload": {"nodes": [], "edges": []},
+        "diagnostics": {},
+        "evaluation": {},
+        "status": "ok",
+    }
 
     store.record_parse_run(build_parse_statistics_record(**base_kwargs))
     store.record_parse_run(build_parse_statistics_record(**{**base_kwargs, "source_document_id": "doc-2"}))

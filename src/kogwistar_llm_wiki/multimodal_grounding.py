@@ -8,14 +8,13 @@ to validate an evidence-pack reference before an authoritative write.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
-import json
 from typing import Literal, Protocol
 
 from kogwistar.logical_refs import LogicalRef
-
 
 GroundingComposition = Literal["all_of", "any_of"]
 EntityKind = Literal["node", "edge"]
@@ -34,7 +33,7 @@ def _mapping_sequence(
             raise ValueError(f"evidence payload requires {key}")
         return ()
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
-        raise ValueError(f"evidence payload field {key!r} must be a sequence")
+        raise ValueError(f"evidence payload field {key!r} must be a sequence")  # noqa: TRY004
     if not all(isinstance(item, Mapping) for item in raw):
         raise ValueError(f"evidence payload field {key!r} entries must be mappings")
     return tuple(item for item in raw if isinstance(item, Mapping))
@@ -78,7 +77,7 @@ class SourceEvidenceRef:
         }
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "SourceEvidenceRef":
+    def from_payload(cls, payload: Mapping[str, object]) -> SourceEvidenceRef:
         return cls(
             workspace_id=str(payload["workspace_id"]),
             source_id=str(payload["source_id"]),
@@ -122,10 +121,10 @@ class PinnedEntityRef:
         }
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "PinnedEntityRef":
+    def from_payload(cls, payload: Mapping[str, object]) -> PinnedEntityRef:
         raw_ref = payload.get("logical_ref")
         if not isinstance(raw_ref, Mapping):
-            raise ValueError("pinned evidence entity requires logical_ref")
+            raise ValueError("pinned evidence entity requires logical_ref")  # noqa: TRY004
         return cls(
             logical_ref=LogicalRef(
                 target_namespace=str(raw_ref["target_namespace"]),
@@ -166,13 +165,13 @@ class EvidencePackReference:
         }
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "EvidencePackReference":
+    def from_payload(cls, payload: Mapping[str, object]) -> EvidencePackReference:
         raw_ref = payload.get("pack_ref")
         if not isinstance(raw_ref, Mapping):
-            raise ValueError("evidence pack reference requires pack_ref")
+            raise ValueError("evidence pack reference requires pack_ref")  # noqa: TRY004
         raw_watermark = payload.get("source_watermark") or {}
         if not isinstance(raw_watermark, Mapping):
-            raise ValueError("evidence pack source_watermark must be a mapping")
+            raise ValueError("evidence pack source_watermark must be a mapping")  # noqa: TRY004
         return cls(
             pack_ref=LogicalRef(
                 target_namespace=str(raw_ref["target_namespace"]),
@@ -251,13 +250,13 @@ class EvidencePack:
         return payload
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "EvidencePack":
+    def from_payload(cls, payload: Mapping[str, object]) -> EvidencePack:
         raw_nodes = _mapping_sequence(payload, "node_refs")
         raw_edges = _mapping_sequence(payload, "edge_refs")
         raw_sources = _mapping_sequence(payload, "source_refs")
         raw_watermarks = payload.get("source_watermarks") or {}
         if not isinstance(raw_watermarks, Mapping):
-            raise ValueError("evidence pack source_watermarks must be a mapping")
+            raise ValueError("evidence pack source_watermarks must be a mapping")  # noqa: TRY004
         return cls(
             pack_id=str(payload["pack_id"]),
             namespace=str(payload["namespace"]),
@@ -284,7 +283,7 @@ class HigherOrderGrounding:
         return {"evidence_pack_refs": [ref.to_payload() for ref in self.evidence_pack_refs]}
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "HigherOrderGrounding":
+    def from_payload(cls, payload: Mapping[str, object]) -> HigherOrderGrounding:
         raw_refs = _mapping_sequence(payload, "evidence_pack_refs", required=True)
         return cls(tuple(EvidencePackReference.from_payload(item) for item in raw_refs))
 

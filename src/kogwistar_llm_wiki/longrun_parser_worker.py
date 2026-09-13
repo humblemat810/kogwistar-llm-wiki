@@ -7,15 +7,19 @@ import threading
 import time
 import traceback
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable, Literal
+from typing import Literal
 
+from kg_doc_parser.workflow_ingest.layerwise_llm import (
+    LayerwiseCallback,
+    build_layerwise_llm_callbacks,
+)
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
-from kg_doc_parser.workflow_ingest.layerwise_llm import LayerwiseCallback, build_layerwise_llm_callbacks
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
-from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
+from kogwistar.runtime.budget_adapters import summarize_budget_events
 
 from .debug_run import LiveTracePrinter, env_flag_enabled, summarize_stage_timings
 from .llm_usage import ProviderUsageCallback, resolve_token_pricing
@@ -46,7 +50,7 @@ def _close_resources_quietly(*resources: object) -> None:
             continue
         try:
             close()
-        except Exception:
+        except Exception:  # noqa: BLE001, S112 - cleanup must not mask the original failure
             # Shutdown cleanup must not replace a provider or parser error.
             continue
 
@@ -288,8 +292,14 @@ def run_workflow_layered_parse(
     usage_event_path: Path | None = None,
     conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> SimpleNamespace:
-    from kg_doc_parser.workflow_ingest.models import WorkflowIngestInput, WorkflowExportBundle
-    from kg_doc_parser.workflow_ingest.service import build_default_engines, run_ingest_workflow
+    from kg_doc_parser.workflow_ingest.models import (
+        WorkflowExportBundle,
+        WorkflowIngestInput,
+    )
+    from kg_doc_parser.workflow_ingest.service import (
+        build_default_engines,
+        run_ingest_workflow,
+    )
 
     if conversation_persistence_mode not in {"single_stage", "two_stage"}:
         raise ValueError(
@@ -417,8 +427,13 @@ def run_workflow_layered_parse(
         bundle = WorkflowExportBundle.model_validate(final_state["export_bundle"])
         bundle_source = "final_state_export_bundle"
     if not bundle and final_state.get("semantic_tree"):
-        from kg_doc_parser.workflow_ingest.models import WorkflowExportBundle as _WorkflowExportBundle
-        from kg_doc_parser.workflow_ingest.semantics import SemanticNode, semantic_tree_to_kge_payload
+        from kg_doc_parser.workflow_ingest.models import (
+            WorkflowExportBundle as _WorkflowExportBundle,
+        )
+        from kg_doc_parser.workflow_ingest.semantics import (
+            SemanticNode,
+            semantic_tree_to_kge_payload,
+        )
 
         semantic_tree = SemanticNode.model_validate(final_state["semantic_tree"])
         graph_payload = semantic_tree_to_kge_payload(semantic_tree, doc_id=source_document_id)
@@ -628,7 +643,9 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
                 trace_log=lambda message: _trace(f"page_index::{message}"),
             )
             _trace("child_page_index_parse_call_returned")
-            from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+            from kg_doc_parser.workflow_ingest.semantics import (
+                semantic_tree_to_kge_payload,
+            )
 
             _trace("child_page_index_graph_payload_start")
             graph_payload = semantic_tree_to_kge_payload(
@@ -724,7 +741,7 @@ def run_longrun_parser_child(payload: dict[str, object]) -> None:
             edge_count=len(graph_payload.get("edges", [])),
         )
         _trace("child_completed")
-    except BaseException as exc:  # noqa: BLE001
+    except BaseException as exc:
         _trace(f"child_exception {type(exc).__name__}: {exc}")
         try:
             _write_json_file(failure_payload_path, dict(payload))

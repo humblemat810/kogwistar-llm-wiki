@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_MODEL = "vidore/colqwen2-v1.0-hf"
 # Revision verified by the local checkpoint in this repository's development
 # environment. Override explicitly when adopting a newer model revision.

@@ -219,6 +219,25 @@ Detect conflicting claims, summaries, or relations.
 **Human review**  
 Usually required.
 
+## 5. Safety Boundary
+
+Maintenance may create bounded derived or interpretation artifacts and may add
+grounded support, relationship, supersession, or conflict edges. It must never
+rewrite or tombstone raw source documents, source revisions, source-map seeds,
+readiness records, or lane messages containing user or historical statements.
+
+If maintenance believes a source contains a spelling or factual error, it adds
+an explicitly labeled interpretation candidate and an edge to the unchanged
+source evidence. A new source snapshot is created only through the explicit
+ingest/reingest path when the upstream source actually changes.
+
+Maintenance follow-up rounds may carry a bounded structured context containing
+prior round summaries, touched node/edge IDs, selection reasons, and next seed
+IDs. The context is capped at a conservative 10,000-character/token budget and
+does not accept raw transcripts. Follow-ups reuse the same leased job, round
+counter, and budget ledger. They do not call the user-facing maintenance
+request path and cannot recursively create another maintenance job.
+
 ## 4.8 `link_validation`
 
 **Purpose**  

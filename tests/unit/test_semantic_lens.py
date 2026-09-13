@@ -9,9 +9,9 @@ from kogwistar_llm_wiki import (
     GraphSpace,
     SemanticLensRequest,
     SemanticLensService,
-    validate_edit_proposal,
     WorkspaceNamespaces,
     build_in_memory_namespace_engines,
+    validate_edit_proposal,
 )
 from kogwistar_llm_wiki.utils import _temporary_namespace
 

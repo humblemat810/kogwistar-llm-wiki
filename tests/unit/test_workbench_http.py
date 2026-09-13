@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from http.client import HTTPConnection
-from threading import Thread
 import time
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
+from threading import Thread
 
 import pytest
 from jose import jwt
@@ -14,7 +15,6 @@ from kogwistar_llm_wiki import (
     build_in_memory_namespace_engines,
     build_workbench_handler,
 )
-from http.server import ThreadingHTTPServer
 
 
 @pytest.fixture(autouse=True)

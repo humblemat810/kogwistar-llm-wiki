@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 
-from scripts.benchmark_conversation_two_stage import _node, run_conversation_materialization_benchmark
-from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.__main__ import _conversation_persistence_kwargs
+from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
+from scripts.benchmark_conversation_two_stage import (
+    _node,
+    run_conversation_materialization_benchmark,
+)
 
 
 def test_cli_forwards_conversation_two_stage_only_when_explicitly_enabled() -> None:

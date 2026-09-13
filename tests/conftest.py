@@ -5,9 +5,9 @@ import os
 import re
 import shutil
 import subprocess
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,10 +31,9 @@ for path in (OBSIDIAN_SINK_ROOT,):
         sys.path.append(str(path))
 
 import pytest
-
 from kogwistar.id_provider import stable_id
-from tests._helpers.pytest_markers import mark_default_ci_items
 
+from tests._helpers.pytest_markers import mark_default_ci_items
 
 logger = logging.getLogger(__name__)
 LONGRUN_SKIP_LOG_PATH = TEST_TMP / "longrun-skip.log"
@@ -221,7 +220,7 @@ def _ensure_pgvector_database_with_retry(
     while time.monotonic() < deadline:
         try:
             return _ensure_pgvector_database(dsn, database_name)
-        except Exception as exc:  # pragma: no cover - environment-dependent
+        except Exception as exc:  # noqa: BLE001 - environment-dependent setup retry
             last_error = exc
             time.sleep(retry_interval_seconds)
     if last_error is not None:
@@ -246,7 +245,7 @@ def _prepare_longrun_pgvector_database_with_retry(
                 database_name,
                 pg_source=pg_source,
             )
-        except Exception as exc:  # pragma: no cover - environment-dependent
+        except Exception as exc:  # noqa: BLE001 - environment-dependent setup retry
             last_error = exc
             time.sleep(retry_interval_seconds)
     if last_error is not None:
@@ -318,6 +317,7 @@ def tmp_path():
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
+
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest, NamespaceEngines
 
 
@@ -377,7 +377,7 @@ def ingest_request():
 def _normalize_pg_dsn(connection_url: str) -> str:
     try:
         from sqlalchemy.engine import make_url
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional SQLAlchemy dependency
         if connection_url.startswith("postgresql://"):
             return connection_url.replace("postgresql://", "postgresql+psycopg://", 1)
         return connection_url
@@ -436,7 +436,7 @@ def _longrun_pgvector_database_name() -> str:
 def _ensure_pgvector_database(dsn: str, database_name: str) -> str:
     try:
         import sqlalchemy as sa
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional SQLAlchemy dependency
         return dsn
 
     url = sa.engine.make_url(dsn)
@@ -473,7 +473,7 @@ def _reset_pgvector_database(dsn: str, database_name: str) -> str:
     """
     try:
         import sqlalchemy as sa
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional SQLAlchemy dependency
         return dsn
 
     url = sa.engine.make_url(dsn)
@@ -594,7 +594,7 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
                 database_name,
                 pg_source="persistent",
             )
-        except Exception as exc:  # pragma: no cover - environment-dependent
+        except Exception as exc:  # noqa: BLE001 - environment-dependent container setup
             restore_runtime_env()
             reason = f"Failed to prepare persistent longrun pgvector container: {exc}"
             _append_longrun_skip_notice(reason)
@@ -618,7 +618,7 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
 
     try:
         PostgresContainer = _load_longrun_postgres_container_cls()
-    except Exception as exc:  # pragma: no cover - optional dependency
+    except Exception as exc:  # noqa: BLE001 - optional dependency
         restore_runtime_env()
         reason = f"pgvector long-run probe requires testcontainers[postgresql]: {exc}"
         _append_longrun_skip_notice(reason)
@@ -629,7 +629,7 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
     initial_ryuk_disabled = _configure_longrun_testcontainers_ryuk_env()
     try:
         container = _start_longrun_pgvector_container(PostgresContainer, image)
-    except Exception as exc:  # pragma: no cover - environment-dependent
+    except Exception as exc:  # noqa: BLE001 - environment-dependent container setup
         if (not initial_ryuk_disabled) and _is_ryuk_port_mapping_failure(exc):
             logger.warning(
                 "Failed to start longrun pgvector test container with Ryuk enabled; retrying once without Ryuk. image=%s err=%s",
@@ -641,7 +641,7 @@ def _longrun_pgvector_testcontainer(pytestconfig: pytest.Config):
             try:
                 PostgresContainer = _load_longrun_postgres_container_cls()
                 container = _start_longrun_pgvector_container(PostgresContainer, image)
-            except Exception as retry_exc:  # pragma: no cover - environment-dependent
+            except Exception as retry_exc:  # noqa: BLE001 - environment-dependent retry
                 restore_runtime_env()
                 reason = (
                     f"Failed to start longrun pgvector test container image={image} "

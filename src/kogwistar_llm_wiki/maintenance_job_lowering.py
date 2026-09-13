@@ -11,7 +11,6 @@ from .maintenance_patches import (
 )
 from .maintenance_policy import normalize_maintenance_kind
 
-
 JOB_KIND_INTENTS: dict[str, MaintenanceIntent] = {
     "document_seed_graph": MaintenanceIntent.SEED_DOCUMENT,
     "document_parse_graph": MaintenanceIntent.SPLIT_NODE,

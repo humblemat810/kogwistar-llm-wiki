@@ -12,6 +12,53 @@
 # This file is intentionally an example. Keep credentials in .env or a secret
 # manager; do not commit a working token.
 services:
+  maintenance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    mem_limit: ${LLM_WIKI_MAINTENANCE_MEMORY_LIMIT:-512m}
+    cpus: ${LLM_WIKI_MAINTENANCE_CPU_LIMIT:-0.20}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app-data-init:
+        condition: service_completed_successfully
+      grafana:
+        condition: service_started
+    environment:
+      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki
+      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://${POSTGRES_USER:-llm_wiki}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}@postgres:5432/${POSTGRES_DB:-llm_wiki}
+      LLM_WIKI_AUTH_MODE: ${LLM_WIKI_AUTH_MODE:-static_token}
+      LLM_WIKI_AUTH_REQUIRED: ${LLM_WIKI_AUTH_REQUIRED:-true}
+      LLM_WIKI_API_TOKEN: ${LLM_WIKI_API_TOKEN:?Set LLM_WIKI_API_TOKEN in .env}
+      LLM_WIKI_MCP_TOKEN: ${LLM_WIKI_MCP_TOKEN:-${LLM_WIKI_API_TOKEN}}
+      LLM_WIKI_OTEL_ENABLED: ${LLM_WIKI_OTEL_ENABLED:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://grafana:4318
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://grafana:4318/v1/traces
+      KOGWISTAR_MAINTENANCE_PROVIDER: ${KOGWISTAR_MAINTENANCE_PROVIDER:-ollama}
+      KOGWISTAR_MAINTENANCE_MODEL: ${KOGWISTAR_MAINTENANCE_MODEL:-gemma4:e2b}
+      KOGWISTAR_MAINTENANCE_BASE_URL: ${KOGWISTAR_MAINTENANCE_BASE_URL:-http://host.docker.internal:11434}
+    command:
+      - llm-wiki
+      - --data-dir
+      - /var/lib/llm-wiki
+      - --backend
+      - postgres
+      - daemon
+      - maintenance
+      - --workspace
+      - ${LLM_WIKI_WORKSPACE:-default}
+      - --interval
+      - ${LLM_WIKI_MAINTENANCE_POLL_INTERVAL:-10}
+      - --background-interval
+      - ${LLM_WIKI_MAINTENANCE_BACKGROUND_INTERVAL:-600}
+    volumes:
+      - app_data:/var/lib/llm-wiki
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+
   rest:
     depends_on:
       grafana:

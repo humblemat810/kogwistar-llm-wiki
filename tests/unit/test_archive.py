@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import json
 import io
+import json
 import tarfile
 from pathlib import Path
 
 import pytest
-
 from kogwistar.engine_core import EntityEventEnvelope
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 from kogwistar.engine_core.models import Grounding, Node, Span
+
 from kogwistar_llm_wiki.archive import (
     ArchiveError,
     create_archive,

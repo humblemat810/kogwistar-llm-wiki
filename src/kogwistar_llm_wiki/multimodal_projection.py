@@ -17,19 +17,21 @@ or pgvector adapter can implement the same protocol later.
 
 from __future__ import annotations
 
+import json
+import os
+import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
-import json
 from io import BytesIO
 from math import sqrt
 from pathlib import Path
-import os
-import sqlite3
 from typing import Protocol, runtime_checkable
 
 from llm_wiki_embedding_contract import (
     EmbeddingProfile as MultimodalEmbeddingProfile,
+)
+from llm_wiki_embedding_contract import (
     EmbeddingSet,
     SimilarityMetric,
     SourceModality,
@@ -43,7 +45,6 @@ from .multimodal_runtime import (
     configured_torch_backend,
     validate_torch_runtime,
 )
-
 
 DEFAULT_COLQWEN_MODEL = "vidore/colqwen2-v1.0-hf"
 DEFAULT_COLQWEN_REVISION = "ddc07d2317c80f75fc742b7362ee9ad1912908f9"
@@ -98,7 +99,7 @@ class MultimodalSourceUnit:
         }
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> "MultimodalSourceUnit":
+    def from_payload(cls, payload: Mapping[str, object]) -> MultimodalSourceUnit:
         return cls(
             view_id=str(payload["view_id"]),
             workspace_id=str(payload["workspace_id"]),
@@ -136,7 +137,7 @@ class MultimodalEncoder(Protocol):
         units: Sequence[MultimodalSourceUnit],
         *,
         batch_size: int | None = None,
-        resolver: "AssetResolver | None" = None,
+        resolver: AssetResolver | None = None,
     ) -> Sequence[EmbeddingSet]: ...
 
 
@@ -544,7 +545,7 @@ class FakeMultimodalEncoder:
     )
 
     def _vector(self, value: str, ordinal: int) -> tuple[float, ...]:
-        digest = sha256(f"{value}\x00{ordinal}".encode("utf-8")).digest()
+        digest = sha256(f"{value}\x00{ordinal}".encode()).digest()
         return tuple((digest[index] / 127.5) - 1.0 for index in range(self.profile.dimension))
 
     def _encode(self, values: Sequence[str]) -> list[EmbeddingSet]:
@@ -612,7 +613,7 @@ class ColQwenNativeEncoder:
         dimension: int | None = None,
         max_sequence_length: int = 32768,
         max_image_patches: int = 768,
-    ) -> "ColQwenNativeEncoder":
+    ) -> ColQwenNativeEncoder:
         try:
             import sys
 
@@ -723,7 +724,7 @@ class ColQwenNativeEncoder:
     def _encode_text_values(
         self, values: Sequence[str], *, batch_size: int | None = None
     ) -> list[EmbeddingSet]:
-        process_queries = getattr(self._processor, "__call__")
+        process_queries = self._processor.__call__
         chunk_size = max(1, int(batch_size or self.batch_size))
         encoded: list[EmbeddingSet] = []
         for start in range(0, len(values), chunk_size):
@@ -875,7 +876,7 @@ class Qwen3VLDenseEncoder:
         max_sequence_length: int = 32768,
         max_image_patches: int = 768,
         instruction: str = "Represent the user's input.",
-    ) -> "Qwen3VLDenseEncoder":
+    ) -> Qwen3VLDenseEncoder:
         if not QWEN3_VL_MIN_DIMENSION <= int(dimension) <= QWEN3_VL_MAX_DIMENSION:
             raise ValueError(
                 f"Qwen3-VL dimension must be between {QWEN3_VL_MIN_DIMENSION} and "
@@ -885,8 +886,8 @@ class Qwen3VLDenseEncoder:
             import sys
 
             import torch
-            from transformers import AutoModelForMultimodalLM, AutoProcessor
             from qwen_vl_utils import process_vision_info
+            from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
             raise RuntimeError(
                 "Qwen3-VL requires the optional multimodal dependencies in the active "
@@ -1074,7 +1075,7 @@ class Qwen3VLDenseEncoder:
         if hasattr(embeddings, "ndim") and embeddings.ndim != 2:
             raise ProjectionIntegrityError("Qwen3-VL must return one dense vector per source view")
         if hasattr(embeddings, "ndim"):
-            import torch.nn.functional as functional
+            from torch.nn import functional
 
             embeddings = functional.normalize(embeddings[..., : self.profile.dimension], p=2, dim=-1)
             # Dense profiles expose one vector per view, while the common
@@ -1179,15 +1180,15 @@ def build_configured_multimodal_encoder(
     backend = configured_multimodal_backend()
     if backend == "vllm":
         from .multimodal_runtime import (
+            configured_embedding_crop_token_budget,
+            configured_embedding_gpu_memory_utilization,
+            configured_embedding_max_model_len,
+            configured_embedding_vllm_enforce_eager,
+            configured_embedding_vllm_max_num_seqs,
             configured_vllm_allowed_hosts,
             configured_vllm_image,
             configured_vllm_token,
             configured_vllm_url,
-            configured_embedding_crop_token_budget,
-            configured_embedding_max_model_len,
-            configured_embedding_gpu_memory_utilization,
-            configured_embedding_vllm_enforce_eager,
-            configured_embedding_vllm_max_num_seqs,
         )
         from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 
@@ -1235,8 +1236,8 @@ def build_configured_multimodal_encoder(
     ).strip()
     if service_url:
         from .multimodal_remote import (
+            EmbeddingServiceSettings,
             RemoteMultimodalEncoder,
-                EmbeddingServiceSettings,
         )
         from .multimodal_runtime import (
             configured_embedding_service_allowed_hosts,
@@ -1331,17 +1332,16 @@ def embed_pending(
 
 
 __all__ = [
-    "AssetResolver",
     "DEFAULT_COLQWEN_MODEL",
     "DEFAULT_COLQWEN_REVISION",
     "DEFAULT_QWEN3_VL_MODEL",
     "QWEN3_VL_MAX_DIMENSION",
     "QWEN3_VL_MIN_DIMENSION",
+    "AssetResolver",
+    "ChromaMultimodalProjectionStore",
     "ColQwenNativeEncoder",
-    "build_configured_multimodal_encoder",
     "EmbeddingProfileMismatch",
     "EmbeddingSet",
-    "ChromaMultimodalProjectionStore",
     "FakeMultimodalEncoder",
     "InMemoryMultimodalProjectionStore",
     "MultimodalEmbeddingProfile",
@@ -1353,6 +1353,7 @@ __all__ = [
     "ProjectionIntegrityError",
     "Qwen3VLDenseEncoder",
     "SQLiteMultimodalProjectionStore",
+    "build_configured_multimodal_encoder",
     "embed_pending",
     "score_embedding_sets",
 ]

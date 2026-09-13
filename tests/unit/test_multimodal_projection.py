@@ -1,26 +1,30 @@
 from __future__ import annotations
 
 import importlib.util
-from contextlib import contextmanager
-from io import BytesIO
 import json
 import sys
+from contextlib import contextmanager
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 
+from kogwistar_llm_wiki.ingest_pipeline import (
+    IngestPipeline,
+    build_in_memory_namespace_engines,
+)
 from kogwistar_llm_wiki.multimodal_projection import (
+    QWEN3_VL_MAX_DIMENSION,
+    QWEN3_VL_MIN_DIMENSION,
     ChromaMultimodalProjectionStore,
+    ColQwenNativeEncoder,
     EmbeddingProfileMismatch,
     FakeMultimodalEncoder,
     InMemoryMultimodalProjectionStore,
-    ColQwenNativeEncoder,
     MultimodalEmbeddingProfile,
     MultimodalSourceUnit,
     ProjectionIntegrityError,
     Qwen3VLDenseEncoder,
-    QWEN3_VL_MAX_DIMENSION,
-    QWEN3_VL_MIN_DIMENSION,
     SQLiteMultimodalProjectionStore,
     embed_pending,
     score_embedding_sets,
@@ -32,7 +36,6 @@ from kogwistar_llm_wiki.multimodal_sources import (
 )
 from scripts.pull_colqwen_model import verify_checkpoint
 from scripts.pull_qwen3_vl_model import verify_checkpoint as verify_qwen3_vl_checkpoint
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, build_in_memory_namespace_engines
 
 
 def _profile(**overrides: object) -> MultimodalEmbeddingProfile:

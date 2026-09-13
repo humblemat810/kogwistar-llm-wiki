@@ -8,50 +8,56 @@ import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 
-from kogwistar.engine_core.jobs import JobQueueItem
-from kg_doc_parser.semantic_document_splitting_layerwise_edits import parser_llm_cache_transaction
+from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
+    parser_llm_cache_transaction,
+)
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
-from kogwistar.engine_core.models import Grounding, Node, Span, GraphExtractionWithIDs
+from kogwistar.engine_core.jobs import JobQueueItem
+from kogwistar.engine_core.models import GraphExtractionWithIDs, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.maintenance.models import MaintenanceTemplateResult
-from kogwistar.runtime import RunResult
-from kogwistar.runtime import budget_event_from_dict
+from kogwistar.maintenance.template import run_grouped_maintenance_template
+from kogwistar.runtime import RunResult, budget_event_from_dict
+from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.models import RunSuccess, StepRunResult
 from kogwistar.runtime.resolvers import MappingStepResolver
 from kogwistar.runtime.runtime import StepContext, WorkflowRuntime
-from kogwistar.maintenance.template import run_grouped_maintenance_template
 from kogwistar.wisdom.template import write_execution_wisdom_artifacts
 
-from .models import NamespaceEngines
-from .policies import LlmWikiPolicies, build_default_policies
-from .maintenance_policy import (
-    is_execution_wisdom_kind,
-    workflow_id_for_maintenance_kind,
+from .ingest_pipeline import IngestPipeline, IngestPipelineRequest
+from .maintenance_context import (
+    append_maintenance_round,
+    bound_maintenance_context,
+    maintenance_execution_context,
 )
 from .maintenance_designs import materialize_maintenance_designs
-from .maintenance_patch_apply import apply_maintenance_patch_for_scope
-from .maintenance_patches import MaintenancePatch
 from .maintenance_guards import (
     MaintenanceGuardDecision,
     SourceRevision,
     evaluate_maintenance_guard,
     required_stage_for_maintenance,
 )
+from .maintenance_patch_apply import apply_maintenance_patch_for_scope
+from .maintenance_patches import MaintenancePatch
+from .maintenance_planner import decide_next_maintenance_phase
+from .maintenance_policy import (
+    is_execution_wisdom_kind,
+    workflow_id_for_maintenance_kind,
+)
+from .maintenance_selection import select_request_candidates
+from .maintenance_statistics import operation_category
 from .maintenance_strategies import (
     MaintenanceJobExecutionContext,
     MaintenanceStrategy,
     build_default_maintenance_strategy_registry,
 )
+from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
+from .policies import LlmWikiPolicies, build_default_policies
 from .provider_config import resolve_maintenance_provider_settings
-from .utils import _temporary_namespace
-from kogwistar.runtime.budget import StateBackedBudgetLedger
 from .usage_projection import UsageProjection, persist_usage_events
-from .maintenance_statistics import operation_category
-from .maintenance_planner import decide_next_maintenance_phase
-from .ingest_pipeline import IngestPipeline, IngestPipelineRequest
-
+from .utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +65,26 @@ logger = logging.getLogger(__name__)
 def _and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
     """Compose a Chroma-compatible conjunction filter from simple metadata clauses."""
     return {"$and": [dict(clause) for clause in clauses]}
+
+
+def _belongs_to_workspace(node: object, workspace_id: str) -> bool:
+    """Apply a metadata defense-in-depth check after namespace/ACL filtering."""
+    metadata = getattr(node, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return True
+    declared_workspace = str(metadata.get("workspace_id") or "").strip()
+    return not declared_workspace or declared_workspace == str(workspace_id)
+
+
+def _edge_ids(edge: object) -> set[str]:
+    ids: set[str] = set()
+    for field in ("source_ids", "target_ids"):
+        value = getattr(edge, field, ()) or ()
+        if isinstance(value, str):
+            ids.add(value)
+        else:
+            ids.update(str(item) for item in value if str(item).strip())
+    return ids
 
 
 def _persisted_budget_state(state: Mapping[str, object]) -> dict[str, object]:
@@ -206,14 +232,13 @@ class BaseWorker(ABC):
         while True:
             try:
                 self.process_pending_jobs(workspace_id)
-            except Exception as e:
-                logger.error(f"Worker error in workspace {workspace_id}: {e}", exc_info=True)
+            except Exception:
+                logger.exception("Worker error in workspace %s", workspace_id)
             time.sleep(interval)
 
     @abstractmethod
     def process_pending_jobs(self, workspace_id: str) -> None:
         """Subclasses implement specific polling/processing logic."""
-        pass
 
 
 class MaintenanceWorker(BaseWorker):
@@ -259,6 +284,8 @@ class MaintenanceWorker(BaseWorker):
         self._last_progress_monotonic = time.monotonic()
         self._claim_lost = threading.Event()
         self.trace_sink = trace_sink
+        self.request_enabled = True
+        self.background_enabled = True
         self.document_parser = document_parser or self._parse_seeded_document
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()
@@ -316,13 +343,34 @@ class MaintenanceWorker(BaseWorker):
             )
             for job in jobs:
                 try:
+                    job_payload = getattr(job, "payload", {})
+                    mode = (
+                        str(job_payload.get("mode") or "request")
+                        if isinstance(job_payload, Mapping)
+                        else "request"
+                    )
+                    mode_disabled = (
+                        mode == "background"
+                        and not getattr(self, "background_enabled", True)
+                    ) or (
+                        mode != "background"
+                        and not getattr(self, "request_enabled", True)
+                    )
+                    if mode_disabled:
+                        self.engines.conversation.jobs.requeue_at_tail(job, delay_seconds=1)
+                        self._emit_trace(
+                            "maintenance_job_paused",
+                            workspace_id=workspace_id,
+                            job_id=str(job.job_id),
+                            mode=mode,
+                            reason="mode_disabled",
+                        )
+                        continue
                     self._handle_job(workspace_id, job)
                 except Exception as exc:
-                    logger.error(
-                        "Maintenance worker failed to process claimed job for workspace %s: %s",
+                    logger.exception(
+                        "Maintenance worker failed to process claimed job for workspace %s",
                         workspace_id,
-                        exc,
-                        exc_info=True,
                     )
                     self.engines.conversation.jobs.retry_or_fail(job, exc)
                     raise
@@ -340,6 +388,7 @@ class MaintenanceWorker(BaseWorker):
         job = self.engines.conversation.jobs.coerce(job)
         job_id = str(job.job_id)
         payload = dict(job.payload)
+        mode = str(payload.get("mode") or "request")
         req_node_id = str(payload.get("request_node_id") or job_id)
         lane_message_id = str(payload.get("lane_message_id") or "")
         maintenance_kind = str(payload.get("maintenance_kind") or "distill")
@@ -372,11 +421,13 @@ class MaintenanceWorker(BaseWorker):
             lane_message_id=lane_message_id,
             maintenance_kind=maintenance_kind,
         )
+        if mode == "request":
+            self._attach_request_selection(ctx)
         # History-wide wisdom extraction has no source revision to fence.  It
         # intentionally consumes workflow history across the workspace, while
         # source-dependent strategies must still pass the revision/readiness
         # guard before touching graph state.
-        if not is_execution_wisdom_kind(maintenance_kind):
+        if not is_execution_wisdom_kind(maintenance_kind) and mode != "background":
             decision = self._evaluate_maintenance_guard(ctx)
             if decision.status != "ready":
                 self._block_guarded_job(ctx, decision)
@@ -409,7 +460,8 @@ class MaintenanceWorker(BaseWorker):
         )
         lease_thread.start()
         try:
-            strategy.handle(self, ctx)
+            with maintenance_execution_context():
+                strategy.handle(self, ctx)
         finally:
             lease_stop.set()
             lease_thread.join(timeout=2)
@@ -422,6 +474,137 @@ class MaintenanceWorker(BaseWorker):
                 maintenance_kind=maintenance_kind,
                 duration_ms=int(time.time() * 1000) - job_started_ms,
             )
+
+    def _attach_request_selection(self, ctx: MaintenanceJobExecutionContext) -> None:
+        """Enrich the in-flight payload without changing budgets or history."""
+        kg = getattr(self.engines, "kg", None)
+        if kg is None or not callable(getattr(getattr(kg, "read", None), "get_nodes", None)):
+            return
+        seed_ids = {str(item) for item in (ctx.payload.get("seed_node_ids") or []) if item}
+        continuation = ctx.payload.get("maintenance_context")
+        if isinstance(continuation, Mapping):
+            turns = continuation.get("turns")
+            if isinstance(turns, list) and turns:
+                last_turn = turns[-1]
+                if isinstance(last_turn, Mapping):
+                    seed_ids.update(
+                        str(item)
+                        for item in (last_turn.get("next_seed_node_ids") or [])
+                        if str(item).strip()
+                    )
+            seed_ids.update(
+                str(item)
+                for item in (continuation.get("compressed_node_ids") or [])
+                if str(item).strip()
+            )
+        if ctx.request_node_id:
+            seed_ids.add(ctx.request_node_id)
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        try:
+            nodes: list[Node] = []
+            edges: list[object] = []
+            for namespace in (ns.curated_kg_space, ns.source_space):
+                with _temporary_namespace(self.engines.kg, namespace):
+                    nodes.extend(self.engines.kg.read.get_nodes(limit=250))
+                    edges.extend(self.engines.kg.read.get_edges(limit=500))
+            nodes = [node for node in nodes if _belongs_to_workspace(node, ctx.workspace_id)]
+            node_ids = {
+                str(getattr(node, "safe_get_id", lambda node=node: getattr(node, "id", ""))() or "")
+                for node in nodes
+            }
+            edges = [
+                edge
+                for edge in edges
+                if _edge_ids(edge) <= node_ids
+            ]
+        except Exception as exc:  # noqa: BLE001 - selection is advisory; guarded work remains authoritative
+            self._emit_trace(
+                "maintenance_selection_degraded",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                error_type=type(exc).__name__,
+            )
+            return
+        seeds = [node for node in nodes if str(getattr(node, "safe_get_id", lambda: "")()) in seed_ids]
+        topic = str(ctx.payload.get("topic") or "").strip().lower()
+        if topic:
+            terms = {term for term in topic.split() if len(term) > 2}
+            for node in nodes:
+                node_id = str(getattr(node, "safe_get_id", lambda: "")())
+                metadata_value = getattr(node, "metadata", {})
+                searchable = " ".join(
+                    [
+                        str(getattr(node, "label", "") or ""),
+                        str(getattr(node, "summary", "") or ""),
+                        str(metadata_value if isinstance(metadata_value, Mapping) else ""),
+                    ]
+                ).lower()
+                if node_id and terms and any(term in searchable for term in terms) and node not in seeds:
+                    seeds.append(node)
+        if not seeds and ctx.request_node is not None:
+            seeds = [ctx.request_node]
+        selected = select_request_candidates(seeds, nodes, edges, max_candidates=24)
+        ctx.payload["maintenance_candidates"] = [item.as_dict() for item in selected]
+        ctx.payload["selection_strategy"] = "connected_semantic_evidence_history"
+        self._persist_selection_audit(ctx)
+        self._emit_trace(
+            "maintenance_candidates_selected",
+            workspace_id=ctx.workspace_id,
+            job_id=ctx.job_id,
+            selection_strategy=ctx.payload["selection_strategy"],
+            candidates=ctx.payload["maintenance_candidates"],
+        )
+
+    def _persist_selection_audit(self, ctx: MaintenanceJobExecutionContext) -> None:
+        """Persist selection metadata in the workspace maintenance lane."""
+        candidates = list(ctx.payload.get("maintenance_candidates") or [])
+        if not candidates:
+            return
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        audit_key = str(
+            stable_id(
+                "kogwistar_llm_wiki.maintenance_selection",
+                ctx.workspace_id,
+                ctx.job_id,
+                ctx.payload.get("selection_strategy") or "",
+                json.dumps(candidates, sort_keys=True, separators=(",", ":")),
+            )
+        )
+        try:
+            with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+                self.engines.conversation.send_lane_message(
+                    conversation_id=f"maintenance:{ctx.request_node_id}",
+                    inbox_id="inbox:worker:maintenance:audit",
+                    sender_id="lane:worker:maintenance",
+                    recipient_id="lane:worker:maintenance-audit",
+                    msg_type="maintenance.selection",
+                    purpose="internal",
+                    payload={
+                        "workspace_id": ctx.workspace_id,
+                        "job_id": ctx.job_id,
+                        "mode": str(ctx.payload.get("mode") or "request"),
+                        "topic": str(ctx.payload.get("topic") or ""),
+                        "selection_strategy": ctx.payload.get("selection_strategy"),
+                        "candidates": candidates,
+                    },
+                    idempotency_key=audit_key,
+                )
+        except Exception as exc:  # noqa: BLE001 - audit failure must not bypass maintenance fences
+            self._emit_trace(
+                "maintenance_selection_audit_failed",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                error_type=type(exc).__name__,
+            )
+
+    @staticmethod
+    def _selection_result_payload(ctx: MaintenanceJobExecutionContext) -> dict[str, object]:
+        """Return bounded selection data for durable lane replies."""
+        candidates = list(ctx.payload.get("maintenance_candidates") or [])
+        return {
+            "selection_strategy": str(ctx.payload.get("selection_strategy") or ""),
+            "maintenance_candidates": candidates[:24],
+        }
 
     def _renew_claim_while_progressing(
         self, ctx: MaintenanceJobExecutionContext, stop: threading.Event
@@ -508,7 +691,7 @@ class MaintenanceWorker(BaseWorker):
             if self._advance_maintenance_plan(ctx):
                 return
             self._acknowledge_job(ctx)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - failed maintenance is reported and fenced
             self._emit_trace(
                 "maintenance_parse_failed",
                 workspace_id=ctx.workspace_id,
@@ -658,6 +841,28 @@ class MaintenanceWorker(BaseWorker):
             )
             return False
         next_payload = dict(ctx.payload)
+        next_payload["maintenance_context"] = append_maintenance_round(
+            ctx.payload.get("maintenance_context")
+            if isinstance(ctx.payload.get("maintenance_context"), Mapping)
+            else None,
+            round_number=int(ctx.payload.get("maintenance_round") or 0),
+            summary=f"Completed maintenance phase: {ctx.maintenance_kind}",
+            touched_node_ids=[
+                str(item.get("candidate_id"))
+                for item in (ctx.payload.get("maintenance_candidates") or [])
+                if isinstance(item, Mapping) and str(item.get("candidate_id") or "").strip()
+            ],
+            next_seed_node_ids=[
+                str(item.get("candidate_id"))
+                for item in (ctx.payload.get("maintenance_candidates") or [])
+                if isinstance(item, Mapping) and str(item.get("candidate_id") or "").strip()
+            ],
+            selection_reasons=[
+                item
+                for item in (ctx.payload.get("maintenance_candidates") or [])
+                if isinstance(item, Mapping)
+            ],
+        )
         if budget_state is not None:
             next_payload["maintenance_budget_state"] = _persisted_budget_state(budget_state)
         next_payload.update(
@@ -799,6 +1004,8 @@ class MaintenanceWorker(BaseWorker):
                 "required_stage": decision.required_stage,
                 "job_id": ctx.job_id,
                 "maintenance_kind": ctx.maintenance_kind,
+                "selection_strategy": ctx.payload.get("selection_strategy"),
+                "maintenance_candidates": list(ctx.payload.get("maintenance_candidates") or [])[:24],
                 "created_at_ms": int(time.time() * 1000),
             },
         )
@@ -815,6 +1022,7 @@ class MaintenanceWorker(BaseWorker):
                 "maintenance_kind": ctx.maintenance_kind,
                 "maintenance_guard_status": decision.status,
                 "maintenance_guard_reason": decision.reason,
+                **self._selection_result_payload(ctx),
                 "guard_artifact_id": artifact_id,
             },
         )
@@ -853,9 +1061,10 @@ class MaintenanceWorker(BaseWorker):
                 request_node_id=ctx.request_node_id,
                 reply_to_message_id=ctx.lane_message_id or None,
                 status="completed",
-                payload={
-                    "maintenance_kind": ctx.maintenance_kind,
-                    "execution_wisdom_emitted": emitted,
+                            payload={
+                                "maintenance_kind": ctx.maintenance_kind,
+                                **self._selection_result_payload(ctx),
+                                "execution_wisdom_emitted": emitted,
                 },
             )
             if ctx.job_id:
@@ -864,16 +1073,17 @@ class MaintenanceWorker(BaseWorker):
             if self._claim_lost.is_set():
                 self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_wisdom")
                 return
-            logger.error(f"Maintenance job {ctx.request_node_id} encountered runtime error: {e}", exc_info=True)
+            logger.exception("Maintenance job %s encountered runtime error", ctx.request_node_id)
             self._emit_lane_reply(
                 workspace_id=ctx.workspace_id,
                 source_document_id=str(ctx.payload.get("source_document_id") or ""),
                 request_node_id=ctx.request_node_id,
                 reply_to_message_id=ctx.lane_message_id or None,
                 status="failed",
-                payload={
-                    "maintenance_kind": ctx.maintenance_kind,
-                    "error": str(e),
+                        payload={
+                            "maintenance_kind": ctx.maintenance_kind,
+                            **self._selection_result_payload(ctx),
+                            "error": str(e),
                 },
             )
             if ctx.job_id:
@@ -965,7 +1175,7 @@ class MaintenanceWorker(BaseWorker):
             else:
                 raise RuntimeError(f"graph patch apply did not complete: {result.status.value}")
         except Exception as e:
-            logger.error(f"Maintenance job {ctx.request_node_id} encountered graph patch apply error: {e}", exc_info=True)
+            logger.exception("Maintenance job %s encountered graph patch apply error", ctx.request_node_id)
             self._emit_lane_reply(
                 workspace_id=ctx.workspace_id,
                 source_document_id=str(ctx.payload.get("source_document_id") or ""),
@@ -1031,17 +1241,14 @@ class MaintenanceWorker(BaseWorker):
         with _temporary_namespace(self.engines.conversation, ns.conv_bg), _temporary_namespace(
             self.engines.workflow, ns.workflow_maintenance
         ):
-            try:
-                workflow_exists = self.engines.workflow.read.node_exists(
-                    where={
-                        "$and": [
-                            {"entity_type": "workflow_node"},
-                            {"workflow_id": workflow_id},
-                        ]
-                    },
-                )
-            except Exception:
-                raise
+            workflow_exists = self.engines.workflow.read.node_exists(
+                where={
+                    "$and": [
+                        {"entity_type": "workflow_node"},
+                        {"workflow_id": workflow_id},
+                    ]
+                },
+            )
             if not workflow_exists:
                 materialize_maintenance_designs(self.engines.workflow)
             with warnings.catch_warnings():
@@ -1083,6 +1290,14 @@ class MaintenanceWorker(BaseWorker):
                                 "request_id": ctx.request_node_id,
                                 "source_document_id": str(ctx.payload.get("source_document_id") or ""),
                                 "maintenance_kind": ctx.maintenance_kind,
+                                "maintenance_mode": str(ctx.payload.get("mode") or "request"),
+                                "maintenance_candidates": list(ctx.payload.get("maintenance_candidates") or []),
+                                "selection_strategy": str(ctx.payload.get("selection_strategy") or ""),
+                                "maintenance_context": bound_maintenance_context(
+                                    ctx.payload.get("maintenance_context")
+                                    if isinstance(ctx.payload.get("maintenance_context"), Mapping)
+                                    else None
+                                ),
                                 "_deps": runtime_deps,
                             },
                             conversation_id=ns.conv_bg,
@@ -1135,6 +1350,7 @@ class MaintenanceWorker(BaseWorker):
                                 "maintenance_kind": ctx.maintenance_kind,
                                 "workflow_id": workflow_id,
                                 "runtime_status": status,
+                                **self._selection_result_payload(ctx),
                             },
                         )
                         self._acknowledge_job(ctx)
@@ -1187,17 +1403,18 @@ class MaintenanceWorker(BaseWorker):
                         error=str(e),
                         duration_ms=int(time.time() * 1000) - started_ms,
                     )
-                    logger.error(f"Maintenance job {ctx.request_node_id} encountered runtime error: {e}", exc_info=True)
+                    logger.exception("Maintenance job %s encountered runtime error", ctx.request_node_id)
                     self._emit_lane_reply(
                         workspace_id=ctx.workspace_id,
                         source_document_id=str(ctx.payload.get("source_document_id") or ""),
                         request_node_id=ctx.request_node_id,
                         reply_to_message_id=ctx.lane_message_id or None,
                         status="failed",
-                        payload={
-                            "maintenance_kind": ctx.maintenance_kind,
-                            "workflow_id": workflow_id,
-                            "error": str(e),
+                            payload={
+                                "maintenance_kind": ctx.maintenance_kind,
+                                "workflow_id": workflow_id,
+                                "error": str(e),
+                                **self._selection_result_payload(ctx),
                         },
                     )
                     if ctx.job_id:
@@ -1419,6 +1636,7 @@ class MaintenanceWorker(BaseWorker):
                     sender_id="lane:worker:maintenance",
                     recipient_id="lane:foreground",
                     msg_type=msg_type,
+                    purpose="maintenance",
                     payload={
                         "workspace_id": workspace_id,
                         "request_node_id": request_node_id,
@@ -1493,12 +1711,24 @@ class MaintenanceWorker(BaseWorker):
             return RunSuccess(state_update=[("u", {"error": "Missing context"})])
 
         ns = WorkspaceNamespaces(workspace_id)
+        maintenance_mode = str(ctx.state_view.get("maintenance_mode") or "request")
+        selected_ids = {
+            str(item.get("candidate_id") or "")
+            for item in (ctx.state_view.get("maintenance_candidates") or [])
+            if isinstance(item, Mapping) and str(item.get("candidate_id") or "").strip()
+        }
+        source_where = self.policies.derived_knowledge.source_query(
+            workspace_id=workspace_id,
+        ).where
+        if maintenance_mode == "background":
+            # A background pass is candidate-scoped. An empty or malformed
+            # selection is a safe no-op, never an invitation to scan everything.
+            if not selected_ids:
+                return RunSuccess(state_update=[("u", {"distillation_complete": True, "candidate_count": 0})])
+            source_where = _and_where(source_where, {"id": {"$in": sorted(selected_ids)}})
         with _temporary_namespace(engines.kg, ns.curated_kg_space):
             promoted_nodes: list[Node] = engines.kg.read.get_nodes(
-                where=_and_where(
-                    {"artifact_kind": "promoted_knowledge"},
-                    {"workspace_id": workspace_id},
-                )
+                where=source_where
             )
 
         if not promoted_nodes:
@@ -1519,9 +1749,7 @@ class MaintenanceWorker(BaseWorker):
             target_engine=derived_engine,
             source_namespace=ns.curated_kg_space,
             target_namespace=ns.derived_knowledge,
-            source_where=self.policies.derived_knowledge.source_query(
-                workspace_id=workspace_id,
-            ).where,
+            source_where=source_where,
             group_key_for_node=self.policies.derived_knowledge.group_key,
             match_where_for_group=lambda label: self.policies.derived_knowledge.match_where(
                 workspace_id=workspace_id,
@@ -1615,7 +1843,7 @@ class MaintenanceWorker(BaseWorker):
         for mention in raw_mentions:
             try:
                 mention_key = mention.model_dump_json()
-            except (AttributeError, Exception):
+            except Exception:  # noqa: BLE001 - legacy grounding objects may expose arbitrary serializers
                 mention_key = str(mention)
 
             if mention_key not in seen_mentions:

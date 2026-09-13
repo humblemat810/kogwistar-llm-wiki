@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
 import json
 import logging
 import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.engine_core.models import Grounding, Node, Span
@@ -235,8 +235,7 @@ class WorkbenchInteractionStore:
         payload: Mapping[str, object],
     ) -> bool:
         namespace = WorkspaceNamespaces(workspace_id).conversation_fg_space
-        with _artifact_lock(self.engines, namespace, node_id):
-            with _temporary_namespace(self.engines.conversation, namespace):
+        with _artifact_lock(self.engines, namespace, node_id), _temporary_namespace(self.engines.conversation, namespace):
                 if self.engines.conversation.read.get_nodes(ids=[node_id], limit=1):
                     return False
                 span = Span.from_dummy_for_conversation(f"workbench:{interaction_id}")
@@ -300,7 +299,7 @@ class CodexWorkbenchWorker:
         self.trace_sink = trace_sink
         self.store = WorkbenchInteractionStore(engines)
 
-    def clone(self, suffix: str) -> "CodexWorkbenchWorker":
+    def clone(self, suffix: str) -> CodexWorkbenchWorker:
         return CodexWorkbenchWorker(
             self.engines,
             execute_turn=self.execute_turn,
@@ -358,7 +357,7 @@ class CodexWorkbenchWorker:
             acknowledged = self.engines.conversation.jobs.mark_done(job.job_id, claim_token=job.claim_token)
             event = "codex_turn_completed" if acknowledged and created else "codex_turn_duplicate_result_ignored"
             self._trace(event, job_id=job.job_id, interaction_id=interaction.interaction_id)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - durable worker reports and retries all handler failures
             final_failure = int(job.retry_count) + 1 >= int(job.max_retries)
             owns_claim = not claim_lost.is_set() and self.engines.conversation.jobs.renew_lease(
                 job,

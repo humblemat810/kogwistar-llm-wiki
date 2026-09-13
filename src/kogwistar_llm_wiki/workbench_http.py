@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-import os
-
 from .agent_gateway import AgentGateway, _jsonrpc_result
+from .identity import (
+    IdentityError,
+    auth_mode,
+    authenticate_bearer,
+    authorize,
+    claims_context,
+)
 from .workbench_api import WorkbenchApi
-from .identity import IdentityError, auth_mode, authorize, authenticate_bearer, claims_context
 
 API_VERSION = "v1"
 CAPABILITIES_SCHEMA_VERSION = "1"
@@ -30,7 +35,7 @@ def build_workbench_handler(
     # fails before the REST listener accepts requests.
     selected_auth_mode = auth_mode()
     class Handler(BaseHTTPRequestHandler):
-        def handle_one_request(self) -> None:  # noqa: N802
+        def handle_one_request(self) -> None:
             """Trace transport requests in addition to gateway operations."""
             path = getattr(self, "path", "").split("?", 1)[0]
             with gateway.telemetry.span(
@@ -42,7 +47,7 @@ def build_workbench_handler(
             ):
                 super().handle_one_request()
 
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
             try:
@@ -147,7 +152,7 @@ def build_workbench_handler(
                 return
             self._write_json(body)
 
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
             if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
@@ -157,7 +162,7 @@ def build_workbench_handler(
                 size = int(self.headers.get("content-length", "0"))
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
-                    raise ValueError("request body must be a JSON object")
+                    raise ValueError("request body must be a JSON object")  # noqa: TRY004
                 workspace_id = _payload_workspace(payload)
                 if selected_auth_mode == "kogwistar_jwt" and workspace_id is None:
                     raise IdentityError("workspace_id is required when JWT authorization is enabled", status=400)
@@ -417,7 +422,7 @@ def _payload_workspace(payload: dict[str, object]) -> str | None:
 def _sse_bytes(event: str, body: object) -> bytes:
     return (
         f"event: {event}\ndata: {json.dumps(body, sort_keys=True, default=str)}\n\n"
-    ).encode("utf-8")
+    ).encode()
 
 
 def _agent_card(

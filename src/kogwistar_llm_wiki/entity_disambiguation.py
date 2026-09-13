@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 from kogwistar.id_provider import stable_id
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .maintenance_patches import (
     MaintenanceIntent,
@@ -77,7 +76,7 @@ class DisambiguationCandidate(BaseModel):
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_candidate(self) -> "DisambiguationCandidate":
+    def _validate_candidate(self) -> DisambiguationCandidate:
         entity_ids = tuple(str(entity_id).strip() for entity_id in self.entity_ids if str(entity_id).strip())
         if len(entity_ids) < 2:
             raise ValueError("disambiguation candidate requires at least two entity_ids")
@@ -116,7 +115,7 @@ class DisambiguationEvidenceUpdate(BaseModel):
     challenge_reason: str | None = None
 
     @model_validator(mode="after")
-    def _validate_resolution_flags(self) -> "DisambiguationEvidenceUpdate":
+    def _validate_resolution_flags(self) -> DisambiguationEvidenceUpdate:
         if self.resolves_equivalence and self.resolves_distinction:
             raise ValueError("an evidence update cannot resolve equivalence and distinction at the same time")
         if self.user_decision is not None and self.policy_decision is not None:

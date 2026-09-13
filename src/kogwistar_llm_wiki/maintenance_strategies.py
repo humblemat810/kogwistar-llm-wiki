@@ -50,7 +50,7 @@ class MaintenanceStrategyRegistry:
     def __init__(self, strategies: list[MaintenanceStrategy] | None = None) -> None:
         self._strategies = list(strategies or [])
 
-    def register(self, strategy: MaintenanceStrategy) -> "MaintenanceStrategyRegistry":
+    def register(self, strategy: MaintenanceStrategy) -> MaintenanceStrategyRegistry:
         self._strategies.append(strategy)
         return self
 
