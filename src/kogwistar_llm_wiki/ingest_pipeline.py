@@ -68,6 +68,7 @@ from .investigation_history import (
 )
 from .longrun_parser_worker import run_workflow_layered_parse
 from .maintenance_context import bound_maintenance_context, maintenance_execution_active
+from .maintenance_control import configured_default_request_max_rounds
 from .maintenance_guards import (
     SourceRevision,
     build_source_revision,
@@ -1921,6 +1922,9 @@ class IngestPipeline:
                 "follow-up phases must reuse the current leased job"
             )
         maintenance_kind = str(maintenance_kind or self._maintenance_kind_for_operation_mode(self._operation_mode(request)))
+        effective_max_rounds = (
+            configured_default_request_max_rounds() if max_rounds is None else max(0, int(max_rounds))
+        )
         seed_node_ids = [str(value) for value in (seed_node_ids or [source_document_id]) if str(value).strip()]
         topic = str(topic or "").strip() or None
         revision = self.source_revision(request=request, source_document_id=source_document_id)
@@ -1979,7 +1983,7 @@ class IngestPipeline:
                     "selection_strategy": "connected_semantic_evidence_history",
                     "seed_node_ids": seed_node_ids,
                     "maintenance_context": _metadata_digest_value(bound_maintenance_context(maintenance_context)),
-                    "maintenance_max_rounds": max(0, int(max_rounds or 0)),
+                    "maintenance_max_rounds": effective_max_rounds,
                     "request_fingerprint": request_fingerprint,
                     "budgets": _metadata_digest_value(dict(budgets or {})),
                 },
@@ -2032,7 +2036,7 @@ class IngestPipeline:
                     "selection_strategy": "connected_semantic_evidence_history",
                     "seed_node_ids": seed_node_ids,
                     "maintenance_context": bound_maintenance_context(maintenance_context),
-                    "maintenance_max_rounds": max(0, int(max_rounds or 0)),
+                    "maintenance_max_rounds": effective_max_rounds,
                     "request_fingerprint": request_fingerprint,
                     "budgets": dict(budgets or {}),
                 },
@@ -2071,7 +2075,7 @@ class IngestPipeline:
                 topic=topic,
                 seed_node_ids=seed_node_ids,
                 maintenance_context=maintenance_context,
-                max_rounds=max_rounds,
+                max_rounds=effective_max_rounds,
             )
         self._trace_step(
             "create_maintenance_request_complete",
@@ -2549,6 +2553,9 @@ class IngestPipeline:
                 "maintenance execution cannot enqueue a new maintenance job; "
                 "follow-up phases must reuse the current leased job"
             )
+        effective_max_rounds = (
+            configured_default_request_max_rounds() if max_rounds is None else max(0, int(max_rounds))
+        )
         payload = {
             "workspace_id": request.workspace_id,
             "request_node_id": request_node_id,
@@ -2560,7 +2567,7 @@ class IngestPipeline:
             "seed_node_ids": [str(value) for value in (seed_node_ids or [source_document_id]) if str(value).strip()],
             "maintenance_context": bound_maintenance_context(maintenance_context),
             "maintenance_round": 0,
-            "maintenance_max_rounds": max(0, int(max_rounds or 0)),
+            "maintenance_max_rounds": effective_max_rounds,
             "lane_message_id": lane_message_id,
             "source_revision_id": source_revision_id,
             "source_digest": source_digest,
@@ -2574,7 +2581,7 @@ class IngestPipeline:
                     "maintenance_plan": list(DEFAULT_DOCUMENT_MAINTENANCE_PLAN),
                     "maintenance_phase_index": 0,
                     "maintenance_round": 0,
-                    "maintenance_max_rounds": max(0, int(max_rounds or 0)),
+                    "maintenance_max_rounds": effective_max_rounds,
                 }
             )
         job_id = request_node_id

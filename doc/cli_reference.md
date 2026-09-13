@@ -183,6 +183,7 @@ python -m kogwistar_llm_wiki --help
 | `KOGWISTAR_MAINTENANCE_MODEL` | daemon maintenance | Explicit maintenance model or Azure deployment name |
 | `KOGWISTAR_MAINTENANCE_BASE_URL` | daemon maintenance | Maintenance endpoint URL |
 | `KOGWISTAR_MAINTENANCE_API_KEY_ENV` | daemon maintenance | Env var name that holds the maintenance API key |
+| `LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS` | maintenance requests | Default maximum rounds per request when `max_rounds` is omitted; defaults to `2`, valid range `1`-`100` |
 | `PYTHONPATH` | dev | Ensure `src/` is importable without install |
 
 `demo` and `ingest` also accept `--parser-lane page_index|workflow_layered`. Use
