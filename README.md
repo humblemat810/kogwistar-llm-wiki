@@ -116,20 +116,20 @@ For prebuilt public images and the release workflow, see
 ### Use a published application image
 
 The GitHub repository includes the Compose files, but it does not require a
-local application build. For release `v0.3.3`, pull the published Torch-free
+local application build. For release `v0.3.4`, pull the published Torch-free
 LLM-Wiki image and point both application services at it:
 
 ```bash
-docker pull profchan/kogwistar-llm-wiki:v0.3.3
-LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.3.3 \
+docker pull profchan/kogwistar-llm-wiki:v0.3.4
+LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.3.4 \
   docker compose up -d
 ```
 
 PowerShell:
 
 ```powershell
-docker pull profchan/kogwistar-llm-wiki:v0.3.3
-$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.3.3"
+docker pull profchan/kogwistar-llm-wiki:v0.3.4
+$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.3.4"
 docker compose up -d
 ```
 
@@ -144,6 +144,29 @@ Application releases publish only the Torch-free `profchan/kogwistar-llm-wiki`
 image. CPU and CUDA embedding images are published independently after their
 own runtime checks; see [`doc/docker_hub_publishing.md`](doc/docker_hub_publishing.md)
 for the explicit targets and commands.
+
+### Codex project memory
+
+LLM-Wiki provides bounded, evidence-backed project memory through its existing
+MCP gateway. Use one isolated workspace per project and run the helper to
+validate the backend, create the app-owned project binding, and print safe
+client instructions:
+
+```bash
+python -m kogwistar_llm_wiki \
+  --data-dir ./data \
+  --backend postgres \
+  --dsn "$KOGWISTAR_POSTGRES_DSN" \
+  codex-memory --workspace my-project --project-root .
+```
+
+Memory capture is disabled by default. Enable it explicitly with
+`LLM_WIKI_CODEX_MEMORY_ENABLED=true`; `memory_recall` and `memory_review` stay
+read-only. Records require bounded repository or source-span evidence, reject
+secrets and host paths, and never retain raw transcripts. Canonical graph
+changes still require the existing `propose` and `confirm` flow. See
+[`integrations/codex_integration.md`](integrations/codex_integration.md) for
+MCP setup and the complete safety contract.
 
 If you use VS Code, the launch presets already read `.env` and only prompt for
 the parser lane:

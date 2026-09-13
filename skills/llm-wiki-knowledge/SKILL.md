@@ -15,13 +15,21 @@ a conversation.
 2. Use `ingest`, `source`, and `reingest` for canonical source lifecycle.
 3. Use `maintain` for directed work and `status` for health and progress.
 4. Use `hypergraph_search` for bounded structural inspection and `history` for prior context.
-5. Inspect nodes, edges, hyperedges, grounding, source watermark, and citations.
-6. Validate a proposed graph edit against the current lens and evidence.
-7. Apply a change only after explicit confirmation.
+5. Before relevant project planning, debugging, design, or continuation work,
+   call `memory_recall`; skip it for unrelated trivial tasks.
+6. Inspect nodes, edges, hyperedges, grounding, source watermark, and citations.
+7. Capture only durable project facts with `memory_capture` when the operator has
+   enabled it. Every record needs bounded evidence and must label `verified` or
+   `inferred` confidence.
+8. Use `memory_review` when current evidence conflicts with prior memory; treat
+   superseded or inferred records as context, not unquestionable truth.
+9. Validate a proposed graph edit against the current lens and evidence.
+10. Apply a canonical change only after explicit confirmation.
 
 `no_change` is a successful result. Never invent a node, edge, evidence ID,
 source span, revision, or confidence value. If evidence is insufficient, say
-so and ask for more grounded input.
+so and ask for more grounded input. Do not capture secrets, tokens, private
+keys, raw transcripts, host filesystem paths, or unbounded tool output.
 
 ## Safety
 

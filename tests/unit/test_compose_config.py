@@ -22,6 +22,8 @@ def test_gpu_bundle_is_complete_without_secrets() -> None:
     assert "mock-oauth2-server" in text
     assert "${POSTGRES_PASSWORD" in text
     assert "change-this-development-password" not in text
+    assert "app-data-init:" in text
+    assert "service_completed_successfully" in text
 
 
 def test_gpu_auto_selects_vllm_and_cpu_keeps_reference_service() -> None:
@@ -36,6 +38,9 @@ def test_gpu_auto_selects_vllm_and_cpu_keeps_reference_service() -> None:
     assert "--max-model-len" in gpu
     assert "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET" in gpu
     assert "--enforce-eager" in gpu
+    assert "LLM_WIKI_POSTGRES_MEMORY_LIMIT" in gpu
+    assert "LLM_WIKI_APP_CPU_LIMIT" in gpu
+    assert "LLM_WIKI_EMBEDDING_MEMORY_LIMIT" in gpu
 
 
 def test_compose_context_knobs_reject_invalid_budget() -> None:
@@ -137,3 +142,17 @@ def test_vllm_overlay_is_gpu_only_and_requires_pinned_identity() -> None:
     assert "driver: nvidia" in text
     assert "expose:" in text
     assert "ports:" not in text
+    assert "mem_limit:" in text
+    assert "cpus:" in text
+
+
+def test_generated_stack_exposes_tunable_resource_limits() -> None:
+    text = render_compose(ComposeOptions(model_revision="abc123", with_otel=True, with_oauth=True))
+    for name in (
+        "LLM_WIKI_POSTGRES_MEMORY_LIMIT",
+        "LLM_WIKI_APP_MEMORY_LIMIT",
+        "LLM_WIKI_EMBEDDING_MEMORY_LIMIT",
+        "LLM_WIKI_GRAFANA_MEMORY_LIMIT",
+        "LLM_WIKI_OAUTH_MEMORY_LIMIT",
+    ):
+        assert name in text

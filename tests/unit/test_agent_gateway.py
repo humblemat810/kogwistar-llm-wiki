@@ -8,12 +8,15 @@ from threading import Thread
 from types import SimpleNamespace
 
 import pytest
+from fastmcp.server.auth import AccessToken, AuthContext, run_auth_checks
 from jose import jwt
 
-from fastmcp.server.auth import AccessToken, AuthContext, run_auth_checks
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
 from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
-from kogwistar_llm_wiki.workbench_http import _payload_workspace, build_workbench_handler
+from kogwistar_llm_wiki.workbench_http import (
+    _payload_workspace,
+    build_workbench_handler,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +87,20 @@ def test_gateway_dispatches_query_history_and_controlled_mutation_tools():
     assert confirmation["status"] == "rejected"
 
 
+def test_gateway_memory_capture_accepts_records_when_optional_record_is_null():
+    captured: dict[str, object] = {}
+
+    class MemoryApi(FakeApi):
+        def capture_memory(self, payload):
+            captured["payload"] = payload
+            return {"status": "captured"}
+
+    gateway = AgentGateway(MemoryApi())
+    records = [{"workspace_id": "w", "statement": "fact"}]
+    assert gateway.memory_capture({"record": None, "records": records}) == {"status": "captured"}
+    assert captured["payload"] == records
+
+
 def test_agent_protocol_routes_are_opt_in(monkeypatch):
     monkeypatch.delenv("LLM_WIKI_AGENT_API_ENABLED", raising=False)
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(FakeApi()))
@@ -120,7 +137,8 @@ def test_public_discovery_and_readiness_endpoints(monkeypatch):
         assert capabilities["protocols"]["mcp"] is True
         assert capabilities["mcp_tools"] == [
             "query", "search", "ingest", "source", "reingest", "maintain",
-            "status", "hypergraph_search", "history", "propose", "confirm",
+            "status", "hypergraph_search", "history", "memory_recall",
+            "memory_capture", "memory_review", "propose", "confirm",
         ]
     finally:
         server.shutdown()
@@ -286,7 +304,8 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     tools = asyncio.run(mcp.list_tools())
     assert [tool.name for tool in tools] == [
         "query", "search", "ingest", "source", "reingest", "maintain",
-        "status", "hypergraph_search", "history", "propose", "confirm",
+        "status", "hypergraph_search", "history", "memory_recall",
+        "memory_capture", "memory_review", "propose", "confirm",
     ]
     assert all(tool.description for tool in tools)
     query = next(tool for tool in tools if tool.name == "query")
@@ -342,7 +361,8 @@ def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):
         assert response.status == 200
         assert {tool["name"] for tool in json.loads(response.read())["tools"]} == {
             "query", "search", "ingest", "source", "reingest", "maintain",
-            "status", "hypergraph_search", "history", "propose", "confirm",
+            "status", "hypergraph_search", "history", "memory_recall",
+            "memory_capture", "memory_review", "propose", "confirm",
         }
 
         encoded = json.dumps({"message": {"parts": [{"text": "hello"}]}, "workspace_id": "w", "background": False}).encode()
