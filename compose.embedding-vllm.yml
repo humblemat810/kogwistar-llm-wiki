@@ -7,6 +7,9 @@
 services:
   embedding:
     image: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE to a pinned vllm/vllm-openai@sha256 digest}
+    # Host RAM/CPU, not GPU VRAM. vLLM needs room while loading weights.
+    mem_limit: ${LLM_WIKI_EMBEDDING_MEMORY_LIMIT:-8g}
+    cpus: ${LLM_WIKI_EMBEDDING_CPU_LIMIT:-2.0}
     command:
       - ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
       - --served-model-name

@@ -3,6 +3,8 @@ name: ${COMPOSE_PROJECT_NAME:-llm-wiki}
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    mem_limit: ${LLM_WIKI_POSTGRES_MEMORY_LIMIT:-512m}
+    cpus: ${LLM_WIKI_POSTGRES_CPU_LIMIT:-0.15}
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-llm_wiki}
       POSTGRES_USER: ${POSTGRES_USER:-llm_wiki}
@@ -16,18 +18,45 @@ services:
       timeout: 5s
       retries: 12
 
+  app-data-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mkdir -p /var/lib/llm-wiki/conversation /var/lib/llm-wiki/knowledge
+        /var/lib/llm-wiki/wisdom /var/lib/llm-wiki/workflow
+        /var/lib/llm-wiki/logs /var/lib/llm-wiki/parser-cache
+        /var/lib/llm-wiki/kogwistar-cache &&
+        chown 10001:10001 /var/lib/llm-wiki
+        /var/lib/llm-wiki/conversation /var/lib/llm-wiki/knowledge
+        /var/lib/llm-wiki/wisdom /var/lib/llm-wiki/workflow
+        /var/lib/llm-wiki/logs /var/lib/llm-wiki/parser-cache
+        /var/lib/llm-wiki/kogwistar-cache
+    volumes:
+      - app_data:/var/lib/llm-wiki
+    restart: "no"
+
   rest:
     build:
       context: .
       dockerfile: Dockerfile
     image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    mem_limit: ${LLM_WIKI_REST_MEMORY_LIMIT:-384m}
+    cpus: ${LLM_WIKI_REST_CPU_LIMIT:-0.15}
     depends_on:
       postgres:
         condition: service_healthy
+      app-data-init:
+        condition: service_completed_successfully
     environment: &app_environment
       KOGWISTAR_DATA_DIR: /var/lib/llm-wiki
       KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://${POSTGRES_USER:-llm_wiki}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}@postgres:5432/${POSTGRES_DB:-llm_wiki}
       LLM_WIKI_AGENT_API_ENABLED: ${LLM_WIKI_AGENT_API_ENABLED:-false}
+      LLM_WIKI_CODEX_MEMORY_ENABLED: ${LLM_WIKI_CODEX_MEMORY_ENABLED:-false}
       LLM_WIKI_AUTH_MODE: ${LLM_WIKI_AUTH_MODE:-}
       LLM_WIKI_AUTH_REQUIRED: ${LLM_WIKI_AUTH_REQUIRED:-false}
       LLM_WIKI_API_TOKEN: ${LLM_WIKI_API_TOKEN:-}
@@ -127,9 +156,13 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}
+    mem_limit: ${LLM_WIKI_MCP_MEMORY_LIMIT:-384m}
+    cpus: ${LLM_WIKI_MCP_CPU_LIMIT:-0.15}
     depends_on:
       postgres:
         condition: service_healthy
+      app-data-init:
+        condition: service_completed_successfully
     environment: *app_environment
     command:
       - llm-wiki

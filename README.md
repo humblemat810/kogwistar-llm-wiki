@@ -116,20 +116,20 @@ For prebuilt public images and the release workflow, see
 ### Use a published application image
 
 The GitHub repository includes the Compose files, but it does not require a
-local application build. For release `v0.3.3`, pull the published Torch-free
+local application build. For release `v0.3.4`, pull the published Torch-free
 LLM-Wiki image and point both application services at it:
 
 ```bash
-docker pull profchan/kogwistar-llm-wiki:v0.3.3
-LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.3.3 \
+docker pull profchan/kogwistar-llm-wiki:v0.3.4
+LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.3.4 \
   docker compose up -d
 ```
 
 PowerShell:
 
 ```powershell
-docker pull profchan/kogwistar-llm-wiki:v0.3.3
-$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.3.3"
+docker pull profchan/kogwistar-llm-wiki:v0.3.4
+$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.3.4"
 docker compose up -d
 ```
 

@@ -43,6 +43,8 @@ services:
   # Replace this with a separately managed collector/Grafana stack in prod.
   grafana:
     image: grafana/otel-lgtm:latest
+    mem_limit: ${LLM_WIKI_GRAFANA_MEMORY_LIMIT:-512m}
+    cpus: ${LLM_WIKI_GRAFANA_CPU_LIMIT:-0.15}
     ports:
       - "127.0.0.1:${LLM_WIKI_GRAFANA_PORT:-3000}:3000"
     expose:
@@ -55,6 +57,8 @@ services:
   #
   # keycloak:
   #   image: quay.io/keycloak/keycloak:latest
+  #   mem_limit: ${LLM_WIKI_OAUTH_MEMORY_LIMIT:-256m}
+  #   cpus: ${LLM_WIKI_OAUTH_CPU_LIMIT:-0.10}
   #   command: start-dev
   #   environment:
   #     KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME}

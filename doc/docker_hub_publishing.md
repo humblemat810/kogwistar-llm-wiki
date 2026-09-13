@@ -92,22 +92,22 @@ reports the account from `docker info`, the namespace can be omitted:
 
 ```powershell
 docker login
-.\scripts\publish_docker_images.ps1 -Tag v0.3.3
+.\scripts\publish_docker_images.ps1 -Tag v0.3.4
 ```
 
 For a non-interactive shell, set the namespace explicitly:
 
 ```powershell
 $env:DOCKERHUB_USERNAME = 'profchan'
-.\scripts\publish_docker_images.ps1 -Tag v0.3.3
+.\scripts\publish_docker_images.ps1 -Tag v0.3.4
 ```
 
 The default target is `app`. Use explicit targets for the standalone images:
 
 ```powershell
-.\scripts\publish_docker_images.ps1 -Tag v0.3.3 -Target embedding-cpu
-.\scripts\publish_docker_images.ps1 -Tag v0.3.3 -Target embedding-cuda12.8
-.\scripts\publish_docker_images.ps1 -Tag v0.3.3 -Target all
+.\scripts\publish_docker_images.ps1 -Tag v0.3.4 -Target embedding-cpu
+.\scripts\publish_docker_images.ps1 -Tag v0.3.4 -Target embedding-cuda12.8
+.\scripts\publish_docker_images.ps1 -Tag v0.3.4 -Target all
 ```
 
 The Bash publisher uses the equivalent `--target` values. The legacy

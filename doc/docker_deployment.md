@@ -218,7 +218,7 @@ must not be combined with the vLLM overlay.
 Copy `.env.example` to `.env` and set at least:
 
 ```dotenv
-LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.3.3
+LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.3.4
 POSTGRES_PASSWORD=change-this-development-password
 LLM_WIKI_EMBEDDING_VLLM_IMAGE=vllm/vllm-openai@sha256:<pinned-64-hex-digest>
 LLM_WIKI_EMBEDDING_VLLM_TOKEN=change-me
@@ -245,6 +245,32 @@ eager execution, and one scheduled sequence. The crop budget leaves room for
 the instruction, image tokens, and scheduler overhead. On an 8 GiB GPU this
 profile may still require a lower memory utilization value or a smaller model
 length; vLLM must report healthy before it is used.
+
+### Per-container host resource limits
+
+The Compose files set explicit, tunable limits for each container. `mem_limit`
+controls host system RAM and `cpus` controls that container's CPU quota; neither
+is a total host-wide budget. The default base stack is approximately 1.75 GiB
+across PostgreSQL, REST, MCP, and Grafana:
+
+```dotenv
+LLM_WIKI_POSTGRES_MEMORY_LIMIT=512m
+LLM_WIKI_POSTGRES_CPU_LIMIT=0.15
+LLM_WIKI_REST_MEMORY_LIMIT=384m
+LLM_WIKI_REST_CPU_LIMIT=0.15
+LLM_WIKI_MCP_MEMORY_LIMIT=384m
+LLM_WIKI_MCP_CPU_LIMIT=0.15
+LLM_WIKI_GRAFANA_MEMORY_LIMIT=512m
+LLM_WIKI_GRAFANA_CPU_LIMIT=0.15
+```
+
+The generated single-application stack uses `LLM_WIKI_APP_MEMORY_LIMIT` and
+`LLM_WIKI_APP_CPU_LIMIT` for its REST and MCP services. The vLLM sidecar has a
+separate default of `8g` host RAM and `2.0` CPUs because model loading can need
+several GiB even when inference weights are primarily in GPU memory. Do not
+force it to a 2 GiB limit unless a smaller model/profile has been tested.
+GPU VRAM remains controlled by `LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION` and
+the Docker Desktop or host GPU runtime, not by `mem_limit`.
 
 #### Long-context eager-mode experiment
 

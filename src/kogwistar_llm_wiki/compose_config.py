@@ -7,9 +7,9 @@ are a small, reproducible starting point for the common stack.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 
 class ComposeConfigurationError(ValueError):
@@ -102,6 +102,8 @@ def render_compose(options: ComposeOptions) -> str:
         "services:",
         "  postgres:",
         "    image: pgvector/pgvector:pg17",
+        "    mem_limit: ${LLM_WIKI_POSTGRES_MEMORY_LIMIT:-512m}",
+        "    cpus: ${LLM_WIKI_POSTGRES_CPU_LIMIT:-0.15}",
         "    environment:",
         "      POSTGRES_DB: llm_wiki",
         "      POSTGRES_USER: llm_wiki",
@@ -113,13 +115,36 @@ def render_compose(options: ComposeOptions) -> str:
         "      interval: 5s",
         "      timeout: 5s",
         "      retries: 12",
+        "  app-data-init:",
+        "    build:",
+        "      context: .",
+        "      dockerfile: Dockerfile",
+        "    image: ${LLM_WIKI_IMAGE:-kogwistar-llm-wiki:local}",
+        "    user: \"0:0\"",
+        "    entrypoint: [/bin/sh, -c]",
+        "    command:",
+        "      - >-",
+        "        mkdir -p /var/lib/llm-wiki/conversation /var/lib/llm-wiki/knowledge",
+        "        /var/lib/llm-wiki/wisdom /var/lib/llm-wiki/workflow",
+        "        /var/lib/llm-wiki/logs /var/lib/llm-wiki/parser-cache",
+        "        /var/lib/llm-wiki/kogwistar-cache && chown 10001:10001",
+        "        /var/lib/llm-wiki /var/lib/llm-wiki/conversation",
+        "        /var/lib/llm-wiki/knowledge /var/lib/llm-wiki/wisdom",
+        "        /var/lib/llm-wiki/workflow /var/lib/llm-wiki/logs",
+        "        /var/lib/llm-wiki/parser-cache /var/lib/llm-wiki/kogwistar-cache",
+        "    volumes: [app_data:/var/lib/llm-wiki]",
+        "    restart: \"no\"",
         "  llm-wiki:",
         "    build:",
         "      context: .",
         "      dockerfile: Dockerfile",
+        "    mem_limit: ${LLM_WIKI_APP_MEMORY_LIMIT:-384m}",
+        "    cpus: ${LLM_WIKI_APP_CPU_LIMIT:-0.15}",
         "    depends_on:",
         "      postgres:",
         "        condition: service_healthy",
+        "      app-data-init:",
+        "        condition: service_completed_successfully",
         "    environment:",
         "      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki",
         "      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki",
@@ -127,6 +152,7 @@ def render_compose(options: ComposeOptions) -> str:
         f"      LLM_WIKI_AUTH_MODE: \"{auth}\"",
         f"      LLM_WIKI_AUTH_REQUIRED: \"${{LLM_WIKI_AUTH_REQUIRED:-{'true' if options.auth_mode != 'disabled' else 'false'}}}\"",
         "      LLM_WIKI_API_TOKEN: \"${LLM_WIKI_API_TOKEN:-}\"",
+        "      LLM_WIKI_CODEX_MEMORY_ENABLED: \"${LLM_WIKI_CODEX_MEMORY_ENABLED:-false}\"",
         "      KOGWISTAR_PARSER_PROVIDER: ${KOGWISTAR_PARSER_PROVIDER:-ollama}",
         "      KOGWISTAR_PARSER_MODEL: ${KOGWISTAR_PARSER_MODEL:-gemma4:e2b}",
         "      KOGWISTAR_PARSER_BASE_URL: ${KOGWISTAR_PARSER_BASE_URL:-http://host.docker.internal:11434}",
@@ -158,9 +184,13 @@ def render_compose(options: ComposeOptions) -> str:
         "    build:",
         "      context: .",
         "      dockerfile: Dockerfile",
+        "    mem_limit: ${LLM_WIKI_APP_MEMORY_LIMIT:-384m}",
+        "    cpus: ${LLM_WIKI_APP_CPU_LIMIT:-0.15}",
         "    depends_on:",
         "      postgres:",
         "        condition: service_healthy",
+        "      app-data-init:",
+        "        condition: service_completed_successfully",
         "    environment:",
         "      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki",
         "      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki",
@@ -169,6 +199,7 @@ def render_compose(options: ComposeOptions) -> str:
         f"      LLM_WIKI_AUTH_MODE: \"{auth}\"",
         f"      LLM_WIKI_MCP_AUTH_REQUIRED: \"${{LLM_WIKI_MCP_AUTH_REQUIRED:-{'true' if options.auth_mode != 'disabled' else 'false'}}}\"",
         "      LLM_WIKI_MCP_TOKEN: \"${LLM_WIKI_MCP_TOKEN:-}\"",
+        "      LLM_WIKI_CODEX_MEMORY_ENABLED: \"${LLM_WIKI_CODEX_MEMORY_ENABLED:-false}\"",
         f"      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: \"${{LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-{options.embedding_max_model_len if embedding_url else ''}}}\"",
         f"      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: \"${{LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-{options.embedding_crop_token_budget if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_BACKEND: \"${{LLM_WIKI_MULTIMODAL_BACKEND:-{embedding_backend if embedding_url else 'none'}}}\"",
@@ -197,6 +228,8 @@ def render_compose(options: ComposeOptions) -> str:
             "    build:",
             "      context: .",
             "      dockerfile: Dockerfile.embedding-service",
+            "    mem_limit: ${LLM_WIKI_EMBEDDING_MEMORY_LIMIT:-2g}",
+            "    cpus: ${LLM_WIKI_EMBEDDING_CPU_LIMIT:-0.50}",
             f"      args: {{LLM_WIKI_EMBEDDING_TORCH_BACKEND: {'cu128' if options.mode == 'gpu' else 'cpu'}}}",
             "    environment:",
             "      LLM_WIKI_EMBEDDING_MODEL: Qwen/Qwen3-VL-Embedding-2B",
@@ -218,6 +251,8 @@ def render_compose(options: ComposeOptions) -> str:
         lines.extend([
             "  embedding:",
             "    image: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE to a pinned vllm/vllm-openai@sha256 digest}",
+            "    mem_limit: ${LLM_WIKI_EMBEDDING_MEMORY_LIMIT:-8g}",
+            "    cpus: ${LLM_WIKI_EMBEDDING_CPU_LIMIT:-2.0}",
             "    command:",
             "      - vllm",
             "      - serve",
@@ -270,6 +305,8 @@ def render_compose(options: ComposeOptions) -> str:
         lines.extend([
             "  grafana:",
             "    image: grafana/otel-lgtm:latest",
+            "    mem_limit: ${LLM_WIKI_GRAFANA_MEMORY_LIMIT:-512m}",
+            "    cpus: ${LLM_WIKI_GRAFANA_CPU_LIMIT:-0.15}",
             "    ports: ['127.0.0.1:${GRAFANA_PORT:-3000}:3000']",
         ])
     if options.with_oauth:
@@ -277,6 +314,8 @@ def render_compose(options: ComposeOptions) -> str:
             "  # Optional OAuth/OIDC provider; configure issuer and client secrets externally.",
             "  oauth:",
             "    image: ghcr.io/navikt/mock-oauth2-server:2.2.1",
+            "    mem_limit: ${LLM_WIKI_OAUTH_MEMORY_LIMIT:-256m}",
+            "    cpus: ${LLM_WIKI_OAUTH_CPU_LIMIT:-0.10}",
             "    profiles: [oauth]",
             "    expose: ['8080']",
         ])
