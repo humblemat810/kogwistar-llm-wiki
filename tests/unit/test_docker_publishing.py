@@ -42,7 +42,7 @@ def test_local_publishers_default_to_application_and_offer_explicit_targets() ->
 def test_release_verifier_matches_package_version_and_rejects_mismatch() -> None:
     script = ROOT / "scripts" / "verify_release_version.py"
     matching = subprocess.run(
-        [sys.executable, str(script), "--tag", "v0.3.4"],
+        [sys.executable, str(script), "--tag", "v0.3.5"],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -75,7 +75,7 @@ def test_release_publishers_reject_reuse_and_align_github_tag_names() -> None:
     assert "Reject an existing release tag" in workflow
 
 
-def test_main_image_publishes_only_after_successful_ci_to_secondary_namespace() -> None:
+def test_main_image_publishes_only_after_successful_ci_to_configured_namespace() -> None:
     workflow = (ROOT / ".github" / "workflows" / "publish-dockerhub-main.yml").read_text(
         encoding="utf-8"
     )
@@ -84,8 +84,9 @@ def test_main_image_publishes_only_after_successful_ci_to_secondary_namespace() 
     assert "types: [completed]" in workflow
     assert "github.event.workflow_run.conclusion == 'success'" in workflow
     assert "github.event.workflow_run.head_sha" in workflow
-    assert "DOCKERHUB_SECONDARY_USERNAME" in workflow
-    assert "DOCKERHUB_SECONDARY_TOKEN" in workflow
+    assert "DOCKERHUB_USERNAME" in workflow
+    assert "DOCKERHUB_TOKEN" in workflow
+    assert "DOCKERHUB_SECONDARY_" not in workflow
     assert "type=raw,value=main" in workflow
     assert "type=raw,value=sha-${{ github.event.workflow_run.head_sha }}" in workflow
     assert "Dockerfile.embedding-service" not in workflow

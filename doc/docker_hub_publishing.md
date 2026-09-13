@@ -26,25 +26,24 @@ checkpoint. Mount or configure the Hugging Face cache and set an immutable
 
 The workflows never store either value in the repository or image labels.
 
-To publish successful `main` builds to a second Docker Hub account, add the
-repository secrets `DOCKERHUB_SECONDARY_USERNAME` and
-`DOCKERHUB_SECONDARY_TOKEN`. The `publish-dockerhub-main.yml` workflow runs
-only after the `CI` workflow succeeds on `main`, checks out that exact tested
-commit, and publishes `main` plus a commit-specific `sha-...` tag. It does not
-publish release tags or embedding images.
+The `publish-dockerhub-main.yml` workflow uses the same repository secrets,
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, only after the `CI` workflow
+succeeds on `main`. It checks out that exact tested commit and publishes
+`main` plus a commit-specific `sha-...` tag. It does not publish release tags
+or embedding images.
 
 ## Publish An Application Release
 
 The application package version and release tag must match exactly. For
-example, `pyproject.toml` version `0.3.4` is published as `v0.3.4`; do not
+example, `pyproject.toml` version `0.3.5` is published as `v0.3.5`; do not
 reuse an existing version tag. The local publishers and GitHub Actions verify
 the package version and reject an existing release tag by default.
 
 From PowerShell:
 
 ```powershell
-git tag v0.3.4
-git push origin v0.3.4
+git tag v0.3.5
+git push origin v0.3.5
 ```
 
 The tag publishes only the Torch-free application image. It receives the
@@ -92,7 +91,7 @@ reports the account from `docker info`, the namespace can be omitted:
 
 ```powershell
 docker login
-.\scripts\publish_docker_images.ps1 -Tag v0.3.4
+.\scripts\publish_docker_images.ps1 -Tag v0.3.5
 ```
 
 For a non-interactive shell, set the namespace explicitly:
@@ -105,9 +104,9 @@ $env:DOCKERHUB_USERNAME = 'profchan'
 The default target is `app`. Use explicit targets for the standalone images:
 
 ```powershell
-.\scripts\publish_docker_images.ps1 -Tag v0.3.4 -Target embedding-cpu
-.\scripts\publish_docker_images.ps1 -Tag v0.3.4 -Target embedding-cuda12.8
-.\scripts\publish_docker_images.ps1 -Tag v0.3.4 -Target all
+.\scripts\publish_docker_images.ps1 -Tag v0.3.5 -Target embedding-cpu
+.\scripts\publish_docker_images.ps1 -Tag v0.3.5 -Target embedding-cuda12.8
+.\scripts\publish_docker_images.ps1 -Tag v0.3.5 -Target all
 ```
 
 The Bash publisher uses the equivalent `--target` values. The legacy

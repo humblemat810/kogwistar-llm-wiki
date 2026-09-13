@@ -51,24 +51,24 @@ jobs:
           test -f kogwistar/pyproject.toml
           test -f kg-doc-parser/pyproject.toml
           test -f kogwistar-obsidian-sink/pyproject.toml
-      - name: Verify secondary Docker Hub namespace
+      - name: Verify Docker Hub namespace
         shell: bash
         env:
-          DOCKERHUB_SECONDARY_USERNAME: ${{ secrets.DOCKERHUB_SECONDARY_USERNAME }}
-          DOCKERHUB_SECONDARY_TOKEN: ${{ secrets.DOCKERHUB_SECONDARY_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$DOCKERHUB_SECONDARY_USERNAME"
-          test -n "$DOCKERHUB_SECONDARY_TOKEN"
+          test -n "$DOCKERHUB_USERNAME"
+          test -n "$DOCKERHUB_TOKEN"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_SECONDARY_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_SECONDARY_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: docker.io/${{ secrets.DOCKERHUB_SECONDARY_USERNAME }}/kogwistar-llm-wiki
+          images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki
           tags: |
             type=raw,value=main
             type=raw,value=sha-${{ github.event.workflow_run.head_sha }}
