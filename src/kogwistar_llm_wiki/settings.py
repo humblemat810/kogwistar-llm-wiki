@@ -36,6 +36,7 @@ _DESIRED_KEYS = frozenset({
     "maintenance_model",
     "parser_provider",
     "maintenance_provider",
+    "maintenance_provider_chain",
     "parser_base_url",
     "maintenance_base_url",
     "embedding_max_model_len",
@@ -46,7 +47,7 @@ _DESIRED_KEYS = frozenset({
     "maintenance_default_request_max_rounds",
 })
 _SECRET_WORDS = ("token", "secret", "password", "api_key", "credential")
-_WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router"})
+_WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router", "codex"})
 
 
 def _redact(value: object) -> object:
@@ -151,7 +152,14 @@ class SettingsService:
             "backend": self._backend_name(),
             "data_dir": os.getenv("KOGWISTAR_DATA_DIR"),
             "parser": {"provider": parser.provider, "model": parser.model, "base_url": _safe_endpoint(parser.base_url or ""), "temperature": parser.temperature},
-            "maintenance": {"provider": maintenance.provider, "model": maintenance.model, "base_url": _safe_endpoint(maintenance.base_url or ""), "temperature": maintenance.temperature, "default_request_max_rounds": configured_default_request_max_rounds()},
+            "maintenance": {
+                "provider": maintenance.provider,
+                "provider_chain": [maintenance.provider, *[item.provider for item in getattr(maintenance, "fallback_specs", [])]],
+                "model": maintenance.model,
+                "base_url": _safe_endpoint(maintenance.base_url or ""),
+                "temperature": maintenance.temperature,
+                "default_request_max_rounds": configured_default_request_max_rounds(),
+            },
             "embeddings": self._effective_embeddings(),
             "multimodal": {
                 "enabled": multimodal_enabled,
@@ -254,7 +262,11 @@ class SettingsService:
             raise ValueError("embedding_crop_token_budget cannot exceed embedding_max_model_len")
         for key in ("parser_provider", "maintenance_provider"):
             if key in next_desired and str(next_desired[key]).strip().lower() not in _WORKER_PROVIDERS:
-                raise ValueError(f"{key} must be a configured structured provider or router; Codex cockpit is workbench-only")
+                raise ValueError(f"{key} must be a configured structured provider or router")
+        if "maintenance_provider_chain" in next_desired:
+            names = [part.strip().lower() for part in str(next_desired["maintenance_provider_chain"]).split(",") if part.strip()]
+            if not names or any(name not in _WORKER_PROVIDERS for name in names):
+                raise ValueError("maintenance_provider_chain must contain configured structured providers")
         self._save_desired(next_desired)
         return self.snapshot(workspace_id=workspace_id)
 
@@ -316,7 +328,7 @@ class SettingsService:
 
     @staticmethod
     def _impact(effective: Mapping[str, object], desired: Mapping[str, object]) -> dict[str, object]:
-        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget", "maintenance_default_request_max_rounds"}
+        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "maintenance_provider_chain", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget", "maintenance_default_request_max_rounds"}
         parser = effective.get("parser", {})
         maintenance = effective.get("maintenance", {})
         effective_values = {
@@ -325,6 +337,7 @@ class SettingsService:
             "parser_base_url": parser.get("base_url") if isinstance(parser, Mapping) else None,
             "maintenance_model": maintenance.get("model") if isinstance(maintenance, Mapping) else None,
             "maintenance_provider": maintenance.get("provider") if isinstance(maintenance, Mapping) else None,
+            "maintenance_provider_chain": maintenance.get("provider_chain") if isinstance(maintenance, Mapping) else None,
             "maintenance_base_url": maintenance.get("base_url") if isinstance(maintenance, Mapping) else None,
             "auth_mode": effective.get("auth_mode"),
             "otel_enabled": effective.get("otel", {}).get("enabled") if isinstance(effective.get("otel"), Mapping) else None,

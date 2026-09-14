@@ -46,7 +46,7 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -706,12 +706,29 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
             "cockpit": cockpit_summary,
         }
         print(json.dumps(result, indent=2, sort_keys=True))
+
+
         if exported != bundle:
             raise RuntimeError("persisted seed bundle failed canonical round-trip integrity")
     finally:
         if api is not None:
             api.close()
         _close_engines(engines)
+
+
+def _cmd_codex_bridge(args: argparse.Namespace) -> None:
+    """Run the user-scoped bridge used by Docker maintenance workers."""
+    from .codex_bridge import bridge_settings_from_environment, serve_codex_bridge
+
+    token = os.environ.get(args.token_env, "")
+    if not token:
+        raise SystemExit(f"set {args.token_env} before starting the Codex bridge")
+    settings = bridge_settings_from_environment()
+    if args.codex_executable:
+        settings = replace(settings, executable=args.codex_executable)
+    if args.codex_model:
+        settings = replace(settings, model=args.codex_model)
+    serve_codex_bridge(host=args.host, port=args.port, token=token, settings=settings)
 
 
 def _cmd_archive_create(args: argparse.Namespace) -> None:
@@ -1268,6 +1285,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Validate without creating a missing project binding",
     )
     codex_memory_p.set_defaults(func=_cmd_codex_memory)
+
+    bridge_p = sub.add_parser(
+        "codex-bridge",
+        help="Serve a bounded, user-scoped Codex bridge for Docker maintenance",
+    )
+    bridge_p.add_argument("--host", default="0.0.0.0", help="Bind address; use 0.0.0.0 for Docker Desktop reachability")
+    bridge_p.add_argument("--port", type=int, default=8791, help="Bridge port")
+    bridge_p.add_argument("--token-env", default="LLM_WIKI_CODEX_BRIDGE_TOKEN", help="Environment variable containing the bridge token")
+    bridge_p.add_argument("--codex-executable", default=None, help="Optional Codex executable override")
+    bridge_p.add_argument("--codex-model", default=None, help="Optional Codex model override")
+    bridge_p.set_defaults(func=_cmd_codex_bridge)
 
     compose_p = sub.add_parser("compose", help="Generate or validate a safe Docker Compose bundle")
     compose_sub = compose_p.add_subparsers(dest="compose_command", required=True)

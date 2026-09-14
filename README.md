@@ -36,6 +36,22 @@ desired state and updates a running daemon immediately:
 docker exec llm-wiki-memory-maintenance-1 llm-wiki --data-dir /var/lib/llm-wiki daemon maintenance-control --request-enabled true --background-enabled false
 ```
 
+### Optional Codex maintenance provider
+
+The maintenance daemon keeps Ollama as its default. To use the host's already
+signed-in Codex CLI with an availability-only fallback, start the bridge under
+the signed-in user and set `KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN=codex,ollama`:
+
+```powershell
+$env:LLM_WIKI_CODEX_BRIDGE_TOKEN = "choose-a-long-random-local-token"
+python -m kogwistar_llm_wiki codex-bridge
+```
+
+In Docker, set the same token and the provider-chain variable in `.env`, then
+restart only the maintenance service. Codex credentials stay on the host; the
+bridge is not a REST or MCP login endpoint, and it rejects tools, filesystem
+access, network access, recursive jobs, oversized context, and invalid output.
+
 Use `--runtime-only` for a temporary change. Disabling a mode retains queued
 jobs; it does not cancel or rewrite workflow history. The control socket is
 local to the container and is not exposed through REST or MCP.
