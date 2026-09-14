@@ -6,8 +6,16 @@ from typing import Any
 
 import pytest
 from kg_doc_parser.workflow_ingest.providers import (
+    CodexBridgeChatModel,
     ProviderChainChatModel,
     _codex_messages,
+)
+from kogwistar.llm_tasks.providers import (
+    ProviderChainChatModel as SharedProviderChainChatModel,
+)
+from kogwistar.llm_tasks.providers import (
+    StructuredBridgeChatModel,
+    bridge_messages,
 )
 from pydantic import BaseModel
 
@@ -51,6 +59,8 @@ def test_bridge_returns_only_valid_structured_object() -> None:
 def test_codex_messages_use_openai_roles_without_paths() -> None:
     message = SimpleNamespace(type="human", content="file:///secret/path")
     assert _codex_messages([message]) == [{"role": "user", "content": "file:///secret/path"}]
+    assert _codex_messages is bridge_messages
+    assert CodexBridgeChatModel is StructuredBridgeChatModel
 
 
 def test_provider_chain_falls_back_only_on_retryable_error() -> None:
@@ -64,6 +74,7 @@ def test_provider_chain_falls_back_only_on_retryable_error() -> None:
             _ = include_raw
             return SimpleNamespace(invoke=lambda messages, config=None: {"parsed": schema(text="ok")})
 
+    assert ProviderChainChatModel is SharedProviderChainChatModel
     chain = ProviderChainChatModel.__new__(ProviderChainChatModel)
     chain.models = [("codex", Retryable()), ("ollama", Successful())]
     result = chain.with_structured_output(Answer).invoke([])
