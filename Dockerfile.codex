@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-bookworm-slim
+
+ENV HOME=/var/lib/codex CODEX_BRIDGE_HOST=0.0.0.0 CODEX_BRIDGE_PORT=8791 NODE_ENV=production
+WORKDIR /opt/codex-bridge
+RUN npm install --global @openai/codex \
+    && npm cache clean --force \
+    && useradd --create-home --uid 10001 codex \
+    && mkdir -p /var/lib/codex \
+    && chown -R 10001:10001 /opt/codex-bridge /var/lib/codex
+COPY docker/codex_bridge.mjs ./codex_bridge.mjs
+RUN chown 10001:10001 ./codex_bridge.mjs
+USER codex
+EXPOSE 8791
+ENTRYPOINT ["node", "/opt/codex-bridge/codex_bridge.mjs"]

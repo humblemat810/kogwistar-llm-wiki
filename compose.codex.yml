@@ -1,0 +1,42 @@
+# STANDALONE OPT-IN CODEX CONTAINER.
+# This file can be used by itself to build, authenticate, and run only Codex:
+# First-time authentication is interactive and persists in codex_auth. Build
+# and authenticate before starting the maintenance worker:
+#   docker compose -f compose.codex.yml build codex
+#   docker compose -f compose.codex.yml run --rm -it --entrypoint codex codex login --device-auth
+#   docker compose -f compose.codex.yml up -d
+#
+# Add compose.codex-memory.yml when wiring this service to the memory worker.
+services:
+  codex:
+    build:
+      context: .
+      dockerfile: Dockerfile.codex
+      args:
+        LLM_WIKI_IMAGE: ${LLM_WIKI_IMAGE:-profchan/kogwistar-llm-wiki:v0.3.6}
+    image: ${LLM_WIKI_CODEX_IMAGE:-kogwistar-llm-wiki-codex:local}
+    mem_limit: ${LLM_WIKI_CODEX_MEMORY_LIMIT:-1g}
+    cpus: ${LLM_WIKI_CODEX_CPU_LIMIT:-1.0}
+    environment:
+      LLM_WIKI_CODEX_BRIDGE_TOKEN: ${LLM_WIKI_CODEX_BRIDGE_TOKEN:?Set LLM_WIKI_CODEX_BRIDGE_TOKEN}
+      KOGWISTAR_CODEX_EXECUTABLE: ${KOGWISTAR_CODEX_EXECUTABLE:-codex}
+      KOGWISTAR_CODEX_PROFILE: ${KOGWISTAR_CODEX_PROFILE:-}
+      KOGWISTAR_CODEX_TRANSPORT: ${KOGWISTAR_CODEX_TRANSPORT:-exec}
+      KOGWISTAR_MAINTENANCE_CODEX_MODEL: ${KOGWISTAR_MAINTENANCE_CODEX_MODEL:-}
+      KOGWISTAR_MAINTENANCE_CODEX_TIMEOUT_SECONDS: ${KOGWISTAR_MAINTENANCE_CODEX_TIMEOUT_SECONDS:-300}
+    volumes:
+      - codex_auth:/var/lib/codex
+    expose:
+      - "8791"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8791/healthz').then(r => { if (!r.ok) process.exit(1) })"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - default
+    restart: unless-stopped
+
+volumes:
+  codex_auth:

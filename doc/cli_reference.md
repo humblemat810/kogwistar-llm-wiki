@@ -247,6 +247,77 @@ Linux, copy `scripts/llm-wiki-codex-bridge.service` into
 and start it. Both mechanisms run as the signed-in user and inherit that
 user's Codex session; neither performs sign-in.
 
+### Compose-managed Codex worker
+
+When device-code login is supported by the installed Codex CLI, the optional
+`compose.codex.yml` can run only the bridge and CLI in a private container:
+
+```powershell
+$env:KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN = "codex,ollama"
+.\scripts\start_codex_compose.ps1 -Mode standalone -Build -Login
+```
+
+For the full memory stack, use `-Mode memory`; it adds the base app, memory
+worker, and Codex-memory wiring overlays while keeping the Codex container
+isolated.
+
+The recommended guided launchers perform CA preparation and select the correct
+file set automatically:
+
+```powershell
+.\scripts\start_codex_compose.ps1 -Mode standalone -Build
+.\scripts\start_codex_compose.ps1 -Mode memory
+```
+
+On Linux, use `bash scripts/start_codex_compose.sh --mode standalone --build`
+or `bash scripts/start_codex_compose.sh --mode memory`. Add `--login` (or
+`-Login` on PowerShell) for first-time device authentication; the launcher
+keeps the generated CA path available to that login command.
+
+The first login is interactive. Authentication state is stored only in the
+named `codex_auth` volume. Normal `docker compose down` preserves it; `down -v`
+deletes it. Do not mount the host filesystem or Docker socket into this
+service. The host bridge and the Compose worker are alternative Codex
+transports, not services that should be enabled together.
+
+If the container reports `UnknownIssuer`, use the optional
+`compose.codex-ca.yml` overlay with `LLM_WIKI_CODEX_CA_BUNDLE_FILE` pointing to
+a PEM bundle containing the normal CA roots and the Docker/proxy root:
+
+```powershell
+$env:LLM_WIKI_CODEX_CA_BUNDLE_FILE = "C:\path\to\ca-bundle.pem"
+docker compose -f compose.codex.yml -f compose.codex-ca.yml up -d
+```
+
+The bundle is mounted read-only and TLS verification remains enabled. Keep the
+file outside the repository and never commit it.
+
+To create the bundle automatically from the host trust store, use
+`scripts/setup_codex_ca.ps1` on Windows or `scripts/setup_codex_ca.sh` on Linux.
+Pass `-StartCompose` or `--start-compose` to start the stack automatically.
+These helpers export public root certificates only; they never extract private
+keys, Codex credentials, or certificates into the image. The proxy root must
+already be installed in the host operating-system trust store.
+
+```powershell
+.\scripts\setup_codex_ca.ps1 -StartCompose
+```
+
+```bash
+bash scripts/setup_codex_ca.sh --start-compose
+```
+
+The equivalent guided TUI is `llm-wiki codex-compose`. It explains the selected
+Compose files, CA handling, login behavior, and resource action, then shows the
+exact launcher command. Use `--dry-run` to preview only or `--execute` to run a
+selected mode without an interactive confirmation.
+
+The TUI also offers `--mode host` for the host bridge. That mode uses the host
+CA store and host Codex login, starts no Docker container, and prints the bridge
+command. The normal memory Compose stack must be started separately with the
+host-bridge provider settings. Use `--mode host-memory` to start the bridge in
+the background and then start the memory stack with those settings.
+
 ## `llm-wiki codex-memory`
 
 Validate or create an app-owned project-to-workspace binding and print safe

@@ -52,6 +52,54 @@ restart only the maintenance service. Codex credentials stay on the host; the
 bridge is not a REST or MCP login endpoint, and it rejects tools, filesystem
 access, network access, recursive jobs, oversized context, and invalid output.
 
+For a Compose-managed Codex worker, use the opt-in `compose.codex.yml` service
+instead of the host bridge. It can run by itself, or be wired into the memory
+stack with `compose.codex-memory.yml`. Set `KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN=codex` (or
+`codex,ollama`) and a local bearer token in `.env`, then build, authenticate,
+and start it:
+
+```powershell
+.\scripts\start_codex_compose.ps1 -Mode standalone -Build -Login
+```
+
+For the full memory stack, use the guided launcher instead of assembling the
+files manually:
+
+```powershell
+.\scripts\start_codex_compose.ps1 -Mode memory
+```
+
+Use `-Build` when the Codex image is not built locally. The standalone form is
+`.\scripts\start_codex_compose.ps1 -Mode standalone`.
+Add `-Login` for first-time device authentication. The launcher keeps the
+generated CA path available to the login command.
+
+Complete device-code login only once. The `codex_auth` volume persists the
+session across normal `down`/`up` cycles; `down -v` removes it and requires
+login again. The container has no host filesystem or Docker-socket access.
+This mode is separate from the host bridge and is not needed for Ollama.
+
+If the request fails with `UnknownIssuer`, Docker Desktop or a corporate proxy
+is re-signing HTTPS traffic. Export a PEM CA bundle containing the normal Linux
+roots plus that proxy root, set `LLM_WIKI_CODEX_CA_BUNDLE_FILE` to its host
+path, and add `compose.codex-ca.yml` to the Compose files. Do not disable TLS
+verification or put the certificate bundle in Git.
+
+The bundle can be prepared automatically from the host trust store with
+`scripts/setup_codex_ca.ps1 -StartCompose` on Windows or
+`scripts/setup_codex_ca.sh --start-compose` on Linux. The helpers export public
+root certificates only and fail if no usable host trust store is available.
+
+For a guided terminal menu that explains and previews the final command before
+execution, run `llm-wiki codex-compose`. Use `--execute` to run a selected mode
+without an additional confirmation prompt.
+
+The menu also includes the host-bridge mode. It starts only the host bridge and
+does not start Docker; complete `codex login` on the host and start the normal
+memory Compose stack separately with the host-bridge provider settings.
+It also offers a combined host-bridge plus memory-stack mode, which starts the
+bridge in the background and then starts Compose with the host-bridge settings.
+
 Use `--runtime-only` for a temporary change. Disabling a mode retains queued
 jobs; it does not cancel or rewrite workflow history. The control socket is
 local to the container and is not exposed through REST or MCP.

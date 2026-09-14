@@ -1,0 +1,14 @@
+# OPTIONAL HTTPS-PROXY CA OVERLAY.
+# Use only when Docker Desktop or the network proxy re-signs chatgpt.com
+# certificates. The host must provide a PEM bundle containing the normal root
+# certificates plus the proxy/root CA. TLS verification remains enabled.
+#
+#   docker compose -f compose.codex.yml -f compose.codex-ca.yml up -d
+# For the full memory stack, also add compose.codex-memory.yml.
+services:
+  codex:
+    environment:
+      SSL_CERT_FILE: /run/codex-ca/ca-bundle.pem
+      CURL_CA_BUNDLE: /run/codex-ca/ca-bundle.pem
+    volumes:
+      - ${LLM_WIKI_CODEX_CA_BUNDLE_FILE:?Set LLM_WIKI_CODEX_CA_BUNDLE_FILE to a PEM CA bundle}:/run/codex-ca/ca-bundle.pem:ro
