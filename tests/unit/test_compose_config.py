@@ -146,6 +146,78 @@ def test_vllm_overlay_is_gpu_only_and_requires_pinned_identity() -> None:
     assert "cpus:" in text
 
 
+def test_codex_overlay_is_opt_in_and_persists_auth_without_host_mounts() -> None:
+    text = (Path(__file__).parents[2] / "compose.codex.yml").read_text(encoding="utf-8")
+    assert "STANDALONE OPT-IN CODEX CONTAINER" in text
+    assert "codex_auth:/var/lib/codex" in text
+    assert "maintenance:" not in text
+    assert "host.docker.internal" not in text
+    assert "docker.sock" not in text
+    assert "--entrypoint codex codex login --device-auth" in text
+    assert "LLM_WIKI_CODEX_MEMORY_LIMIT" in text
+
+    memory_text = (Path(__file__).parents[2] / "compose.codex-memory.yml").read_text(encoding="utf-8")
+    assert "KOGWISTAR_MAINTENANCE_CODEX_BASE_URL: http://codex:8791" in memory_text
+    assert "condition: service_healthy" in memory_text
+
+
+def test_codex_dockerfile_overlays_current_bridge_source() -> None:
+    text = (Path(__file__).parents[2] / "Dockerfile.codex").read_text(encoding="utf-8")
+    assert "COPY docker/codex_bridge.mjs" in text
+    assert "npm install --global @openai/codex" in text
+
+
+def test_codex_container_bridge_skips_git_trust_check_in_isolated_runtime() -> None:
+    text = (Path(__file__).parents[2] / "docker" / "codex_bridge.mjs").read_text(encoding="utf-8")
+    assert "--skip-git-repo-check" in text
+    assert '"--sandbox", "read-only"' in text
+    assert '"approval_policy=never"' in text
+
+
+def test_codex_ca_overlay_requires_explicit_read_only_bundle() -> None:
+    text = (Path(__file__).parents[2] / "compose.codex-ca.yml").read_text(encoding="utf-8")
+    assert "LLM_WIKI_CODEX_CA_BUNDLE_FILE:?" in text
+    assert ":/run/codex-ca/ca-bundle.pem:ro" in text
+    assert "SSL_CERT_FILE: /run/codex-ca/ca-bundle.pem" in text
+    assert "verify" not in text.lower() or "verification" in text.lower()
+
+
+def test_codex_launchers_select_standalone_or_memory_file_sets() -> None:
+    root = Path(__file__).parents[2]
+    powershell = (root / "scripts" / "start_codex_compose.ps1").read_text(encoding="utf-8")
+    shell = (root / "scripts" / "start_codex_compose.sh").read_text(encoding="utf-8")
+    for text in (powershell, shell):
+        assert "compose.codex.yml" in text
+        assert "compose.codex-ca.yml" in text
+        assert "compose.codex-memory.yml" in text
+        assert "standalone" in text
+        assert "memory" in text
+    assert "--entrypoint codex codex login --device-auth" in powershell
+    assert "--entrypoint codex codex login --device-auth" in shell
+    assert "if (-not $?)" in powershell
+    assert "Set-Location $repo" in powershell
+    assert "script_dir=" in shell
+    assert "--login" in shell
+
+
+def test_codex_tui_exposes_host_bridge_as_a_distinct_mode() -> None:
+    from kogwistar_llm_wiki.codex_compose_tui import (
+        _host_environment,
+        _repository_root,
+        build_plan,
+    )
+
+    host_steps = build_plan("host", build=False, login=False, project="ignored")
+    assert host_steps[0].background is True
+    assert host_steps[0].command[1:] == ["-m", "kogwistar_llm_wiki", "codex-bridge", "--host", "0.0.0.0", "--port", "8791"]
+    memory_steps = build_plan("host-memory", build=False, login=True, project="demo")
+    assert memory_steps[0].command == ["codex", "login"]
+    assert "compose.memory-agent.yml" in memory_steps[-1].command
+    assert _host_environment()["KOGWISTAR_MAINTENANCE_PROVIDER"] == "codex"
+    assert _host_environment()["KOGWISTAR_MAINTENANCE_CODEX_BASE_URL"] == "http://host.docker.internal:8791"
+    assert (_repository_root() / "compose.codex.yml").exists()
+
+
 def test_generated_stack_exposes_tunable_resource_limits() -> None:
     text = render_compose(ComposeOptions(model_revision="abc123", with_otel=True, with_oauth=True))
     for name in (

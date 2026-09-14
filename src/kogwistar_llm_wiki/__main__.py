@@ -632,6 +632,23 @@ def _cmd_codex_memory(args: argparse.Namespace) -> None:
         _close_engines(engines)
 
 
+def _cmd_codex_compose(args: argparse.Namespace) -> None:
+    """Run the guided Codex Compose TUI."""
+    from kogwistar_llm_wiki.codex_compose_tui import main as run_tui
+
+    tui_args = []
+    for name in ("mode", "project"):
+        value = getattr(args, name, None)
+        if value:
+            tui_args.extend([f"--{name}", value])
+    for name in ("build", "login", "dry_run", "execute"):
+        if getattr(args, name, False):
+            tui_args.append(f"--{name.replace('_', '-')}")
+    exit_code = run_tui(tui_args)
+    if exit_code:
+        raise SystemExit(exit_code)
+
+
 def _cmd_seed_bundle(args: argparse.Namespace) -> None:
     """Seed, optionally inspect through cockpit mode, and export a graph bundle."""
 
@@ -1323,6 +1340,18 @@ def main(argv: list[str] | None = None) -> int:
     bridge_p.add_argument("--codex-executable", default=None, help="Optional Codex executable override")
     bridge_p.add_argument("--codex-model", default=None, help="Optional Codex model override")
     bridge_p.set_defaults(func=_cmd_codex_bridge)
+
+    codex_compose_p = sub.add_parser(
+        "codex-compose",
+        help="Interactive TUI for starting standalone Codex or the memory stack",
+    )
+    codex_compose_p.add_argument("--mode", choices=["standalone", "memory", "host", "host-memory"])
+    codex_compose_p.add_argument("--project", default="llm-wiki-memory")
+    codex_compose_p.add_argument("--build", action="store_true")
+    codex_compose_p.add_argument("--login", action="store_true")
+    codex_compose_p.add_argument("--dry-run", action="store_true")
+    codex_compose_p.add_argument("--execute", action="store_true")
+    codex_compose_p.set_defaults(func=lambda args: _cmd_codex_compose(args))
 
     compose_p = sub.add_parser("compose", help="Generate or validate a safe Docker Compose bundle")
     compose_sub = compose_p.add_subparsers(dest="compose_command", required=True)

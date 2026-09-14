@@ -1,0 +1,13 @@
+# MEMORY-STACK CODEX WIRING.
+# Combine after compose.yml, compose.memory-agent.yml, and compose.codex.yml.
+services:
+  maintenance:
+    depends_on:
+      codex:
+        condition: service_healthy
+    environment:
+      KOGWISTAR_MAINTENANCE_PROVIDER: ${KOGWISTAR_MAINTENANCE_PROVIDER:-codex}
+      KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN: ${KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN:-codex,ollama}
+      KOGWISTAR_MAINTENANCE_CODEX_BASE_URL: http://codex:8791
+      KOGWISTAR_MAINTENANCE_CODEX_API_KEY_ENV: LLM_WIKI_CODEX_BRIDGE_TOKEN
+      LLM_WIKI_CODEX_BRIDGE_TOKEN: ${LLM_WIKI_CODEX_BRIDGE_TOKEN:?Set LLM_WIKI_CODEX_BRIDGE_TOKEN}
