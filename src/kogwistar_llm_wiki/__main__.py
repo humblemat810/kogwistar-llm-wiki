@@ -61,6 +61,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("kogwistar_llm_wiki")
 
 
+def _load_env_file(path: Path) -> None:
+    """Load simple dotenv assignments without overriding exported values."""
+    if not path.is_file():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise SystemExit(f"cannot read env file {path}: {exc}") from exc
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].lstrip()
+        name, separator, value = stripped.partition("=")
+        if not separator or not name.strip() or name.strip() in os.environ:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ[name.strip()] = value
+
+
 def _conversation_persistence_kwargs(args: argparse.Namespace) -> dict[str, str]:
     """Forward the new engine option only when an operator opts in.
 
@@ -720,6 +743,8 @@ def _cmd_codex_bridge(args: argparse.Namespace) -> None:
     """Run the user-scoped bridge used by Docker maintenance workers."""
     from .codex_bridge import bridge_settings_from_environment, serve_codex_bridge
 
+    if not args.no_env_file:
+        _load_env_file(Path(args.env_file).expanduser())
     token = os.environ.get(args.token_env, "")
     if not token:
         raise SystemExit(f"set {args.token_env} before starting the Codex bridge")
@@ -1293,6 +1318,8 @@ def main(argv: list[str] | None = None) -> int:
     bridge_p.add_argument("--host", default="0.0.0.0", help="Bind address; use 0.0.0.0 for Docker Desktop reachability")
     bridge_p.add_argument("--port", type=int, default=8791, help="Bridge port")
     bridge_p.add_argument("--token-env", default="LLM_WIKI_CODEX_BRIDGE_TOKEN", help="Environment variable containing the bridge token")
+    bridge_p.add_argument("--env-file", default=".env", help="Host dotenv file to load for bridge settings (default: .env)")
+    bridge_p.add_argument("--no-env-file", action="store_true", help="Do not load the host dotenv file")
     bridge_p.add_argument("--codex-executable", default=None, help="Optional Codex executable override")
     bridge_p.add_argument("--codex-model", default=None, help="Optional Codex model override")
     bridge_p.set_defaults(func=_cmd_codex_bridge)

@@ -233,9 +233,13 @@ CLI session. It exposes only bounded structured requests to the Docker network;
 it does not copy or accept Codex credentials.
 
 ```powershell
-$env:LLM_WIKI_CODEX_BRIDGE_TOKEN = "choose-a-long-random-local-token"
 python -m kogwistar_llm_wiki codex-bridge
 ```
+
+The command loads `.env` automatically, including
+`LLM_WIKI_CODEX_BRIDGE_TOKEN`. An explicitly exported environment variable
+takes precedence. Use `--env-file <path>` for another host file or
+`--no-env-file` to disable dotenv loading.
 
 Set `KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN=codex,ollama` in the Compose
 environment to opt in. The default remains Ollama. Only bridge outage,
@@ -246,6 +250,17 @@ Linux, copy `scripts/llm-wiki-codex-bridge.service` into
 `~/.config/systemd/user/`, run `systemctl --user daemon-reload`, then enable
 and start it. Both mechanisms run as the signed-in user and inherit that
 user's Codex session; neither performs sign-in.
+
+To run the one-request real subscription smoke test after the bridge is up:
+
+```powershell
+$env:KOGWISTAR_RUN_REAL_CODEX = "1"
+python -m pytest tests/integration/test_codex_bridge_manual.py -m "manual and slow" -q -p no:cacheprovider
+```
+
+The test checks bridge health and one bounded structured response. It does not
+write graph data, create maintenance jobs, call MCP tools, or store the Codex
+session.
 
 ## `llm-wiki codex-memory`
 
