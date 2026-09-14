@@ -1,0 +1,13 @@
+[Unit]
+Description=LLM-Wiki Codex maintenance bridge
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/llm-wiki
+ExecStart=/usr/bin/python3 -m kogwistar_llm_wiki codex-bridge
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

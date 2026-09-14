@@ -280,8 +280,7 @@ def resolve_maintenance_provider_settings(
     location: str | None = None,
     max_retries: int | None = None,
 ) -> WorkflowProviderSettings:
-    return build_workflow_provider_settings(
-        parser=build_provider_endpoint_config(
+    primary = build_provider_endpoint_config(
             "maintenance",
             provider=provider,
             model=model,
@@ -293,6 +292,43 @@ def resolve_maintenance_provider_settings(
             location=location,
             max_retries=max_retries,
         )
+    chain_value = _first_env("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN")
+    provider_names = [
+        normalize_provider_name(value)
+        for value in (chain_value or primary.provider).split(",")
+        if str(value).strip()
+    ]
+    if not provider_names or any(value is None for value in provider_names):
+        raise ValueError("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN contains an invalid provider")
+    if len(set(provider_names)) != len(provider_names):
+        raise ValueError("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN must not contain duplicates")
+    if provider_names[0] != primary.provider:
+        primary = _provider_spec_from_chain_name(provider_names[0], primary)
+    fallbacks = [_provider_spec_from_chain_name(name, primary) for name in provider_names[1:]]
+    primary.fallback_specs = fallbacks
+    return build_workflow_provider_settings(parser=primary)
+
+
+def _provider_spec_from_chain_name(
+    provider: str,
+    primary: ProviderEndpointConfig,
+) -> ProviderEndpointConfig:
+    """Resolve provider-specific overrides without changing legacy defaults."""
+    prefix = f"KOGWISTAR_MAINTENANCE_{provider.upper()}"
+    default_model = "gemma4:e2b" if provider == "ollama" else primary.model
+    default_base_url = "http://host.docker.internal:11434" if provider == "ollama" else primary.base_url
+    default_key_env = None if provider == "ollama" else primary.api_key_env
+    if provider == "codex":
+        default_base_url = "http://host.docker.internal:8791"
+        default_key_env = "LLM_WIKI_CODEX_BRIDGE_TOKEN"
+    return build_provider_endpoint_config(
+        "maintenance",
+        provider=provider,
+        model=_first_env(f"{prefix}_MODEL", default=default_model),
+        temperature=float(_first_env(f"{prefix}_TEMPERATURE", default=str(primary.temperature)) or primary.temperature),
+        base_url=_first_env(f"{prefix}_BASE_URL", default=default_base_url),
+        api_key_env=_first_env(f"{prefix}_API_KEY_ENV", default=default_key_env),
+        max_retries=int(_first_env(f"{prefix}_MAX_RETRIES", default=str(primary.max_retries)) or primary.max_retries),
     )
 
 
@@ -302,6 +338,7 @@ def provider_config_summary(settings: WorkflowProviderSettings | ProviderEndpoin
     return {
         "proposal_mode": proposal_mode,
         "provider": getattr(parser, "provider", None),
+        "provider_chain": [getattr(parser, "provider", None), *[item.provider for item in getattr(parser, "fallback_specs", [])]],
         "model": getattr(parser, "model", None),
         "temperature": getattr(parser, "temperature", None),
         "base_url": getattr(parser, "base_url", None),

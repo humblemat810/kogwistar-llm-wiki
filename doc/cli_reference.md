@@ -180,10 +180,14 @@ python -m kogwistar_llm_wiki --help
 | `KOGWISTAR_PARSER_API_KEY_ENV` | CLI, parser workflows | Env var name that holds the parser API key |
 | `KOGWISTAR_PARSER_API_VERSION` | CLI, parser workflows | Azure OpenAI API version to use when building `AzureChatOpenAI` |
 | `KOGWISTAR_MAINTENANCE_PROVIDER` | daemon maintenance | Explicit maintenance provider alias |
+| `KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN` | daemon maintenance | Ordered providers, for example `codex,ollama`; defaults to the legacy provider |
 | `KOGWISTAR_MAINTENANCE_MODEL` | daemon maintenance | Explicit maintenance model or Azure deployment name |
 | `KOGWISTAR_MAINTENANCE_BASE_URL` | daemon maintenance | Maintenance endpoint URL |
 | `KOGWISTAR_MAINTENANCE_API_KEY_ENV` | daemon maintenance | Env var name that holds the maintenance API key |
 | `LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS` | maintenance requests | Default maximum rounds per request when `max_rounds` is omitted; defaults to `2`, valid range `1`-`100` |
+| `KOGWISTAR_MAINTENANCE_CODEX_BASE_URL` | daemon maintenance | Host bridge URL, normally `http://host.docker.internal:8791` |
+| `KOGWISTAR_MAINTENANCE_CODEX_API_KEY_ENV` | daemon maintenance | Container environment variable containing the bridge token name |
+| `LLM_WIKI_CODEX_BRIDGE_TOKEN` | Docker/host bridge | Shared bearer token; never a Codex credential and never logged |
 | `PYTHONPATH` | dev | Ensure `src/` is importable without install |
 
 `demo` and `ingest` also accept `--parser-lane page_index|workflow_layered`. Use
@@ -221,6 +225,27 @@ For an unknown or incompatible store, prefer a portable archive, isolated
 restore, re-embedding, validation, and cutover. There is no automatic in-place
 dimension migration. In-memory stores are process-local and do not provide
 durable profile compatibility across restarts.
+
+## `llm-wiki codex-bridge`
+
+Run this on the host under the same signed-in user account that owns the Codex
+CLI session. It exposes only bounded structured requests to the Docker network;
+it does not copy or accept Codex credentials.
+
+```powershell
+$env:LLM_WIKI_CODEX_BRIDGE_TOKEN = "choose-a-long-random-local-token"
+python -m kogwistar_llm_wiki codex-bridge
+```
+
+Set `KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN=codex,ollama` in the Compose
+environment to opt in. The default remains Ollama. Only bridge outage,
+timeout, or other availability failures may use the next provider.
+
+For persistence, use `scripts/install_codex_bridge_task.ps1` on Windows. On
+Linux, copy `scripts/llm-wiki-codex-bridge.service` into
+`~/.config/systemd/user/`, run `systemctl --user daemon-reload`, then enable
+and start it. Both mechanisms run as the signed-in user and inherit that
+user's Codex session; neither performs sign-in.
 
 ## `llm-wiki codex-memory`
 
