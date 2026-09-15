@@ -19,9 +19,9 @@ Options:
   -h, --help                   Show this help
 
 Examples:
-  ./scripts/publish_docker_images.sh --docker-hub-user profchan --tag v0.3.7
-  ./scripts/publish_docker_images.sh --target embedding-cuda12.8 --tag v0.3.7
-  ./scripts/publish_docker_images.sh --target all --tag v0.3.7
+  ./scripts/publish_docker_images.sh --docker-hub-user profchan --tag v0.3.8
+  ./scripts/publish_docker_images.sh --target embedding-cuda12.8 --tag v0.3.8
+  ./scripts/publish_docker_images.sh --target all --tag v0.3.8
 EOF
 }
 
