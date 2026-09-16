@@ -37,6 +37,18 @@ from kogwistar.engine_core import (
 )
 
 from .maintenance_control import MaintenanceControl, MaintenanceControlState
+from .maintenance_profiles import (
+    MaintenanceProfileLadderDecision,
+    add_usage,
+    budget_fits,
+    configured_maintenance_budget,
+    configured_prices,
+    configured_profile_ladder,
+    configured_token_budget_rate,
+    next_window_reset,
+    reset_expired_spend,
+    resolve_profile_ladder,
+)
 from .maintenance_selection import select_embedding_exploration
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
@@ -407,12 +419,28 @@ class MaintenanceDaemon:
             for item in (self._background_state.get("recent_candidate_ids") or [])
             if str(item).strip()
         }
+        self._budget_state_path = (
+            Path(data_dir) / "maintenance" / "budget_state.json" if data_dir else None
+        )
+        self._budget_state = self._load_budget_state()
+        self._empty_poll_streak = 0
+        self._last_profile_reason = "configured"
+        self._active_profile_level: str | None = None
+        self._recorded_usage_attempts: set[str] = {
+            str(item)
+            for item in (self._budget_state.get("usage_attempt_ids") or [])
+            if str(item).strip()
+        }
         self.provider_settings = resolve_maintenance_provider_settings()
         self.telemetry = LlmWikiTelemetry.from_environment()
         self._worker = MaintenanceWorker(
             engines,
             provider_settings=self.provider_settings,
+            # A ladder must be re-evaluated between jobs so one quota level
+            # cannot consume a whole claim batch after it is exhausted.
+            fair_scheduling=bool(self._effective_profile_ladder(self.control_state)),
             trace_sink=self.telemetry.instrument_event,
+            usage_sink=self._record_profile_usage,
         )
         self._stop_event = threading.Event()
         self._instance_id = f"maintenance-{uuid.uuid4().hex}"
@@ -430,6 +458,176 @@ class MaintenanceDaemon:
         except (FileNotFoundError, OSError, TypeError, ValueError):
             return {}
         return value if isinstance(value, dict) else {}
+
+    def _load_budget_state(self) -> dict[str, Any]:
+        path = getattr(self, "_budget_state_path", None)
+        if path is None:
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _effective_budget(self, state: MaintenanceControlState) -> dict[str, dict[str, float]]:
+        return state.budget or configured_maintenance_budget()
+
+    def _effective_profile_ladder(self, state: MaintenanceControlState) -> list[dict[str, object]]:
+        if state.profile_ladder_configured or state.profile_ladder:
+            return state.profile_ladder
+        return [
+            {
+                "name": level.name,
+                "provider": level.provider,
+                "model": level.model,
+                "profile": level.profile,
+                "budget": level.budget,
+            }
+            for level in configured_profile_ladder()
+        ]
+
+    @staticmethod
+    def _profile_estimate() -> dict[str, float]:
+        return {"tokens": 1000.0, "input_tokens": 800.0, "output_tokens": 200.0, "money": 0.0}
+
+    def _select_profile_level(self, state: MaintenanceControlState) -> MaintenanceProfileLadderDecision:
+        """Select the first affordable level; always rechecks primary for recovery."""
+        decision = resolve_profile_ladder(
+            enabled=state.enabled,
+            requested=state.profile,
+            budget=self._effective_budget(state),
+            ladder=self._effective_profile_ladder(state),
+            ladder_spend=self._budget_state.get("ladder_spend", {}),
+            estimate=self._profile_estimate(),
+        )
+        self._last_profile_reason = decision.reason
+        self._active_profile_level = decision.level.name if decision.level else None
+        if decision.level is not None:
+            self.provider_settings = resolve_maintenance_provider_settings(
+                provider=decision.level.provider,
+                model=decision.level.model,
+                include_provider_chain=False,
+            )
+            self._worker.provider_settings = self.provider_settings
+        return decision
+
+    def _persist_budget_state(self) -> None:
+        path = getattr(self, "_budget_state_path", None)
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self._budget_state, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(path)
+
+    def profile_status(self, state: MaintenanceControlState | None = None) -> dict[str, object]:
+        """Return redaction-free operational state for local diagnostics."""
+        state = state or self.control_state
+        ladder_decision = resolve_profile_ladder(
+            enabled=state.enabled,
+            requested=state.profile,
+            budget=self._effective_budget(state),
+            ladder=self._effective_profile_ladder(state),
+            ladder_spend=getattr(self, "_budget_state", {}).get("ladder_spend", {}),
+            estimate=self._profile_estimate(),
+        )
+        decision = ladder_decision.profile
+        budget_state = getattr(self, "_budget_state", {})
+        return {
+            "enabled": state.enabled,
+            "requested_profile": decision.requested,
+            "effective_profile": decision.effective,
+            "profile_reason": self._last_profile_reason if self._last_profile_reason != "configured" else decision.reason,
+            "request_enabled": state.request_enabled,
+            "background_enabled": state.background_enabled,
+            "budget": self._effective_budget(state),
+            "spend": budget_state.get("spend", {}) or state.spend,
+            "next_window_reset": {
+                window: next_window_reset(
+                    float(budget_state.get("window_started_at", {}).get(window, time.time())),
+                    window,
+                    mode=os.getenv("LLM_WIKI_MAINTENANCE_BUDGET_WINDOW_MODE", "rolling").strip().lower(),
+                )
+                for window in self._effective_budget(state)
+            },
+            "deferred_cycle": state.deferred_cycle,
+            "budget_window_mode": os.getenv("LLM_WIKI_MAINTENANCE_BUDGET_WINDOW_MODE", "rolling"),
+            "poll_interval_seconds": self._current_poll_interval(),
+            "profile_ladder": self._effective_profile_ladder(state),
+            "active_profile_level": self._active_profile_level,
+            "ladder_spend": budget_state.get("ladder_spend", {}),
+        }
+
+    def _current_poll_interval(self) -> float:
+        streak = int(getattr(self, "_empty_poll_streak", 0))
+        return min(float(self.poll_interval) * (2 ** min(streak, 5)), 300.0)
+
+    def _record_profile_usage(self, attempt_id: str, usage: Mapping[str, float]) -> None:
+        """Reconcile measured worker usage into durable window spend."""
+        if attempt_id in self._recorded_usage_attempts:
+            return
+        self._recorded_usage_attempts.add(attempt_id)
+        recorded_ids = list(self._budget_state.get("usage_attempt_ids") or [])
+        recorded_ids.append(attempt_id)
+        self._budget_state["usage_attempt_ids"] = recorded_ids[-2048:]
+        self._refresh_budget_state(time.time())
+        current_spend = self._budget_state.get("spend", {}) or self.control_state.spend
+        updated_spend = add_usage(current_spend, usage)
+        accumulated = float(self._budget_state.get("accumulated_call_tokens", 0) or 0)
+        accumulated += float(usage.get("tokens", 0) or 0)
+        self._budget_state.update({"spend": updated_spend, "accumulated_call_tokens": accumulated})
+        active_profile_level = getattr(self, "_active_profile_level", None)
+        if active_profile_level:
+            ladder_spend = self._budget_state.setdefault("ladder_spend", {})
+            level_spend = ladder_spend.get(active_profile_level, {})
+            ladder_spend[active_profile_level] = add_usage(level_spend, usage)
+            ladder_started = self._budget_state.setdefault("ladder_window_started_at", {})
+            level_started = ladder_started.setdefault(active_profile_level, {})
+            now = time.time()
+            for window in ladder_spend[active_profile_level]:
+                if isinstance(level_started, dict):
+                    level_started.setdefault(window, now)
+        self._persist_budget_state()
+        if self.control is not None:
+            self.control.update(spend=updated_spend, actor="maintenance-worker")
+
+    def _refresh_budget_state(self, now: float) -> None:
+        mode = os.getenv("LLM_WIKI_MAINTENANCE_BUDGET_WINDOW_MODE", "rolling").strip().lower()
+        budget_state = getattr(self, "_budget_state", {})
+        spend, starts = reset_expired_spend(
+            budget_state.get("spend", {}),
+            budget_state.get("window_started_at", {}),
+            now=now,
+            mode=mode,
+        )
+        budget_state["spend"] = spend
+        budget_state["window_started_at"] = starts
+        self._budget_state = budget_state
+        ladder_spend = budget_state.get("ladder_spend", {})
+        ladder_started = budget_state.get("ladder_window_started_at", {})
+        if isinstance(ladder_spend, Mapping) and isinstance(ladder_started, Mapping):
+            refreshed_ladder: dict[str, object] = {}
+            refreshed_starts: dict[str, object] = {}
+            for level_name, spend in ladder_spend.items():
+                if not isinstance(spend, Mapping):
+                    continue
+                starts = ladder_started.get(level_name, {})
+                if not isinstance(starts, Mapping):
+                    starts = {}
+                refreshed, starts = reset_expired_spend(spend, starts, now=now, mode=mode)
+                refreshed_ladder[str(level_name)] = refreshed
+                refreshed_starts[str(level_name)] = starts
+            budget_state["ladder_spend"] = refreshed_ladder
+            budget_state["ladder_window_started_at"] = refreshed_starts
+        self._persist_budget_state()
+
+    def _queue_has_work(self) -> bool:
+        try:
+            jobs = self.engines.conversation.jobs
+            namespace = WorkspaceNamespaces(self.workspace_id).maintenance_jobs
+            return bool(jobs.list(namespace=namespace, status="PENDING", limit=1))
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            return True
 
     def _persist_background_state(
         self,
@@ -467,6 +665,9 @@ class MaintenanceDaemon:
                 "provider_settings": provider_config_summary(self.provider_settings),
                 "request_enabled": self.control_state.request_enabled,
                 "background_enabled": self.control_state.background_enabled,
+                "maintenance_enabled": self.control_state.enabled,
+                "maintenance_profile": self.control_state.profile,
+                "maintenance_profile_status": self.profile_status(self.control_state),
                 "background_interval_seconds": self.background_interval,
             },
             status="starting",
@@ -491,18 +692,35 @@ class MaintenanceDaemon:
             self.control.serve(self._stop_event)
         while not self._stop_event.is_set():
             try:
+                previous_state = self.control_state
                 if self.control:
                     self.control_state = self.control.get()
+                state_changed = self.control_state != previous_state
+                had_work = self._queue_has_work()
                 _heartbeat_service_health(
                     self.engines,
                     workspace_id=self.workspace_id,
                     service_kind="maintenance_daemon",
                     instance_id=self._instance_id,
                 )
-                self._schedule_background_cycle(self.control_state)
+                if self.control_state.request_enabled or self.control_state.background_enabled:
+                    self._schedule_background_cycle(self.control_state)
                 self._worker.request_enabled = self.control_state.request_enabled
                 self._worker.background_enabled = self.control_state.background_enabled
-                self._worker.process_pending_jobs(self.workspace_id)
+                self._worker.fair_scheduling = bool(self._effective_profile_ladder(self.control_state))
+                if self.control_state.request_enabled or self.control_state.background_enabled:
+                    selected_profile = self._select_profile_level(self.control_state)
+                    ladder_exhausted = bool(self._effective_profile_ladder(self.control_state)) and not selected_profile.profile.enabled
+                    if ladder_exhausted:
+                        self._last_profile_reason = selected_profile.reason
+                    else:
+                        self._worker.process_pending_jobs(self.workspace_id)
+                else:
+                    self._last_profile_reason = "both_modes_disabled_worker_paused"
+                if had_work or state_changed:
+                    self._empty_poll_streak = 0
+                else:
+                    self._empty_poll_streak += 1
             except Exception as exc:
                 _heartbeat_service_health(
                     self.engines,
@@ -513,7 +731,7 @@ class MaintenanceDaemon:
                     last_error=f"{type(exc).__name__}: {exc}",
                 )
                 logger.exception("MaintenanceDaemon: unhandled error in poll cycle")
-            self._stop_event.wait(timeout=self.poll_interval)
+            self._stop_event.wait(timeout=self._current_poll_interval())
         _stop_service_health(
             self.engines,
             workspace_id=self.workspace_id,
@@ -525,11 +743,58 @@ class MaintenanceDaemon:
     def _schedule_background_cycle(self, state: MaintenanceControlState) -> None:
         """Queue one bounded, auditable background pass when the LLM is free."""
         now_ms = int(time.time() * 1000)
+        self._refresh_budget_state(now_ms / 1000.0)
         last_cycle_at_ms = int(getattr(self, "_last_background_cycle_at_ms", 0) or 0)
-        if not state.background_enabled or (
+        ladder_decision = self._select_profile_level(state)
+        decision = ladder_decision.profile
+        self._last_profile_reason = decision.reason
+        if not state.background_enabled or decision.effective == "off" or (
+            not self._effective_profile_ladder(state) and decision.effective == "lite"
+        ) or (
             last_cycle_at_ms and now_ms - last_cycle_at_ms < self.background_interval * 1000
         ):
             return
+        selected_budget = (
+            ladder_decision.level.budget
+            if ladder_decision.level is not None and ladder_decision.level.budget
+            else self._effective_budget(state)
+        )
+        if decision.effective == "budgeted":
+            if float(self._budget_state.get("accumulated_call_tokens", 0) or 0) < configured_token_budget_rate():
+                self._last_profile_reason = "waiting_for_token_budget_rate"
+                return
+            if any(
+                "money" in metrics
+                for metrics in selected_budget.values()
+            ) and os.getenv("LLM_WIKI_MAINTENANCE_MODEL_CLASS", "unknown").strip().lower() != "free":
+                prices = configured_prices()
+                if prices["input"] is None or prices["output"] is None:
+                    self._last_profile_reason = "deferred:money_price_unavailable"
+                    return
+            prices = configured_prices()
+            estimated_money = 0.0
+            if prices["input"] is not None and prices["output"] is not None:
+                estimated_money = (
+                    800.0 * prices["input"] + 200.0 * prices["output"]
+                ) / 1_000_000.0
+            estimate = {
+                "tokens": 1000.0,
+                "input_tokens": 800.0,
+                "output_tokens": 200.0,
+                "money": estimated_money,
+            }
+            fits, reason = budget_fits(
+                selected_budget,
+                (
+                    self._budget_state.get("ladder_spend", {}).get(ladder_decision.level.name, {})
+                    if ladder_decision.level is not None
+                    else self._budget_state.get("spend", {}) or state.spend
+                ),
+                estimate,
+            )
+            if not fits:
+                self._last_profile_reason = f"deferred:{reason}"
+                return
         jobs = self.engines.conversation.jobs
         active = jobs.list(namespace=WorkspaceNamespaces(self.workspace_id).maintenance_jobs, status="DOING", limit=50)
         queued = jobs.list(namespace=WorkspaceNamespaces(self.workspace_id).maintenance_jobs, status="PENDING", limit=50)
@@ -630,6 +895,13 @@ class MaintenanceDaemon:
             payload=payload,
             max_retries=1,
         )
+        if decision.effective == "budgeted":
+            self._budget_state["accumulated_call_tokens"] = max(
+                0.0,
+                float(self._budget_state.get("accumulated_call_tokens", 0) or 0)
+                - configured_token_budget_rate(),
+            )
+            self._persist_budget_state()
         self._worker._emit_trace(
             "maintenance_background_cycle_scheduled",
             workspace_id=self.workspace_id,
@@ -637,6 +909,7 @@ class MaintenanceDaemon:
             cycle_seed=cycle_seed,
             selected_count=len(selected),
             exploration_strategy=strategy,
+            maintenance_profile=decision.effective,
         )
 
 

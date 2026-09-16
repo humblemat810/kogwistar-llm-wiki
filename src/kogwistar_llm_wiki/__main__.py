@@ -45,6 +45,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, replace
 from hashlib import sha256
@@ -445,14 +446,110 @@ def _cmd_maintenance_control(args: argparse.Namespace) -> None:
     """Change maintenance modes without opening the database or HTTP API."""
     from .maintenance_control import send_control_command
 
+    if args.status:
+        result = send_control_command(
+            args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
+            status=True,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return
+
+    budget = None
+    if args.budget_json:
+        try:
+            parsed = json.loads(args.budget_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("--budget-json must contain a JSON object") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("--budget-json must contain a JSON object")
+        budget = parsed
+    budget_values = {
+        window: {
+            metric: getattr(args, f"{window}_{metric}")
+            for metric in ("tokens", "input_tokens", "output_tokens", "money")
+            if getattr(args, f"{window}_{metric}") is not None
+        }
+        for window in ("daily", "weekly", "monthly")
+    }
+    if any(budget_values.values()):
+        budget = budget_values
+    if args.clear_budget:
+        budget = {}
+    profile_ladder = None
+    if args.profile_ladder_json:
+        try:
+            profile_ladder = json.loads(args.profile_ladder_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("--profile-ladder-json must contain a JSON array") from exc
+        if not isinstance(profile_ladder, list):
+            raise ValueError("--profile-ladder-json must contain a JSON array")
+
     result = send_control_command(
         args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
         request_enabled=args.request_enabled,
         background_enabled=args.background_enabled,
+        enabled=args.enabled,
+        profile=args.profile,
+        profile_ladder=profile_ladder,
+        budget=budget,
         persist=not args.runtime_only,
         actor="llm-wiki-maintenance-control",
     )
     print(json.dumps(result, sort_keys=True))
+
+
+def _cmd_serve(args: argparse.Namespace) -> None:
+    """Serve REST, MCP, and maintenance from one shared engine bundle."""
+    from kogwistar_llm_wiki.agent_gateway import AgentGateway
+    from kogwistar_llm_wiki.daemon import MaintenanceDaemon
+    from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
+    from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
+    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+    from kogwistar_llm_wiki.workbench_http import create_workbench_server
+
+    engines = _build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
+    pipeline = IngestPipeline(engines)
+    api = WorkbenchApi(pipeline)
+    stop_event = threading.Event()
+    server = create_workbench_server(api, host=args.host, port=args.port)
+    maintenance = MaintenanceDaemon(
+        engines,
+        args.workspace,
+        poll_interval=args.maintenance_interval,
+        data_dir=args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
+        background_interval=args.background_interval,
+    )
+    gateway = AgentGateway(api)
+    mcp = build_agent_mcp(gateway)
+    threads = [
+        threading.Thread(target=server.serve_forever, name="llm-wiki-rest", daemon=True),
+        threading.Thread(
+            target=lambda: mcp.run(transport="streamable-http", host=args.host, port=args.mcp_port, path=args.mcp_path),
+            name="llm-wiki-mcp",
+            daemon=True,
+        ),
+        threading.Thread(target=maintenance.run, name="llm-wiki-maintenance", daemon=True),
+    ]
+    def _stop(_sig: int, _frame: object) -> None:
+        stop_event.set()
+        maintenance.stop()
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+    try:
+        for thread in threads:
+            thread.start()
+        logger.info("combined_server_started workspace=%s rest=%s mcp=%s", args.workspace, args.port, args.mcp_port)
+        while not stop_event.wait(1.0):
+            pass
+    except KeyboardInterrupt:
+        pass
+    finally:
+        maintenance.stop()
+        server.shutdown()
+        server.server_close()
+        api.close()
+        _close_engines(engines)
 
 
 def _cmd_workbench(args: argparse.Namespace) -> None:
@@ -637,11 +734,30 @@ def _cmd_codex_compose(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.codex_compose_tui import main as run_tui
 
     tui_args = []
-    for name in ("mode", "project"):
+    tui_option_names = {"profile_ladder_json": "profile-ladder"}
+    for name in (
+        "mode",
+        "project",
+        "stack",
+        "embedding",
+        "maintenance_enabled",
+        "request_enabled",
+        "background_enabled",
+        "maintenance_profile",
+        "profile_ladder_json",
+        "profile_ladder_file",
+        "combined_memory",
+        "combined_cpu",
+        "embedding_dimension",
+        "max_model_len",
+        "crop_token_budget",
+        "env_file",
+    ):
         value = getattr(args, name, None)
         if value:
-            tui_args.extend([f"--{name}", value])
-    for name in ("build", "login", "dry_run", "execute"):
+            option_name = tui_option_names.get(name, name.replace("_", "-"))
+            tui_args.extend([f"--{option_name}", str(value)])
+    for name in ("build", "login", "dry_run", "execute", "configure", "write_env", "lxc", "lxc_apply"):
         if getattr(args, name, False):
             tui_args.append(f"--{name.replace('_', '-')}")
     exit_code = run_tui(tui_args)
@@ -1210,6 +1326,19 @@ def main(argv: list[str] | None = None) -> int:
     mcp_p.add_argument("--split-derived-knowledge", action="store_true")
     mcp_p.set_defaults(func=_cmd_mcp)
 
+    serve_p = sub.add_parser(
+        "serve",
+        help="Run REST, MCP, and maintenance in one shared process",
+    )
+    serve_p.add_argument("--workspace", required=True, help="Workspace ID")
+    serve_p.add_argument("--host", default="127.0.0.1", help="HTTP bind host")
+    serve_p.add_argument("--port", type=int, default=8765, help="REST workbench port")
+    serve_p.add_argument("--mcp-port", type=int, default=8780, help="MCP port")
+    serve_p.add_argument("--mcp-path", default="/mcp", help="MCP HTTP path")
+    serve_p.add_argument("--maintenance-interval", type=float, default=10.0)
+    serve_p.add_argument("--background-interval", type=float, default=600.0)
+    serve_p.set_defaults(func=_cmd_serve)
+
     embedding_p = sub.add_parser(
         "embedding-service",
         aliases=["embedding-service"],
@@ -1347,6 +1476,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     codex_compose_p.add_argument("--mode", choices=["standalone", "memory", "host", "host-memory"])
     codex_compose_p.add_argument("--project", default="llm-wiki-memory")
+    codex_compose_p.add_argument("--configure", action="store_true")
+    codex_compose_p.add_argument("--stack", choices=["split", "combined"], default="split")
+    codex_compose_p.add_argument("--embedding", choices=["none", "vllm", "transformers"], default="none")
+    codex_compose_p.add_argument("--maintenance-enabled", choices=["true", "false"], default="false", dest="maintenance_enabled")
+    codex_compose_p.add_argument("--request-enabled", choices=["true", "false"], default="true", dest="request_enabled")
+    codex_compose_p.add_argument("--background-enabled", choices=["true", "false"], default="false", dest="background_enabled")
+    codex_compose_p.add_argument("--maintenance-profile", choices=["high", "balanced", "budgeted", "lite"], default="balanced")
+    codex_compose_p.add_argument("--profile-ladder", dest="profile_ladder_json", default=None)
+    codex_compose_p.add_argument("--profile-ladder-file", default=None)
+    codex_compose_p.add_argument("--combined-memory", default="512m")
+    codex_compose_p.add_argument("--combined-cpu", default="0.25")
+    codex_compose_p.add_argument("--embedding-dimension", type=int, default=1024)
+    codex_compose_p.add_argument("--max-model-len", type=int, default=8192, dest="max_model_len")
+    codex_compose_p.add_argument("--crop-token-budget", type=int, default=7680, dest="crop_token_budget")
+    codex_compose_p.add_argument("--env-file", default=".env", dest="env_file")
+    codex_compose_p.add_argument("--write-env", action="store_true", dest="write_env")
+    codex_compose_p.add_argument("--lxc", action="store_true")
+    codex_compose_p.add_argument("--lxc-apply", action="store_true", dest="lxc_apply")
     codex_compose_p.add_argument("--build", action="store_true")
     codex_compose_p.add_argument("--login", action="store_true")
     codex_compose_p.add_argument("--dry-run", action="store_true")
@@ -1396,6 +1543,15 @@ def main(argv: list[str] | None = None) -> int:
     control_p = daemon_sub.add_parser("maintenance-control", help="Change maintenance modes through the local daemon control channel")
     control_p.add_argument("--request-enabled", choices=["true", "false"], default=None)
     control_p.add_argument("--background-enabled", choices=["true", "false"], default=None)
+    control_p.add_argument("--enabled", choices=["true", "false"], default=None, help="Enable or pause profile-driven maintenance")
+    control_p.add_argument("--profile", choices=["high", "balanced", "budgeted", "lite"], default=None)
+    control_p.add_argument("--profile-ladder-json", default=None, help="Ordered JSON profile/provider quota ladder")
+    control_p.add_argument("--budget-json", default=None, help="Windowed budget JSON, for example {\"daily\":{\"output_tokens\":20000}}")
+    control_p.add_argument("--clear-budget", action="store_true")
+    control_p.add_argument("--status", action="store_true", help="Print durable control state without changing it")
+    for window in ("daily", "weekly", "monthly"):
+        for metric in ("tokens", "input_tokens", "output_tokens", "money"):
+            control_p.add_argument(f"--{window.replace('_', '-')}-{metric.replace('_', '-')}", dest=f"{window}_{metric}", type=float, default=None)
     control_p.add_argument("--runtime-only", action="store_true", help="Do not persist the requested state")
     control_p.set_defaults(func=_cmd_maintenance_control)
 

@@ -4,6 +4,7 @@ from kogwistar_llm_wiki.provider_config import (
     build_provider_endpoint_config,
     normalize_provider_name,
     provider_config_summary,
+    resolve_maintenance_provider_settings,
     resolve_parser_provider_settings,
 )
 
@@ -109,3 +110,18 @@ def test_resolve_parser_provider_settings_prefers_kogwistar_proposal_mode_over_l
     settings = resolve_parser_provider_settings()
 
     assert settings.proposal_mode == "children"
+
+
+def test_explicit_ladder_provider_does_not_get_replaced_by_global_chain(monkeypatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN", "codex,ollama")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_OLLAMA_BASE_URL", "http://ollama:11434")
+
+    settings = resolve_maintenance_provider_settings(
+        provider="ollama",
+        model="gemma4:e2b",
+        include_provider_chain=False,
+    )
+
+    assert settings.parser.provider == "ollama"
+    assert settings.parser.model == "gemma4:e2b"
+    assert settings.parser.fallback_specs == []

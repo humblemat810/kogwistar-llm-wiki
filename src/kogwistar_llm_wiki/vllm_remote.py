@@ -39,6 +39,8 @@ from .multimodal_remote import (
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-fA-F]{64}$")
 DEFAULT_VLLM_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
 DEFAULT_VLLM_DIMENSION = 1024
+MIN_VLLM_DIMENSION = 64
+MAX_VLLM_DIMENSION = 2048
 DEFAULT_VLLM_MAX_MODEL_LEN = 8192
 DEFAULT_VLLM_CROP_TOKEN_BUDGET = 7680
 
@@ -76,8 +78,11 @@ class VllmEmbeddingSettings:
             raise ValueError("vLLM model revision is required")
         if not _DIGEST_RE.search(self.image_digest.strip()):
             raise ValueError("vLLM image must be pinned by an @sha256 digest")
-        if self.dimension != DEFAULT_VLLM_DIMENSION:
-            raise ValueError("the experimental vLLM backend currently supports 1024 dimensions only")
+        if not MIN_VLLM_DIMENSION <= self.dimension <= MAX_VLLM_DIMENSION:
+            raise ValueError(
+                "vLLM embedding dimension must be between "
+                f"{MIN_VLLM_DIMENSION} and {MAX_VLLM_DIMENSION}"
+            )
         if self.timeout_seconds <= 0 or self.max_request_bytes <= 0 or self.max_image_bytes <= 0:
             raise ValueError("vLLM limits must be positive")
         if self.max_model_len <= 0 or self.crop_token_budget <= 0:
@@ -107,7 +112,7 @@ class VllmEmbeddingSettings:
             metric="dot",
             preprocessing_fingerprint=(
                 f"qwen3-vl:vllm:{self.image_digest}:pooling:embed:"
-                f"{instruction_fingerprint}:1024:context={self.max_model_len}:"
+                f"{instruction_fingerprint}:{self.dimension}:context={self.max_model_len}:"
                 f"crop={self.crop_token_budget}:eager={int(self.enforce_eager)}:"
                 f"seqs={self.max_num_seqs}"
             ),
@@ -430,6 +435,8 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
 __all__ = [
     "DEFAULT_VLLM_DIMENSION",
     "DEFAULT_VLLM_MODEL",
+    "MAX_VLLM_DIMENSION",
+    "MIN_VLLM_DIMENSION",
     "VllmEmbeddingSettings",
     "VllmMultimodalEncoder",
 ]

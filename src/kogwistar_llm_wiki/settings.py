@@ -11,7 +11,21 @@ from pathlib import Path
 from typing import Any
 
 from .identity import auth_mode
-from .maintenance_control import configured_default_request_max_rounds
+from .maintenance_control import (
+    MaintenanceControl,
+    MaintenanceControlState,
+    configured_default_request_max_rounds,
+)
+from .maintenance_profiles import (
+    configured_maintenance_budget,
+    configured_maintenance_enabled,
+    configured_maintenance_profile,
+    configured_prices,
+    configured_profile_ladder,
+    configured_token_budget_rate,
+    normalize_profile_ladder,
+    resolve_profile,
+)
 from .model_catalog import _safe_endpoint
 from .multimodal_runtime import (
     configured_embedding_crop_token_budget,
@@ -45,6 +59,12 @@ _DESIRED_KEYS = frozenset({
     "codex_memory_max_records_per_capture",
     "codex_memory_max_recall_records",
     "maintenance_default_request_max_rounds",
+    "maintenance_enabled",
+    "maintenance_profile",
+    "maintenance_profile_ladder",
+    "maintenance_token_budget_rate",
+    "maintenance_model_class",
+    "maintenance_budget",
 })
 _SECRET_WORDS = ("token", "secret", "password", "api_key", "credential")
 _WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router", "codex"})
@@ -134,6 +154,18 @@ class SettingsService:
     def snapshot(self, *, workspace_id: str = "default") -> dict[str, object]:
         parser = resolve_parser_provider_settings().parser
         maintenance = resolve_maintenance_provider_settings().parser
+        data_dir = os.getenv("KOGWISTAR_DATA_DIR")
+        maintenance_state = MaintenanceControl(data_dir).get() if data_dir else MaintenanceControlState(
+            enabled=configured_maintenance_enabled(),
+            profile=configured_maintenance_profile(),
+            budget=configured_maintenance_budget(),
+        )
+        configured_budget = maintenance_state.budget or configured_maintenance_budget()
+        profile_status = resolve_profile(
+            enabled=maintenance_state.enabled,
+            requested=maintenance_state.profile,
+            budget=configured_budget,
+        )
         multimodal = getattr(self.pipeline, "multimodal_encoder", None)
         desired = self._load_desired()
         multimodal_enabled = (
@@ -159,6 +191,25 @@ class SettingsService:
                 "base_url": _safe_endpoint(maintenance.base_url or ""),
                 "temperature": maintenance.temperature,
                 "default_request_max_rounds": configured_default_request_max_rounds(),
+                "enabled": maintenance_state.enabled,
+                "requested_profile": maintenance_state.profile,
+                "profile_ladder": maintenance_state.profile_ladder if maintenance_state.profile_ladder_configured else [
+                    {
+                        "name": level.name,
+                        "provider": level.provider,
+                        "model": level.model,
+                        "profile": level.profile,
+                        "budget": level.budget,
+                    }
+                    for level in configured_profile_ladder()
+                ],
+                "effective_profile": profile_status.effective,
+                "profile_reason": profile_status.reason,
+                "budget": configured_budget,
+                "spend": maintenance_state.spend,
+                "token_budget_rate": configured_token_budget_rate(),
+                "budget_window_mode": os.getenv("LLM_WIKI_MAINTENANCE_BUDGET_WINDOW_MODE", "rolling"),
+                "prices_per_1m": configured_prices(),
             },
             "embeddings": self._effective_embeddings(),
             "multimodal": {
@@ -254,6 +305,38 @@ class SettingsService:
                 raise ValueError("maintenance_default_request_max_rounds must be an integer") from exc
             if not 1 <= next_desired["maintenance_default_request_max_rounds"] <= 100:
                 raise ValueError("maintenance_default_request_max_rounds must be between 1 and 100")
+        if "maintenance_enabled" in next_desired and not isinstance(next_desired["maintenance_enabled"], bool):
+            raise ValueError("maintenance_enabled must be boolean")
+        if "maintenance_profile" in next_desired and next_desired["maintenance_profile"] not in {"high", "balanced", "budgeted", "lite"}:
+            raise ValueError("maintenance_profile must be high, balanced, budgeted, or lite")
+        if "maintenance_profile_ladder" in next_desired:
+            try:
+                levels = normalize_profile_ladder(next_desired["maintenance_profile_ladder"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid maintenance_profile_ladder: {exc}") from exc
+            next_desired["maintenance_profile_ladder"] = [
+                {
+                    "name": level.name,
+                    "provider": level.provider,
+                    "model": level.model,
+                    "profile": level.profile,
+                    "budget": level.budget,
+                }
+                for level in levels
+            ]
+        if "maintenance_token_budget_rate" in next_desired:
+            try:
+                next_desired["maintenance_token_budget_rate"] = int(next_desired["maintenance_token_budget_rate"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("maintenance_token_budget_rate must be an integer") from exc
+            if next_desired["maintenance_token_budget_rate"] <= 0:
+                raise ValueError("maintenance_token_budget_rate must be positive")
+        if "maintenance_budget" in next_desired:
+            if not isinstance(next_desired["maintenance_budget"], Mapping):
+                raise ValueError("maintenance_budget must be an object")
+            from .maintenance_profiles import normalize_budget
+
+            next_desired["maintenance_budget"] = normalize_budget(next_desired["maintenance_budget"])
         if (
             "embedding_max_model_len" in next_desired
             and "embedding_crop_token_budget" in next_desired
@@ -297,6 +380,10 @@ class SettingsService:
                 if key in desired:
                     setattr(self.codex_memory, attribute, int(desired[key]))
             snapshot = self.snapshot(workspace_id=workspace_id)
+        if {"maintenance_enabled", "maintenance_profile", "maintenance_budget"}.intersection(
+            snapshot.get("pending_changes", [])
+        ):
+            return {"status": "staged", "reason": "maintenance_control_is_local_only", **snapshot}
         if snapshot["restart_required"] or snapshot["reembedding_required"]:
             return {"status": "staged", "reason": "restart_and_or_reembedding_required", **snapshot}
         return {"status": "applied", "applied_live": ["multimodal_enabled"] if self._runtime_multimodal_enabled is not None else [], **snapshot}
@@ -321,14 +408,19 @@ class SettingsService:
             "knowledge_text_embedding": {"state": "up", "toggleable": False, "description": "Local text embedding used by the configured graph backend."},
             "multimodal_embedding": {"state": "up" if multimodal["enabled"] else "disabled", "toggleable": True, "description": "Qwen3-VL remote projection route."},
             "parser": {"state": "up", "toggleable": False},
-            "maintenance": {"state": "up", "toggleable": False},
+            "maintenance": {
+                "state": "up" if effective.get("maintenance", {}).get("enabled") else "paused",
+                "toggleable": True,
+                "profile": effective.get("maintenance", {}).get("effective_profile"),
+                "description": "Durable request maintenance plus locally controlled background profile work.",
+            },
             "otel_sink": {"state": "up" if otel.get("enabled") else "disabled", "toggleable": True, "description": "Optional OpenTelemetry trace sink for the configured collector."},
             "codex_memory": {"state": "up" if effective.get("codex_memory", {}).get("enabled") else "disabled", "toggleable": True, "description": "Project-scoped evidence-backed memory artifacts; canonical graph edits still require propose and confirm."},
         }
 
     @staticmethod
     def _impact(effective: Mapping[str, object], desired: Mapping[str, object]) -> dict[str, object]:
-        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "maintenance_provider_chain", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget", "maintenance_default_request_max_rounds"}
+        restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "maintenance_provider_chain", "maintenance_profile_ladder", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget", "maintenance_default_request_max_rounds"}
         parser = effective.get("parser", {})
         maintenance = effective.get("maintenance", {})
         effective_values = {
@@ -347,6 +439,12 @@ class SettingsService:
             "codex_memory_max_records_per_capture": effective.get("codex_memory", {}).get("max_records_per_capture") if isinstance(effective.get("codex_memory"), Mapping) else None,
             "codex_memory_max_recall_records": effective.get("codex_memory", {}).get("max_recall_records") if isinstance(effective.get("codex_memory"), Mapping) else None,
             "maintenance_default_request_max_rounds": effective.get("maintenance", {}).get("default_request_max_rounds") if isinstance(effective.get("maintenance"), Mapping) else None,
+            "maintenance_enabled": effective.get("maintenance", {}).get("enabled") if isinstance(effective.get("maintenance"), Mapping) else None,
+            "maintenance_profile": effective.get("maintenance", {}).get("requested_profile") if isinstance(effective.get("maintenance"), Mapping) else None,
+            "maintenance_profile_ladder": effective.get("maintenance", {}).get("profile_ladder") if isinstance(effective.get("maintenance"), Mapping) else None,
+            "maintenance_token_budget_rate": effective.get("maintenance", {}).get("token_budget_rate") if isinstance(effective.get("maintenance"), Mapping) else None,
+            "maintenance_model_class": os.getenv("LLM_WIKI_MAINTENANCE_MODEL_CLASS", "unknown"),
+            "maintenance_budget": effective.get("maintenance", {}).get("budget") if isinstance(effective.get("maintenance"), Mapping) else None,
         }
         pending_changes = sorted(
             key for key, value in desired.items()
@@ -360,4 +458,6 @@ class SettingsService:
             warnings.append("Model/provider changes are staged and require a graceful service restart.")
         if reembedding_required:
             warnings.append("Embedding profile changes require an isolated projection and re-embedding.")
+        if {"maintenance_enabled", "maintenance_profile", "maintenance_profile_ladder", "maintenance_budget"}.intersection(pending_changes):
+            warnings.append("Maintenance profile changes are applied through the local docker-exec control command.")
         return {"pending_changes": pending_changes, "restart_required": restart_required, "reembedding_required": reembedding_required, "warnings": warnings}

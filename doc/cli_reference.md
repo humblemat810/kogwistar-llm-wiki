@@ -188,6 +188,18 @@ python -m kogwistar_llm_wiki --help
 | `KOGWISTAR_MAINTENANCE_CODEX_BASE_URL` | daemon maintenance | Host bridge URL, normally `http://host.docker.internal:8791` |
 | `KOGWISTAR_MAINTENANCE_CODEX_API_KEY_ENV` | daemon maintenance | Container environment variable containing the bridge token name |
 | `LLM_WIKI_CODEX_BRIDGE_TOKEN` | Docker/host bridge | Shared bearer token; never a Codex credential and never logged |
+| `LLM_WIKI_MAINTENANCE_ENABLED` | maintenance daemon | Master profile-policy switch; defaults to `false` when no persisted control state exists |
+| `LLM_WIKI_MAINTENANCE_REQUEST_ENABLED` | maintenance daemon | Independently pause/resume request-originated maintenance; queued jobs are retained |
+| `LLM_WIKI_MAINTENANCE_BACKGROUND_ENABLED` | maintenance daemon | Independently pause/resume scheduled background maintenance; queued jobs are retained |
+| `LLM_WIKI_MAINTENANCE_PROFILE` | maintenance daemon | Base profile: `high`, `balanced`, `budgeted`, or `lite` |
+| `LLM_WIKI_MAINTENANCE_PROFILE_LADDER` | maintenance daemon | Optional JSON array of up to eight ordered `{name, provider, model, profile, budget}` levels |
+| `LLM_WIKI_MAINTENANCE_BUDGET_*` | maintenance daemon | Windowed caps for `DAILY`, `WEEKLY`, and `MONTHLY` `TOKENS`, `INPUT_TOKENS`, `OUTPUT_TOKENS`, or `MONEY` |
+| `LLM_WIKI_MAINTENANCE_BUDGET_WINDOW_MODE` | maintenance daemon | `rolling` or `calendar` reset behavior; defaults to `rolling` |
+| `LLM_WIKI_MAINTENANCE_TOKEN_BUDGET_RATE` | maintenance daemon | Token accumulation threshold used by the `budgeted` background profile |
+| `LLM_WIKI_COMBINED_MEMORY_LIMIT` | Compose combined overlay | Memory limit for the single REST/MCP/maintenance process |
+| `LLM_WIKI_COMBINED_CPU_LIMIT` | Compose combined overlay | CPU limit for the single REST/MCP/maintenance process |
+| `LLM_WIKI_EMBEDDING_MAX_MODEL_LEN` | multimodal embedding | Active model context limit; must be positive |
+| `LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET` | multimodal embedding | Defensive crop budget; must be positive and no greater than the context limit |
 | `PYTHONPATH` | dev | Ensure `src/` is importable without install |
 
 `demo` and `ingest` also accept `--parser-lane page_index|workflow_layered`. Use
@@ -332,6 +344,38 @@ CA store and host Codex login, starts no Docker container, and prints the bridge
 command. The normal memory Compose stack must be started separately with the
 host-bridge provider settings. Use `--mode host-memory` to start the bridge in
 the background and then start the memory stack with those settings.
+
+### TUI configuration and Linux LXC
+
+Use `llm-wiki codex-compose --configure` for an interactive, non-secret setup
+of split or combined deployment, embedding backend, maintenance switches and
+profile, CPU/RAM limits, and embedding dimension/context/crop settings. Add
+`--write-env` to persist only those allowlisted settings to the selected
+`--env-file` (default `.env`), then `--execute` to start the plan. Secrets are
+never collected or written by the TUI.
+
+The configuration prompt also accepts an optional ordered profile ladder JSON.
+For example, `[{"name":"primary","provider":"codex","profile":"high","budget":{"daily":{"tokens":20000}}},{"name":"fallback","provider":"ollama","profile":"balanced","budget":{"daily":{"tokens":50000}}}]` selects the first level with quota and rechecks the primary after its window resets. Use `[]` to disable the ladder. The daemon persists per-level spend under the maintenance data volume. On Windows, use `--profile-ladder-file path/to/ladder.json` instead of inline JSON when shell quoting is unreliable.
+
+The ladder is evaluated at each maintenance-job boundary, not in the middle of
+an in-flight provider call. The selected level's provider and model override
+the ordinary provider retry chain for that job. When every configured level is
+over quota, maintenance pauses with an exhausted status rather than silently
+using an unconfigured provider. Usage is attributed to the selected level and
+the primary is eligible again after its configured window resets.
+
+Linux hosts may optionally run Docker inside an existing LXC. The safe
+read-only preflight is:
+
+```bash
+bash scripts/setup_lxc_docker.sh --check
+```
+
+After the LXC host has enabled nesting, keyctl, cgroups, and networking, an
+administrator may install Docker on Debian/Ubuntu with
+`sudo bash scripts/setup_lxc_docker.sh --apply`. `--print-config` prints the
+host-side guidance. GPU passthrough remains an explicit host operation; this
+helper never changes LXC device policy.
 
 ## `llm-wiki codex-memory`
 

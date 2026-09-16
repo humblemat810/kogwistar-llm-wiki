@@ -377,12 +377,17 @@ class _RouteHandled(Exception):
 
 def serve_workbench(api: WorkbenchApi, *, host: str = "127.0.0.1", port: int = 8765) -> None:
     """Serve lens/history reads until interrupted; mutations remain command-gated."""
-    server = ThreadingHTTPServer((host, port), build_workbench_handler(api))
+    server = create_workbench_server(api, host=host, port=port)
     try:
         server.serve_forever()
     finally:
         server.server_close()
         api.close()
+
+
+def create_workbench_server(api: WorkbenchApi, *, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+    """Create, but do not start, a workbench server for combined mode."""
+    return ThreadingHTTPServer((host, port), build_workbench_handler(api))
 
 
 def _first(values: dict[str, list[str]], key: str, default: str) -> str:
@@ -481,4 +486,4 @@ def _models() -> dict[str, object]:
     return {"object": "list", "data": [{"id": "llm-wiki-deterministic", "object": "model", "owned_by": "kogwistar-llm-wiki"}]}
 
 
-__all__ = ["build_workbench_handler", "serve_workbench"]
+__all__ = ["build_workbench_handler", "create_workbench_server", "serve_workbench"]

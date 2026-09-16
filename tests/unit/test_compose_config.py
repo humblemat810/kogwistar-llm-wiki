@@ -117,6 +117,15 @@ def test_memory_agent_combination_enables_observability_and_auth() -> None:
     assert "postgres:" in text
 
 
+def test_combined_overlay_uses_one_process_and_suppresses_split_roles() -> None:
+    text = (Path(__file__).parents[2] / "compose.combined.yml").read_text(encoding="utf-8")
+    assert "serve" in text
+    assert "--mcp-port" in text
+    assert "profiles: [split]" in text
+    assert "LLM_WIKI_COMBINED_MEMORY_LIMIT" in text
+    assert "LLM_WIKI_COMBINED_CPU_LIMIT" in text
+
+
 def test_static_compose_helper_contains_persistent_service_contract() -> None:
     text = (Path(__file__).parents[2] / "frontend" / "public" / "compose.html").read_text(
         encoding="utf-8"
@@ -200,11 +209,13 @@ def test_codex_launchers_select_standalone_or_memory_file_sets() -> None:
     assert "--login" in shell
 
 
-def test_codex_tui_exposes_host_bridge_as_a_distinct_mode() -> None:
+def test_codex_tui_exposes_host_bridge_as_a_distinct_mode(tmp_path: Path) -> None:
     from kogwistar_llm_wiki.codex_compose_tui import (
+        TuiConfiguration,
         _host_environment,
         _repository_root,
         build_plan,
+        merge_configuration_env,
     )
 
     host_steps = build_plan("host", build=False, login=False, project="ignored")
@@ -216,6 +227,41 @@ def test_codex_tui_exposes_host_bridge_as_a_distinct_mode() -> None:
     assert _host_environment()["KOGWISTAR_MAINTENANCE_PROVIDER"] == "codex"
     assert _host_environment()["KOGWISTAR_MAINTENANCE_CODEX_BASE_URL"] == "http://host.docker.internal:8791"
     assert (_repository_root() / "compose.codex.yml").exists()
+
+    configuration = TuiConfiguration(
+        stack="combined",
+        embedding="vllm",
+        maintenance_enabled=True,
+        request_enabled=False,
+        background_enabled=True,
+        embedding_crop_token_budget=7000,
+        profile_ladder_json='[{"name":"primary","provider":"codex","profile":"high"}]',
+    )
+    configured = build_plan("host-memory", build=False, login=False, project="demo", configuration=configuration)
+    assert "compose.combined.yml" in configured[-1].command
+    assert "compose.embedding-vllm.yml" in configured[-1].command
+    assert configured[-1].environment["LLM_WIKI_MAINTENANCE_REQUEST_ENABLED"] == "false"
+
+    env_file = tmp_path / "tui-config.env"
+    env_file.write_text("POSTGRES_PASSWORD=keep-me\nLLM_WIKI_COMBINED_CPU_LIMIT=old\n", encoding="utf-8")
+    merge_configuration_env(env_file, configuration)
+    text = env_file.read_text(encoding="utf-8")
+    assert "POSTGRES_PASSWORD=keep-me" in text
+    assert "LLM_WIKI_COMBINED_CPU_LIMIT=0.25" in text
+    assert "LLM_WIKI_MAINTENANCE_BACKGROUND_ENABLED=true" in text
+    assert 'LLM_WIKI_MAINTENANCE_PROFILE_LADDER=[{"name":"primary","provider":"codex","profile":"high"}]' in text
+    assert "--profile-ladder-file" in (Path(__file__).parents[2] / "src" / "kogwistar_llm_wiki" / "codex_compose_tui.py").read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="between 1 and max model length"):
+        TuiConfiguration(embedding_max_model_len=8192, embedding_crop_token_budget=8193)
+
+
+def test_lxc_helper_is_linux_only_and_non_mutating_by_default() -> None:
+    script = Path("scripts/setup_lxc_docker.sh").read_text(encoding="utf-8")
+    assert "--check" in script
+    assert "--apply" in script
+    assert "--print-config" in script
+    assert "apt-get install -y docker-ce" in script
+    assert "does not create or reconfigure an LXC" in script
 
 
 def test_generated_stack_exposes_tunable_resource_limits() -> None:

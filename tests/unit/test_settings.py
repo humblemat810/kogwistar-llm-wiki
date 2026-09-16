@@ -156,3 +156,22 @@ def test_codex_memory_settings_reject_invalid_limits(tmp_path):
             service.update_desired({"codex_memory_enabled": "true"})
     finally:
         engines.close()
+
+
+def test_maintenance_profile_settings_are_visible_and_local_controlled(tmp_path, monkeypatch):
+    monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_WIKI_MAINTENANCE_ENABLED", "false")
+    engines = build_in_memory_namespace_engines()
+    try:
+        service = SettingsService(IngestPipeline(engines), path=tmp_path / "desired.json")
+        initial = service.snapshot(workspace_id="demo")
+        assert initial["effective"]["maintenance"]["enabled"] is False
+        updated = service.update_desired(
+            {"maintenance_enabled": True, "maintenance_profile": "budgeted", "maintenance_budget": {"daily": {"output_tokens": 20}}},
+            workspace_id="demo",
+        )
+        assert updated["desired"]["maintenance_profile"] == "budgeted"
+        assert any("docker-exec" in warning for warning in updated["warnings"])
+        assert service.apply(workspace_id="demo", confirmed=True)["reason"] == "maintenance_control_is_local_only"
+    finally:
+        engines.close()
