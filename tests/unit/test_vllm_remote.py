@@ -69,7 +69,8 @@ def test_vllm_profile_is_distinct_from_transformers_profile() -> None:
         ({"model_revision": ""}, "model revision is required"),
         ({"model": "other-model"}, "supports only"),
         ({"image_digest": "vllm:latest"}, "pinned by an @sha256 digest"),
-        ({"dimension": 1536}, "supports 1024 dimensions only"),
+        ({"dimension": 63}, "between 64 and 2048"),
+        ({"dimension": 2049}, "between 64 and 2048"),
     ],
 )
 def test_vllm_settings_fail_closed(kwargs: dict[str, object], message: str) -> None:
@@ -124,6 +125,33 @@ def test_vllm_adapter_uses_chat_embeddings_and_preserves_request_identity() -> N
     assert "a test image" in json.dumps(embedding_requests[-1])
     assert embedding_requests[-1]["continue_final_message"] is True
     assert embedding_requests[-1]["add_generation_prompt"] is False
+
+
+def test_vllm_adapter_uses_configured_dimension() -> None:
+    requests: list[dict[str, object]] = []
+
+    def opener(request, *, timeout):
+        del timeout
+        payload = json.loads(request.data.decode("utf-8"))
+        requests.append(payload)
+        if request.full_url.endswith("/tokenize"):
+            return _Response({"count": 2, "tokens": [1, 2]})
+        vector = [0.0] * 1536
+        vector[0] = 1.0
+        return _Response(
+            {
+                "model": "Qwen/Qwen3-VL-Embedding-2B",
+                "data": [{"index": 0, "embedding": vector}],
+            }
+        )
+
+    encoder = VllmMultimodalEncoder(replace(_settings(), dimension=1536), opener=opener)
+    result = encoder.encode_queries(["configured dimension"])
+
+    assert len(result[0][0]) == 1536
+    embedding_requests = [request for request in requests if "dimensions" in request]
+    assert embedding_requests[-1]["dimensions"] == 1536
+    assert ":1536:context=" in encoder.profile.preprocessing_fingerprint
 
 
 def test_vllm_adapter_tokenizes_and_crops_long_text() -> None:

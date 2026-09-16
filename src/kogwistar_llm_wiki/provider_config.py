@@ -279,6 +279,7 @@ def resolve_maintenance_provider_settings(
     project: str | None = None,
     location: str | None = None,
     max_retries: int | None = None,
+    include_provider_chain: bool = True,
 ) -> WorkflowProviderSettings:
     primary = build_provider_endpoint_config(
             "maintenance",
@@ -292,6 +293,8 @@ def resolve_maintenance_provider_settings(
             location=location,
             max_retries=max_retries,
         )
+    if not include_provider_chain:
+        return build_workflow_provider_settings(parser=primary)
     chain_value = _first_env("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN")
     provider_names = [
         normalize_provider_name(value)

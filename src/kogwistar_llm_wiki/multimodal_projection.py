@@ -1206,8 +1206,7 @@ def build_configured_multimodal_encoder(
             )
         if not revision:
             raise ValueError("vLLM requires LLM_WIKI_MULTIMODAL_MODEL_REVISION")
-        if configured_multimodal_dimension() != 1024:
-            raise ValueError("the experimental vLLM backend currently supports 1024 dimensions only")
+        dimension = configured_multimodal_dimension()
         return VllmMultimodalEncoder(
             VllmEmbeddingSettings(
                 url=vllm_url,
@@ -1215,7 +1214,7 @@ def build_configured_multimodal_encoder(
                 image_digest=vllm_image,
                 model=configured_multimodal_model(),
                 model_revision=revision,
-                dimension=1024,
+                dimension=dimension,
                 instruction=os.environ.get(
                     "LLM_WIKI_MULTIMODAL_INSTRUCTION",
                     "Represent the user's input.",

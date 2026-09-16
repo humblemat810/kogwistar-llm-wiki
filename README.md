@@ -94,6 +94,27 @@ For a guided terminal menu that explains and previews the final command before
 execution, run `llm-wiki codex-compose`. Use `--execute` to run a selected mode
 without an additional confirmation prompt.
 
+The TUI can also configure the deployment without handling secrets. For an
+interactive configuration of stack layout, embedding backend, maintenance
+switches/profile, resource caps, and vLLM context limits, use:
+
+```bash
+llm-wiki codex-compose --configure --write-env --dry-run
+```
+
+Review the preview, then repeat with `--execute` to update only the allowlisted
+non-secret settings in `.env` and start the selected stack. Existing passwords,
+tokens, and unrelated variables are preserved. The equivalent non-interactive
+form is `llm-wiki codex-compose --mode host-memory --stack combined
+--embedding vllm --write-env --execute`.
+
+On Linux, an optional LXC deployment uses the normal Docker Engine inside an
+already-created LXC. Run `bash scripts/setup_lxc_docker.sh --check` first; use
+`sudo bash scripts/setup_lxc_docker.sh --apply` only after enabling nesting and
+cgroup support in the LXC host. The script does not create or reconfigure an
+LXC and does not configure NVIDIA passthrough. The TUI can run the same
+preflight with `--lxc`; `--lxc-apply` is an explicit Docker installation step.
+
 The menu also includes the host-bridge mode. It starts only the host bridge and
 does not start Docker; complete `codex login` on the host and start the normal
 memory Compose stack separately with the host-bridge provider settings.
@@ -103,6 +124,45 @@ bridge in the background and then starts Compose with the host-bridge settings.
 Use `--runtime-only` for a temporary change. Disabling a mode retains queued
 jobs; it does not cancel or rewrite workflow history. The control socket is
 local to the container and is not exposed through REST or MCP.
+
+Maintenance also has a durable profile switch. The master switch pauses only
+profile-driven background work; explicit request maintenance remains controlled
+by its independent switch. `budgeted` fails closed to `lite` until at least one
+windowed cap is configured:
+
+```powershell
+docker exec llm-wiki-memory-maintenance-1 llm-wiki --data-dir /var/lib/llm-wiki daemon maintenance-control --enabled true --profile budgeted --budget-json '{"daily":{"output_tokens":20000}}'
+docker exec llm-wiki-memory-maintenance-1 llm-wiki --data-dir /var/lib/llm-wiki daemon maintenance-control --enabled false
+```
+
+An optional profile ladder cascades by quota. The daemon checks levels in
+order on every cycle, records spend per level, and returns to the first level
+when its budget window resets:
+
+```bash
+export LLM_WIKI_MAINTENANCE_PROFILE_LADDER='[{"name":"codex-high","provider":"codex","profile":"high","budget":{"daily":{"tokens":20000}}},{"name":"ollama-balanced","provider":"ollama","profile":"balanced","budget":{"daily":{"tokens":50000}}},{"name":"ollama-lite","provider":"ollama","profile":"lite","budget":{}}]'
+```
+
+The ladder is disabled when unset and does not replace the existing provider
+retry chain. Configure or clear it through the TUI, or locally with
+`daemon maintenance-control --profile-ladder-json '[]'`; no REST or MCP route
+can change this local control.
+When a ladder level is selected, its provider and model are authoritative for
+that maintenance job; the ordinary provider retry chain is not allowed to
+override the selected level.
+
+On Windows, where inline JSON quoting can be altered by the shell, put the
+same array in a file and run `llm-wiki codex-compose --profile-ladder-file
+profile-ladder.json --dry-run`.
+
+The daemon reports requested/effective profile, cap/spend, deferral reason, and
+poll interval in startup metadata. Empty queues back off automatically. For a
+single-process deployment, use the checked-in combined overlay:
+`docker compose -f compose.yml -f compose.combined.yml up -d --no-build`.
+It runs `llm-wiki serve` and shares one engine bundle across REST, streamable
+MCP, and maintenance. Set `LLM_WIKI_COMBINED_MEMORY_LIMIT` and
+`LLM_WIKI_COMBINED_CPU_LIMIT` to constrain that process. The existing split
+Compose deployment remains supported.
 
 | Layer | Role |
 |---|---|

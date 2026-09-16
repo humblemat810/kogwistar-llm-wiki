@@ -260,6 +260,7 @@ class MaintenanceWorker(BaseWorker):
         maintenance_seconds_per_slice: int = 0,
         worker_id: str | None = None,
         trace_sink: Callable[[dict[str, object]], None] | None = None,
+        usage_sink: Callable[[str, Mapping[str, float]], None] | None = None,
         document_parser: Callable[[MaintenanceJobExecutionContext], Mapping[str, object]] | None = None,
     ) -> None:
         """
@@ -284,6 +285,7 @@ class MaintenanceWorker(BaseWorker):
         self._last_progress_monotonic = time.monotonic()
         self._claim_lost = threading.Event()
         self.trace_sink = trace_sink
+        self.usage_sink = usage_sink
         self.request_enabled = True
         self.background_enabled = True
         self.document_parser = document_parser or self._parse_seeded_document
@@ -1459,6 +1461,19 @@ class MaintenanceWorker(BaseWorker):
             source_namespace=ns.usage_events,
             projection_namespace=ns.usage_projection,
         ).refresh()
+        if self.usage_sink is not None:
+            summary = summarize_budget_events(budget_ledger.events)
+            input_tokens = float(summary.get("input_tokens", 0) or 0)
+            output_tokens = float(summary.get("output_tokens", 0) or 0)
+            self.usage_sink(
+                f"{ctx.job_id}:{getattr(result, 'run_id', '') or ctx.request_node_id}",
+                {
+                    "tokens": float(summary.get("total_tokens", input_tokens + output_tokens) or 0),
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "money": float(summary.get("total_cost", 0) or 0),
+                },
+            )
 
     def _requeue_suspended_maintenance_job(
         self,

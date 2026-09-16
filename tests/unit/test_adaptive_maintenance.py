@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -147,3 +148,55 @@ def test_background_cycle_identity_and_exclusions_survive_restart(tmp_path, monk
     assert enqueued[0]["payload"]["embedding_exploration"]["probe_seed"] != enqueued[1]["payload"]["embedding_exploration"]["probe_seed"]
     assert second._cycle_number == 2
     assert (tmp_path / "maintenance" / "background_state.json").exists()
+
+
+def test_profile_usage_is_idempotent_after_daemon_restart(tmp_path) -> None:
+    def make_daemon() -> MaintenanceDaemon:
+        daemon = object.__new__(MaintenanceDaemon)
+        daemon._budget_state_path = tmp_path / "maintenance" / "budget_state.json"
+        daemon._budget_state = daemon._load_budget_state()
+        daemon._recorded_usage_attempts = {
+            str(item)
+            for item in (daemon._budget_state.get("usage_attempt_ids") or [])
+            if str(item).strip()
+        }
+        daemon.control = None
+        daemon.control_state = MaintenanceControlState()
+        return daemon
+
+    first = make_daemon()
+    first._record_profile_usage("attempt-1", {"tokens": 12, "input_tokens": 10, "output_tokens": 2})
+    second = make_daemon()
+    second._record_profile_usage("attempt-1", {"tokens": 12, "input_tokens": 10, "output_tokens": 2})
+
+    state = json.loads((tmp_path / "maintenance" / "budget_state.json").read_text(encoding="utf-8"))
+    assert state["spend"]["daily"]["tokens"] == 12
+    assert state["usage_attempt_ids"] == ["attempt-1"]
+
+
+def test_daemon_applies_selected_ladder_provider_without_global_chain(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_resolve(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(parser=SimpleNamespace(provider=kwargs["provider"]))
+
+    daemon = object.__new__(MaintenanceDaemon)
+    daemon._budget_state = {"ladder_spend": {"primary": {"daily": {"tokens": 100}}}}
+    daemon._worker = SimpleNamespace(provider_settings=None)
+    daemon.control_state = MaintenanceControlState(
+        enabled=True,
+        profile="high",
+        profile_ladder=[
+            {"name": "primary", "provider": "codex", "profile": "high", "budget": {"daily": {"tokens": 100}}},
+            {"name": "fallback", "provider": "ollama", "profile": "balanced", "budget": {"daily": {"tokens": 2000}}},
+        ],
+        profile_ladder_configured=True,
+    )
+    monkeypatch.setattr(daemon_module, "resolve_maintenance_provider_settings", fake_resolve)
+
+    decision = daemon._select_profile_level(daemon.control_state)
+
+    assert decision.level is not None and decision.level.name == "fallback"
+    assert calls == [{"provider": "ollama", "model": None, "include_provider_chain": False}]
+    assert daemon._worker.provider_settings.parser.provider == "ollama"

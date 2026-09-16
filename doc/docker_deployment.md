@@ -289,11 +289,15 @@ is not a general recommendation for batch throughput. A batch of four
 is the checked-in safe-long default. Use the Compose environment knobs above
 to select a shorter context when the GPU cannot start this profile.
 
-The current pinned vLLM image must also pass a live 1,024-dimensional output
-probe. The Qwen3-VL model advertises Matryoshka dimensions, but some vLLM
-builds reject the `dimensions=1024` request. Such a build remains blocked for
-Stage 2 writes; the compatible Transformers embedding service is the reference
-route until a pinned vLLM candidate passes the probe.
+The configured vLLM dimension is sent on every `/v1/embeddings` request and is
+validated against the returned vector. Set `LLM_WIKI_MULTIMODAL_DIMENSION` (or
+the Compose `LLM_WIKI_EMBEDDING_DIMENSION` input) to a supported model dimension;
+the default remains `1,024`. The current pinned vLLM image must pass a live
+probe for the selected dimension. The Qwen3-VL model advertises Matryoshka
+dimensions, but some vLLM builds reject lower-dimensional requests. Such a
+build remains blocked for Stage 2 writes; the compatible Transformers
+embedding service is the reference route until a pinned vLLM candidate passes
+the probe.
 
 Start the complete GPU memory-agent stack from the repository root:
 
@@ -517,3 +521,84 @@ and embedding images use the explicit targets documented in
 Do not run an overlay alone. Compose does not have a built-in way for an
 overlay to require its base file, so the operator must use the documented
 `-f` order. The CLI generator instead writes one self-contained YAML file.
+### Maintenance profiles and combined mode
+
+The split maintenance service supports two independent request/background
+switches plus a durable profile engine. The master profile switch is local
+control-socket state, not a REST or MCP route:
+
+```bash
+docker exec llm-wiki-memory-maintenance-1 llm-wiki --data-dir /var/lib/llm-wiki \
+  daemon maintenance-control --enabled true --profile balanced \
+  --background-enabled true
+```
+
+Profiles are `high`, `balanced`, `budgeted`, and `lite`. `budgeted` is refused
+as unbudgeted work and reports an effective `lite` state until a daily,
+weekly, or monthly cap is supplied. Token, input-token, output-token, and money
+caps are independent. Use `--budget-json` for an atomic update; state is
+persisted under the app data volume. Empty queues back off up to five minutes,
+and both modes being disabled pauses the worker while retaining the control
+socket so an operator can re-enable it without a container restart.
+
+For quota-aware cascading, set `LLM_WIKI_MAINTENANCE_PROFILE_LADDER` to a JSON
+array of ordered `{name, provider, model, profile, budget}` levels. The first
+level with remaining quota is selected; each window reset rechecks the primary
+level first. Per-level spend is persisted separately from the legacy global
+budget. A selected ladder provider/model is authoritative for that job and is
+not replaced by the ordinary provider retry chain. An empty or unset ladder
+keeps the legacy single-profile behavior.
+The guided TUI accepts the ladder interactively, through `--profile-ladder`,
+or from a JSON file with `--profile-ladder-file` when shell quoting is
+unreliable.
+
+Inspect the active ladder and its durable per-level spend from the maintenance
+container:
+
+```bash
+docker exec llm-wiki-memory-maintenance-1 llm-wiki \
+  --data-dir /var/lib/llm-wiki daemon maintenance-control --status
+```
+
+Change it without restarting the container. Use `[]` to explicitly clear a
+ladder that was supplied by the environment; omitting the option leaves the
+current ladder unchanged:
+
+```bash
+docker exec llm-wiki-memory-maintenance-1 llm-wiki \
+  --data-dir /var/lib/llm-wiki daemon maintenance-control \
+  --profile-ladder-json '[{"name":"primary","provider":"codex","profile":"high","budget":{"daily":{"tokens":20000}}},{"name":"fallback","provider":"ollama","profile":"balanced","budget":{"daily":{"tokens":50000}}}]'
+```
+
+The daemon reevaluates the ladder between jobs. A fallback is not selected
+mid-call, and exhaustion of all levels pauses rather than silently bypassing
+the configured policy. Per-level spend and window timestamps are stored in
+`/var/lib/llm-wiki/maintenance/budget_state.json`; the primary is considered
+again automatically after its window expires.
+
+For lower resident memory, use the combined overlay instead of the split
+REST/MCP/maintenance processes:
+
+```bash
+docker compose -f compose.yml -f compose.combined.yml up -d --no-build
+```
+
+The combined process exposes REST on `8765`, MCP on `8780/mcp`, and retains the
+same Postgres, volume, authentication, and health-check contracts. Use the
+existing split Compose files when independent process scaling is preferred.
+
+The guided TUI exposes these choices without collecting secrets:
+
+```bash
+llm-wiki codex-compose --configure --write-env --dry-run
+llm-wiki codex-compose --mode host-memory --stack combined --embedding vllm \
+  --write-env --execute
+```
+
+The first command previews the changes. The second persists only the
+allowlisted non-secret settings in `.env` and starts the stack. Existing
+passwords and tokens are preserved. On Linux, an optional Docker-in-LXC
+deployment starts with the read-only `bash scripts/setup_lxc_docker.sh
+--check`; use `--apply` only inside an existing Debian/Ubuntu LXC after the
+host has enabled nesting, cgroups, networking, and any required GPU
+passthrough.

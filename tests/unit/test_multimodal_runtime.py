@@ -120,6 +120,7 @@ def test_vllm_builder_is_remote_only(monkeypatch) -> None:
         "LLM_WIKI_EMBEDDING_VLLM_IMAGE": "vllm/vllm-openai@sha256:" + "a" * 64,
         "LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS": "embedding",
         "LLM_WIKI_MULTIMODAL_MODEL_REVISION": "revision",
+        "LLM_WIKI_MULTIMODAL_DIMENSION": "1536",
         "LLM_WIKI_EMBEDDING_MAX_MODEL_LEN": "8192",
         "LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET": "7680",
     }
@@ -135,6 +136,7 @@ def test_vllm_builder_is_remote_only(monkeypatch) -> None:
     encoder = build_configured_multimodal_encoder()
     assert isinstance(encoder, VllmMultimodalEncoder)
     assert encoder.profile.provider == "vllm"
+    assert encoder.profile.dimension == 1536
 
 
 @pytest.mark.parametrize("value", ["63", "2049", "not-an-int"])
