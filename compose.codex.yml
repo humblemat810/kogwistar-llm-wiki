@@ -13,7 +13,7 @@ services:
       context: .
       dockerfile: Dockerfile.codex
       args:
-        LLM_WIKI_IMAGE: ${LLM_WIKI_IMAGE:-profchan/kogwistar-llm-wiki:v0.3.8}
+        LLM_WIKI_IMAGE: ${LLM_WIKI_IMAGE:-profchan/kogwistar-llm-wiki:v0.3.9}
     image: ${LLM_WIKI_CODEX_IMAGE:-kogwistar-llm-wiki-codex:local}
     mem_limit: ${LLM_WIKI_CODEX_MEMORY_LIMIT:-1g}
     cpus: ${LLM_WIKI_CODEX_CPU_LIMIT:-1.0}
