@@ -10,8 +10,7 @@ import json
 import os
 from collections.abc import Callable
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import Request
-from urllib.request import urlopen as _default_urlopen
+from urllib.request import Request, urlopen
 
 
 def _safe_endpoint(value: str) -> str:
@@ -34,12 +33,14 @@ def available_models(
     *,
     provider: str | None = None,
     base_url: str | None = None,
-    opener: Callable[..., object] = _default_urlopen,
+    opener: Callable[..., object] | None = None,
 ) -> dict[str, object]:
     role = role.strip().lower()
     prefix = "KOGWISTAR_PARSER" if role == "parser" else "KOGWISTAR_MAINTENANCE"
     provider = (provider or os.getenv(f"{prefix}_PROVIDER", "ollama")).strip().lower()
     raw_base_url = base_url or os.getenv(f"{prefix}_BASE_URL", "http://localhost:11434")
+    if opener is None:
+        opener = urlopen
     safe_base_url = _safe_endpoint(raw_base_url)
     if not safe_base_url:
         return {"role": role, "provider": provider, "base_url": "", "models": [], "source": "invalid_endpoint"}
