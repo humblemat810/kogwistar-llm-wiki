@@ -81,3 +81,33 @@ def test_generation_retry_rejects_changed_member_payload() -> None:
     changed_member = members[0].model_copy(update={"semantic_id": "different"})
     with pytest.raises(ParseGenerationStoreConflict, match="member ID"):
         store.commit(generation, commit, [changed_member])
+
+
+def test_generation_member_region_must_use_revision_document() -> None:
+    _, _, members = _evidence()
+    with pytest.raises(ValueError, match="revision document"):
+        ParseGenerationMember(
+            **(
+                members[0].model_dump()
+                | {
+                    "region": {
+                        "source_document_id": "logical-source",
+                        "start_char": 0,
+                        "end_char": 1,
+                    }
+                }
+            )
+        )
+
+
+def test_generation_history_is_readable_without_mutating_the_projection() -> None:
+    generation, commit, members = _evidence()
+    store = ParseGenerationStore(InMemoryMetaStore(), workspace_id="demo")
+    store.commit(generation, commit, members)
+
+    loaded = store.get(generation.generation_id)
+    assert loaded is not None
+    assert loaded[0] == generation
+    assert loaded[1] == (commit,)
+    assert loaded[2] == tuple(members)
+    assert store.list_for_source(generation.source_document_id)[0][0] == generation

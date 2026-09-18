@@ -234,6 +234,46 @@ def test_parse_view_activation_rejects_uncommitted_or_foreign_evidence() -> None
         )
 
 
+def test_parse_view_activation_rejects_member_key_identity_mismatch() -> None:
+    metadata = InMemoryMetaStore()
+    _commit_member(metadata)
+    generation_row = metadata.get_named_projection(
+        "ws:demo:projection_state", "parse_generation:g1"
+    )
+    assert generation_row is not None
+    generation_payload = dict(generation_row["payload"])
+    generation_payload["members"] = {
+        "member-a": ParseGenerationMember(
+            member_id="different-member",
+            generation_id="g1",
+            workspace_id="demo",
+            source_document_id="logical-source",
+            source_revision_id="revision-1",
+            revision_document_id="rev-doc",
+            region=_region(0, 10),
+        ).model_dump(mode="json")
+    }
+    metadata.replace_named_projection(
+        "ws:demo:projection_state",
+        "parse_generation:g1",
+        generation_payload,
+        last_authoritative_seq=generation_row["last_authoritative_seq"],
+        last_materialized_seq=generation_row["last_materialized_seq"],
+        projection_schema_version=generation_row["projection_schema_version"],
+        materialization_status=generation_row["materialization_status"],
+    )
+    with pytest.raises(ValueError, match="not grounded"):
+        ParseViewStore(metadata, workspace_id="demo").activate(
+            _view(
+                1,
+                selection=(
+                    ParseViewSelection(member_id="member-a", generation_id="g1", region=_region(0, 10)),
+                ),
+            ),
+            expected_view_version=None,
+        )
+
+
 def test_parse_view_activation_rejects_member_missing_from_generation_commit() -> None:
     metadata = InMemoryMetaStore()
     _commit_member(metadata)

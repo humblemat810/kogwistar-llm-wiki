@@ -1419,6 +1419,10 @@ class IngestPipeline:
             source_document_id=source_document_id,
         )
         resolved_profile = parser_profile or request.parser_lane
+        if max_depth < 0:
+            raise ValueError("max_depth must be non-negative")
+        if max_frontier_items < 1:
+            raise ValueError("max_frontier_items must be positive")
         if max_parser_calls < 1:
             raise ValueError("max_parser_calls must be positive")
         if max_region_chars < 1:
@@ -1447,7 +1451,10 @@ class IngestPipeline:
         existing = store.get(session_id)
         if existing is not None:
             return existing[0]
-        end_char = max(len(request.raw_text), 1)
+        source_namespace = self.namespaces_for(request.workspace_id).source_space
+        with _temporary_namespace(self.engines.kg, source_namespace):
+            revision_document = self.engines.kg.read.get_document(revision_document_id)
+        end_char = max(len(str(revision_document.content or "")), 1)
         region = initial_region or SourceRegion(
             source_document_id=revision_document_id,
             start_char=0,

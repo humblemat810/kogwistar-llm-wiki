@@ -131,6 +131,12 @@ class ParseGenerationMember(BaseModel):
     depth: int = Field(default=0, ge=0)
     payload: Mapping[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _region_is_pinned_to_revision(self) -> ParseGenerationMember:
+        if self.region.source_document_id != self.revision_document_id:
+            raise ValueError("parse generation member region must point to its revision document")
+        return self
+
 
 class ParseFrontierItem(BaseModel):
     """Durable bounded work item; status changes are session state, not evidence."""
@@ -365,6 +371,7 @@ class ParseViewStore:
         view = ParseView.model_validate(payload)
         if view.workspace_id != self.workspace_id:
             raise ValueError("stored ParseView workspace does not match store workspace")
+        self._validate_view_evidence(view)
         return view
 
     def activate(self, view: ParseView, *, expected_view_version: int | None) -> bool:
@@ -385,6 +392,7 @@ class ParseViewStore:
             if existing is None:
                 raise ParseViewConflict("expected an existing ParseView")
             current = ParseView.model_validate(existing.get("payload", {}))
+            self._validate_view_evidence(current)
             if current.view_version != expected_view_version:
                 raise ParseViewConflict("ParseView version changed before activation")
             if view.view_version <= current.view_version:
@@ -455,6 +463,7 @@ class ParseViewStore:
             if (
                 member.workspace_id != self.workspace_id
                 or member.generation_id != selection.generation_id
+                or member.member_id != selection.member_id
                 or member.source_document_id != view.source_document_id
                 or member.source_revision_id != view.source_revision_id
                 or member.revision_document_id != view.revision_document_id

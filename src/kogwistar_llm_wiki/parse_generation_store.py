@@ -36,6 +36,72 @@ class ParseGenerationStore:
     def key(self, generation_id: str) -> str:
         return f"parse_generation:{generation_id}"
 
+    def get(
+        self, generation_id: str
+    ) -> tuple[ParseGeneration, tuple[ParseGenerationCommit, ...], tuple[ParseGenerationMember, ...], int] | None:
+        """Read immutable generation evidence without changing its projection."""
+
+        row = self.metadata.get_named_projection(self.namespace, self.key(generation_id))
+        if row is None:
+            return None
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            raise TypeError("parse generation projection payload must be an object")
+        generation = ParseGeneration.model_validate(payload.get("generation", {}))
+        if generation.workspace_id != self.workspace_id or generation.generation_id != generation_id:
+            raise ValueError("parse generation workspace or identity does not match store")
+        commits_payload = payload.get("commits") or {}
+        members_payload = payload.get("members") or {}
+        if not isinstance(commits_payload, dict) or not isinstance(members_payload, dict):
+            raise TypeError("parse generation commits and members must be objects")
+        commits = tuple(ParseGenerationCommit.model_validate(item) for item in commits_payload.values())
+        members = tuple(ParseGenerationMember.model_validate(item) for item in members_payload.values())
+        for commit in commits:
+            if (
+                commit.workspace_id != self.workspace_id
+                or commit.generation_id != generation.generation_id
+                or commit.source_document_id != generation.source_document_id
+                or commit.source_revision_id != generation.source_revision_id
+            ):
+                raise ValueError("stored parse generation commit is outside its generation")
+        for member in members:
+            if (
+                member.workspace_id != self.workspace_id
+                or member.generation_id != generation.generation_id
+                or member.source_document_id != generation.source_document_id
+                or member.source_revision_id != generation.source_revision_id
+                or member.revision_document_id != generation.revision_document_id
+            ):
+                raise ValueError("stored parse generation member is outside its generation")
+        member_ids = {member.member_id for member in members}
+        if any(not set(commit.member_ids).issubset(member_ids) for commit in commits):
+            raise ValueError("stored parse generation commit references an unknown member")
+        return generation, commits, members, int(row.get("last_authoritative_seq", 0))
+
+    def list_for_source(
+        self, source_document_id: str
+    ) -> list[tuple[ParseGeneration, int]]:
+        """List generation headers for one logical source for operator inspection."""
+
+        list_projections = getattr(self.metadata, "list_named_projections", None)
+        if not callable(list_projections):
+            return []
+        result: list[tuple[ParseGeneration, int]] = []
+        for row in list_projections(self.namespace):
+            if not str(row.get("key") or "").startswith("parse_generation:"):
+                continue
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            generation = ParseGeneration.model_validate(payload.get("generation", {}))
+            if (
+                generation.workspace_id == self.workspace_id
+                and generation.source_document_id == source_document_id
+            ):
+                result.append((generation, int(row.get("last_authoritative_seq", 0))))
+        result.sort(key=lambda item: (item[0].created_at, item[0].generation_id), reverse=True)
+        return result
+
     def commit(
         self,
         generation: ParseGeneration,

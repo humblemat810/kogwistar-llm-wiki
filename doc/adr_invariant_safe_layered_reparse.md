@@ -80,6 +80,22 @@ activation. Kogwistar supplies the durable queue and leases, named projection
 CAS, namespace-scoped graph reads, spans, and backend atomicity capability.
 These layers are deliberately not reimplemented in the application.
 
+The production durable worker currently uses a conservative LLM-Wiki adapter
+for its default frontier callback. It deterministically segments an oversized
+immutable region and invokes the existing bounded `IngestPipeline` parser for
+one selected region. Deployments may inject the kg-doc-parser layered contract
+adapter when they have the parser collection/source-map DTOs available. This
+boundary is intentional: the durable session owns restart/retry state, while
+the parser contract owns semantic expansion mechanics; neither side treats a
+temporary parser directory as a checkpoint.
+
+Operator status is exposed through the existing source inspection surface. It
+includes active ParseView identity, historical generation headers, frontier
+counts and depth distribution, bounded frontier item diagnostics, parser
+profile/provider/model, configured limits, parser-call usage, failure state,
+progress timestamp, and linked maintenance job IDs. It does not expose raw
+source bytes.
+
 ## Reuse Audit And Scope
 
 | Concern | Existing primitive | Application responsibility |

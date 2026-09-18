@@ -175,6 +175,37 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
         )
 
 
+def test_durable_session_region_length_comes_from_immutable_revision(
+    pipeline, ingest_request
+):
+    source_document_id = pipeline._source_document_id(ingest_request)
+    pipeline.register_source(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        namespace=WorkspaceNamespaces(ingest_request.workspace_id).conv_bg,
+    )
+    revision = pipeline.source_revision(request=ingest_request, source_document_id=source_document_id)
+    assert revision.revision_document_id is not None
+    caller_with_stale_text = ingest_request.model_copy(
+        update={"raw_text": ingest_request.raw_text + " stale caller bytes" * 100}
+    )
+
+    session = pipeline.initialize_durable_parse_session(
+        request=caller_with_stale_text,
+        source_document_id=source_document_id,
+        revision_document_id=revision.revision_document_id,
+        revision=revision,
+    )
+
+    assert session.frontier_ids
+    stored = ParseSessionStore(
+        pipeline.engines.conversation.meta_sqlite,
+        workspace_id=ingest_request.workspace_id,
+    ).get(session.session_id)
+    assert stored is not None
+    assert stored[1][0].region.end_char == len(ingest_request.raw_text)
+
+
 def test_durable_sessions_do_not_reuse_a_different_parser_profile(pipeline, ingest_request):
     source_document_id = pipeline._source_document_id(ingest_request)
     pipeline.register_source(

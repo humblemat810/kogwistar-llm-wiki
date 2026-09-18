@@ -18,6 +18,7 @@ from .inspection import build_workspace_quality_report
 from .maintenance_control import configured_default_request_max_rounds
 from .models import IngestPipelineRequest
 from .otel import LlmWikiTelemetry
+from .parse_generation_store import ParseGenerationStore
 from .parse_session_store import ParseSessionStore
 from .parse_views import ParseViewResolver, parse_session_id
 from .utils import _temporary_namespace
@@ -299,6 +300,7 @@ class AgentGateway:
             source_document_id=source_document_id,
             metadata=metadata,
             request=request,
+            maintenance_jobs=jobs,
         )
         latest_revision = max(revisions, key=lambda node: int((getattr(node, "metadata", {}) or {}).get("created_at_ms") or 0), default=None)
         return {
@@ -323,6 +325,7 @@ class AgentGateway:
         source_document_id: str,
         metadata: Mapping[str, object],
         request: IngestPipelineRequest,
+        maintenance_jobs: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         """Expose durable session/view state without exposing raw source bytes."""
 
@@ -351,9 +354,35 @@ class AgentGateway:
         ) -> dict[str, object]:
             session, frontier, version = stored
             counts: dict[str, int] = {}
+            depth_distribution: dict[str, int] = {}
+            frontier_items: list[dict[str, object]] = []
             for item in frontier:
                 status = getattr(getattr(item, "status", None), "value", "unknown")
                 counts[status] = counts.get(status, 0) + 1
+                depth = str(item.depth)
+                depth_distribution[depth] = depth_distribution.get(depth, 0) + 1
+                frontier_items.append(
+                    {
+                        "frontier_id": item.frontier_id,
+                        "depth": item.depth,
+                        "ordinal": item.ordinal,
+                        "status": status,
+                        "attempt": item.attempt,
+                        "last_error": item.last_error,
+                    }
+                )
+            parser_state = session.parser_state
+            linked_jobs = [
+                str(job.get("job_id") or "")
+                for job in (maintenance_jobs or [])
+                if isinstance(job, Mapping)
+                and (
+                    str((job.get("payload") or {}).get("parse_session_id") or "")
+                    == session.session_id
+                    if isinstance(job.get("payload"), Mapping)
+                    else False
+                )
+            ]
             return {
                 "session_id": session.session_id,
                 "phase": session.phase.value,
@@ -364,14 +393,32 @@ class AgentGateway:
                 "max_frontier_items": session.max_frontier_items,
                 "max_parser_calls": session.max_parser_calls,
                 "max_region_chars": session.max_region_chars,
+                "token_budget": session.token_budget,
+                "wall_time_seconds": session.wall_time_seconds,
                 "parser_calls": session.parser_calls,
+                "failure_reason": session.failure_reason,
                 "frontier_counts": counts,
+                "frontier_depth_distribution": depth_distribution,
+                "frontier_items": frontier_items[:256],
                 "frontier_ids": list(session.frontier_ids),
+                "consumed_frontier_count": len(session.consumed_frontier_ids),
+                "parser": {
+                    "profile": str(parser_state.get("parser_profile") or parser_profile),
+                    "lane": str(parser_state.get("parser_lane") or ""),
+                    "mode": str(parser_state.get("parser_mode") or ""),
+                    "provider": str(parser_state.get("llm_provider") or ""),
+                    "model": str(parser_state.get("llm_model") or ""),
+                },
+                "maintenance_job_ids": [job_id for job_id in linked_jobs if job_id],
                 "last_progress_at": session.last_progress_at.isoformat(),
                 "projection_version": version,
             }
 
         sessions_payload = [session_payload(row) for row in session_rows]
+        generation_rows = ParseGenerationStore(
+            self.api.pipeline.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+        ).list_for_source(source_document_id)
         view = ParseViewResolver(
             self.api.pipeline.engines.conversation.meta_sqlite,
             workspace_id=workspace_id,
@@ -382,6 +429,19 @@ class AgentGateway:
         return {
             "session": sessions_payload[0] if sessions_payload else None,
             "sessions": sessions_payload,
+            "generations": [
+                {
+                    "generation_id": generation.generation_id,
+                    "source_revision_id": generation.source_revision_id,
+                    "revision_document_id": generation.revision_document_id,
+                    "parser_profile": generation.parser_profile,
+                    "parser_version": generation.parser_version,
+                    "status": generation.status.value,
+                    "created_at": generation.created_at.isoformat(),
+                    "projection_version": version,
+                }
+                for generation, version in generation_rows
+            ],
             "active_view": {
                 "view_id": view.view_id,
                 "view_version": view.view_version,

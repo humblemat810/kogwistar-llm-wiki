@@ -47,7 +47,9 @@ def test_session_store_round_trips_and_retries_with_cas() -> None:
     assert loaded is not None
     assert loaded[2] == 1
     assert loaded[1][0].frontier_id == "frontier-1"
-    updated = session.model_copy(update={"consumed_frontier_ids": ("frontier-1",)})
+    updated = session.model_copy(
+        update={"consumed_frontier_ids": ("frontier-1",), "frontier_ids": ()}
+    )
     assert store.save(updated, [], expected_version=1) == 2
     assert store.get(session.session_id)[0].consumed_frontier_ids == ("frontier-1",)
     with pytest.raises(ParseSessionStoreConflict):
@@ -69,6 +71,13 @@ def test_session_store_rejects_frontier_from_another_session() -> None:
         store.save(session, [foreign], expected_version=None)
 
 
+def test_session_store_rejects_frontier_pointer_divergence() -> None:
+    store = ParseSessionStore(InMemoryMetaStore(), workspace_id="demo")
+    session, frontier = _state()
+    with pytest.raises(ValueError, match="frontier pointer"):
+        store.save(session.model_copy(update={"frontier_ids": ()}), frontier, expected_version=None)
+
+
 def test_session_store_rejects_callback_identity_pivot() -> None:
     store = ParseSessionStore(InMemoryMetaStore(), workspace_id="demo")
     session, frontier = _state()
@@ -77,7 +86,7 @@ def test_session_store_rejects_callback_identity_pivot() -> None:
     pivoted_frontier = [
         item.model_copy(update={"revision_document_id": "other-revision"}) for item in frontier
     ]
-    with pytest.raises(ValueError, match="immutable identity"):
+    with pytest.raises(ValueError, match="immutable identity|does not belong"):
         store.save(
             pivoted,
             pivoted_frontier,

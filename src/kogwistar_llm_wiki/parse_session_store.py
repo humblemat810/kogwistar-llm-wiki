@@ -73,6 +73,7 @@ class ParseSessionStore:
             session = ParseSessionState.model_validate(payload.get("session", {}))
             if session.workspace_id != self.workspace_id or session.source_document_id != source_document_id:
                 continue
+            self._validate_session_identity(session)
             frontier = [
                 ParseFrontierItem.model_validate(item)
                 for item in payload.get("frontier", [])
@@ -129,6 +130,11 @@ class ParseSessionStore:
         session: ParseSessionState,
         frontier: list[ParseFrontierItem],
     ) -> None:
+        frontier_ids = [item.frontier_id for item in frontier]
+        if len(frontier_ids) != len(set(frontier_ids)):
+            raise ValueError("parse frontier contains duplicate item IDs")
+        if tuple(frontier_ids) != session.frontier_ids:
+            raise ValueError("parse session frontier pointer does not match persisted frontier")
         for item in frontier:
             if (
                 item.session_id != session.session_id
@@ -137,12 +143,21 @@ class ParseSessionStore:
                 or item.source_revision_id != session.source_revision_id
                 or item.revision_document_id != session.revision_document_id
                 or item.generation_id != session.generation_id
+                or item.region.source_document_id != session.revision_document_id
+                or item.depth > session.max_depth
             ):
                 raise ValueError("parse frontier item does not belong to its session")
 
     @staticmethod
     def _validate_session_identity(session: ParseSessionState) -> None:
-        if not session.session_id or not session.source_document_id or not session.source_revision_id:
+        if (
+            not session.session_id
+            or not session.source_document_id
+            or not session.source_revision_id
+            or not session.source_digest
+            or not session.revision_document_id
+            or not session.generation_id
+        ):
             raise ValueError("parse session is missing a stable source identity")
 
     @staticmethod
@@ -158,6 +173,12 @@ class ParseSessionStore:
             "revision_document_id",
             "generation_id",
             "parser_state",
+            "max_depth",
+            "max_frontier_items",
+            "max_parser_calls",
+            "max_region_chars",
+            "token_budget",
+            "wall_time_seconds",
         )
         changed = [
             field
@@ -169,6 +190,10 @@ class ParseSessionStore:
                 "parse session transition changed immutable identity fields: "
                 + ", ".join(changed)
             )
+        if next_session.parser_calls < current.parser_calls:
+            raise ValueError("parse session parser call count cannot decrease")
+        if not set(current.consumed_frontier_ids).issubset(next_session.consumed_frontier_ids):
+            raise ValueError("parse session consumed frontier history cannot be removed")
 
 
 __all__ = ["ParseSessionStore", "ParseSessionStoreConflict"]

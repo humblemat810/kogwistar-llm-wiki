@@ -833,21 +833,33 @@ class MaintenanceWorker(BaseWorker):
                 ParseFrontierItem.model_validate(item)
                 for item in (result.get("frontier") or [])
             ]
-            if len(next_frontier) > session.max_frontier_items * max(session.max_depth, 1):
+            consumed_values = [
+                str(value)
+                for value in (result.get("consumed_frontier_ids") or [])
+                if str(value).strip()
+            ]
+            if len(consumed_values) != len(set(consumed_values)):
+                raise ValueError("layered parser returned duplicate consumed frontier IDs")
+            consumed_ids = set(consumed_values)
+            if len(consumed_ids) > session.max_frontier_items:
+                raise ValueError("layered parser consumed more than the configured frontier batch")
+            if any(item.depth > session.max_depth for item in next_frontier):
+                raise ValueError("layered parser returned a frontier beyond max_depth")
+            if len(next_frontier) > len(frontier) + session.max_frontier_items:
                 raise ValueError("layered parser returned an unbounded frontier")
             if bool(result.get("stable")) and next_frontier:
                 raise ValueError("layered parser cannot report stable with pending frontier items")
             stable = bool(result.get("stable", not next_frontier))
-            consumed_ids = {
-                str(value)
-                for value in (result.get("consumed_frontier_ids") or [])
-                if str(value).strip()
-            }
             available_ids = {item.frontier_id for item in frontier}
             if frontier and not consumed_ids:
                 raise ValueError("layered parser must report consumed_frontier_ids")
             if not consumed_ids.issubset(available_ids):
                 raise ValueError("layered parser consumed frontier outside the claimed batch")
+            next_frontier_ids = [item.frontier_id for item in next_frontier]
+            if len(next_frontier_ids) != len(set(next_frontier_ids)):
+                raise ValueError("layered parser returned duplicate frontier IDs")
+            if not (available_ids - consumed_ids).issubset(next_frontier_ids):
+                raise ValueError("layered parser dropped an unconsumed frontier item")
             next_session = next_session.model_copy(
                 update={
                     "phase": ParseSessionPhase.STABLE if stable else ParseSessionPhase.EXPANDING,
@@ -869,8 +881,14 @@ class MaintenanceWorker(BaseWorker):
                     self.engines.conversation.meta_sqlite,
                     workspace_id=ctx.workspace_id,
                 )
+                generation = ParseGeneration.model_validate(generation_payload)
+                if (
+                    generation.source_digest != session.source_digest
+                    or generation.revision_document_id != session.revision_document_id
+                ):
+                    raise ValueError("layered parser generation is not pinned to the session revision")
                 generation_store.commit(
-                    ParseGeneration.model_validate(generation_payload),
+                    generation,
                     ParseGenerationCommit.model_validate(commit_payload),
                     [ParseGenerationMember.model_validate(item) for item in members_payload],
                 )
@@ -1016,6 +1034,12 @@ class MaintenanceWorker(BaseWorker):
             "revision_document_id",
             "generation_id",
             "parser_state",
+            "max_depth",
+            "max_frontier_items",
+            "max_parser_calls",
+            "max_region_chars",
+            "token_budget",
+            "wall_time_seconds",
         )
         changed = [
             field
@@ -1024,6 +1048,10 @@ class MaintenanceWorker(BaseWorker):
         ]
         if changed:
             raise ValueError("layered parser changed immutable session fields: " + ", ".join(changed))
+        if next_session.parser_calls < current.parser_calls:
+            raise ValueError("layered parser decreased parser call count")
+        if not set(current.consumed_frontier_ids).issubset(next_session.consumed_frontier_ids):
+            raise ValueError("layered parser removed consumed frontier history")
 
     def _recover_pending_parse_view(
         self,
@@ -1153,6 +1181,7 @@ class MaintenanceWorker(BaseWorker):
                         "consumed_frontier_ids": tuple(
                             sorted(set(session.consumed_frontier_ids) | {selected.frontier_id})
                         ),
+                        "parser_calls": session.parser_calls + 1,
                         "last_progress_at": datetime.now(UTC),
                     }
                 ).model_dump(mode="json"),
