@@ -1,6 +1,6 @@
 import json
 
-from kogwistar_llm_wiki.parse_comparison import write_parse_comparison
+from kogwistar_llm_wiki.parsing.parse_comparison import write_parse_comparison
 
 
 def _make_run(root, model, score, cost):

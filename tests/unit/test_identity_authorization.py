@@ -6,7 +6,7 @@ import pytest
 from jose import jwt
 from kogwistar.server.auth_middleware import claims_ctx
 
-from kogwistar_llm_wiki.identity import (
+from kogwistar_llm_wiki.configuration.identity import (
     IdentityError,
     authenticate_bearer,
     authorize,

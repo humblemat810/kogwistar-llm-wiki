@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kogwistar_llm_wiki import multimodal_runtime
+from kogwistar_llm_wiki.embeddings import multimodal_runtime
 
 
 class _FakeCuda:
@@ -128,10 +128,10 @@ def test_vllm_builder_is_remote_only(monkeypatch) -> None:
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("LLM_WIKI_EMBEDDING_SERVICE_URL", raising=False)
 
-    from kogwistar_llm_wiki.multimodal_projection import (
+    from kogwistar_llm_wiki.embeddings.multimodal_projection import (
         build_configured_multimodal_encoder,
     )
-    from kogwistar_llm_wiki.vllm_remote import VllmMultimodalEncoder
+    from kogwistar_llm_wiki.embeddings.vllm_remote import VllmMultimodalEncoder
 
     encoder = build_configured_multimodal_encoder()
     assert isinstance(encoder, VllmMultimodalEncoder)
@@ -168,7 +168,7 @@ def test_remote_embedding_requires_an_explicit_host_allowlist(monkeypatch) -> No
     monkeypatch.setenv("LLM_WIKI_EMBEDDING_SERVICE_URL", "http://embedding:8790")
     monkeypatch.delenv("LLM_WIKI_EMBEDDING_SERVICE_ALLOWED_HOSTS", raising=False)
 
-    from kogwistar_llm_wiki.multimodal_projection import (
+    from kogwistar_llm_wiki.embeddings.multimodal_projection import (
         build_configured_multimodal_encoder,
     )
 

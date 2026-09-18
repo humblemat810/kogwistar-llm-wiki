@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.maintenance_patches import (
+from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenancePatchStatus,
 )
-from kogwistar_llm_wiki.maintenance_status import (
+from kogwistar_llm_wiki.maintenance.maintenance_status import (
     DocumentGraphStatus,
     graph_status_for_patch,
 )

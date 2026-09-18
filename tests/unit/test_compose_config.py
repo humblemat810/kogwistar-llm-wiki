@@ -4,13 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from kogwistar_llm_wiki.compose_config import (
-    ComposeConfigurationError,
-    ComposeOptions,
-    check_compose_text,
-    render_compose,
-    write_compose,
-)
+from kogwistar_llm_wiki.compose.options import ComposeConfigurationError, ComposeOptions
+from kogwistar_llm_wiki.compose.rendering import render_compose
+from kogwistar_llm_wiki.compose.validation import check_compose_text, write_compose
 
 
 def test_gpu_bundle_is_complete_without_secrets() -> None:
@@ -210,7 +206,7 @@ def test_codex_launchers_select_standalone_or_memory_file_sets() -> None:
 
 
 def test_codex_tui_exposes_host_bridge_as_a_distinct_mode(tmp_path: Path) -> None:
-    from kogwistar_llm_wiki.codex_compose_tui import (
+    from kogwistar_llm_wiki.codex.codex_compose_tui import (
         TuiConfiguration,
         _host_environment,
         _repository_root,
@@ -250,7 +246,7 @@ def test_codex_tui_exposes_host_bridge_as_a_distinct_mode(tmp_path: Path) -> Non
     assert "LLM_WIKI_COMBINED_CPU_LIMIT=0.25" in text
     assert "LLM_WIKI_MAINTENANCE_BACKGROUND_ENABLED=true" in text
     assert 'LLM_WIKI_MAINTENANCE_PROFILE_LADDER=[{"name":"primary","provider":"codex","profile":"high"}]' in text
-    assert "--profile-ladder-file" in (Path(__file__).parents[2] / "src" / "kogwistar_llm_wiki" / "codex_compose_tui.py").read_text(encoding="utf-8")
+    assert "--profile-ladder-file" in (Path(__file__).parents[2] / "src" / "kogwistar_llm_wiki" / "codex" / "codex_compose_tui.py").read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="between 1 and max model length"):
         TuiConfiguration(embedding_max_model_len=8192, embedding_crop_token_budget=8193)
 

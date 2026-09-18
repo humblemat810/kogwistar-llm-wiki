@@ -17,8 +17,8 @@ The main evidence surface was:
 - [`fuzzy_offsets.py`](</mnt/c/Users/chanh/Documents/kogwistar-llm-wiki/kogwistar/kogwistar/fuzzy_offsets.py>)
 - [`ingest_pipeline.py`](</mnt/c/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/ingest_pipeline.py>)
 - [`worker.py`](</mnt/c/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py>)
-- [`maintenance_policy.py`](</mnt/c/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/maintenance_policy.py>)
-- [`maintenance_strategies.py`](</mnt/c/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/maintenance_strategies.py>)
+- [`maintenance_policy.py`](</mnt/c/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/maintenance/maintenance_policy.py>)
+- [`maintenance_strategies.py`](</mnt/c/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/maintenance/maintenance_strategies.py>)
 
 ## Findings
 

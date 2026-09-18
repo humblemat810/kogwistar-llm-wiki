@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from kogwistar.runtime.budget import BudgetEvent
 
-from kogwistar_llm_wiki.maintenance_reporting import summarize_maintenance_costs
+from kogwistar_llm_wiki.maintenance.maintenance_reporting import (
+    summarize_maintenance_costs,
+)
 
 
 def test_summarize_maintenance_costs_groups_by_kind_and_model() -> None:

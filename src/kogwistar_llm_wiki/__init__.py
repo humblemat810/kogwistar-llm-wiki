@@ -1,62 +1,48 @@
-from .agent_gateway import AgentGateway, AgentTurn
-from .archive import (
+from .agent.gateway import AgentGateway, AgentTurn
+from .agent.mcp_server import build_agent_mcp
+from .archiving.archive_contracts import (
     ARCHIVE_FORMAT_VERSION,
     ArchiveError,
     RestoreReport,
+)
+from .archiving.operations import (
     create_archive,
-    inspect_archive,
     restore_archive,
     restore_backend_snapshot,
+)
+from .archiving.validation import (
+    inspect_archive,
     verify_archive,
 )
-from .codex_memory import (
+from .codex.codex_memory import (
     CodexMemoryError,
     CodexMemoryRecord,
     CodexMemoryService,
     MemoryDisabledError,
     MemoryEvidence,
 )
-from .codex_workbench_agent import (
+from .codex.codex_workbench_agent import (
     CodexAppServerRunner,
     CodexCliCockpitResponder,
     CodexCliResponder,
     CodexCliSettings,
     HostCockpitResponder,
 )
-from .disambiguation_selection import (
+from .configuration.settings_service import SettingsService
+from .configuration.workspace import (
+    GraphSpace,
+    GraphSpaceNamespace,
+    WorkspaceNamespaces,
+)
+from .disambiguation.selection import (
     DefaultDisambiguationReviewPolicy,
     DisambiguationReviewPick,
     DisambiguationReviewSelection,
     DisambiguationReviewService,
     select_disambiguation_review_requests,
 )
-from .disambiguation_service import DisambiguationAnswerRecord, DisambiguationService
-from .graph_seed_bundle import (
-    GraphSeedBundle,
-    SeedBundleResult,
-    dump_seed_bundle,
-    export_graph_seed_bundle,
-    load_seed_bundle,
-    seed_graph_bundle,
-)
-from .ingest_pipeline import (
-    IngestPipeline,
-    build_in_memory_namespace_engines,
-)
-from .investigation_history import (
-    InvestigationHistoryRecord,
-    InvestigationHistoryService,
-)
-from .mcp_agent_server import build_agent_mcp
-from .models import (
-    IngestPipelineArtifacts,
-    IngestPipelineRequest,
-    NamespaceEngines,
-    ObsidianBuildResult,
-    ProjectionEntity,
-    ProjectionSnapshot,
-)
-from .multimodal_grounding import (
+from .disambiguation.service import DisambiguationAnswerRecord, DisambiguationService
+from .embeddings.multimodal_grounding import (
     EvidenceClosureResolver,
     EvidenceClosureValidator,
     EvidencePack,
@@ -68,7 +54,7 @@ from .multimodal_grounding import (
     ResolvedEntityGrounding,
     SourceEvidenceRef,
 )
-from .multimodal_projection import (
+from .embeddings.multimodal_projection import (
     DEFAULT_COLQWEN_MODEL,
     DEFAULT_COLQWEN_REVISION,
     AssetResolver,
@@ -89,14 +75,14 @@ from .multimodal_projection import (
     embed_pending,
     score_embedding_sets,
 )
-from .multimodal_remote import (
+from .embeddings.multimodal_remote import (
     EmbeddingProtocolError,
     EmbeddingServiceError,
     EmbeddingServiceSettings,
     EmbeddingServiceUnavailable,
     RemoteMultimodalEncoder,
 )
-from .multimodal_sources import (
+from .embeddings.multimodal_sources import (
     LocalFileAssetResolver,
     MappingAssetResolver,
     MultimodalSourceBundle,
@@ -106,12 +92,40 @@ from .multimodal_sources import (
     split_text_units,
     webpage_units,
 )
-from .namespaces import GraphSpace, GraphSpaceNamespace, WorkspaceNamespaces
+from .embeddings.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
+from .ingest_pipeline import (
+    IngestPipeline,
+    build_in_memory_namespace_engines,
+)
+from .models import (
+    IngestPipelineArtifacts,
+    IngestPipelineRequest,
+    NamespaceEngines,
+    ObsidianBuildResult,
+    ProjectionEntity,
+    ProjectionSnapshot,
+)
 from .otel import LlmWikiTelemetry
-from .policies import LlmWikiPolicies, build_default_policies
-from .query import GraphSpaceQueryResult, GraphSpaceQueryService, workspace_graph_spaces
-from .review_query import ReviewChainResult, ReviewQueryService
-from .semantic_lens import (
+from .policies.rules import LlmWikiPolicies, build_default_policies
+from .seeding.bundle_models import GraphSeedBundle
+from .seeding.operations import (
+    SeedBundleResult,
+    dump_seed_bundle,
+    export_graph_seed_bundle,
+    load_seed_bundle,
+    seed_graph_bundle,
+)
+from .workbench.investigation_history import (
+    InvestigationHistoryRecord,
+    InvestigationHistoryService,
+)
+from .workbench.query import (
+    GraphSpaceQueryResult,
+    GraphSpaceQueryService,
+    workspace_graph_spaces,
+)
+from .workbench.review_query import ReviewChainResult, ReviewQueryService
+from .workbench.semantic_lens import (
     InvestigationOutcome,
     LensEdge,
     LensNode,
@@ -123,17 +137,15 @@ from .semantic_lens import (
     SemanticLensSnapshot,
     validate_edit_proposal,
 )
-from .settings import SettingsService
-from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
-from .workbench import GroundedAnswer, KnowledgeWorkbench, WorkbenchTurn
-from .workbench_api import WorkbenchApi
-from .workbench_background import (
+from .workbench.workbench import GroundedAnswer, KnowledgeWorkbench, WorkbenchTurn
+from .workbench.workbench_api import WorkbenchApi
+from .workbench.workbench_background import (
     CodexWorkbenchDispatcher,
     CodexWorkbenchWorker,
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
-from .workbench_http import build_workbench_handler, serve_workbench
+from .workbench.workbench_http import build_workbench_handler, serve_workbench
 
 __all__ = [
     "ARCHIVE_FORMAT_VERSION",

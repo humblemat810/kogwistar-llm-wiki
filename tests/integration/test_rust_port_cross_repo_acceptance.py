@@ -17,7 +17,7 @@ from kogwistar_obsidian_sink.cdc.event_consumer import JsonlEventConsumer
 from kogwistar_obsidian_sink.integrations.kogwistar_adapter import KogwistarDuckProvider
 from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 
-from kogwistar_llm_wiki.namespaces import GraphSpace
+from kogwistar_llm_wiki.configuration.workspace import GraphSpace
 
 pytestmark = [pytest.mark.ci_full, pytest.mark.integration]
 

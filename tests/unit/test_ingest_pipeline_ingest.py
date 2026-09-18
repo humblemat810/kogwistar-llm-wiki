@@ -1,10 +1,10 @@
 import pytest
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.models import IngestPipelineRequest
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.parse_session_store import ParseSessionStore
-from kogwistar_llm_wiki.parse_views import SourceRegion, reparse_session_id
+from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
+from kogwistar_llm_wiki.parsing.parse_views import SourceRegion, reparse_session_id
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
@@ -137,6 +137,11 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
         },
         "reason": "repair one grounded region",
         "parser_profile": "page-index-v2",
+        "llm_provider": "codex",
+        "llm_model": "luna",
+        "model_version": "2026-09",
+        "prompt_version": "reparse-prompt-v3",
+        "parser_version": "page-index-2.1",
     }
 
     pipeline.create_maintenance_request(
@@ -154,6 +159,11 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
         source_revision_id=revision.revision_id,
         parser_profile="page-index-v2",
         region=region,
+        llm_provider="codex",
+        llm_model="luna",
+        model_version="2026-09",
+        prompt_version="reparse-prompt-v3",
+        parser_version="page-index-2.1",
     )
     session = ParseSessionStore(
         pipeline.engines.conversation.meta_sqlite,
@@ -162,6 +172,11 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
     assert session is not None
     assert session[1][0].region == region
     assert session[0].parser_state["source_revision_document_id"] == revision.revision_document_id
+    assert session[0].parser_state["llm_provider"] == "codex"
+    assert session[0].parser_state["llm_model"] == "luna"
+    assert session[0].parser_state["model_version"] == "2026-09"
+    assert session[0].parser_state["prompt_version"] == "reparse-prompt-v3"
+    assert session[0].parser_state["parser_version"] == "page-index-2.1"
 
     stale = dict(target)
     stale["source_revision_id"] = "stale"
@@ -173,6 +188,37 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
             maintenance_kind="document_reparse_region",
             parse_target=stale,
         )
+
+
+def test_durable_session_region_length_comes_from_immutable_revision(
+    pipeline, ingest_request
+):
+    source_document_id = pipeline._source_document_id(ingest_request)
+    pipeline.register_source(
+        request=ingest_request,
+        source_document_id=source_document_id,
+        namespace=WorkspaceNamespaces(ingest_request.workspace_id).conv_bg,
+    )
+    revision = pipeline.source_revision(request=ingest_request, source_document_id=source_document_id)
+    assert revision.revision_document_id is not None
+    caller_with_stale_text = ingest_request.model_copy(
+        update={"raw_text": ingest_request.raw_text + " stale caller bytes" * 100}
+    )
+
+    session = pipeline.initialize_durable_parse_session(
+        request=caller_with_stale_text,
+        source_document_id=source_document_id,
+        revision_document_id=revision.revision_document_id,
+        revision=revision,
+    )
+
+    assert session.frontier_ids
+    stored = ParseSessionStore(
+        pipeline.engines.conversation.meta_sqlite,
+        workspace_id=ingest_request.workspace_id,
+    ).get(session.session_id)
+    assert stored is not None
+    assert stored[1][0].region.end_char == len(ingest_request.raw_text)
 
 
 def test_durable_sessions_do_not_reuse_a_different_parser_profile(pipeline, ingest_request):

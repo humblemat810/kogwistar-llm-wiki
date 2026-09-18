@@ -52,7 +52,8 @@ from kogwistar.runtime.models import (
 from kogwistar.runtime.runtime import RunResult, WorkflowRuntime
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
-from kogwistar_llm_wiki.debug_run import (
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.diagnostics.debug_helpers import (
     LiveTracePrinter,
     aggregate_stage_timings,
     env_flag_enabled,
@@ -66,12 +67,17 @@ from kogwistar_llm_wiki.longrun_parser_worker import (
     run_longrun_parser_child,
 )
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
-from kogwistar_llm_wiki.maintenance_policy import DERIVED_KNOWLEDGE_WORKFLOW_ID
-from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.projection_worker import ProjectionWorker
-from kogwistar_llm_wiki.provider_config import (
+from kogwistar_llm_wiki.maintenance.maintenance_designs import (
+    materialize_maintenance_designs,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_policy import (
+    DERIVED_KNOWLEDGE_WORKFLOW_ID,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_statistics import (
+    build_maintenance_statistics,
+)
+from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
+from kogwistar_llm_wiki.providers.role_config import (
     normalize_provider_name,
     resolve_parser_provider_settings,
 )

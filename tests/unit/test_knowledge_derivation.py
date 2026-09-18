@@ -9,8 +9,10 @@ from kogwistar.runtime.models import WorkflowStepExecNode
 from pydantic import ValidationError
 
 from kogwistar_llm_wiki import IngestPipeline, NamespaceEngines
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.maintenance.maintenance_designs import (
+    materialize_maintenance_designs,
+)
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 from tests.conftest import _build_engine

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from kogwistar_llm_wiki.maintenance_control import (
+from kogwistar_llm_wiki.maintenance.maintenance_control import (
     MaintenanceControl,
     send_control_command,
 )
-from kogwistar_llm_wiki.maintenance_profiles import (
+from kogwistar_llm_wiki.maintenance.maintenance_profiles import (
     budget_fits,
     configured_prices,
     next_window_reset,
@@ -85,7 +85,7 @@ def test_profile_ladder_control_state_is_durable_and_can_be_cleared(tmp_path) ->
 
 
 def test_profile_ladder_survives_socket_fallback(tmp_path, monkeypatch) -> None:
-    from kogwistar_llm_wiki import maintenance_control
+    from kogwistar_llm_wiki.maintenance import maintenance_control
 
     def unavailable_socket(*args, **kwargs):
         raise OSError("socket unavailable")

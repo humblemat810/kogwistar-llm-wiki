@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.maintenance_planner import (
+from kogwistar_llm_wiki.maintenance.maintenance_planner import (
     DEFAULT_DOCUMENT_MAINTENANCE_PLAN,
     decide_next_maintenance_phase,
     normalize_maintenance_plan,

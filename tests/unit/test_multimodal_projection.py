@@ -9,11 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kogwistar_llm_wiki.ingest_pipeline import (
-    IngestPipeline,
-    build_in_memory_namespace_engines,
-)
-from kogwistar_llm_wiki.multimodal_projection import (
+from kogwistar_llm_wiki.embeddings.multimodal_projection import (
     QWEN3_VL_MAX_DIMENSION,
     QWEN3_VL_MIN_DIMENSION,
     ChromaMultimodalProjectionStore,
@@ -29,10 +25,14 @@ from kogwistar_llm_wiki.multimodal_projection import (
     embed_pending,
     score_embedding_sets,
 )
-from kogwistar_llm_wiki.multimodal_sources import (
+from kogwistar_llm_wiki.embeddings.multimodal_sources import (
     MappingAssetResolver,
     build_source_bundle,
     manifest_units,
+)
+from kogwistar_llm_wiki.ingest_pipeline import (
+    IngestPipeline,
+    build_in_memory_namespace_engines,
 )
 from scripts.pull_colqwen_model import verify_checkpoint
 from scripts.pull_qwen3_vl_model import verify_checkpoint as verify_qwen3_vl_checkpoint

@@ -5,14 +5,14 @@ from __future__ import annotations
 import os
 import sys
 
-from .ingest_pipeline import _resolve_embedding_functions
-from .multimodal_projection import build_configured_multimodal_encoder
-from .multimodal_runtime import (
+from .embeddings.multimodal_projection import build_configured_multimodal_encoder
+from .embeddings.multimodal_runtime import (
     configured_embedding_service_url,
     configured_multimodal_backend,
     configured_vllm_url,
     validate_configured_multimodal_runtime,
 )
+from .ingest_pipeline import _resolve_embedding_functions
 
 
 def main(argv: list[str] | None = None) -> int:

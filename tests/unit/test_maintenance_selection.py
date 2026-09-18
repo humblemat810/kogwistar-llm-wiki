@@ -1,10 +1,10 @@
 from types import SimpleNamespace
 
-from kogwistar_llm_wiki.maintenance_control import (
+from kogwistar_llm_wiki.maintenance.maintenance_control import (
     MaintenanceControl,
     send_control_command,
 )
-from kogwistar_llm_wiki.maintenance_selection import (
+from kogwistar_llm_wiki.maintenance.maintenance_selection import (
     select_embedding_exploration,
     select_request_candidates,
 )

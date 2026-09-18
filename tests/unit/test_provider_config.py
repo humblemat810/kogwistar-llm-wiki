@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.provider_config import (
+from kogwistar_llm_wiki.providers.role_config import (
     build_provider_endpoint_config,
     normalize_provider_name,
     provider_config_summary,

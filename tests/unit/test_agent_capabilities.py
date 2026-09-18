@@ -7,8 +7,11 @@ from typing import ClassVar
 import pytest
 from kogwistar.runtime import BudgetAttribution, BudgetEvent, budget_event_to_dict
 
-from kogwistar_llm_wiki.agent_gateway import AgentGateway, _fetch_source_text
-from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+from kogwistar_llm_wiki.agent.gateway import AgentGateway
+from kogwistar_llm_wiki.agent.gateway_source import (
+    fetch_source_text as _fetch_source_text,
+)
+from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 from kogwistar_llm_wiki.worker import (
     _durable_maintenance_usage,
     _maintenance_budget_state,
@@ -78,6 +81,34 @@ def test_agent_capability_fake_payload_flow(pipeline):
     reingested = gateway.reingest(reingest_payload)
     assert reingested["status"] == "reingested"
     assert reingested["artifacts"]["source_document_id"] == source_id
+
+    gateway.api.close()
+    pipeline.engines.close()
+
+
+def test_source_status_exposes_durable_parse_diagnostics(pipeline):
+    gateway = AgentGateway(WorkbenchApi(pipeline))
+    source_uri = "https://example.test/durable-status.txt"
+    gateway.ingest(
+        {
+            "workspace_id": "durable-status",
+            "source_uri": source_uri,
+            "title": "Durable status fixture",
+            "raw_text": "A bounded parser frontier should be inspectable.",
+            "operation_mode": "maintenance_first",
+            "parser_lane": "page_index",
+        }
+    )
+
+    inspected = gateway.source({"workspace_id": "durable-status", "source_uri": source_uri})
+    parse_status = inspected["parse_status"]
+    session = parse_status["session"]
+    assert session["phase"] == "parse_seeded"
+    assert session["frontier_depth_distribution"] == {"0": 1}
+    assert session["frontier_items"][0]["status"] == "pending"
+    assert session["parser"]["lane"] == "page_index"
+    assert session["maintenance_job_ids"]
+    assert parse_status["generations"] == []
 
     gateway.api.close()
     pipeline.engines.close()
@@ -264,7 +295,7 @@ def test_http_source_fetch_requires_allowlist_and_enforces_response_limit(monkey
 
     monkeypatch.setenv("LLM_WIKI_SOURCE_FETCH_ALLOWED_HOSTS", "example.test")
     monkeypatch.setenv("LLM_WIKI_SOURCE_FETCH_MAX_BYTES", "4")
-    monkeypatch.setattr("kogwistar_llm_wiki.agent_gateway.urllib_request.build_opener", lambda *_args: Opener())
+    monkeypatch.setattr("kogwistar_llm_wiki.agent.gateway_source.urllib_request.build_opener", lambda *_args: Opener())
     assert _fetch_source_text("https://example.test/source.txt") == "test"
 
 
@@ -400,10 +431,10 @@ def test_status_marks_maintenance_unavailable_instead_of_reporting_empty(monkeyp
     gateway = AgentGateway(Api())
     gateway._source_documents = lambda _workspace_id: []  # type: ignore[method-assign]
     monkeypatch.setattr(
-        "kogwistar_llm_wiki.agent_gateway.build_workspace_quality_report",
+        "kogwistar_llm_wiki.agent.gateway.build_workspace_quality_report",
         lambda *_args, **_kwargs: SimpleNamespace(),
     )
-    monkeypatch.setattr("kogwistar_llm_wiki.agent_gateway.asdict", lambda _value: {})
+    monkeypatch.setattr("kogwistar_llm_wiki.agent.gateway.asdict", lambda _value: {})
     status = gateway.status({"workspace_id": "w"})
     assert status["maintenance"]["available"] is False
     assert status["maintenance"]["errors"] == [
@@ -489,7 +520,7 @@ def test_fetch_source_rejects_credentials_fragments_and_redirects(monkeypatch):
 
     monkeypatch.setenv("LLM_WIKI_SOURCE_FETCH_ALLOWED_HOSTS", "example.test")
     monkeypatch.setattr(
-        "kogwistar_llm_wiki.agent_gateway.urllib_request.build_opener",
+        "kogwistar_llm_wiki.agent.gateway_source.urllib_request.build_opener",
         lambda *_args: Opener(),
     )
     with pytest.raises(ValueError, match="redirects"):

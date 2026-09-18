@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.policies import LlmWikiPolicies
+from kogwistar_llm_wiki.policies.rules import LlmWikiPolicies
 
 
 def test_llm_wiki_promotion_policy_maps_sync_to_core_approval():

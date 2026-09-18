@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 from pydantic import ValidationError
 
-from kogwistar_llm_wiki.parse_generation_store import ParseGenerationStore
-from kogwistar_llm_wiki.parse_views import (
+from kogwistar_llm_wiki.parsing.parse_generation_store import ParseGenerationStore
+from kogwistar_llm_wiki.parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
     ParseGenerationCommit,
@@ -74,6 +76,49 @@ def _commit_member(metadata: InMemoryMetaStore, *, member_id: str = "member-a") 
     ParseGenerationStore(metadata, workspace_id="demo").commit(generation, commit, [member])
 
 
+def _commit_region(
+    metadata: InMemoryMetaStore,
+    *,
+    generation_id_value: str,
+    parser_profile: str,
+    member_id: str,
+    commit_id: str,
+    start_char: int,
+    end_char: int,
+) -> ParseGenerationMember:
+    generation = ParseGeneration(
+        generation_id=generation_id_value,
+        workspace_id="demo",
+        source_document_id="logical-source",
+        source_revision_id="revision-1",
+        source_digest="digest",
+        revision_document_id="rev-doc",
+        parser_profile=parser_profile,
+        parser_version="1",
+        status="stable",
+        created_at=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+    member = ParseGenerationMember(
+        member_id=member_id,
+        generation_id=generation_id_value,
+        workspace_id="demo",
+        source_document_id="logical-source",
+        source_revision_id="revision-1",
+        revision_document_id="rev-doc",
+        region=_region(start_char, end_char),
+    )
+    commit = ParseGenerationCommit(
+        commit_id=commit_id,
+        generation_id=generation_id_value,
+        workspace_id="demo",
+        source_document_id="logical-source",
+        source_revision_id="revision-1",
+        member_ids=(member_id,),
+    )
+    ParseGenerationStore(metadata, workspace_id="demo").commit(generation, commit, [member])
+    return member
+
+
 def test_parse_evidence_ids_are_stable_but_generation_members_are_event_scoped() -> None:
     generation = generation_id(
         workspace_id="demo",
@@ -138,6 +183,25 @@ def test_parse_view_activation_is_per_source_and_cas_protected() -> None:
         store.activate(_view(2), expected_view_version=2)
 
 
+def test_parse_view_read_rejects_payload_under_the_wrong_source_key() -> None:
+    metadata = InMemoryMetaStore()
+    view = _view(1).model_copy(update={"source_document_id": "other-source"})
+    metadata.compare_and_swap_named_projection(
+        "ws:demo:projection_state",
+        "parse_view:logical-source",
+        view.model_dump(mode="json"),
+        expected_last_authoritative_seq=None,
+        expected_last_materialized_seq=None,
+        last_authoritative_seq=1,
+        last_materialized_seq=1,
+        projection_schema_version=1,
+        materialization_status="ready",
+    )
+
+    with pytest.raises(ValueError, match="source does not match projection key"):
+        ParseViewStore(metadata, workspace_id="demo").get("logical-source")
+
+
 def test_parse_view_resolver_uses_legacy_g0_until_a_view_is_activated() -> None:
     metadata = InMemoryMetaStore()
     resolver = ParseViewResolver(metadata, workspace_id="demo")
@@ -156,6 +220,75 @@ def test_parse_view_resolver_uses_legacy_g0_until_a_view_is_activated() -> None:
     assert active.revision_document_id == "rev-doc"
     assert resolver.is_active_revision("logical-source", "rev-doc") is True
     assert resolver.is_active_revision("logical-source", "rev-doc-2") is False
+
+
+def test_selective_reparse_can_replace_one_region_without_dropping_neighbors() -> None:
+    metadata = InMemoryMetaStore()
+    old_a = _commit_region(
+        metadata,
+        generation_id_value="g1",
+        parser_profile="coarse-v1",
+        member_id="old-a",
+        commit_id="commit-a",
+        start_char=0,
+        end_char=10,
+    )
+    old_b = _commit_region(
+        metadata,
+        generation_id_value="g1",
+        parser_profile="coarse-v1",
+        member_id="old-b",
+        commit_id="commit-b",
+        start_char=10,
+        end_char=20,
+    )
+    old_c = _commit_region(
+        metadata,
+        generation_id_value="g1",
+        parser_profile="coarse-v1",
+        member_id="old-c",
+        commit_id="commit-c",
+        start_char=20,
+        end_char=30,
+    )
+    new_b = _commit_region(
+        metadata,
+        generation_id_value="g2",
+        parser_profile="repair-v2",
+        member_id="new-b",
+        commit_id="commit-new-b",
+        start_char=10,
+        end_char=20,
+    )
+    store = ParseViewStore(metadata, workspace_id="demo")
+    store.activate(
+        _view(
+            1,
+            selection=tuple(
+                ParseViewSelection(member_id=member.member_id, generation_id="g1", region=member.region)
+                for member in (old_a, old_b, old_c)
+            ),
+        ),
+        expected_view_version=None,
+    )
+
+    store.activate(
+        _view(
+            2,
+            selection=(
+                ParseViewSelection(member_id=old_a.member_id, generation_id="g1", region=old_a.region),
+                ParseViewSelection(member_id=new_b.member_id, generation_id="g2", region=new_b.region),
+                ParseViewSelection(member_id=old_c.member_id, generation_id="g1", region=old_c.region),
+            ),
+        ),
+        expected_view_version=1,
+    )
+
+    resolved = ParseViewResolver(metadata, workspace_id="demo").resolve("logical-source")
+    assert resolved.view_version == 2
+    assert resolved.member_ids == ("old-a", "new-b", "old-c")
+    assert resolved.generation_ids == ("g1", "g2")
+    assert ParseGenerationStore(metadata, workspace_id="demo").get("g1") is not None
 
 
 def test_parse_view_resolver_requires_selected_member_after_activation() -> None:
@@ -234,6 +367,46 @@ def test_parse_view_activation_rejects_uncommitted_or_foreign_evidence() -> None
         )
 
 
+def test_parse_view_activation_rejects_member_key_identity_mismatch() -> None:
+    metadata = InMemoryMetaStore()
+    _commit_member(metadata)
+    generation_row = metadata.get_named_projection(
+        "ws:demo:projection_state", "parse_generation:g1"
+    )
+    assert generation_row is not None
+    generation_payload = dict(generation_row["payload"])
+    generation_payload["members"] = {
+        "member-a": ParseGenerationMember(
+            member_id="different-member",
+            generation_id="g1",
+            workspace_id="demo",
+            source_document_id="logical-source",
+            source_revision_id="revision-1",
+            revision_document_id="rev-doc",
+            region=_region(0, 10),
+        ).model_dump(mode="json")
+    }
+    metadata.replace_named_projection(
+        "ws:demo:projection_state",
+        "parse_generation:g1",
+        generation_payload,
+        last_authoritative_seq=generation_row["last_authoritative_seq"],
+        last_materialized_seq=generation_row["last_materialized_seq"],
+        projection_schema_version=generation_row["projection_schema_version"],
+        materialization_status=generation_row["materialization_status"],
+    )
+    with pytest.raises(ValueError, match="not grounded"):
+        ParseViewStore(metadata, workspace_id="demo").activate(
+            _view(
+                1,
+                selection=(
+                    ParseViewSelection(member_id="member-a", generation_id="g1", region=_region(0, 10)),
+                ),
+            ),
+            expected_view_version=None,
+        )
+
+
 def test_parse_view_activation_rejects_member_missing_from_generation_commit() -> None:
     metadata = InMemoryMetaStore()
     _commit_member(metadata)
@@ -280,6 +453,21 @@ def test_parse_target_is_revision_pinned_and_has_distinct_session_scope() -> Non
         source_revision_id=target.source_revision_id,
         parser_profile=target.parser_profile,
         region=_region(20, 30),
+    )
+    assert reparse_session_id(
+        workspace_id="demo",
+        source_document_id=target.source_document_id,
+        source_revision_id=target.source_revision_id,
+        parser_profile=target.parser_profile,
+        region=target.region,
+        model_version="model-v2",
+    ) != reparse_session_id(
+        workspace_id="demo",
+        source_document_id=target.source_document_id,
+        source_revision_id=target.source_revision_id,
+        parser_profile=target.parser_profile,
+        region=target.region,
+        model_version="model-v3",
     )
     with pytest.raises(ValidationError, match="revision document"):
         ParseTarget(

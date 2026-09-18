@@ -1,4 +1,4 @@
-from kogwistar_llm_wiki.parse_reconciliation import (
+from kogwistar_llm_wiki.parsing.parse_reconciliation import (
     ParseReconciliationOutcome,
     decide_parse_reconciliation,
 )

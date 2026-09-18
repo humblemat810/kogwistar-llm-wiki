@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.model_catalog import available_models
+from kogwistar_llm_wiki.providers.model_catalog import available_models
 
 
 def test_model_catalog_accepts_custom_router_catalog(monkeypatch):
@@ -32,7 +32,7 @@ def test_openai_v1_endpoint_does_not_duplicate_v1(monkeypatch):
 
     monkeypatch.delenv("LLM_WIKI_MODEL_CATALOG_JSON", raising=False)
     monkeypatch.setenv("KOGWISTAR_PARSER_PROVIDER", "router")
-    monkeypatch.setattr("kogwistar_llm_wiki.model_catalog.urlopen", fake_urlopen)
+    monkeypatch.setattr("kogwistar_llm_wiki.providers.model_catalog.urlopen", fake_urlopen)
     result = available_models("parser", provider="router", base_url="https://router.example/v1")
     assert calls == ["https://router.example/v1/models"]
     assert result["models"] == ["router-model"]

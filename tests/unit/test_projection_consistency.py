@@ -5,8 +5,8 @@ import json
 import pytest
 from kogwistar.engine_core.models import Edge, Grounding, Span
 
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

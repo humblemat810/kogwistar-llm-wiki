@@ -7,7 +7,7 @@ from kogwistar_llm_wiki import (
     WorkbenchApi,
     build_in_memory_namespace_engines,
 )
-from kogwistar_llm_wiki.settings import SettingsService
+from kogwistar_llm_wiki.configuration.settings_service import SettingsService
 
 
 @pytest.fixture(autouse=True)

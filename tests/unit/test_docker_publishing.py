@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -90,3 +91,22 @@ def test_main_image_publishes_only_after_successful_ci_to_configured_namespace()
     assert "type=raw,value=main" in workflow
     assert "type=raw,value=sha-${{ github.event.workflow_run.head_sha }}" in workflow
     assert "Dockerfile.embedding-service" not in workflow
+
+
+def test_github_workflows_pin_the_checked_out_kogwistar_revision() -> None:
+    workflow_paths = (
+        ROOT / ".github" / "workflows" / "ci.yml",
+        ROOT / ".github" / "workflows" / "publish-dockerhub.yml",
+        ROOT / ".github" / "workflows" / "publish-dockerhub-main.yml",
+    )
+    pins = {
+        re.search(r"KOGWISTAR_REVISION:\s*([0-9a-f]{40})", path.read_text(encoding="utf-8")).group(1)
+        for path in workflow_paths
+    }
+    current = subprocess.check_output(
+        ["git", "-C", str(ROOT / "kogwistar"), "rev-parse", "HEAD"],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+
+    assert pins == {current}

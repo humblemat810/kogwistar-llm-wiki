@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
 
 
 def _sync_request(ingest_request):

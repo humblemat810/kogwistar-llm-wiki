@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.entity_disambiguation import (
+from kogwistar_llm_wiki.disambiguation.disambiguation_contracts import (
     DisambiguationArtifactStatus,
     DisambiguationCandidate,
     DisambiguationDecisionKind,
     DisambiguationEvidenceUpdate,
     DisambiguationResolutionSource,
     DisambiguationScoreBundle,
+)
+from kogwistar_llm_wiki.disambiguation.reconciliation import (
     build_disambiguation_patch,
     is_review_request_fresh,
     reconcile_disambiguation_candidate,
 )
-from kogwistar_llm_wiki.maintenance_patches import (
+from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
     validate_maintenance_patch,

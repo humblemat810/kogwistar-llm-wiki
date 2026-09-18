@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 
-from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch_for_scope
-from kogwistar_llm_wiki.maintenance_patches import (
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.maintenance.maintenance_patch_apply import (
+    apply_maintenance_patch_for_scope,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
     MaintenancePatch,
@@ -11,7 +14,6 @@ from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceProvenance,
     MaintenanceScope,
 )
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

@@ -35,7 +35,7 @@ Recommended commands:
 ```powershell
 # Default PR CI slice; includes tests auto-marked as `ci` and prints the
 # slowest individual tests for timing visibility.
-.\.venv\Scripts\python.exe -m pytest tests -q -m "ci and not ci_full" `
+.\.venv\Scripts\python.exe -m pytest tests -q -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama" `
   --durations=25 --durations-min=0 -p no:cacheprovider
 
 # Normal run; uses the repo-local cache configured by pytest.ini.

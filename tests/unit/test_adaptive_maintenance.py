@@ -7,8 +7,10 @@ from types import SimpleNamespace
 import kogwistar_llm_wiki.daemon as daemon_module
 import kogwistar_llm_wiki.worker as worker_module
 from kogwistar_llm_wiki.daemon import MaintenanceDaemon
-from kogwistar_llm_wiki.maintenance_control import MaintenanceControlState
-from kogwistar_llm_wiki.maintenance_strategies import MaintenanceJobExecutionContext
+from kogwistar_llm_wiki.maintenance.maintenance_control import MaintenanceControlState
+from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+)
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 
 

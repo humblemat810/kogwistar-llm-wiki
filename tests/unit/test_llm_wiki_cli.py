@@ -10,8 +10,11 @@ import pytest
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
 
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
-from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch
-from kogwistar_llm_wiki.maintenance_patches import (
+from kogwistar_llm_wiki.configuration.workspace import GraphSpace, WorkspaceNamespaces
+from kogwistar_llm_wiki.maintenance.maintenance_patch_apply import (
+    apply_maintenance_patch,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
     MaintenancePatch,
@@ -20,7 +23,6 @@ from kogwistar_llm_wiki.maintenance_patches import (
     MaintenanceScope,
 )
 from kogwistar_llm_wiki.models import ObsidianBuildResult
-from kogwistar_llm_wiki.namespaces import GraphSpace, WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
@@ -194,7 +196,7 @@ def test_demo_cli_runs_end_to_end_in_one_process(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(llm_wiki_cli, "_build_demo_engines", _fake_build_demo_engines)
     monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
     monkeypatch.setattr("kogwistar_llm_wiki.worker.MaintenanceWorker", _FakeMaintenanceWorker)
-    monkeypatch.setattr("kogwistar_llm_wiki.maintenance_designs.materialize_maintenance_designs", lambda workflow_engine: captured.setdefault("maintenance_designs_seeded", True))
+    monkeypatch.setattr("kogwistar_llm_wiki.maintenance.maintenance_designs.materialize_maintenance_designs", lambda workflow_engine: captured.setdefault("maintenance_designs_seeded", True))
 
     exit_code = llm_wiki_cli.main(
         [
@@ -272,7 +274,7 @@ def test_demo_cli_can_ingest_a_demo_corpus_directory(tmp_path, monkeypatch, caps
     monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
     monkeypatch.setattr("kogwistar_llm_wiki.worker.MaintenanceWorker", _FakeMaintenanceWorker)
     monkeypatch.setattr(
-        "kogwistar_llm_wiki.maintenance_designs.materialize_maintenance_designs",
+        "kogwistar_llm_wiki.maintenance.maintenance_designs.materialize_maintenance_designs",
         lambda workflow_engine: captured.setdefault("maintenance_designs_seeded", True),
     )
 
@@ -428,8 +430,8 @@ def test_report_cli_summarizes_persisted_graph_quality(tmp_path, monkeypatch, ca
         return fake_engines
 
     monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
-    monkeypatch.setattr("kogwistar_llm_wiki.inspection._temporary_namespace", _fake_temporary_namespace)
-    monkeypatch.setattr("kogwistar_llm_wiki.review_query._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.inspection._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.review_query._temporary_namespace", _fake_temporary_namespace)
 
     exit_code = llm_wiki_cli.main(
         [
@@ -820,8 +822,8 @@ def test_report_cli_can_scope_lane_groups(namespace_engines, tmp_path, monkeypat
         return namespace_engines
 
     monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
-    monkeypatch.setattr("kogwistar_llm_wiki.inspection._temporary_namespace", _fake_temporary_namespace)
-    monkeypatch.setattr("kogwistar_llm_wiki.review_query._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.inspection._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.review_query._temporary_namespace", _fake_temporary_namespace)
 
     exit_code = llm_wiki_cli.main(
         [
@@ -1000,7 +1002,7 @@ def test_demo_cli_enables_split_derived_knowledge_hosting(tmp_path, monkeypatch,
     monkeypatch.setattr(llm_wiki_cli, "_build_demo_engines", _fake_build_demo_engines)
     monkeypatch.setattr("kogwistar_llm_wiki.ingest_pipeline.IngestPipeline", _fake_pipeline_ctor)
     monkeypatch.setattr("kogwistar_llm_wiki.worker.MaintenanceWorker", _FakeMaintenanceWorker)
-    monkeypatch.setattr("kogwistar_llm_wiki.maintenance_designs.materialize_maintenance_designs", lambda workflow_engine: None)
+    monkeypatch.setattr("kogwistar_llm_wiki.maintenance.maintenance_designs.materialize_maintenance_designs", lambda workflow_engine: None)
 
     exit_code = llm_wiki_cli.main(
         [

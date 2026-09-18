@@ -10,14 +10,14 @@ from kogwistar_llm_wiki import (
     WorkbenchApi,
     build_in_memory_namespace_engines,
 )
-from kogwistar_llm_wiki.graph_seed_bundle import (
-    GraphSeedBundle,
+from kogwistar_llm_wiki.seeding.bundle_models import GraphSeedBundle
+from kogwistar_llm_wiki.seeding.operations import (
     dump_seed_bundle,
     export_graph_seed_bundle,
     load_seed_bundle,
     seed_graph_bundle,
 )
-from kogwistar_llm_wiki.workbench_cockpit import CockpitAction
+from kogwistar_llm_wiki.workbench.workbench_cockpit import CockpitAction
 
 BUNDLE_PATH = Path(__file__).parents[2] / "data" / "seed_bundles" / "rl_llm_agent_tool_use_v1.json"
 

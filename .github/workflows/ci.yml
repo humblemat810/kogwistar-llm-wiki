@@ -17,7 +17,7 @@ concurrency:
 env:
   # The application imports these sibling repositories at runtime. Keep CI
   # aligned with the revisions used by publish-dockerhub.yml.
-  KOGWISTAR_REVISION: 1137897a1fc7a002888fdc9a23c536e4ebf570c9
+  KOGWISTAR_REVISION: fd47df2894ea020ef4199d9a8e1d089242467df4
   KG_DOC_PARSER_REVISION: 95af9c1db83dc4933e54c126013091616e2beb26
   OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
 
@@ -94,7 +94,7 @@ jobs:
           LOG_LEVEL: WARNING
         shell: bash
         run: >-
-          python -m pytest -m "ci and not ci_full" tests -q
+          python -m pytest -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama" tests -q
           --durations=25 --durations-min=0 -p no:cacheprovider
 
   python-lint:

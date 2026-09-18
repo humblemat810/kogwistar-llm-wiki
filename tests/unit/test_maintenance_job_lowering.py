@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.maintenance_job_lowering import (
+from kogwistar_llm_wiki.maintenance.maintenance_job_lowering import (
     build_review_patch_for_maintenance_job,
     maintenance_intent_for_job_kind,
 )
-from kogwistar_llm_wiki.maintenance_patches import MaintenanceOperationKind
-from kogwistar_llm_wiki.maintenance_policy import (
+from kogwistar_llm_wiki.maintenance.maintenance_patches import MaintenanceOperationKind
+from kogwistar_llm_wiki.maintenance.maintenance_policy import (
     GRAPH_PATCH_APPLY_KINDS,
     GRAPH_PATCH_PROPOSAL_KINDS,
 )

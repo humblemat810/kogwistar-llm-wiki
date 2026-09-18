@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 from kogwistar.id_provider import stable_id
 
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 
 
 def _job_field(job, name: str):

@@ -10,16 +10,18 @@ from kogwistar.engine_core import EntityEventEnvelope
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 from kogwistar.engine_core.models import Grounding, Node, Span
 
-from kogwistar_llm_wiki.archive import (
-    ArchiveError,
+from kogwistar_llm_wiki.archiving.archive_contracts import ArchiveError
+from kogwistar_llm_wiki.archiving.operations import (
     create_archive,
-    inspect_archive,
     restore_archive,
     restore_backend_snapshot,
+)
+from kogwistar_llm_wiki.archiving.validation import (
+    inspect_archive,
     verify_archive,
 )
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

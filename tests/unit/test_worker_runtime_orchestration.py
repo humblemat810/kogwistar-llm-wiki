@@ -13,14 +13,20 @@ from kogwistar.engine_core.jobs import DurableQueueUnavailableError, JobQueueSub
 from kogwistar.runtime import BudgetAttribution, BudgetEvent
 
 import kogwistar_llm_wiki.worker as worker_module
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
-from kogwistar_llm_wiki.maintenance_patches import MaintenancePatch
-from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
-from kogwistar_llm_wiki.maintenance_strategies import MaintenanceJobExecutionContext
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.maintenance.maintenance_designs import (
+    materialize_maintenance_designs,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_patches import MaintenancePatch
+from kogwistar_llm_wiki.maintenance.maintenance_statistics import (
+    build_maintenance_statistics,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+)
+from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 
@@ -250,7 +256,7 @@ def test_expired_maintenance_claim_cannot_be_completed_by_stale_worker() -> None
             worker._advance_maintenance_plan = lambda _ctx: False
 
             def handle_job(_workspace_id: str, job) -> None:
-                from kogwistar_llm_wiki.maintenance_strategies import (
+                from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
                     MaintenanceJobExecutionContext,
                 )
 

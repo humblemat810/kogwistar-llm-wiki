@@ -177,7 +177,7 @@ Recommended classification for existing behavior:
 - Artifact metadata policy:
   [ingest_pipeline.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/ingest_pipeline.py:760)
 - Maintenance kind routing:
-  [maintenance_policy.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/maintenance_policy.py:3)
+  [maintenance_policy.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/maintenance/maintenance_policy.py:3)
 - Derived knowledge synthesis policy:
   [worker.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py:276)
   [worker.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py:401)

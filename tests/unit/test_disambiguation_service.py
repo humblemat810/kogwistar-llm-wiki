@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.disambiguation_service import DisambiguationService
-from kogwistar_llm_wiki.entity_disambiguation import (
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.disambiguation.disambiguation_contracts import (
     DisambiguationArtifactStatus,
     DisambiguationCandidate,
     DisambiguationDecisionKind,
     DisambiguationResolutionSource,
     DisambiguationScoreBundle,
 )
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.disambiguation.service import DisambiguationService
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
@@ -107,4 +107,3 @@ def test_service_records_reviewer_answer_and_challenge(namespace_engines) -> Non
 
     assert len(challenge_nodes) == 1
     assert challenge_nodes[0].metadata.get("challenge_reason") == "A later source contradicts the prior separation"
-

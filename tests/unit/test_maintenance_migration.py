@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.maintenance_migration import compare_ingest_operation_modes
+from kogwistar_llm_wiki.maintenance.maintenance_migration import (
+    compare_ingest_operation_modes,
+)
 
 
 def test_compare_ingest_operation_modes_runs_same_document_shape_across_modes(pipeline, ingest_request) -> None:

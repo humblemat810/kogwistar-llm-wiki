@@ -7,12 +7,15 @@ from typing import Self
 
 import pytest
 
-from kogwistar_llm_wiki.multimodal_projection import (
+from kogwistar_llm_wiki.embeddings.multimodal_projection import (
     MultimodalSourceUnit,
     ProjectionIntegrityError,
 )
-from kogwistar_llm_wiki.multimodal_remote import EmbeddingProtocolError
-from kogwistar_llm_wiki.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
+from kogwistar_llm_wiki.embeddings.multimodal_remote import EmbeddingProtocolError
+from kogwistar_llm_wiki.embeddings.vllm_remote import (
+    VllmEmbeddingSettings,
+    VllmMultimodalEncoder,
+)
 
 IMAGE = b"small-image"
 IMAGE_DIGEST = "@sha256:" + "a" * 64

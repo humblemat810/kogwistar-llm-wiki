@@ -3,14 +3,15 @@ from __future__ import annotations
 import pytest
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 
-from kogwistar_llm_wiki.parse_generation_store import (
+from kogwistar_llm_wiki.parsing.parse_generation_store import (
     ParseGenerationStore,
     ParseGenerationStoreConflict,
 )
-from kogwistar_llm_wiki.parse_views import (
+from kogwistar_llm_wiki.parsing.parse_views import (
     ParseGeneration,
     ParseGenerationCommit,
     ParseGenerationMember,
+    ParseGenerationStatus,
     SourceRegion,
 )
 
@@ -81,3 +82,49 @@ def test_generation_retry_rejects_changed_member_payload() -> None:
     changed_member = members[0].model_copy(update={"semantic_id": "different"})
     with pytest.raises(ParseGenerationStoreConflict, match="member ID"):
         store.commit(generation, commit, [changed_member])
+
+
+def test_generation_member_region_must_use_revision_document() -> None:
+    _, _, members = _evidence()
+    with pytest.raises(ValueError, match="revision document"):
+        ParseGenerationMember(
+            **(
+                members[0].model_dump()
+                | {
+                    "region": {
+                        "source_document_id": "logical-source",
+                        "start_char": 0,
+                        "end_char": 1,
+                    }
+                }
+            )
+        )
+
+
+def test_generation_history_is_readable_without_mutating_the_projection() -> None:
+    generation, commit, members = _evidence()
+    store = ParseGenerationStore(InMemoryMetaStore(), workspace_id="demo")
+    store.commit(generation, commit, members)
+
+    loaded = store.get(generation.generation_id)
+    assert loaded is not None
+    assert loaded[0] == generation
+    assert loaded[1] == (commit,)
+    assert loaded[2] == tuple(members)
+    assert store.list_for_source(generation.source_document_id)[0][0] == generation
+
+
+def test_generation_lifecycle_can_advance_without_changing_immutable_identity() -> None:
+    generation, commit, members = _evidence()
+    store = ParseGenerationStore(InMemoryMetaStore(), workspace_id="demo")
+    expanding = generation.model_copy(update={"status": ParseGenerationStatus.EXPANDING})
+    stable = generation.model_copy(update={"status": ParseGenerationStatus.STABLE})
+    store.commit(expanding, commit, members)
+    next_commit = commit.model_copy(update={"commit_id": "commit-2"})
+    store.commit(stable, next_commit, members)
+
+    loaded = store.get(generation.generation_id)
+    assert loaded is not None
+    assert loaded[0].status is ParseGenerationStatus.STABLE
+    with pytest.raises(ParseGenerationStoreConflict, match="cannot regress"):
+        store.commit(expanding, commit.model_copy(update={"commit_id": "commit-3"}), members)
