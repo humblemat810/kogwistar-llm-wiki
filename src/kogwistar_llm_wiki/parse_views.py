@@ -70,6 +70,11 @@ class ParseTarget(BaseModel):
     reason: str = Field(min_length=1, max_length=512)
     parser_profile: str = Field(min_length=1, max_length=256)
     generation_member_id: str | None = None
+    llm_provider: str | None = Field(default=None, max_length=128)
+    llm_model: str | None = Field(default=None, max_length=256)
+    model_version: str | None = Field(default=None, max_length=256)
+    prompt_version: str | None = Field(default=None, max_length=256)
+    parser_version: str | None = Field(default=None, max_length=256)
 
     @model_validator(mode="after")
     def _region_is_pinned_to_revision(self) -> ParseTarget:
@@ -91,6 +96,10 @@ class ParseGeneration(BaseModel):
     revision_document_id: str
     parser_profile: str
     parser_version: str
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    model_version: str | None = None
+    prompt_version: str | None = None
     parent_generation_id: str | None = None
     maintenance_run_id: str | None = None
     status: ParseGenerationStatus = ParseGenerationStatus.SEEDED
@@ -300,6 +309,11 @@ def reparse_session_id(
     source_revision_id: str,
     parser_profile: str,
     region: SourceRegion,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    model_version: str | None = None,
+    prompt_version: str | None = None,
+    parser_version: str | None = None,
 ) -> str:
     """Return a distinct idempotency scope for one explicit region reparse."""
 
@@ -313,6 +327,11 @@ def reparse_session_id(
             region.source_document_id,
             str(region.start_char),
             str(region.end_char),
+            llm_provider or "",
+            llm_model or "",
+            model_version or "",
+            prompt_version or "",
+            parser_version or "",
         )
     )
 

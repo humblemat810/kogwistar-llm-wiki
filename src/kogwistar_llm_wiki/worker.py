@@ -1305,7 +1305,11 @@ class MaintenanceWorker(BaseWorker):
                 source_digest=session.source_digest,
                 revision_document_id=session.revision_document_id,
                 parser_profile=str(state.get("parser_profile") or state.get("parser_lane") or "page_index"),
-                parser_version="llm-wiki-durable-frontier-v1",
+                parser_version=str(state.get("parser_version") or "llm-wiki-durable-frontier-v1"),
+                llm_provider=(str(state["llm_provider"]) if state.get("llm_provider") else None),
+                llm_model=(str(state["llm_model"]) if state.get("llm_model") else None),
+                model_version=(str(state["model_version"]) if state.get("model_version") else None),
+                prompt_version=(str(state["prompt_version"]) if state.get("prompt_version") else None),
                 status="stable",
             )
         member = ParseGenerationMember(

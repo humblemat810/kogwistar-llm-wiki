@@ -104,6 +104,7 @@ from .parse_views import (
     ParseSessionPhase,
     ParseSessionState,
     ParseTarget,
+    ParseViewStore,
     SourceRegion,
     frontier_id,
     generation_id,
@@ -1409,6 +1410,9 @@ class IngestPipeline:
         token_budget: int | None = None,
         wall_time_seconds: float | None = None,
         parser_profile: str | None = None,
+        parser_version: str | None = None,
+        model_version: str | None = None,
+        prompt_version: str | None = None,
         initial_region: SourceRegion | None = None,
         session_id_override: str | None = None,
     ) -> ParseSessionState:
@@ -1419,6 +1423,7 @@ class IngestPipeline:
             source_document_id=source_document_id,
         )
         resolved_profile = parser_profile or request.parser_lane
+        resolved_parser_version = parser_version or "llm-wiki-layered-contract-v1"
         if max_depth < 0:
             raise ValueError("max_depth must be non-negative")
         if max_frontier_items < 1:
@@ -1499,6 +1504,9 @@ class IngestPipeline:
                 "parser_mode": request.parser_mode,
                 "parser_lane": request.parser_lane,
                 "parser_profile": resolved_profile,
+                "parser_version": resolved_parser_version,
+                "model_version": model_version,
+                "prompt_version": prompt_version,
                 "promotion_mode": request.promotion_mode,
                 "llm_provider": request.llm_provider,
                 "llm_model": request.llm_model,
@@ -1521,7 +1529,11 @@ class IngestPipeline:
             source_digest=revision.source_digest,
             revision_document_id=revision_document_id,
             parser_profile=resolved_profile,
-            parser_version="llm-wiki-layered-contract-v1",
+            parser_version=resolved_parser_version,
+            llm_provider=request.llm_provider,
+            llm_model=request.llm_model,
+            model_version=model_version,
+            prompt_version=prompt_version,
             status="seeded",
         )
         node = self._artifact_node(
@@ -2337,6 +2349,27 @@ class IngestPipeline:
                 or target.revision_document_id != (revision.revision_document_id or source_document_id)
             ):
                 raise ValueError("parse_target must match the current immutable source revision")
+            if target.generation_member_id:
+                active_view = ParseViewStore(
+                    self.engines.conversation.meta_sqlite,
+                    workspace_id=request.workspace_id,
+                ).get(source_document_id)
+                if active_view is None:
+                    raise ValueError(
+                        "legacy_evidence_unavailable: generation_member_id requires an active ParseView"
+                    )
+                selected_member = next(
+                    (
+                        selection
+                        for selection in active_view.selections
+                        if selection.member_id == target.generation_member_id
+                    ),
+                    None,
+                )
+                if selected_member is None or selected_member.region != target.region:
+                    raise ValueError(
+                        "generation_member_id must identify the active member with the requested region"
+                    )
         if target is None:
             layered_session_id = parse_session_id(
                 workspace_id=request.workspace_id,
@@ -2351,6 +2384,11 @@ class IngestPipeline:
                 source_revision_id=revision.revision_id,
                 parser_profile=target.parser_profile,
                 region=target.region,
+                llm_provider=target.llm_provider,
+                llm_model=target.llm_model,
+                model_version=target.model_version,
+                prompt_version=target.prompt_version,
+                parser_version=target.parser_version,
             )
             # A targeted reparse may be requested for a legacy parse-first
             # source. Seed grounding first so the normal revision guard is
@@ -2360,14 +2398,23 @@ class IngestPipeline:
                 source_document_id=source_document_id,
                 namespace=namespace,
             )
+            target_request = request.model_copy(
+                update={
+                    "llm_provider": target.llm_provider or request.llm_provider,
+                    "llm_model": target.llm_model or request.llm_model,
+                }
+            )
             self.initialize_durable_parse_session(
-                request=request,
+                request=target_request,
                 source_document_id=source_document_id,
                 revision_document_id=target.revision_document_id,
                 revision=revision,
                 parser_profile=(
                     f"reparse:{target.parser_profile}:{target.region.start_char}:{target.region.end_char}"
                 ),
+                parser_version=target.parser_version,
+                model_version=target.model_version,
+                prompt_version=target.prompt_version,
                 initial_region=target.region,
                 session_id_override=layered_session_id,
             )

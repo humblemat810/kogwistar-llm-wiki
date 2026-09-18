@@ -435,6 +435,21 @@ def test_parse_target_is_revision_pinned_and_has_distinct_session_scope() -> Non
         parser_profile=target.parser_profile,
         region=_region(20, 30),
     )
+    assert reparse_session_id(
+        workspace_id="demo",
+        source_document_id=target.source_document_id,
+        source_revision_id=target.source_revision_id,
+        parser_profile=target.parser_profile,
+        region=target.region,
+        model_version="model-v2",
+    ) != reparse_session_id(
+        workspace_id="demo",
+        source_document_id=target.source_document_id,
+        source_revision_id=target.source_revision_id,
+        parser_profile=target.parser_profile,
+        region=target.region,
+        model_version="model-v3",
+    )
     with pytest.raises(ValidationError, match="revision document"):
         ParseTarget(
             **(

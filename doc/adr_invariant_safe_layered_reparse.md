@@ -15,6 +15,13 @@ frontiers in named projections and keeps temporary parser directories
 disposable. A parse generation is immutable evidence. A per-source ParseView
 is the only active-interpretation pointer.
 
+Explicit targeted reparses may carry provider/model, model-version,
+prompt-version, and parser-version metadata. Those values are persisted in
+the session and generation evidence and participate in the targeted reparse
+idempotency key, so a model upgrade cannot accidentally reuse the prior
+region's session. This remains opt-in and region-scoped; no corpus-wide model
+upgrade is scheduled automatically.
+
 ParseView activation uses a named projection key:
 
 ```text

@@ -137,6 +137,11 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
         },
         "reason": "repair one grounded region",
         "parser_profile": "page-index-v2",
+        "llm_provider": "codex",
+        "llm_model": "luna",
+        "model_version": "2026-09",
+        "prompt_version": "reparse-prompt-v3",
+        "parser_version": "page-index-2.1",
     }
 
     pipeline.create_maintenance_request(
@@ -154,6 +159,11 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
         source_revision_id=revision.revision_id,
         parser_profile="page-index-v2",
         region=region,
+        llm_provider="codex",
+        llm_model="luna",
+        model_version="2026-09",
+        prompt_version="reparse-prompt-v3",
+        parser_version="page-index-2.1",
     )
     session = ParseSessionStore(
         pipeline.engines.conversation.meta_sqlite,
@@ -162,6 +172,11 @@ def test_targeted_reparse_is_revision_pinned_and_creates_bounded_session(pipelin
     assert session is not None
     assert session[1][0].region == region
     assert session[0].parser_state["source_revision_document_id"] == revision.revision_document_id
+    assert session[0].parser_state["llm_provider"] == "codex"
+    assert session[0].parser_state["llm_model"] == "luna"
+    assert session[0].parser_state["model_version"] == "2026-09"
+    assert session[0].parser_state["prompt_version"] == "reparse-prompt-v3"
+    assert session[0].parser_state["parser_version"] == "page-index-2.1"
 
     stale = dict(target)
     stale["source_revision_id"] = "stale"
