@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from .parse_views import ParseGeneration, ParseGenerationCommit, ParseGenerationMember
+from .parse_views import (
+    ParseGeneration,
+    ParseGenerationCommit,
+    ParseGenerationMember,
+    ParseGenerationStatus,
+)
 
 
 class ParseGenerationStoreConflict(RuntimeError):
@@ -133,7 +138,16 @@ class ParseGenerationStore:
             commits = dict(existing.get("commits") or {})
             stored_generation = existing.get("generation")
             if stored_generation != generation.model_dump(mode="json"):
-                raise ParseGenerationStoreConflict("generation ID was reused with different evidence")
+                if not isinstance(stored_generation, dict):
+                    raise ParseGenerationStoreConflict("generation ID was reused with different evidence")
+                stored_header = ParseGeneration.model_validate(stored_generation)
+                self._validate_status_transition(stored_header, generation)
+                if stored_header.model_copy(update={"status": generation.status}).model_dump(
+                    mode="json"
+                ) != generation.model_dump(mode="json"):
+                    raise ParseGenerationStoreConflict(
+                        "generation ID was reused with different immutable evidence"
+                    )
             existing_commit = commits.get(commit.commit_id)
             if existing_commit is not None:
                 if existing_commit != commit.model_dump(mode="json"):
@@ -152,7 +166,7 @@ class ParseGenerationStore:
             commits[commit.commit_id] = commit.model_dump(mode="json")
             existing_members.update({member.member_id: member.model_dump(mode="json") for member in members})
             payload = {
-                "generation": existing.get("generation", generation.model_dump(mode="json")),
+                "generation": generation.model_dump(mode="json"),
                 "commits": commits,
                 "members": existing_members,
             }
@@ -173,6 +187,28 @@ class ParseGenerationStore:
         if not inserted:
             raise ParseGenerationStoreConflict("generation commit lost a CAS race")
         return next_version
+
+    @staticmethod
+    def _validate_status_transition(
+        current: ParseGeneration,
+        next_generation: ParseGeneration,
+    ) -> None:
+        """Allow only monotonic lifecycle updates on an immutable generation."""
+
+        if current.generation_id != next_generation.generation_id:
+            raise ParseGenerationStoreConflict("generation ID was reused with different evidence")
+        rank = {
+            ParseGenerationStatus.SEEDED: 0,
+            ParseGenerationStatus.EXPANDING: 1,
+            ParseGenerationStatus.STABLE: 2,
+            ParseGenerationStatus.FAILED: 3,
+        }
+        if next_generation.status == ParseGenerationStatus.FAILED:
+            return
+        if current.status == ParseGenerationStatus.FAILED:
+            raise ParseGenerationStoreConflict("failed generation cannot resume")
+        if rank[next_generation.status] < rank[current.status]:
+            raise ParseGenerationStoreConflict("generation lifecycle status cannot regress")
 
     def _validate(
         self,

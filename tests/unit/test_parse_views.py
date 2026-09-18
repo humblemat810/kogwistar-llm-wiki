@@ -183,6 +183,25 @@ def test_parse_view_activation_is_per_source_and_cas_protected() -> None:
         store.activate(_view(2), expected_view_version=2)
 
 
+def test_parse_view_read_rejects_payload_under_the_wrong_source_key() -> None:
+    metadata = InMemoryMetaStore()
+    view = _view(1).model_copy(update={"source_document_id": "other-source"})
+    metadata.compare_and_swap_named_projection(
+        "ws:demo:projection_state",
+        "parse_view:logical-source",
+        view.model_dump(mode="json"),
+        expected_last_authoritative_seq=None,
+        expected_last_materialized_seq=None,
+        last_authoritative_seq=1,
+        last_materialized_seq=1,
+        projection_schema_version=1,
+        materialization_status="ready",
+    )
+
+    with pytest.raises(ValueError, match="source does not match projection key"):
+        ParseViewStore(metadata, workspace_id="demo").get("logical-source")
+
+
 def test_parse_view_resolver_uses_legacy_g0_until_a_view_is_activated() -> None:
     metadata = InMemoryMetaStore()
     resolver = ParseViewResolver(metadata, workspace_id="demo")

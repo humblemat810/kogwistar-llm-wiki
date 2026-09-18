@@ -15,6 +15,14 @@ frontiers in named projections and keeps temporary parser directories
 disposable. A parse generation is immutable evidence. A per-source ParseView
 is the only active-interpretation pointer.
 
+Generation identity and lifecycle are separate: source, parser, model, and
+derivation fields cannot change after the first commit, while status may
+advance monotonically from `expanding` to `stable` as additional immutable
+commit events arrive. Each generation member also carries a deterministic
+semantic fingerprint. An overlapping reparse may activate automatically only
+when that fingerprint exactly matches the active member; corrective or
+conflicting output remains review-gated.
+
 Explicit targeted reparses may carry provider/model, model-version,
 prompt-version, and parser-version metadata. Those values are persisted in
 the session and generation evidence and participate in the targeted reparse
@@ -115,6 +123,7 @@ source bytes.
 | Concern | Existing primitive | Application responsibility |
 | --- | --- | --- |
 | Layered parsing | `kg_doc_parser.workflow_ingest.layered_contracts` | Adapt its bounded results to durable source-pinned sessions |
+| Embedding resolution | `embedding_config_resolver.py` | Keep provider selection and profile construction separate from ingestion orchestration |
 | Work scheduling | Kogwistar `JobQueueSubsystem` | Choose maintenance policy and coalesce follow-up jobs |
 | Durable CAS state | Kogwistar named projections | Define parse-session, generation, and ParseView payload schemas |
 | Graph traversal | Kogwistar `ReadSubsystem.get_nodes/get_edges` | Classify affected dependents; no parser-specific reverse index |
@@ -137,6 +146,10 @@ validation rather than claims made by these provider-free tests.
 - stale revision jobs are rejected before parser work;
 - duplicate delivery is safe through deterministic generation-member event IDs
   and named-projection CAS;
+- generation lifecycle status can only advance; immutable identity and
+  provenance cannot be rewritten by a later commit;
+- equivalent overlapping reparses require an exact semantic fingerprint match;
+  uncertainty and correction remain review/proposal work;
 - generation retries reuse the persisted generation header rather than creating
   conflicting timestamps for the same generation identity;
 - targeted derivations must keep every grounded span inside the requested

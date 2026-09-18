@@ -46,6 +46,8 @@ class ParseSessionStore:
         session = ParseSessionState.model_validate(payload.get("session", {}))
         if session.workspace_id != self.workspace_id:
             raise ValueError("parse session workspace does not match store workspace")
+        if session.session_id != session_id:
+            raise ValueError("stored parse session identity does not match projection key")
         self._validate_session_identity(session)
         frontier = [
             ParseFrontierItem.model_validate(item)

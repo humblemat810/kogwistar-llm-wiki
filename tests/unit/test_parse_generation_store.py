@@ -11,6 +11,7 @@ from kogwistar_llm_wiki.parse_views import (
     ParseGeneration,
     ParseGenerationCommit,
     ParseGenerationMember,
+    ParseGenerationStatus,
     SourceRegion,
 )
 
@@ -111,3 +112,19 @@ def test_generation_history_is_readable_without_mutating_the_projection() -> Non
     assert loaded[1] == (commit,)
     assert loaded[2] == tuple(members)
     assert store.list_for_source(generation.source_document_id)[0][0] == generation
+
+
+def test_generation_lifecycle_can_advance_without_changing_immutable_identity() -> None:
+    generation, commit, members = _evidence()
+    store = ParseGenerationStore(InMemoryMetaStore(), workspace_id="demo")
+    expanding = generation.model_copy(update={"status": ParseGenerationStatus.EXPANDING})
+    stable = generation.model_copy(update={"status": ParseGenerationStatus.STABLE})
+    store.commit(expanding, commit, members)
+    next_commit = commit.model_copy(update={"commit_id": "commit-2"})
+    store.commit(stable, next_commit, members)
+
+    loaded = store.get(generation.generation_id)
+    assert loaded is not None
+    assert loaded[0].status is ParseGenerationStatus.STABLE
+    with pytest.raises(ParseGenerationStoreConflict, match="cannot regress"):
+        store.commit(expanding, commit.model_copy(update={"commit_id": "commit-3"}), members)

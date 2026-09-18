@@ -390,6 +390,8 @@ class ParseViewStore:
         view = ParseView.model_validate(payload)
         if view.workspace_id != self.workspace_id:
             raise ValueError("stored ParseView workspace does not match store workspace")
+        if view.source_document_id != source_document_id:
+            raise ValueError("stored ParseView source does not match projection key")
         self._validate_view_evidence(view)
         return view
 
@@ -412,6 +414,8 @@ class ParseViewStore:
                 raise ParseViewConflict("expected an existing ParseView")
             current = ParseView.model_validate(existing.get("payload", {}))
             self._validate_view_evidence(current)
+            if current.source_document_id != view.source_document_id:
+                raise ValueError("stored ParseView source does not match replacement source")
             if current.view_version != expected_view_version:
                 raise ParseViewConflict("ParseView version changed before activation")
             if view.view_version <= current.view_version:

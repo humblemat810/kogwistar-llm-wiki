@@ -18,7 +18,7 @@ from kogwistar.engine_core.models import GraphExtractionWithIDs, Grounding, Node
 from kogwistar.id_provider import stable_id
 from kogwistar.maintenance.models import MaintenanceTemplateResult
 from kogwistar.maintenance.template import run_grouped_maintenance_template
-from kogwistar.runtime import RunResult, budget_event_from_dict
+from kogwistar.runtime import RunResult
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.models import RunSuccess, StepRunResult
@@ -67,6 +67,7 @@ from .parse_views import (
     ParseGeneration,
     ParseGenerationCommit,
     ParseGenerationMember,
+    ParseGenerationStatus,
     ParseSessionPhase,
     ParseSessionState,
     ParseView,
@@ -81,166 +82,29 @@ from .policies import LlmWikiPolicies, build_default_policies
 from .provider_config import resolve_maintenance_provider_settings
 from .usage_projection import UsageProjection, persist_usage_events
 from .utils import _temporary_namespace
+from .worker_state import (
+    and_where as _and_where,
+)
+from .worker_state import (
+    belongs_to_workspace as _belongs_to_workspace,
+)
+from .worker_state import (
+    durable_maintenance_usage as _durable_maintenance_usage,
+)
+from .worker_state import (
+    edge_ids as _edge_ids,
+)
+from .worker_state import (
+    maintenance_budget_state as _maintenance_budget_state,
+)
+from .worker_state import (
+    persisted_budget_state as _persisted_budget_state,
+)
+from .worker_state import (
+    semantic_fingerprint as _semantic_fingerprint,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
-    """Compose a Chroma-compatible conjunction filter from simple metadata clauses."""
-    return {"$and": [dict(clause) for clause in clauses]}
-
-
-def _belongs_to_workspace(node: object, workspace_id: str) -> bool:
-    """Apply a metadata defense-in-depth check after namespace/ACL filtering."""
-    metadata = getattr(node, "metadata", None)
-    if not isinstance(metadata, Mapping):
-        return True
-    declared_workspace = str(metadata.get("workspace_id") or "").strip()
-    return not declared_workspace or declared_workspace == str(workspace_id)
-
-
-def _edge_ids(edge: object) -> set[str]:
-    ids: set[str] = set()
-    for field in ("source_ids", "target_ids"):
-        value = getattr(edge, field, ()) or ()
-        if isinstance(value, str):
-            ids.add(value)
-        else:
-            ids.update(str(item) for item in value if str(item).strip())
-    return ids
-
-
-def _persisted_budget_state(state: Mapping[str, object]) -> dict[str, object]:
-    """Keep only JSON-safe cumulative budget fields on a requeued job."""
-    allowed = {
-        "token_budget", "token_used", "step_budget", "step_used", "call_budget",
-        "call_used", "time_budget_ms", "time_used_ms", "cost_budget", "cost_used",
-        "request_token_budget", "request_step_budget", "request_call_budget",
-        "request_time_budget_ms", "request_cost_budget",
-    }
-    return {
-        key: value
-        for key, value in state.items()
-        if key in allowed and isinstance(value, (int, float)) and not isinstance(value, bool)
-    }
-
-
-def _maintenance_budget_state(
-    payload: Mapping[str, object],
-    *,
-    fair_scheduling: bool,
-    maintenance_steps_per_slice: int,
-    maintenance_llm_calls_per_slice: int,
-    maintenance_seconds_per_slice: int,
-    durable_usage: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Build the current attempt's ledger from durable request/job state.
-
-    Request limits and usage survive phase requeues. Fair-scheduling limits are
-    raised one slice at a time so they do not turn a cumulative job counter into
-    an accidental per-slice reset.
-    """
-    previous = payload.get("maintenance_budget_state")
-    state: dict[str, object] = dict(previous) if isinstance(previous, Mapping) else {}
-    budgets = payload.get("budgets")
-    budgets = budgets if isinstance(budgets, Mapping) else {}
-
-    token_limit = int(budgets.get("max_tokens") or 10_000_000)
-    call_limit = int(budgets.get("max_llm_calls") or 0)
-    step_limit = int(budgets.get("max_steps") or 0)
-    time_limit_ms = int(float(budgets.get("max_time_seconds") or 0) * 1000)
-    cost_limit = float(budgets.get("max_cost_usd") or 0.0)
-    request_limits = {
-        "request_token_budget": token_limit,
-        "request_call_budget": call_limit,
-        "request_step_budget": step_limit,
-        "request_time_budget_ms": time_limit_ms,
-        "request_cost_budget": cost_limit,
-    }
-    state.update(request_limits)
-    used = {
-        key: state.get(key, 0)
-        for key in ("token_used", "call_used", "step_used", "time_used_ms", "cost_used")
-    }
-    for key, value in (durable_usage or {}).items():
-        if key not in used or isinstance(value, bool) or not isinstance(value, (int, float)):
-            continue
-        used[key] = max(float(used[key] or 0), float(value))
-        state[key] = int(used[key]) if key != "cost_used" else float(used[key])
-    state["token_budget"] = token_limit
-    state["call_budget"] = call_limit
-    state["step_budget"] = step_limit
-    state["time_budget_ms"] = time_limit_ms
-    state["cost_budget"] = cost_limit
-
-    if fair_scheduling:
-        slice_limits = {
-            "step_budget": maintenance_steps_per_slice,
-            "call_budget": maintenance_llm_calls_per_slice,
-            "time_budget_ms": maintenance_seconds_per_slice * 1000,
-        }
-        request_keys = {
-            "step_budget": "request_step_budget",
-            "call_budget": "request_call_budget",
-            "time_budget_ms": "request_time_budget_ms",
-        }
-        used_keys = {
-            "step_budget": "step_used",
-            "call_budget": "call_used",
-            "time_budget_ms": "time_used_ms",
-        }
-        for limit_key, slice_limit in slice_limits.items():
-            if not slice_limit:
-                continue
-            request_limit = int(state[request_keys[limit_key]] or 0)
-            slice_cap = int(used[used_keys[limit_key]] or 0) + slice_limit
-            state[limit_key] = min(request_limit, slice_cap) if request_limit else slice_cap
-    return state
-
-
-def _durable_maintenance_usage(
-    meta: object,
-    *,
-    namespace: str,
-    maintenance_job_id: str,
-) -> dict[str, object]:
-    """Recover budget usage from authoritative events after a failed retry."""
-    iterator = getattr(meta, "iter_entity_events", None)
-    if not callable(iterator) or not maintenance_job_id:
-        return {}
-    events = []
-    try:
-        rows = iterator(namespace=namespace, from_seq=1, batch_size=500)
-        for _seq, _event_id, _entity_kind, _entity_id, payload_json in rows:
-            try:
-                payload = json.loads(payload_json)
-                attribution = payload.get("attribution")
-                if not isinstance(attribution, Mapping):
-                    continue
-                if str(attribution.get("maintenance_job_id") or "") != maintenance_job_id:
-                    continue
-                if payload.get("artifact_kind") != "usage_event":
-                    continue
-                events.append(budget_event_from_dict(payload))
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-    except Exception:
-        logger.exception("Failed to recover durable usage for maintenance job %s", maintenance_job_id)
-        return {}
-    summary = summarize_budget_events(events)
-    token_used = sum(
-        float(event.amount or 0)
-        for event in events
-        if event.kind in {"debit", "token"}
-        and event.unit not in {"call", "llm_call", "step", "ms"}
-    )
-    return {
-        "token_used": int(token_used),
-        "call_used": sum(1 for event in events if event.unit in {"call", "llm_call"}),
-        "step_used": sum(int(event.amount or 0) for event in events if event.unit == "step"),
-        "time_used_ms": int(summary.get("time_ms", 0) or 0),
-        "cost_used": float(summary.get("total_cost", 0.0) or 0.0),
-    }
 
 
 class BaseWorker(ABC):
@@ -1259,6 +1123,7 @@ class MaintenanceWorker(BaseWorker):
                 source_document_id=revision_document_id,
             )
             self._offset_extraction_spans(extraction, selected.region.start_char)
+            semantic_fingerprint = _semantic_fingerprint(extraction)
             commit_id = str(
                 stable_id(
                     "kogwistar_llm_wiki.parse_generation_commit",
@@ -1282,6 +1147,10 @@ class MaintenanceWorker(BaseWorker):
             )
             parser_cache_transaction.promote()
 
+        remaining_frontier = [
+            item for item in frontier if item.frontier_id != selected.frontier_id
+        ]
+        stable = not remaining_frontier
         generation_store = ParseGenerationStore(
             self.engines.conversation.meta_sqlite,
             workspace_id=ctx.workspace_id,
@@ -1296,6 +1165,15 @@ class MaintenanceWorker(BaseWorker):
                 or generation.revision_document_id != session.revision_document_id
             ):
                 raise ValueError("stored parse generation is not pinned to the session revision")
+            generation = generation.model_copy(
+                update={
+                    "status": (
+                        ParseGenerationStatus.STABLE
+                        if stable
+                        else ParseGenerationStatus.EXPANDING
+                    )
+                }
+            )
         else:
             generation = ParseGeneration(
                 generation_id=session.generation_id,
@@ -1310,7 +1188,11 @@ class MaintenanceWorker(BaseWorker):
                 llm_model=(str(state["llm_model"]) if state.get("llm_model") else None),
                 model_version=(str(state["model_version"]) if state.get("model_version") else None),
                 prompt_version=(str(state["prompt_version"]) if state.get("prompt_version") else None),
-                status="stable",
+                # A generation is only stable when this bounded invocation
+                # consumed the final frontier item.  Intermediate commits are
+                # durable evidence, but must remain visibly expandable until
+                # the final ParseView activation.
+                status="stable" if not remaining_frontier else "expanding",
             )
         member = ParseGenerationMember(
             member_id=member_id,
@@ -1321,6 +1203,7 @@ class MaintenanceWorker(BaseWorker):
             revision_document_id=session.revision_document_id,
             region=selected.region,
             depth=selected.depth,
+            semantic_fingerprint=semantic_fingerprint,
             payload={"frontier_id": selected.frontier_id},
         )
         commit = ParseGenerationCommit(
@@ -1338,8 +1221,26 @@ class MaintenanceWorker(BaseWorker):
             if item.region.start_char < selected.region.end_char
             and selected.region.start_char < item.region.end_char
         )
+        active_fingerprints: dict[str, str] = {}
+        if current_view is not None:
+            for selection in current_view.selections:
+                active_generation = generation_store.get(selection.generation_id)
+                if active_generation is None:
+                    continue
+                active_fingerprints.update(
+                    {
+                        item.member_id: item.semantic_fingerprint
+                        for item in active_generation[2]
+                        if item.semantic_fingerprint
+                    }
+                )
         reconciliation = decide_parse_reconciliation(
             overlapping_member_ids=overlapping_member_ids,
+            same_fingerprint=(
+                len(overlapping_member_ids) == 1
+                and bool(semantic_fingerprint)
+                and active_fingerprints.get(overlapping_member_ids[0]) == semantic_fingerprint
+            ),
         )
         member = member.model_copy(
             update={
@@ -1363,30 +1264,53 @@ class MaintenanceWorker(BaseWorker):
             expected_view_version = current_view.view_version
             predecessor_view_id = current_view.view_id
             next_view_version = current_view.view_version + 1
-        view = ParseView(
-            view_id=str(
-                stable_id(
-                    "kogwistar_llm_wiki.parse_view",
-                    session.source_document_id,
-                    session.source_revision_id,
-                    commit_id,
+        view: ParseView | None = None
+        if stable:
+            # A generation can be committed over several bounded worker
+            # invocations.  Activate the view only after the final item, and
+            # include every committed member so earlier chunks remain visible.
+            committed_members: dict[str, ParseGenerationMember] = {}
+            stored_generation = ParseGenerationStore(
+                self.engines.conversation.meta_sqlite,
+                workspace_id=ctx.workspace_id,
+            ).get(session.generation_id)
+            if stored_generation is not None:
+                committed_members.update(
+                    {item.member_id: item for item in stored_generation[2]}
                 )
-            ),
-            view_version=next_view_version,
-            workspace_id=session.workspace_id,
-            source_document_id=session.source_document_id,
-            source_revision_id=session.source_revision_id,
-            revision_document_id=session.revision_document_id,
-            selections=retained
-            + (
+            committed_members[member.member_id] = member
+            new_selections = tuple(
                 ParseViewSelection(
-                    member_id=member_id,
-                    generation_id=session.generation_id,
-                    region=selected.region,
+                    member_id=item.member_id,
+                    generation_id=item.generation_id,
+                    region=item.region,
+                )
+                for item in sorted(
+                    committed_members.values(),
+                    key=lambda item: (
+                        item.region.start_char,
+                        item.region.end_char,
+                        item.member_id,
+                    ),
+                )
+            )
+            view = ParseView(
+                view_id=str(
+                    stable_id(
+                        "kogwistar_llm_wiki.parse_view",
+                        session.source_document_id,
+                        session.source_revision_id,
+                        commit_id,
+                    )
                 ),
-            ),
-            predecessor_view_id=predecessor_view_id,
-        )
+                view_version=next_view_version,
+                workspace_id=session.workspace_id,
+                source_document_id=session.source_document_id,
+                source_revision_id=session.source_revision_id,
+                revision_document_id=session.revision_document_id,
+                selections=retained + new_selections,
+                predecessor_view_id=predecessor_view_id,
+            )
         next_session = session.model_copy(
             update={
                 "parser_calls": session.parser_calls + 1,
@@ -1396,9 +1320,9 @@ class MaintenanceWorker(BaseWorker):
         if reconciliation.requires_review:
             return {
                 "session": next_session.model_dump(mode="json"),
-                "frontier": [],
+                "frontier": [item.model_dump(mode="json") for item in remaining_frontier],
                 "consumed_frontier_ids": [selected.frontier_id],
-                "stable": True,
+                "stable": stable,
                 "generation": generation.model_dump(mode="json"),
                 "commit": commit.model_dump(mode="json"),
                 "members": [member.model_dump(mode="json")],
@@ -1410,16 +1334,20 @@ class MaintenanceWorker(BaseWorker):
             }
         return {
             "session": next_session.model_dump(mode="json"),
-            "frontier": [],
+            "frontier": [item.model_dump(mode="json") for item in remaining_frontier],
             "consumed_frontier_ids": [selected.frontier_id],
-            "stable": True,
+            "stable": stable,
             "generation": generation.model_dump(mode="json"),
             "commit": commit.model_dump(mode="json"),
             "members": [member.model_dump(mode="json")],
-            "parse_view": view.model_dump(mode="json"),
+            **({"parse_view": view.model_dump(mode="json")} if view is not None else {}),
             "expected_view_version": expected_view_version,
             "reconciliation": reconciliation.model_dump(mode="json"),
-            "diagnostics": {"phase": "parsed_graph_persisted", "frontier_id": selected.frontier_id},
+            "diagnostics": {
+                "phase": "parsed_graph_persisted" if stable else "parse_expanding",
+                "frontier_id": selected.frontier_id,
+                "remaining_frontier_count": len(remaining_frontier),
+            },
         }
 
     @staticmethod
@@ -1453,8 +1381,8 @@ class MaintenanceWorker(BaseWorker):
 
         if offset == 0:
             return
-        for node in extraction.nodes or []:
-            for mention in getattr(node, "mentions", ()) or ():
+        for entity in [*(extraction.nodes or []), *(extraction.edges or [])]:
+            for mention in getattr(entity, "mentions", ()) or ():
                 spans = list(getattr(mention, "spans", ()) or ())
                 mention.spans = [
                     span.model_copy(
