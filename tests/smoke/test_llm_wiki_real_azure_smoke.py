@@ -10,7 +10,7 @@ import pytest
 from kogwistar_llm_wiki import IngestPipeline
 from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.models import IngestPipelineRequest
-from kogwistar_llm_wiki.provider_config import resolve_parser_provider_settings
+from kogwistar_llm_wiki.providers.role_config import resolve_parser_provider_settings
 
 
 def _build_mid_sized_markdown(title: str) -> str:

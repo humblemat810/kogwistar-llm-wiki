@@ -13,6 +13,7 @@ from kogwistar.engine_core.jobs import DurableQueueUnavailableError, JobQueueSub
 from kogwistar.runtime import BudgetAttribution, BudgetEvent
 
 import kogwistar_llm_wiki.worker as worker_module
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
 from kogwistar_llm_wiki.maintenance.maintenance_designs import (
@@ -25,8 +26,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_statistics import (
 from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
 )
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.projection_worker import ProjectionWorker
+from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 

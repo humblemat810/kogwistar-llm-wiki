@@ -61,7 +61,7 @@ class WorkbenchAccessMixin:
         outcome: InvestigationOutcome,
         created_at_ms: int | None = None,
     ) -> InvestigationHistoryRecord:
-        from ..debug_run import now_ms
+        from ..diagnostics.debug_helpers import now_ms
 
         return self.investigation_history_service.record(
             workspace_id=workspace_id,

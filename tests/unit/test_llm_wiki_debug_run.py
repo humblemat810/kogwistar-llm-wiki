@@ -11,7 +11,7 @@ from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
-from kogwistar_llm_wiki.debug_run import (
+from kogwistar_llm_wiki.diagnostics.debug_helpers import (
     LiveTracePrinter,
     ParseStatisticsStore,
     aggregate_stage_timings,

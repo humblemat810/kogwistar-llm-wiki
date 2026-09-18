@@ -123,7 +123,7 @@ from .codex.cli_commands import (
 from .codex.cli_commands import (
     seed_bundle as _seed_bundle_command,
 )
-from .compose_config import ComposeOptions
+from .compose.options import ComposeOptions
 
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest, NamespaceEngines

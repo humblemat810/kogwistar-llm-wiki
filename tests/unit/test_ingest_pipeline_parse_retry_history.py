@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

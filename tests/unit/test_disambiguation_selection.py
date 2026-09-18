@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.disambiguation_selection import (
-    DefaultDisambiguationReviewPolicy,
-    DisambiguationReviewService,
-    select_disambiguation_review_requests,
-)
-from kogwistar_llm_wiki.entity_disambiguation import (
+from kogwistar_llm_wiki.disambiguation.disambiguation_contracts import (
     DisambiguationArtifactStatus,
     DisambiguationCandidate,
     DisambiguationDecisionKind,
     DisambiguationScoreBundle,
+)
+from kogwistar_llm_wiki.disambiguation.selection import (
+    DefaultDisambiguationReviewPolicy,
+    DisambiguationReviewService,
+    select_disambiguation_review_requests,
 )
 
 
@@ -98,4 +98,3 @@ def test_selector_can_be_overridden_for_non_concrete_questions() -> None:
     assert default_selection.selected == ()
     assert override_selection.selected[0].candidate.candidate_key == "demo:non-concrete"
     assert override_selection.selected[0].priority_score > 0.0
-

@@ -9,7 +9,7 @@ import uuid
 from kogwistar.engine_core import RecoveryReport
 
 from ..models import NamespaceEngines
-from ..projection_worker import ProjectionWorker
+from ..projections.worker_impl import ProjectionWorker
 from .runtime_support import (
     _core_startup_recovery,
     _declare_service_health,

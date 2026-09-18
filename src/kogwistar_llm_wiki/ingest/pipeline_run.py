@@ -11,9 +11,13 @@ from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
 )
 from kogwistar.engine_core.models import GraphExtractionWithIDs
 
-from ..debug_run import append_jsonl, build_parse_statistics_record, now_ms
+from ..diagnostics.debug_helpers import (
+    append_jsonl,
+    build_parse_statistics_record,
+    now_ms,
+)
 from ..models import IngestPipelineArtifacts, IngestPipelineRequest
-from ..provider_config import normalize_provider_name
+from ..providers.role_config import normalize_provider_name
 
 
 class SemanticTreeLike(Protocol):

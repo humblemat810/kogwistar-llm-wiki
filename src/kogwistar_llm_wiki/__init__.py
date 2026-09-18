@@ -1,12 +1,17 @@
-from .agent_gateway import AgentGateway, AgentTurn
-from .archive import (
+from .agent.gateway import AgentGateway, AgentTurn
+from .agent.mcp_server import build_agent_mcp
+from .archiving.archive_contracts import (
     ARCHIVE_FORMAT_VERSION,
     ArchiveError,
     RestoreReport,
+)
+from .archiving.operations import (
     create_archive,
-    inspect_archive,
     restore_archive,
     restore_backend_snapshot,
+)
+from .archiving.validation import (
+    inspect_archive,
     verify_archive,
 )
 from .codex.codex_memory import (
@@ -23,6 +28,7 @@ from .codex.codex_workbench_agent import (
     CodexCliSettings,
     HostCockpitResponder,
 )
+from .configuration.settings_service import SettingsService
 from .configuration.workspace import (
     GraphSpace,
     GraphSpaceNamespace,
@@ -35,7 +41,7 @@ from .disambiguation.selection import (
     DisambiguationReviewService,
     select_disambiguation_review_requests,
 )
-from .disambiguation_service import DisambiguationAnswerRecord, DisambiguationService
+from .disambiguation.service import DisambiguationAnswerRecord, DisambiguationService
 from .embeddings.multimodal_grounding import (
     EvidenceClosureResolver,
     EvidenceClosureValidator,
@@ -87,19 +93,10 @@ from .embeddings.multimodal_sources import (
     webpage_units,
 )
 from .embeddings.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
-from .graph_seed_bundle import (
-    GraphSeedBundle,
-    SeedBundleResult,
-    dump_seed_bundle,
-    export_graph_seed_bundle,
-    load_seed_bundle,
-    seed_graph_bundle,
-)
 from .ingest_pipeline import (
     IngestPipeline,
     build_in_memory_namespace_engines,
 )
-from .mcp_agent_server import build_agent_mcp
 from .models import (
     IngestPipelineArtifacts,
     IngestPipelineRequest,
@@ -109,8 +106,15 @@ from .models import (
     ProjectionSnapshot,
 )
 from .otel import LlmWikiTelemetry
-from .policies import LlmWikiPolicies, build_default_policies
-from .settings import SettingsService
+from .policies.rules import LlmWikiPolicies, build_default_policies
+from .seeding.bundle_models import GraphSeedBundle
+from .seeding.operations import (
+    SeedBundleResult,
+    dump_seed_bundle,
+    export_graph_seed_bundle,
+    load_seed_bundle,
+    seed_graph_bundle,
+)
 from .workbench.investigation_history import (
     InvestigationHistoryRecord,
     InvestigationHistoryService,

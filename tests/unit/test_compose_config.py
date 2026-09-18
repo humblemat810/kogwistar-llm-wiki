@@ -4,13 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from kogwistar_llm_wiki.compose_config import (
-    ComposeConfigurationError,
-    ComposeOptions,
-    check_compose_text,
-    render_compose,
-    write_compose,
-)
+from kogwistar_llm_wiki.compose.options import ComposeConfigurationError, ComposeOptions
+from kogwistar_llm_wiki.compose.rendering import render_compose
+from kogwistar_llm_wiki.compose.validation import check_compose_text, write_compose
 
 
 def test_gpu_bundle_is_complete_without_secrets() -> None:

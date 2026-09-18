@@ -90,11 +90,11 @@ def run_demo(
     persistence_kwargs: Callable[[argparse.Namespace], dict[str, str]],
 ) -> None:
     """Run the ephemeral, single-process demonstration flow."""
+    from kogwistar_llm_wiki.configuration.workspace import GraphSpace
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.maintenance.maintenance_designs import (
         materialize_maintenance_designs,
     )
-    from kogwistar_llm_wiki.namespaces import GraphSpace
     from kogwistar_llm_wiki.worker import MaintenanceWorker
 
     request_items = read_demo_requests_from_source(args)

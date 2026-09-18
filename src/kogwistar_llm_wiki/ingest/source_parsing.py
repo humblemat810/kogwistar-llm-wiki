@@ -14,7 +14,7 @@ from typing import Protocol
 from kogwistar.runtime.budget import budget_event_from_dict
 
 from ..models import IngestPipelineRequest
-from ..provider_config import resolve_parser_provider_settings
+from ..providers.role_config import resolve_parser_provider_settings
 from ..usage.events import persist_usage_events
 
 

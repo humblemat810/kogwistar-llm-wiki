@@ -16,7 +16,7 @@ def archive_create(
     build_engines: Callable[..., NamespaceEngines],
     close_engines: Callable[[NamespaceEngines], None],
 ) -> None:
-    from ..archive import create_archive
+    from ..archiving.operations import create_archive
 
     engines = build_engines(
         args.workspace,
@@ -41,13 +41,13 @@ def archive_create(
 
 
 def archive_inspect(args: argparse.Namespace) -> None:
-    from ..archive import inspect_archive
+    from ..archiving.validation import inspect_archive
 
     print(json.dumps(inspect_archive(args.archive), indent=2, sort_keys=True))
 
 
 def archive_verify(args: argparse.Namespace) -> None:
-    from ..archive import verify_archive
+    from ..archiving.validation import verify_archive
 
     print(json.dumps(verify_archive(args.archive), indent=2, sort_keys=True))
 
@@ -58,7 +58,8 @@ def archive_restore(
     build_engines: Callable[..., NamespaceEngines],
     close_engines: Callable[[NamespaceEngines], None],
 ) -> None:
-    from ..archive import inspect_archive, restore_archive, restore_backend_snapshot
+    from ..archiving.operations import restore_archive, restore_backend_snapshot
+    from ..archiving.validation import inspect_archive
 
     source_workspace = str(inspect_archive(args.archive)["workspace_id"])
     if args.use_backend_snapshot:
@@ -108,7 +109,7 @@ def archive_restore(
 
 
 def archive_catalog(args: argparse.Namespace) -> None:
-    from ..archive import inspect_archive
+    from ..archiving.validation import inspect_archive
 
     rows: list[dict[str, object]] = []
     for path in sorted(Path(args.directory).expanduser().resolve().glob("*.tar.gz")):

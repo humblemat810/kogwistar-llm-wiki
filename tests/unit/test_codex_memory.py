@@ -9,7 +9,7 @@ from kogwistar_llm_wiki.codex.codex_memory import (
     MemoryDisabledError,
     MemoryEvidence,
 )
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

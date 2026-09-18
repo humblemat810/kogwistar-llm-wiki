@@ -1,8 +1,8 @@
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.maintenance.maintenance_guards import (
     build_source_revision,
     evaluate_maintenance_guard,
 )
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 

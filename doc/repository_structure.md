@@ -12,17 +12,17 @@ must not silently modify those repositories.
 | Product runtime | `src/kogwistar_llm_wiki/` | LLM-Wiki orchestration, API, maintenance, Codex, embeddings, and projections |
 | Application contracts | `src/kogwistar_llm_wiki/app_contracts/` | Typed messages and DTOs owned by LLM-Wiki |
 | Agent protocol domain | `src/kogwistar_llm_wiki/agent/` | Bounded request parsing, source/provenance safety, protocol serialization, and agent helpers |
-| Archive domain | `src/kogwistar_llm_wiki/archiving/` and `archive.py` | Portable archive contracts, manifest validation, event-chain verification, and restore façade |
-| Disambiguation domain | `src/kogwistar_llm_wiki/disambiguation/` and `entity_disambiguation.py` | Validated ambiguity artifacts, service operations, reconciliation, and patch policy |
+| Archive domain | `src/kogwistar_llm_wiki/archiving/` | Portable archive contracts, manifest validation, event-chain verification, and restore operations |
+| Disambiguation domain | `src/kogwistar_llm_wiki/disambiguation/` | Validated ambiguity artifacts, service operations, reconciliation, and patch policy |
 | Maintenance domain | `src/kogwistar_llm_wiki/maintenance/` | Maintenance implementations, policy, selection, worker mechanics, patches, and reporting |
 | Parsing domain | `src/kogwistar_llm_wiki/parsing/` | Revision-pinned parse sessions, generation evidence, ParseViews, comparison, reconciliation, and parse-run statistics |
 | Ingestion domain | `src/kogwistar_llm_wiki/ingest/` | Graph-space construction, base-KG projection, graph persistence, source lifecycle, parser dispatch, run tracing/statistics, workbench access, and ingestion support wiring |
 | Embedding domain | `src/kogwistar_llm_wiki/embeddings/` | Product embedding adapters, multimodal projections, runtime, grounding, and source-unit handling |
 | Codex domain | `src/kogwistar_llm_wiki/codex/` | Codex bridge, structured runner, compose TUI, and project-memory APIs |
-| Compose domain | `src/kogwistar_llm_wiki/compose/` and `compose_config.py` | Typed deployment options and fail-closed validation behind the Compose renderer façade |
-| Configuration domain | `src/kogwistar_llm_wiki/configuration/` and `settings.py` | Authentication/ACL, desired/effective operator settings, redaction, and runtime health snapshots |
-| Provider domain | `src/kogwistar_llm_wiki/providers/` and `provider_config.py` | Shared parser/maintenance provider resolution and compatibility façade |
-| Seeding domain | `src/kogwistar_llm_wiki/seeding/` and `graph_seed_bundle.py` | Portable grounded graph-seed schemas and persistence façade |
+| Compose domain | `src/kogwistar_llm_wiki/compose/` | Typed deployment options, YAML rendering, and fail-closed validation |
+| Configuration domain | `src/kogwistar_llm_wiki/configuration/` | Authentication/ACL, desired/effective operator settings, redaction, and runtime health snapshots |
+| Provider domain | `src/kogwistar_llm_wiki/providers/` | Shared parser/maintenance provider resolution and model discovery |
+| Seeding domain | `src/kogwistar_llm_wiki/seeding/` | Portable grounded graph-seed schemas and persistence operations |
 | CLI domain | `src/kogwistar_llm_wiki/cli/` | Operational command implementations grouped by subsystem |
 | Daemon support | `src/kogwistar_llm_wiki/daemons/` | Projection and maintenance lifecycle loops plus shared service-health, startup-recovery, budget, profile-ladder, and background-selection plumbing |
 | Workbench domain | `src/kogwistar_llm_wiki/workbench/` | Grounded workbench, graph queries, semantic lens, review, and HTTP/background adapters |
@@ -33,8 +33,9 @@ must not silently modify those repositories.
 | Frontend | `frontend/` | Workbench UI and browser tests |
 
 Workspace namespace ownership lives in `configuration/workspace.py`, while
-provider model discovery lives in `providers/model_catalog.py`. The root
-`namespaces.py` and `model_catalog.py` modules remain compatibility facades.
+provider model discovery lives in `providers/model_catalog.py`. Root-level
+functional compatibility facades have been removed; imports should use the
+owning package paths directly.
 
 ## Dependency Boundary
 

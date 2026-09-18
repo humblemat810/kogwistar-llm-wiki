@@ -7,7 +7,8 @@ import json
 import subprocess
 from pathlib import Path
 
-from ..compose_config import ComposeOptions, check_compose_text, write_compose
+from ..compose.options import ComposeOptions
+from ..compose.validation import check_compose_text, write_compose
 
 
 def compose_options_from_args(args: argparse.Namespace) -> ComposeOptions:

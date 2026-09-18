@@ -6,7 +6,7 @@ from typing import Any
 
 from kogwistar.runtime.sinks import JsonlEventSink
 
-from .debug_run import LiveTracePrinter
+from .diagnostics.debug_helpers import LiveTracePrinter
 from .otel import LlmWikiTelemetry
 
 

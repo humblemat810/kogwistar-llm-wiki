@@ -29,7 +29,7 @@ from ..maintenance import (
     select_embedding_exploration,
 )
 from ..maintenance.maintenance_control import MaintenanceControlState
-from ..provider_config import resolve_maintenance_provider_settings
+from ..providers.role_config import resolve_maintenance_provider_settings
 from ..utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)

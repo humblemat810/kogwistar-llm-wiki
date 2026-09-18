@@ -12,9 +12,10 @@ from kogwistar_llm_wiki import (
     build_in_memory_namespace_engines,
 )
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
-from kogwistar_llm_wiki.agent_gateway import AgentGateway
-from kogwistar_llm_wiki.archive import create_archive, restore_archive, verify_archive
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.agent.gateway import AgentGateway
+from kogwistar_llm_wiki.archiving.operations import create_archive, restore_archive
+from kogwistar_llm_wiki.archiving.validation import verify_archive
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 
 
 @pytest.fixture(autouse=True)

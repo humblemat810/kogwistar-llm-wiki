@@ -1,5 +1,7 @@
 from kogwistar_llm_wiki import GraphSpace, GraphSpaceNamespace, WorkspaceNamespaces
-from kogwistar_llm_wiki.namespaces import namespace_matches_graph_space_metadata
+from kogwistar_llm_wiki.configuration.workspace import (
+    namespace_matches_graph_space_metadata,
+)
 
 
 def test_namespaces_include_wisdom_and_review():

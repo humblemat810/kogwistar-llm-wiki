@@ -18,7 +18,7 @@ from ..maintenance.maintenance_control import (
 )
 from ..models import NamespaceEngines
 from ..otel import LlmWikiTelemetry
-from ..provider_config import provider_config_summary
+from ..providers.role_config import provider_config_summary
 from ..worker import MaintenanceWorker
 from .runtime_support import (
     _core_startup_recovery,

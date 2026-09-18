@@ -9,7 +9,7 @@ import uuid
 from kogwistar.engine_core.models import Document
 from kogwistar.id_provider import stable_id
 
-from ..debug_run import now_ms
+from ..diagnostics.debug_helpers import now_ms
 from ..maintenance.maintenance_guards import (
     SourceRevision,
     build_source_revision,

@@ -32,8 +32,17 @@ def check_compose_text(text: str) -> dict[str, object]:
     return {"valid": not errors, "errors": errors, "checks": checks}
 
 
-def write_compose(path: str | Path, options: ComposeOptions, *, render: Callable[[ComposeOptions], str]) -> Path:
+def write_compose(
+    path: str | Path,
+    options: ComposeOptions,
+    *,
+    render: Callable[[ComposeOptions], str] | None = None,
+) -> Path:
     """Write rendered Compose text while keeping rendering policy injectable."""
+    if render is None:
+        from .rendering import render_compose
+
+        render = render_compose
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(render(options), encoding="utf-8")

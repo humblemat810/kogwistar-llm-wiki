@@ -1,4 +1,4 @@
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 
 
 def test_promotion_candidate_stays_out_of_workflow_storage(pipeline, ingest_request):

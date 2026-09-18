@@ -151,8 +151,8 @@ def serve_combined(
     close_engines: CloseEngines,
 ) -> None:
     """Serve REST, MCP, and maintenance from one shared engine bundle."""
+    from ..agent.gateway import AgentGateway
     from ..agent.mcp_server import build_agent_mcp
-    from ..agent_gateway import AgentGateway
     from ..daemon import MaintenanceDaemon
     from ..ingest_pipeline import IngestPipeline
     from ..workbench.workbench_api import WorkbenchApi
@@ -306,8 +306,8 @@ def mcp(
     persistence_kwargs: PersistenceKwargs,
 ) -> None:
     """Serve the full MCP protocol through the optional FastMCP dependency."""
+    from ..agent.gateway import AgentGateway
     from ..agent.mcp_server import build_agent_mcp
-    from ..agent_gateway import AgentGateway
     from ..ingest_pipeline import IngestPipeline
     from ..workbench.workbench_api import WorkbenchApi
 

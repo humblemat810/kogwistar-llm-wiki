@@ -1,6 +1,10 @@
 from kogwistar_llm_wiki.app_contracts import MessageChannel, MessageEnvelope
-from kogwistar_llm_wiki.contracts import MessageChannel as LegacyMessageChannel
-from kogwistar_llm_wiki.contracts import MessageEnvelope as LegacyMessageEnvelope
+from kogwistar_llm_wiki.app_contracts.messaging import (
+    MessageChannel as LegacyMessageChannel,
+)
+from kogwistar_llm_wiki.app_contracts.messaging import (
+    MessageEnvelope as LegacyMessageEnvelope,
+)
 
 
 def test_message_contract_legacy_imports_remain_compatible() -> None:

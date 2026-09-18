@@ -14,7 +14,7 @@ from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
 
-from ..debug_run import LiveTracePrinter, env_flag_enabled
+from ..diagnostics.debug_helpers import LiveTracePrinter, env_flag_enabled
 from ..parsing.longrun_support import append_trace_line as _append_trace_line
 from ..parsing.longrun_support import dump_model as _dump_model
 from ..parsing.longrun_support import now_ms as _now_ms

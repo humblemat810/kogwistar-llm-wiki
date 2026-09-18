@@ -3,7 +3,10 @@ from types import SimpleNamespace
 import pytest
 from kogwistar.engine_core.models import Grounding, Node, Span
 
-from kogwistar_llm_wiki.dependency_invalidation import plan_dependency_invalidation
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.maintenance.dependency_planning import (
+    plan_dependency_invalidation,
+)
 from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
@@ -12,7 +15,6 @@ from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceProvenance,
     MaintenanceScope,
 )
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 

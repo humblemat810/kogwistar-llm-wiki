@@ -167,3 +167,30 @@ def test_functional_implementations_live_inside_their_owning_packages() -> None:
     for package, filenames in expected.items():
         assert {path.name for path in (root / package).glob("*.py")} >= filenames
         assert not any((root / filename).exists() for filename in filenames)
+
+
+def test_root_has_no_removed_functional_facades() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "kogwistar_llm_wiki"
+    removed_facades = {
+        "agent_gateway.py",
+        "archive.py",
+        "compose_config.py",
+        "contracts.py",
+        "debug_run.py",
+        "dependency_invalidation.py",
+        "disambiguation_selection.py",
+        "disambiguation_service.py",
+        "entity_disambiguation.py",
+        "graph_seed_bundle.py",
+        "llm_usage.py",
+        "mcp_agent_server.py",
+        "model_catalog.py",
+        "namespaces.py",
+        "policies.py",
+        "projection_worker.py",
+        "provider_config.py",
+        "settings.py",
+        "usage_projection.py",
+        "worker_state.py",
+    }
+    assert not {name for name in removed_facades if (root / name).exists()}

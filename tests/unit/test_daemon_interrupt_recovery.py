@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.daemon import MaintenanceDaemon, ProjectionDaemon
 from kogwistar_llm_wiki.ingest_pipeline import (
     IngestPipeline,
@@ -13,7 +14,6 @@ from kogwistar_llm_wiki.ingest_pipeline import (
 from kogwistar_llm_wiki.maintenance.maintenance_designs import (
     materialize_maintenance_designs,
 )
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 
 
 def _request() -> IngestPipelineRequest:

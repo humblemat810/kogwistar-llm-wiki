@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 
-from kogwistar_llm_wiki.namespaces import GraphSpace, WorkspaceNamespaces
+from kogwistar_llm_wiki.configuration.workspace import GraphSpace, WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

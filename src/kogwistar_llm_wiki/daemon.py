@@ -34,7 +34,7 @@ from .daemons.runtime_support import (
 from .maintenance import MaintenanceProfileLadderDecision
 from .maintenance.maintenance_control import MaintenanceControlState
 from .models import NamespaceEngines
-from .provider_config import (
+from .providers.role_config import (
     resolve_maintenance_provider_settings,
 )
 from .utils import _temporary_namespace

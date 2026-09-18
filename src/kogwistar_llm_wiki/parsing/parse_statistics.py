@@ -198,7 +198,7 @@ def build_parse_statistics_record(
     evaluation: Mapping[str, Any] | None,
     status: str,
 ) -> ParseStatisticsRecord:
-    from ..debug_run import dump_json, now_ms, summarize_semantic_tree
+    from ..diagnostics.debug_helpers import dump_json, now_ms, summarize_semantic_tree
 
     tree_summary = summarize_semantic_tree(semantic_tree)
     graph_nodes = list((graph_payload or {}).get("nodes") or [])

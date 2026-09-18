@@ -14,19 +14,16 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ..codex.codex_memory import CodexMemoryService
-from ..compose_config import (
-    ComposeOptions,
-    check_compose_text,
-    render_compose,
-    validate_options,
-)
+from ..compose.options import ComposeOptions, validate_options
+from ..compose.rendering import render_compose
+from ..compose.validation import check_compose_text
+from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from ..maintenance.maintenance_patches import MaintenancePatch
 from ..providers.model_catalog import available_models
-from ..settings import SettingsService
 from .investigation_history import InvestigationHistoryRecord
 from .semantic_lens import (
     InvestigationOutcome,

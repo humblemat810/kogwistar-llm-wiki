@@ -15,6 +15,7 @@ from ..parsing.parse_generation_store import ParseGenerationStore
 from ..parsing.parse_session_store import ParseSessionStore
 from ..parsing.parse_views import ParseViewResolver, parse_session_id
 from ..utils import _temporary_namespace
+from ..workbench.inspection import build_workspace_quality_report
 from ..workbench.workbench_api import WorkbenchApi
 from .gateway_protocol import (
     a2a_task as _a2a_task,  # noqa: F401 - legacy protocol seam
@@ -312,12 +313,7 @@ class AgentGateway(
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         if not workspace_id:
             raise ValueError("status requires workspace_id")
-        # Resolve these through the compatibility module so existing operator
-        # integrations and provider-free tests can still replace the report
-        # serializer at the historical import path.
-        from .. import agent_gateway as compatibility_module
-
-        report = compatibility_module.build_workspace_quality_report(
+        report = build_workspace_quality_report(
             self.api.pipeline.engines,
             workspace_id=workspace_id,
             report_scope="all",
@@ -338,7 +334,7 @@ class AgentGateway(
         return {
             "workspace_id": workspace_id,
             "health": self.api.readiness(),
-            "graph": compatibility_module.asdict(report),
+            "graph": asdict(report),
             "sources": {"count": len(self._source_documents(workspace_id)), "states": source_states},
             "maintenance": {
                 "available": not maintenance_errors,

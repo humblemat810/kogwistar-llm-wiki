@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipelineRequest
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.parsing.parse_generation_store import ParseGenerationStore
 from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
 from kogwistar_llm_wiki.parsing.parse_views import (

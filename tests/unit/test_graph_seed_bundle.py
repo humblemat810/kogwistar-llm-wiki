@@ -10,8 +10,8 @@ from kogwistar_llm_wiki import (
     WorkbenchApi,
     build_in_memory_namespace_engines,
 )
-from kogwistar_llm_wiki.graph_seed_bundle import (
-    GraphSeedBundle,
+from kogwistar_llm_wiki.seeding.bundle_models import GraphSeedBundle
+from kogwistar_llm_wiki.seeding.operations import (
     dump_seed_bundle,
     export_graph_seed_bundle,
     load_seed_bundle,

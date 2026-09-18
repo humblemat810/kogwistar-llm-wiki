@@ -11,6 +11,12 @@ from urllib.parse import urlparse
 from ..models import IngestPipelineRequest
 from ..parsing.parse_views import ParseViewResolver
 from ..utils import _temporary_namespace
+from .gateway_source import (
+    decode_metadata_mapping,
+    fetch_source_text,
+    validate_agent_source_uri,
+    validate_supplied_provenance,
+)
 
 
 class AgentSourceMixin:
@@ -22,18 +28,16 @@ class AgentSourceMixin:
         *,
         allow_existing_revision: bool = False,
     ) -> IngestPipelineRequest:
-        from .. import agent_gateway
-
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         source_uri = str(arguments.get("source_uri") or arguments.get("uri") or "").strip()
         raw_text = arguments.get("raw_text")
         if not workspace_id or not source_uri:
             raise ValueError("ingest requires workspace_id and source_uri")
         if raw_text is None:
-            raw_text = agent_gateway._fetch_source_text(source_uri)
+            raw_text = fetch_source_text(source_uri)
         if not isinstance(raw_text, str) or not raw_text.strip():
             raise ValueError("ingest requires non-empty raw_text or a fetchable source_uri")
-        agent_gateway._validate_agent_source_uri(source_uri)
+        validate_agent_source_uri(source_uri)
         policy = str(arguments.get("provenance_policy") or "optional").strip().lower()
         if policy not in {"required", "optional", "disabled"}:
             raise ValueError("provenance_policy must be required, optional, or disabled")
@@ -46,7 +50,7 @@ class AgentSourceMixin:
         if not isinstance(parse_limits, Mapping):
             raise TypeError("parse_limits must be an object when supplied")
         if isinstance(provenance, Mapping):
-            agent_gateway._validate_supplied_provenance(
+            validate_supplied_provenance(
                 provenance,
                 workspace_id=workspace_id,
                 source_uri=source_uri,
@@ -116,8 +120,6 @@ class AgentSourceMixin:
         if candidate is None:
             return None
         metadata = dict(candidate["metadata"])
-        from .. import agent_gateway
-
         return IngestPipelineRequest(
             workspace_id=workspace_id,
             source_uri=str(metadata.get("source_uri") or source_uri),
@@ -129,7 +131,7 @@ class AgentSourceMixin:
             parser_lane=str(metadata.get("parser_lane") or "page_index"),
             promotion_mode=str(metadata.get("promotion_mode") or "pending"),
             provenance_policy=str(metadata.get("provenance_policy") or "optional"),
-            provenance=agent_gateway._decode_metadata_mapping(metadata.get("provenance")),
+            provenance=decode_metadata_mapping(metadata.get("provenance")),
             parse_limits=dict(metadata.get("parse_limits") or {}),
         )
 

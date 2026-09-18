@@ -10,6 +10,7 @@ import pytest
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
 
 from kogwistar_llm_wiki import __main__ as llm_wiki_cli
+from kogwistar_llm_wiki.configuration.workspace import GraphSpace, WorkspaceNamespaces
 from kogwistar_llm_wiki.maintenance.maintenance_patch_apply import (
     apply_maintenance_patch,
 )
@@ -22,7 +23,6 @@ from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceScope,
 )
 from kogwistar_llm_wiki.models import ObsidianBuildResult
-from kogwistar_llm_wiki.namespaces import GraphSpace, WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 

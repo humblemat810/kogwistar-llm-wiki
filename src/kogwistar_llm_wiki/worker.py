@@ -41,7 +41,7 @@ from .parsing.parse_views import (
     ParseSessionState,
 )
 from .policies.rules import LlmWikiPolicies, build_default_policies
-from .provider_config import resolve_maintenance_provider_settings
+from .providers.role_config import resolve_maintenance_provider_settings
 from .utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)

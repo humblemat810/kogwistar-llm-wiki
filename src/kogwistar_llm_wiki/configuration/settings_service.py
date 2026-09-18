@@ -35,11 +35,11 @@ from ..maintenance.maintenance_control import (
     configured_default_request_max_rounds,
 )
 from ..otel import _trace_exporter_endpoint
-from ..provider_config import (
+from ..providers.model_catalog import _safe_endpoint
+from ..providers.role_config import (
     resolve_maintenance_provider_settings,
     resolve_parser_provider_settings,
 )
-from ..providers.model_catalog import _safe_endpoint
 from .identity import auth_mode
 
 _DESIRED_KEYS = frozenset({

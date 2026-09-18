@@ -26,7 +26,7 @@ from .configuration.workspace import (  # noqa: F401 - compatibility enum seam
     GraphSpace,
     WorkspaceNamespaces,
 )
-from .debug_run import (
+from .diagnostics.debug_helpers import (
     LiveTracePrinter,
     ParseStatisticsStore,
     configure_debug_logging,

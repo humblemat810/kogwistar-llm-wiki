@@ -1,8 +1,8 @@
 import pytest
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.models import IngestPipelineRequest
-from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
 from kogwistar_llm_wiki.parsing.parse_views import SourceRegion, reparse_session_id
 from kogwistar_llm_wiki.utils import _temporary_namespace
