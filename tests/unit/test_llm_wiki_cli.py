@@ -430,8 +430,8 @@ def test_report_cli_summarizes_persisted_graph_quality(tmp_path, monkeypatch, ca
         return fake_engines
 
     monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
-    monkeypatch.setattr("kogwistar_llm_wiki.inspection._temporary_namespace", _fake_temporary_namespace)
-    monkeypatch.setattr("kogwistar_llm_wiki.review_query._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.inspection._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.review_query._temporary_namespace", _fake_temporary_namespace)
 
     exit_code = llm_wiki_cli.main(
         [
@@ -822,8 +822,8 @@ def test_report_cli_can_scope_lane_groups(namespace_engines, tmp_path, monkeypat
         return namespace_engines
 
     monkeypatch.setattr(llm_wiki_cli, "_build_engines", _fake_build_engines)
-    monkeypatch.setattr("kogwistar_llm_wiki.inspection._temporary_namespace", _fake_temporary_namespace)
-    monkeypatch.setattr("kogwistar_llm_wiki.review_query._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.inspection._temporary_namespace", _fake_temporary_namespace)
+    monkeypatch.setattr("kogwistar_llm_wiki.workbench.review_query._temporary_namespace", _fake_temporary_namespace)
 
     exit_code = llm_wiki_cli.main(
         [

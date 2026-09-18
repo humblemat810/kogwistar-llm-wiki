@@ -16,8 +16,11 @@ from kogwistar_llm_wiki.codex.codex_workbench_agent import (
     _cockpit_transport_schema,
     _strict_output_schema,
 )
-from kogwistar_llm_wiki.semantic_lens import SemanticLensRequest, SemanticLensSnapshot
-from kogwistar_llm_wiki.workbench_cockpit import CockpitAction
+from kogwistar_llm_wiki.workbench.semantic_lens import (
+    SemanticLensRequest,
+    SemanticLensSnapshot,
+)
+from kogwistar_llm_wiki.workbench.workbench_cockpit import CockpitAction
 
 
 class FakeRunner:

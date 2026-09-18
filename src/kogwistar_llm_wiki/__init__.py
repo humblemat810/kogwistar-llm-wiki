@@ -94,10 +94,6 @@ from .ingest_pipeline import (
     IngestPipeline,
     build_in_memory_namespace_engines,
 )
-from .investigation_history import (
-    InvestigationHistoryRecord,
-    InvestigationHistoryService,
-)
 from .mcp_agent_server import build_agent_mcp
 from .models import (
     IngestPipelineArtifacts,
@@ -110,9 +106,18 @@ from .models import (
 from .namespaces import GraphSpace, GraphSpaceNamespace, WorkspaceNamespaces
 from .otel import LlmWikiTelemetry
 from .policies import LlmWikiPolicies, build_default_policies
-from .query import GraphSpaceQueryResult, GraphSpaceQueryService, workspace_graph_spaces
-from .review_query import ReviewChainResult, ReviewQueryService
-from .semantic_lens import (
+from .settings import SettingsService
+from .workbench.investigation_history import (
+    InvestigationHistoryRecord,
+    InvestigationHistoryService,
+)
+from .workbench.query import (
+    GraphSpaceQueryResult,
+    GraphSpaceQueryService,
+    workspace_graph_spaces,
+)
+from .workbench.review_query import ReviewChainResult, ReviewQueryService
+from .workbench.semantic_lens import (
     InvestigationOutcome,
     LensEdge,
     LensNode,
@@ -124,16 +129,15 @@ from .semantic_lens import (
     SemanticLensSnapshot,
     validate_edit_proposal,
 )
-from .settings import SettingsService
-from .workbench import GroundedAnswer, KnowledgeWorkbench, WorkbenchTurn
-from .workbench_api import WorkbenchApi
-from .workbench_background import (
+from .workbench.workbench import GroundedAnswer, KnowledgeWorkbench, WorkbenchTurn
+from .workbench.workbench_api import WorkbenchApi
+from .workbench.workbench_background import (
     CodexWorkbenchDispatcher,
     CodexWorkbenchWorker,
     WorkbenchInteraction,
     WorkbenchInteractionStore,
 )
-from .workbench_http import build_workbench_handler, serve_workbench
+from .workbench.workbench_http import build_workbench_handler, serve_workbench
 
 __all__ = [
     "ARCHIVE_FORMAT_VERSION",

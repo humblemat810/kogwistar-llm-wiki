@@ -13,10 +13,10 @@ from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Node
 from kogwistar.logical_refs import logical_ref_from_entity
 
-from .models import NamespaceEngines
-from .namespaces import GraphSpace, WorkspaceNamespaces
-from .parsing.parse_views import ParseViewResolver
-from .utils import _temporary_namespace
+from ..models import NamespaceEngines
+from ..namespaces import GraphSpace, WorkspaceNamespaces
+from ..parsing.parse_views import ParseViewResolver
+from ..utils import _temporary_namespace
 
 
 @dataclass(frozen=True, slots=True)

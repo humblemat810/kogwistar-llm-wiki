@@ -17,7 +17,7 @@ from kogwistar_llm_wiki.graph_seed_bundle import (
     load_seed_bundle,
     seed_graph_bundle,
 )
-from kogwistar_llm_wiki.workbench_cockpit import CockpitAction
+from kogwistar_llm_wiki.workbench.workbench_cockpit import CockpitAction
 
 BUNDLE_PATH = Path(__file__).parents[2] / "data" / "seed_bundles" / "rl_llm_agent_tool_use_v1.json"
 

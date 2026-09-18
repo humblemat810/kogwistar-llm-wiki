@@ -8,7 +8,7 @@ import pytest
 from kogwistar.runtime import BudgetAttribution, BudgetEvent, budget_event_to_dict
 
 from kogwistar_llm_wiki.agent_gateway import AgentGateway, _fetch_source_text
-from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 from kogwistar_llm_wiki.worker import (
     _durable_maintenance_usage,
     _maintenance_budget_state,

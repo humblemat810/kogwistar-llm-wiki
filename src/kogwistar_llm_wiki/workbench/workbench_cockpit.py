@@ -13,7 +13,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .maintenance.maintenance_patches import (
+from ..maintenance.maintenance_patches import (
     MaintenancePatch,
     MaintenancePatchOperation,
     validate_maintenance_patch,

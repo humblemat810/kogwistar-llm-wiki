@@ -85,10 +85,6 @@ from .embeddings.multimodal_projection import (
     embed_pending,
 )
 from .embeddings.multimodal_sources import MultimodalSourceBundle, build_source_bundle
-from .investigation_history import (
-    InvestigationHistoryRecord,
-    InvestigationHistoryService,
-)
 from .longrun_parser_worker import run_workflow_layered_parse
 from .maintenance.maintenance_context import (
     bound_maintenance_context,
@@ -129,20 +125,24 @@ from .parsing.parse_views import (
 from .policies import LlmWikiPolicies, build_default_policies
 from .projection import ProjectionManager
 from .provider_config import normalize_provider_name, resolve_parser_provider_settings
-from .query import GraphSpaceQueryResult, GraphSpaceQueryService
-from .review_query import ReviewQueryService
-from .semantic_lens import (
-    InvestigationOutcome,
-    SemanticLensRequest,
-    SemanticLensService,
-    SemanticLensSnapshot,
-)
 from .usage_projection import (
     UsageProjection,
     UsageProjectionSnapshot,
     persist_usage_events,
 )
 from .utils import _temporary_namespace
+from .workbench.investigation_history import (
+    InvestigationHistoryRecord,
+    InvestigationHistoryService,
+)
+from .workbench.query import GraphSpaceQueryResult, GraphSpaceQueryService
+from .workbench.review_query import ReviewQueryService
+from .workbench.semantic_lens import (
+    InvestigationOutcome,
+    SemanticLensRequest,
+    SemanticLensService,
+    SemanticLensSnapshot,
+)
 
 
 def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:

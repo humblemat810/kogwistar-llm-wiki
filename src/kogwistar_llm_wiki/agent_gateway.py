@@ -14,7 +14,6 @@ from typing import Any
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
-from .inspection import build_workspace_quality_report
 from .maintenance.maintenance_control import configured_default_request_max_rounds
 from .models import IngestPipelineRequest
 from .otel import LlmWikiTelemetry
@@ -22,7 +21,8 @@ from .parsing.parse_generation_store import ParseGenerationStore
 from .parsing.parse_session_store import ParseSessionStore
 from .parsing.parse_views import ParseViewResolver, parse_session_id
 from .utils import _temporary_namespace
-from .workbench_api import WorkbenchApi
+from .workbench.inspection import build_workspace_quality_report
+from .workbench.workbench_api import WorkbenchApi
 
 
 @dataclass(frozen=True, slots=True)

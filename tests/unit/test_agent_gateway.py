@@ -13,7 +13,7 @@ from jose import jwt
 
 from kogwistar_llm_wiki.agent_gateway import AgentGateway
 from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
-from kogwistar_llm_wiki.workbench_http import (
+from kogwistar_llm_wiki.workbench.workbench_http import (
     _payload_workspace,
     build_workbench_handler,
 )

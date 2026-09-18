@@ -24,7 +24,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceScope,
 )
 from kogwistar_llm_wiki.utils import _temporary_namespace
-from kogwistar_llm_wiki.workbench_cockpit import (
+from kogwistar_llm_wiki.workbench.workbench_cockpit import (
     CockpitAction,
     CockpitLimits,
     WorkbenchCockpit,

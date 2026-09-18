@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .models import NamespaceEngines
-from .namespaces import WorkspaceNamespaces
+from ..models import NamespaceEngines
+from ..namespaces import WorkspaceNamespaces
+from ..utils import _temporary_namespace
 from .review_query import MaintenancePatchReport, ReviewQueryService
-from .utils import _temporary_namespace
 
 ReportScope = Literal["llm_wiki", "maintenance", "thinking", "all"]
 

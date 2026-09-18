@@ -48,6 +48,18 @@ def test_functional_implementations_live_inside_their_owning_packages() -> None:
             "parse_session_store.py",
             "parse_views.py",
         },
+        "workbench": {
+            "inspection.py",
+            "investigation_history.py",
+            "query.py",
+            "review_query.py",
+            "semantic_lens.py",
+            "workbench.py",
+            "workbench_api.py",
+            "workbench_background.py",
+            "workbench_cockpit.py",
+            "workbench_http.py",
+        },
     }
 
     for package, filenames in expected.items():

@@ -328,7 +328,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
 
 
 def _cmd_report(args: argparse.Namespace) -> None:
-    from kogwistar_llm_wiki.inspection import (
+    from kogwistar_llm_wiki.workbench.inspection import (
         build_workspace_graph_artifact_dump,
         build_workspace_quality_report,
     )
@@ -506,8 +506,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.daemon import MaintenanceDaemon
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
-    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
-    from kogwistar_llm_wiki.workbench_http import create_workbench_server
+    from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
+    from kogwistar_llm_wiki.workbench.workbench_http import create_workbench_server
 
     engines = _build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
     pipeline = IngestPipeline(engines)
@@ -561,8 +561,8 @@ def _cmd_workbench(args: argparse.Namespace) -> None:
         HostCockpitResponder,
     )
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
-    from kogwistar_llm_wiki.workbench_http import serve_workbench
+    from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
+    from kogwistar_llm_wiki.workbench.workbench_http import serve_workbench
 
     engines = _build_engines(
         args.workspace,
@@ -625,7 +625,7 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.agent_gateway import AgentGateway
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
     from kogwistar_llm_wiki.mcp_agent_server import build_agent_mcp
-    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+    from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 
     engines = _build_engines(
         args.workspace,
@@ -658,7 +658,7 @@ def _cmd_embedding_service(args: argparse.Namespace) -> None:
 def _cmd_codex_memory(args: argparse.Namespace) -> None:
     """Validate a project memory binding and print safe Codex MCP settings."""
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+    from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 
     engines = _build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
     try:
@@ -781,7 +781,7 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
         seed_graph_bundle,
     )
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-    from kogwistar_llm_wiki.workbench_api import WorkbenchApi
+    from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 
     engines = _build_engines(
         args.workspace,

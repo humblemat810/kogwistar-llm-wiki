@@ -16,10 +16,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from .models import NamespaceEngines
-from .namespaces import GraphSpace, WorkspaceNamespaces
+from ..models import NamespaceEngines
+from ..namespaces import GraphSpace, WorkspaceNamespaces
+from ..utils import _temporary_namespace
 from .query import GraphSpaceQueryResult, GraphSpaceQueryService
-from .utils import _temporary_namespace
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]*", re.IGNORECASE)
 

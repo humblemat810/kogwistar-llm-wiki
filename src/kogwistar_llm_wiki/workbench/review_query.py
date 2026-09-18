@@ -12,9 +12,9 @@ from dataclasses import dataclass
 
 from kogwistar.engine_core.models import Node
 
-from .models import NamespaceEngines
-from .namespaces import WorkspaceNamespaces
-from .utils import _temporary_namespace
+from ..models import NamespaceEngines
+from ..namespaces import WorkspaceNamespaces
+from ..utils import _temporary_namespace
 
 
 @dataclass(frozen=True, slots=True)

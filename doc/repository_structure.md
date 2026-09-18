@@ -15,6 +15,7 @@ must not silently modify those repositories.
 | Parsing domain | `src/kogwistar_llm_wiki/parsing/` | Revision-pinned parse sessions, generation evidence, ParseViews, comparison, and reconciliation |
 | Embedding domain | `src/kogwistar_llm_wiki/embeddings/` | Product embedding adapters, multimodal projections, runtime, grounding, and source-unit handling |
 | Codex domain | `src/kogwistar_llm_wiki/codex/` | Codex bridge, structured runner, compose TUI, and project-memory APIs |
+| Workbench domain | `src/kogwistar_llm_wiki/workbench/` | Grounded workbench, graph queries, semantic lens, review, and HTTP/background adapters |
 | Embedding service | `src/llm_wiki_embedding_service/` | Isolated model-serving process |
 | Application tests | `tests/` | Root product behavior and integration contracts |
 | Product documentation | `doc/` | ADRs, operator procedures, architecture, and testing guidance |
@@ -41,6 +42,7 @@ maintenance/        maintenance implementations and public domain facade
 parsing/             durable parse sessions, generations, views, and comparison
 embeddings/          assets, grounding, projection, runtime, and remote adapters
 codex/               Codex bridge, memory, runner, and compose integration
+workbench/           grounded workbench, graph queries, lens, review, and HTTP adapters
 workbench_*          REST/workbench APIs and background dispatch
 worker* / daemon     durable worker and process orchestration
 ```

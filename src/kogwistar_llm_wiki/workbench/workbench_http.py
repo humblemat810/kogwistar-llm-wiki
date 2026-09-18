@@ -8,8 +8,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .agent_gateway import AgentGateway, _jsonrpc_result
-from .identity import (
+from ..agent_gateway import AgentGateway, _jsonrpc_result
+from ..identity import (
     IdentityError,
     auth_mode,
     authenticate_bearer,

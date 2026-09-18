@@ -5,7 +5,7 @@ import time
 
 from kogwistar_llm_wiki import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.ingest_pipeline import build_persistent_namespace_engines
-from kogwistar_llm_wiki.workbench_background import (
+from kogwistar_llm_wiki.workbench.workbench_background import (
     CodexWorkbenchDispatcher,
     CodexWorkbenchWorker,
     WorkbenchInteractionStore,
