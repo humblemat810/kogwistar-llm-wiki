@@ -17,15 +17,18 @@ from statistics import mean, median
 from typing import Any
 from urllib.request import Request, urlopen
 
-from kogwistar_llm_wiki.multimodal_projection import (
+from kogwistar_llm_wiki.embeddings.multimodal_projection import (
     ColQwenNativeEncoder,
     FakeMultimodalEncoder,
     MultimodalEncoder,
     MultimodalSourceUnit,
     Qwen3VLDenseEncoder,
 )
-from kogwistar_llm_wiki.multimodal_sources import MappingAssetResolver
-from kogwistar_llm_wiki.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
+from kogwistar_llm_wiki.embeddings.multimodal_sources import MappingAssetResolver
+from kogwistar_llm_wiki.embeddings.vllm_remote import (
+    VllmEmbeddingSettings,
+    VllmMultimodalEncoder,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +201,7 @@ def run_multimodal_benchmark(
             raise ValueError("--allowed-host is required for the remote backend")
         if service_batch_size is None or service_batch_size <= 0:
             raise ValueError("--service-batch-size is required and must be positive for the remote backend")
-        from kogwistar_llm_wiki.multimodal_remote import (
+        from kogwistar_llm_wiki.embeddings.multimodal_remote import (
             EmbeddingServiceSettings,
             RemoteMultimodalEncoder,
         )
@@ -244,7 +247,9 @@ def run_multimodal_benchmark(
             )
         if not vllm_allowed_hosts:
             raise ValueError("--vllm-allowed-host is required for the vllm backend")
-        from kogwistar_llm_wiki.multimodal_runtime import configured_multimodal_revision
+        from kogwistar_llm_wiki.embeddings.multimodal_runtime import (
+            configured_multimodal_revision,
+        )
 
         revision = service_model_revision or configured_multimodal_revision()
         if not revision:

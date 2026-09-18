@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from kogwistar_llm_wiki.codex_workbench_agent import (
+from kogwistar_llm_wiki.codex.codex_workbench_agent import (
     CodexAppServerRunner,
     CodexCliCockpitResponder,
     CodexCliResponder,
@@ -145,7 +145,7 @@ def test_process_runner_passes_the_typed_output_schema(monkeypatch):
         def kill(self):
             return None
 
-    monkeypatch.setattr("kogwistar_llm_wiki.codex_workbench_agent.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("kogwistar_llm_wiki.codex.codex_workbench_agent.subprocess.Popen", FakeProcess)
     runner = CodexProcessRunner()
     raw = runner.run(
         settings=CodexCliSettings(executable="codex"),
@@ -214,7 +214,7 @@ def test_app_server_runner_handshakes_streams_and_closes(monkeypatch):
         def kill(self):
             return None
 
-    monkeypatch.setattr("kogwistar_llm_wiki.codex_workbench_agent.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("kogwistar_llm_wiki.codex.codex_workbench_agent.subprocess.Popen", FakeProcess)
     progress: list[str] = []
     traces: list[str] = []
     raw = CodexAppServerRunner().run(
@@ -281,7 +281,7 @@ def test_app_server_runner_terminates_child_after_protocol_error(monkeypatch):
         def kill(self):
             state["terminated"] = True
 
-    monkeypatch.setattr("kogwistar_llm_wiki.codex_workbench_agent.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("kogwistar_llm_wiki.codex.codex_workbench_agent.subprocess.Popen", FakeProcess)
 
     with pytest.raises(RuntimeError, match="initialize failed"):
         CodexAppServerRunner().run(
@@ -319,7 +319,7 @@ def test_app_server_runner_fails_immediately_on_terminal_error_notification(monk
         def kill(self):
             return None
 
-    monkeypatch.setattr("kogwistar_llm_wiki.codex_workbench_agent.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("kogwistar_llm_wiki.codex.codex_workbench_agent.subprocess.Popen", FakeProcess)
 
     with pytest.raises(RuntimeError, match="terminal error: unauthorized"):
         CodexAppServerRunner().run(

@@ -12,9 +12,9 @@ must not silently modify those repositories.
 | Product runtime | `src/kogwistar_llm_wiki/` | LLM-Wiki orchestration, API, maintenance, Codex, embeddings, and projections |
 | Application contracts | `src/kogwistar_llm_wiki/app_contracts/` | Typed messages and DTOs owned by LLM-Wiki |
 | Maintenance domain | `src/kogwistar_llm_wiki/maintenance/` | Maintenance implementations, policy, selection, patches, and reporting |
-| Parsing facade | `src/kogwistar_llm_wiki/parsing/` | Revision-pinned parse sessions, generation evidence, ParseViews, and reconciliation |
-| Embedding facade | `src/kogwistar_llm_wiki/embeddings/` | Product embedding adapters, multimodal projections, and source-unit handling |
-| Codex facade | `src/kogwistar_llm_wiki/codex/` | Codex bridge, structured runner, and project-memory APIs |
+| Parsing domain | `src/kogwistar_llm_wiki/parsing/` | Revision-pinned parse sessions, generation evidence, ParseViews, comparison, and reconciliation |
+| Embedding domain | `src/kogwistar_llm_wiki/embeddings/` | Product embedding adapters, multimodal projections, runtime, grounding, and source-unit handling |
+| Codex domain | `src/kogwistar_llm_wiki/codex/` | Codex bridge, structured runner, compose TUI, and project-memory APIs |
 | Embedding service | `src/llm_wiki_embedding_service/` | Isolated model-serving process |
 | Application tests | `tests/` | Root product behavior and integration contracts |
 | Product documentation | `doc/` | ADRs, operator procedures, architecture, and testing guidance |
@@ -34,26 +34,23 @@ owning dependency repository and update the pinned revision after its CI passes.
 
 ## Source Navigation
 
-The source package is being migrated incrementally toward bounded contexts:
+The source package is organized around bounded contexts:
 
 ```text
 maintenance/        maintenance implementations and public domain facade
-parsing/             public parsing facade over parse_*.py modules
-embeddings/          public embedding facade over multimodal_*.py modules
-codex/               public Codex facade over codex_*.py modules
-parse_*              durable parse sessions, generations, views, and comparison
-multimodal_*         assets, grounding, projection, and runtime adapters
-codex_*              Codex bridge, memory, and workbench integration
+parsing/             durable parse sessions, generations, views, and comparison
+embeddings/          assets, grounding, projection, runtime, and remote adapters
+codex/               Codex bridge, memory, runner, and compose integration
 workbench_*          REST/workbench APIs and background dispatch
 worker* / daemon     durable worker and process orchestration
 ```
 
-The parsing, embeddings, and Codex facade packages are intentionally thin and
-currently preserve their historical implementation locations. The maintenance
-package is physically migrated: its implementation files live inside the
-package and the old root-level module paths are no longer part of the product
-source. This keeps the ownership boundary explicit without duplicating models
-or changing persisted/runtime contracts.
+The parsing, embeddings, Codex, and maintenance packages contain their
+implementations. The old root-level implementation paths are no longer part
+of the product source. This keeps ownership boundaries explicit without
+duplicating models or changing persisted/runtime contracts. The package root
+continues to re-export the supported public API; domain-specific code should
+import from its owning package.
 
 The public package facade and current application imports are the supported
 entrypoints. A reorganization must preserve Compose service names, health

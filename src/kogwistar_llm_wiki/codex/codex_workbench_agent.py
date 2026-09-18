@@ -21,9 +21,9 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .semantic_lens import SemanticLensRequest, SemanticLensSnapshot
-from .workbench_background import ProgressCallback
-from .workbench_cockpit import CockpitAction, CockpitActionKind, CockpitObservation
+from ..semantic_lens import SemanticLensRequest, SemanticLensSnapshot
+from ..workbench_background import ProgressCallback
+from ..workbench_cockpit import CockpitAction, CockpitActionKind, CockpitObservation
 
 LineSink = Callable[[str], None]
 

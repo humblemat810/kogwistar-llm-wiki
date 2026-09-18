@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from kogwistar_llm_wiki import maintenance
 from kogwistar_llm_wiki.codex import CodexMemoryRecord
 from kogwistar_llm_wiki.embeddings import VllmEmbeddingSettings
@@ -19,3 +21,35 @@ def test_bounded_context_facades_expose_existing_public_contracts() -> None:
     assert normalize_maintenance_kind.__module__.startswith(
         "kogwistar_llm_wiki.maintenance."
     )
+
+
+def test_functional_implementations_live_inside_their_owning_packages() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "kogwistar_llm_wiki"
+    expected = {
+        "codex": {
+            "codex_bridge.py",
+            "codex_compose_tui.py",
+            "codex_memory.py",
+            "codex_workbench_agent.py",
+        },
+        "embeddings": {
+            "embedding_config_resolver.py",
+            "multimodal_grounding.py",
+            "multimodal_projection.py",
+            "multimodal_remote.py",
+            "multimodal_runtime.py",
+            "multimodal_sources.py",
+            "vllm_remote.py",
+        },
+        "parsing": {
+            "parse_comparison.py",
+            "parse_generation_store.py",
+            "parse_reconciliation.py",
+            "parse_session_store.py",
+            "parse_views.py",
+        },
+    }
+
+    for package, filenames in expected.items():
+        assert {path.name for path in (root / package).glob("*.py")} >= filenames
+        assert not any((root / filename).exists() for filename in filenames)

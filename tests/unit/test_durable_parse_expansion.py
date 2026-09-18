@@ -6,9 +6,9 @@ import pytest
 
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipelineRequest
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
-from kogwistar_llm_wiki.parse_generation_store import ParseGenerationStore
-from kogwistar_llm_wiki.parse_session_store import ParseSessionStore
-from kogwistar_llm_wiki.parse_views import (
+from kogwistar_llm_wiki.parsing.parse_generation_store import ParseGenerationStore
+from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
+from kogwistar_llm_wiki.parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
     ParseGenerationCommit,

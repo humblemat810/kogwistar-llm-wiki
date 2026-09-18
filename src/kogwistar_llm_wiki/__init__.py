@@ -9,14 +9,14 @@ from .archive import (
     restore_backend_snapshot,
     verify_archive,
 )
-from .codex_memory import (
+from .codex.codex_memory import (
     CodexMemoryError,
     CodexMemoryRecord,
     CodexMemoryService,
     MemoryDisabledError,
     MemoryEvidence,
 )
-from .codex_workbench_agent import (
+from .codex.codex_workbench_agent import (
     CodexAppServerRunner,
     CodexCliCockpitResponder,
     CodexCliResponder,
@@ -31,6 +31,57 @@ from .disambiguation_selection import (
     select_disambiguation_review_requests,
 )
 from .disambiguation_service import DisambiguationAnswerRecord, DisambiguationService
+from .embeddings.multimodal_grounding import (
+    EvidenceClosureResolver,
+    EvidenceClosureValidator,
+    EvidencePack,
+    EvidencePackReference,
+    GroundingComposition,
+    GroundingValidationError,
+    HigherOrderGrounding,
+    PinnedEntityRef,
+    ResolvedEntityGrounding,
+    SourceEvidenceRef,
+)
+from .embeddings.multimodal_projection import (
+    DEFAULT_COLQWEN_MODEL,
+    DEFAULT_COLQWEN_REVISION,
+    AssetResolver,
+    ChromaMultimodalProjectionStore,
+    ColQwenNativeEncoder,
+    EmbeddingProfileMismatch,
+    EmbeddingSet,
+    FakeMultimodalEncoder,
+    InMemoryMultimodalProjectionStore,
+    MultimodalEmbeddingProfile,
+    MultimodalEncoder,
+    MultimodalImageQueryEncoder,
+    MultimodalProjectionStore,
+    MultimodalSearchHit,
+    MultimodalSourceUnit,
+    ProjectionIntegrityError,
+    SQLiteMultimodalProjectionStore,
+    embed_pending,
+    score_embedding_sets,
+)
+from .embeddings.multimodal_remote import (
+    EmbeddingProtocolError,
+    EmbeddingServiceError,
+    EmbeddingServiceSettings,
+    EmbeddingServiceUnavailable,
+    RemoteMultimodalEncoder,
+)
+from .embeddings.multimodal_sources import (
+    LocalFileAssetResolver,
+    MappingAssetResolver,
+    MultimodalSourceBundle,
+    build_source_bundle,
+    manifest_units,
+    pdf_manifest_units,
+    split_text_units,
+    webpage_units,
+)
+from .embeddings.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 from .graph_seed_bundle import (
     GraphSeedBundle,
     SeedBundleResult,
@@ -56,56 +107,6 @@ from .models import (
     ProjectionEntity,
     ProjectionSnapshot,
 )
-from .multimodal_grounding import (
-    EvidenceClosureResolver,
-    EvidenceClosureValidator,
-    EvidencePack,
-    EvidencePackReference,
-    GroundingComposition,
-    GroundingValidationError,
-    HigherOrderGrounding,
-    PinnedEntityRef,
-    ResolvedEntityGrounding,
-    SourceEvidenceRef,
-)
-from .multimodal_projection import (
-    DEFAULT_COLQWEN_MODEL,
-    DEFAULT_COLQWEN_REVISION,
-    AssetResolver,
-    ChromaMultimodalProjectionStore,
-    ColQwenNativeEncoder,
-    EmbeddingProfileMismatch,
-    EmbeddingSet,
-    FakeMultimodalEncoder,
-    InMemoryMultimodalProjectionStore,
-    MultimodalEmbeddingProfile,
-    MultimodalEncoder,
-    MultimodalImageQueryEncoder,
-    MultimodalProjectionStore,
-    MultimodalSearchHit,
-    MultimodalSourceUnit,
-    ProjectionIntegrityError,
-    SQLiteMultimodalProjectionStore,
-    embed_pending,
-    score_embedding_sets,
-)
-from .multimodal_remote import (
-    EmbeddingProtocolError,
-    EmbeddingServiceError,
-    EmbeddingServiceSettings,
-    EmbeddingServiceUnavailable,
-    RemoteMultimodalEncoder,
-)
-from .multimodal_sources import (
-    LocalFileAssetResolver,
-    MappingAssetResolver,
-    MultimodalSourceBundle,
-    build_source_bundle,
-    manifest_units,
-    pdf_manifest_units,
-    split_text_units,
-    webpage_units,
-)
 from .namespaces import GraphSpace, GraphSpaceNamespace, WorkspaceNamespaces
 from .otel import LlmWikiTelemetry
 from .policies import LlmWikiPolicies, build_default_policies
@@ -124,7 +125,6 @@ from .semantic_lens import (
     validate_edit_proposal,
 )
 from .settings import SettingsService
-from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 from .workbench import GroundedAnswer, KnowledgeWorkbench, WorkbenchTurn
 from .workbench_api import WorkbenchApi
 from .workbench_background import (

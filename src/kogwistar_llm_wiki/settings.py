@@ -10,6 +10,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .embeddings.multimodal_runtime import (
+    configured_embedding_crop_token_budget,
+    configured_embedding_max_model_len,
+    configured_embedding_service_url,
+    configured_multimodal_backend,
+    configured_multimodal_dimension,
+    configured_multimodal_model,
+    configured_vllm_url,
+)
 from .identity import auth_mode
 from .maintenance import (
     configured_maintenance_budget,
@@ -27,15 +36,6 @@ from .maintenance.maintenance_control import (
     configured_default_request_max_rounds,
 )
 from .model_catalog import _safe_endpoint
-from .multimodal_runtime import (
-    configured_embedding_crop_token_budget,
-    configured_embedding_max_model_len,
-    configured_embedding_service_url,
-    configured_multimodal_backend,
-    configured_multimodal_dimension,
-    configured_multimodal_model,
-    configured_vllm_url,
-)
 from .otel import _trace_exporter_endpoint
 from .provider_config import (
     resolve_maintenance_provider_settings,

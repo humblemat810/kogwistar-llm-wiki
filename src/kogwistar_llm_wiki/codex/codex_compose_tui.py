@@ -61,7 +61,7 @@ class TuiConfiguration:
                 ladder = json.loads(self.profile_ladder_json)
             except (TypeError, json.JSONDecodeError) as error:
                 raise ValueError("profile ladder must be valid JSON") from error
-            from .maintenance import normalize_profile_ladder
+            from ..maintenance import normalize_profile_ladder
 
             normalize_profile_ladder(ladder)
 

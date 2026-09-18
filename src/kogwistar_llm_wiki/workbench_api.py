@@ -13,19 +13,19 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
-from .codex_memory import CodexMemoryService
+from .codex.codex_memory import CodexMemoryService
 from .compose_config import (
     ComposeOptions,
     check_compose_text,
     render_compose,
     validate_options,
 )
+from .embeddings.multimodal_remote import EmbeddingServiceUnavailable
 from .ingest_pipeline import IngestPipeline
 from .investigation_history import InvestigationHistoryRecord
 from .maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from .maintenance.maintenance_patches import MaintenancePatch
 from .model_catalog import available_models
-from .multimodal_remote import EmbeddingServiceUnavailable
 from .namespaces import GraphSpace
 from .semantic_lens import (
     InvestigationOutcome,

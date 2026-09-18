@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 
-from kogwistar_llm_wiki.parse_session_store import (
+from kogwistar_llm_wiki.parsing.parse_session_store import (
     ParseSessionStore,
     ParseSessionStoreConflict,
 )
-from kogwistar_llm_wiki.parse_views import (
+from kogwistar_llm_wiki.parsing.parse_views import (
     ParseFrontierItem,
     ParseSessionState,
     SourceRegion,

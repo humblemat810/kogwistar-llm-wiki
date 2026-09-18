@@ -80,7 +80,7 @@ The first application slice is implemented without a Kogwistar source change:
   request and first terminal result are append-only conversation artifacts,
   while the existing durable Kogwistar job facade supplies claim tokens,
   leases, retries, and restart recovery.
-- `src/kogwistar_llm_wiki/codex_workbench_agent.py` runs the installed Codex
+- `src/kogwistar_llm_wiki/codex/codex_workbench_agent.py` runs the installed Codex
   CLI as an ephemeral, read-only central reasoning worker. JSONL activity
   renews the 150-second lease only while the process is making progress. A
   late worker that lost ownership cannot overwrite the accepted result. The

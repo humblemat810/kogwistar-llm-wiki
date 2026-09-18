@@ -1,11 +1,11 @@
 """Public facade for product-owned embedding and multimodal boundaries.
 
 Kogwistar owns generic embedding profiles and vector-store primitives.  This
-package exposes the LLM-Wiki adapters, source-unit handling, and projection
-interfaces without moving the historical modules used by downstream callers.
+package owns the LLM-Wiki adapters, source-unit handling, and projection
+interfaces.
 """
 
-from ..embedding_config_resolver import (
+from .embedding_config_resolver import (
     EMBEDDING_SPACES,
     TinyEmbeddingFunction,
     embedding_profile,
@@ -13,7 +13,7 @@ from ..embedding_config_resolver import (
     resolve_embedding_functions,
     validate_shared_postgres_embedding_profile,
 )
-from ..multimodal_grounding import (
+from .multimodal_grounding import (
     EvidenceClosureResolver,
     EvidenceClosureValidator,
     EvidencePack,
@@ -25,7 +25,7 @@ from ..multimodal_grounding import (
     ResolvedEntityGrounding,
     SourceEvidenceRef,
 )
-from ..multimodal_projection import (
+from .multimodal_projection import (
     AssetResolver,
     ChromaMultimodalProjectionStore,
     ColQwenNativeEncoder,
@@ -44,14 +44,14 @@ from ..multimodal_projection import (
     embed_pending,
     score_embedding_sets,
 )
-from ..multimodal_remote import (
+from .multimodal_remote import (
     EmbeddingProtocolError,
     EmbeddingServiceError,
     EmbeddingServiceSettings,
     EmbeddingServiceUnavailable,
     RemoteMultimodalEncoder,
 )
-from ..multimodal_sources import (
+from .multimodal_sources import (
     LocalFileAssetResolver,
     MappingAssetResolver,
     MultimodalSourceBundle,
@@ -61,7 +61,7 @@ from ..multimodal_sources import (
     split_text_units,
     webpage_units,
 )
-from ..vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
+from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 
 __all__ = [
     "EMBEDDING_SPACES",

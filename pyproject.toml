@@ -138,9 +138,14 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 norecursedirs = ["kogwistar-llm-wiki-tests-*"]
 markers = [
+    "ci: deterministic tests required for the default pull-request CI slice",
+    "ci_full: deterministic but broader or slower tests outside default PR CI",
     "manual: tests that are opt-in and may require local services",
     "integration: tests that require real external backends (Chroma, Obsidian vault)",
     "longrun: opt-in long-running workflow/daemon-style soak tests",
+    "slow: tests that are intentionally slow and excluded from default PR CI",
+    "llm_real: tests that require a real language-model provider",
+    "e2e: end-to-end tests spanning multiple running services",
     "requires_ollama: tests that require a local Ollama service",
 ]
 

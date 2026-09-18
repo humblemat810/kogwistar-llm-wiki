@@ -94,7 +94,7 @@ jobs:
           LOG_LEVEL: WARNING
         shell: bash
         run: >-
-          python -m pytest -m "ci and not ci_full" tests -q
+          python -m pytest -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama" tests -q
           --durations=25 --durations-min=0 -p no:cacheprovider
 
   python-lint:

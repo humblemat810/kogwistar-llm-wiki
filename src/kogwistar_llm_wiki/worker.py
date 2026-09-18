@@ -57,10 +57,13 @@ from .maintenance.maintenance_patches import MaintenancePatch
 from .maintenance.maintenance_planner import decide_next_maintenance_phase
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
-from .parse_generation_store import ParseGenerationStore, ParseGenerationStoreConflict
-from .parse_reconciliation import decide_parse_reconciliation
-from .parse_session_store import ParseSessionStore, ParseSessionStoreConflict
-from .parse_views import (
+from .parsing.parse_generation_store import (
+    ParseGenerationStore,
+    ParseGenerationStoreConflict,
+)
+from .parsing.parse_reconciliation import decide_parse_reconciliation
+from .parsing.parse_session_store import ParseSessionStore, ParseSessionStoreConflict
+from .parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
     ParseGenerationCommit,

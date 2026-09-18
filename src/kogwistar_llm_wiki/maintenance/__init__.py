@@ -1,8 +1,7 @@
 """Public maintenance-domain facade.
 
-Implementation modules retain their historical flat names for compatibility;
-new application code can discover the maintenance boundary through this
-package without importing the worker or daemon.
+Implementation modules live inside this package so the maintenance boundary is
+discoverable without importing the worker or daemon.
 """
 
 from .maintenance_policy import (

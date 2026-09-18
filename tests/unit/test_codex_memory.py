@@ -2,7 +2,7 @@ import pytest
 from kogwistar.engine_core.models import Grounding, Node, Span
 from pydantic import ValidationError
 
-from kogwistar_llm_wiki.codex_memory import (
+from kogwistar_llm_wiki.codex.codex_memory import (
     CodexMemoryError,
     CodexMemoryRecord,
     CodexMemoryService,

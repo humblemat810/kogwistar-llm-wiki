@@ -19,7 +19,7 @@ from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 
 from .models import NamespaceEngines, ObsidianBuildResult, ProjectionSnapshot
 from .namespaces import GraphSpace, WorkspaceNamespaces
-from .parse_views import ParseViewResolver
+from .parsing.parse_views import ParseViewResolver
 from .policies import LlmWikiPolicies, build_default_policies
 from .utils import _temporary_namespace
 

@@ -18,9 +18,9 @@ from .inspection import build_workspace_quality_report
 from .maintenance.maintenance_control import configured_default_request_max_rounds
 from .models import IngestPipelineRequest
 from .otel import LlmWikiTelemetry
-from .parse_generation_store import ParseGenerationStore
-from .parse_session_store import ParseSessionStore
-from .parse_views import ParseViewResolver, parse_session_id
+from .parsing.parse_generation_store import ParseGenerationStore
+from .parsing.parse_session_store import ParseSessionStore
+from .parsing.parse_views import ParseViewResolver, parse_session_id
 from .utils import _temporary_namespace
 from .workbench_api import WorkbenchApi
 

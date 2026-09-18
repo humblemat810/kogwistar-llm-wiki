@@ -59,21 +59,32 @@ from .debug_run import (
     env_flag_enabled,
     now_ms,
 )
-from .embedding_config_resolver import (
+from .embeddings.embedding_config_resolver import (
     EMBEDDING_SPACES as _EMBEDDING_SPACES,
 )
-from .embedding_config_resolver import (
+from .embeddings.embedding_config_resolver import (
     embedding_profile as _embedding_profile,
 )
-from .embedding_config_resolver import (
+from .embeddings.embedding_config_resolver import (
     resolve_embedding_function as _resolve_embedding_function_impl,
 )
-from .embedding_config_resolver import (
+from .embeddings.embedding_config_resolver import (
     resolve_embedding_functions as _resolve_embedding_functions_impl,
 )
-from .embedding_config_resolver import (
+from .embeddings.embedding_config_resolver import (
     validate_shared_postgres_embedding_profile as _validate_shared_postgres_embedding_profile,
 )
+from .embeddings.multimodal_projection import (
+    AssetResolver,
+    MultimodalEncoder,
+    MultimodalImageQueryEncoder,
+    MultimodalProjectionStore,
+    MultimodalSearchHit,
+    MultimodalSourceUnit,
+    build_configured_multimodal_encoder,
+    embed_pending,
+)
+from .embeddings.multimodal_sources import MultimodalSourceBundle, build_source_bundle
 from .investigation_history import (
     InvestigationHistoryRecord,
     InvestigationHistoryService,
@@ -99,21 +110,10 @@ from .models import (
     ObsidianBuildResult,
     ProjectionSnapshot,
 )
-from .multimodal_projection import (
-    AssetResolver,
-    MultimodalEncoder,
-    MultimodalImageQueryEncoder,
-    MultimodalProjectionStore,
-    MultimodalSearchHit,
-    MultimodalSourceUnit,
-    build_configured_multimodal_encoder,
-    embed_pending,
-)
-from .multimodal_sources import MultimodalSourceBundle, build_source_bundle
 from .namespaces import GraphSpace, WorkspaceNamespaces
 from .otel import LlmWikiTelemetry
-from .parse_session_store import ParseSessionStore, ParseSessionStoreConflict
-from .parse_views import (
+from .parsing.parse_session_store import ParseSessionStore, ParseSessionStoreConflict
+from .parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
     ParseSessionPhase,
@@ -503,7 +503,7 @@ class IngestPipeline:
         if self.multimodal_encoder is None and multimodal_projection_store is not None:
             # A configured service client is lightweight; model inference stays
             # outside this process and is only attempted during Stage 2.
-            from .multimodal_runtime import (
+            from .embeddings.multimodal_runtime import (
                 configured_embedding_service_url,
                 configured_multimodal_backend,
                 configured_vllm_url,

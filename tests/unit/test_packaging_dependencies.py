@@ -59,7 +59,7 @@ def test_native_multimodal_profiles_include_transformers_device_map_runtime() ->
             for requirement in extras[profile]
         ), f"{profile} must install accelerate for Transformers device_map support"
 
-    loader = (root / "src/kogwistar_llm_wiki/multimodal_projection.py").read_text(
+    loader = (root / "src/kogwistar_llm_wiki/embeddings/multimodal_projection.py").read_text(
         encoding="utf-8"
     )
     assert '"device_map"' in loader

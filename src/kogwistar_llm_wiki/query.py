@@ -15,7 +15,7 @@ from kogwistar.logical_refs import logical_ref_from_entity
 
 from .models import NamespaceEngines
 from .namespaces import GraphSpace, WorkspaceNamespaces
-from .parse_views import ParseViewResolver
+from .parsing.parse_views import ParseViewResolver
 from .utils import _temporary_namespace
 
 

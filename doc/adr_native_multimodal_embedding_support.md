@@ -93,7 +93,7 @@ graph truth, source truth, or an alternate mutation path.
 ### Implemented reference slice
 
 The application now contains a provider-free reference implementation in
-`src/kogwistar_llm_wiki/multimodal_projection.py`:
+`src/kogwistar_llm_wiki/embeddings/multimodal_projection.py`:
 
 - `MultimodalSourceUnit` is a revision-bound Stage-1 view containing locators
   and an external `content_ref`, not copied binary source bytes;

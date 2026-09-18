@@ -6,8 +6,8 @@ import pytest
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 from pydantic import ValidationError
 
-from kogwistar_llm_wiki.parse_generation_store import ParseGenerationStore
-from kogwistar_llm_wiki.parse_views import (
+from kogwistar_llm_wiki.parsing.parse_generation_store import ParseGenerationStore
+from kogwistar_llm_wiki.parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
     ParseGenerationCommit,

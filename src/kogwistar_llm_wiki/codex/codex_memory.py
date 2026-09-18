@@ -13,9 +13,9 @@ from kogwistar.engine_core.models import Edge, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .models import NamespaceEngines
-from .namespaces import WorkspaceNamespaces
-from .utils import _temporary_namespace
+from ..models import NamespaceEngines
+from ..namespaces import WorkspaceNamespaces
+from ..utils import _temporary_namespace
 
 MemoryKind = Literal["decision", "constraint", "convention", "finding", "task_outcome"]
 MemoryConfidence = Literal["verified", "inferred"]

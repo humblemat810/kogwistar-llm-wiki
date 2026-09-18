@@ -8,12 +8,12 @@ from urllib.error import URLError
 
 import pytest
 
-from kogwistar_llm_wiki.multimodal_projection import (
+from kogwistar_llm_wiki.embeddings.multimodal_projection import (
     MultimodalEmbeddingProfile,
     MultimodalSourceUnit,
     ProjectionIntegrityError,
 )
-from kogwistar_llm_wiki.multimodal_remote import (
+from kogwistar_llm_wiki.embeddings.multimodal_remote import (
     EmbeddingProtocolError,
     EmbeddingServiceSettings,
     EmbeddingServiceUnavailable,

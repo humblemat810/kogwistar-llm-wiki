@@ -19,8 +19,8 @@ from kogwistar.llm_tasks.providers import (
 )
 from pydantic import BaseModel
 
-from kogwistar_llm_wiki.codex_bridge import CodexBridgeState
-from kogwistar_llm_wiki.codex_workbench_agent import CodexCliSettings
+from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
+from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings
 from kogwistar_llm_wiki.provider_config import resolve_maintenance_provider_settings
 
 

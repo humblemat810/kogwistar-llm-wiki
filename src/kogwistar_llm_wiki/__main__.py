@@ -555,7 +555,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
 
 def _cmd_workbench(args: argparse.Namespace) -> None:
-    from kogwistar_llm_wiki.codex_workbench_agent import (
+    from kogwistar_llm_wiki.codex.codex_workbench_agent import (
         CodexCliCockpitResponder,
         CodexCliSettings,
         HostCockpitResponder,
@@ -733,7 +733,7 @@ def _cmd_codex_memory(args: argparse.Namespace) -> None:
 
 def _cmd_codex_compose(args: argparse.Namespace) -> None:
     """Run the guided Codex Compose TUI."""
-    from kogwistar_llm_wiki.codex_compose_tui import main as run_tui
+    from kogwistar_llm_wiki.codex.codex_compose_tui import main as run_tui
 
     tui_args = []
     tui_option_names = {"profile_ladder_json": "profile-ladder"}
@@ -770,7 +770,7 @@ def _cmd_codex_compose(args: argparse.Namespace) -> None:
 def _cmd_seed_bundle(args: argparse.Namespace) -> None:
     """Seed, optionally inspect through cockpit mode, and export a graph bundle."""
 
-    from kogwistar_llm_wiki.codex_workbench_agent import (
+    from kogwistar_llm_wiki.codex.codex_workbench_agent import (
         CodexCliCockpitResponder,
         CodexCliSettings,
     )
@@ -876,7 +876,7 @@ def _cmd_seed_bundle(args: argparse.Namespace) -> None:
 
 def _cmd_codex_bridge(args: argparse.Namespace) -> None:
     """Run the user-scoped bridge used by Docker maintenance workers."""
-    from .codex_bridge import bridge_settings_from_environment, serve_codex_bridge
+    from .codex.codex_bridge import bridge_settings_from_environment, serve_codex_bridge
 
     if not args.no_env_file:
         _load_env_file(Path(args.env_file).expanduser())

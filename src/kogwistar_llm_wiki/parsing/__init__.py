@@ -1,18 +1,17 @@
 """Public facade for LLM-Wiki's durable parsing boundary.
 
-The implementation modules keep their historical flat names for import
-compatibility.  New code should use this package for revision-pinned parsing,
-generation evidence, active ParseViews, and reconciliation.
+The implementation modules live in this package so parsing state and
+reconciliation have one explicit ownership boundary.
 """
 
-from ..parse_generation_store import ParseGenerationStore, ParseGenerationStoreConflict
-from ..parse_reconciliation import (
+from .parse_generation_store import ParseGenerationStore, ParseGenerationStoreConflict
+from .parse_reconciliation import (
     ParseReconciliationDecision,
     ParseReconciliationOutcome,
     decide_parse_reconciliation,
 )
-from ..parse_session_store import ParseSessionStore, ParseSessionStoreConflict
-from ..parse_views import (
+from .parse_session_store import ParseSessionStore, ParseSessionStoreConflict
+from .parse_views import (
     ParseFrontierItem,
     ParseFrontierStatus,
     ParseGeneration,
