@@ -43,7 +43,7 @@ def test_local_publishers_default_to_application_and_offer_explicit_targets() ->
 def test_release_verifier_matches_package_version_and_rejects_mismatch() -> None:
     script = ROOT / "scripts" / "verify_release_version.py"
     matching = subprocess.run(
-        [sys.executable, str(script), "--tag", "v0.3.9"],
+        [sys.executable, str(script), "--tag", "v0.4.0"],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -93,20 +93,24 @@ def test_main_image_publishes_only_after_successful_ci_to_configured_namespace()
     assert "Dockerfile.embedding-service" not in workflow
 
 
-def test_github_workflows_pin_the_checked_out_kogwistar_revision() -> None:
+def test_github_workflows_pin_all_checked_out_vendor_revisions() -> None:
     workflow_paths = (
         ROOT / ".github" / "workflows" / "ci.yml",
         ROOT / ".github" / "workflows" / "publish-dockerhub.yml",
         ROOT / ".github" / "workflows" / "publish-dockerhub-main.yml",
     )
-    pins = {
-        re.search(r"KOGWISTAR_REVISION:\s*([0-9a-f]{40})", path.read_text(encoding="utf-8")).group(1)
-        for path in workflow_paths
+    expected = {
+        "KOGWISTAR_REVISION": "kogwistar",
+        "KG_DOC_PARSER_REVISION": "kg-doc-parser",
+        "OBSIDIAN_SINK_REVISION": "kogwistar-obsidian-sink",
     }
-    current = subprocess.check_output(
-        ["git", "-C", str(ROOT / "kogwistar"), "rev-parse", "HEAD"],
-        cwd=ROOT,
-        text=True,
-    ).strip()
-
-    assert pins == {current}
+    for variable, directory in expected.items():
+        current = subprocess.check_output(
+            ["git", "-C", str(ROOT / directory), "rev-parse", "HEAD"],
+            cwd=ROOT,
+            text=True,
+        ).strip()
+        for path in workflow_paths:
+            pins = re.findall(rf"{variable}:\s*([0-9a-f]{{40}})", path.read_text(encoding="utf-8"))
+            assert pins
+            assert set(pins) == {current}
