@@ -4,7 +4,11 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from typing import Protocol, cast, runtime_checkable
 
-from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core import (
+    AtomicMutationCapability,
+    GraphKnowledgeEngine,
+    get_atomic_mutation_capability,
+)
 from kogwistar.engine_core.models import (
     Edge,
     Grounding,
@@ -51,6 +55,17 @@ class _StaleMaintenancePatch(Exception):
     def __init__(self, issues: list[MaintenancePatchValidationIssue]) -> None:
         super().__init__("maintenance patch targets changed after proposal")
         self.issues = issues
+
+
+class _AtomicPatchOperationFailed(Exception):
+    def __init__(
+        self,
+        operation_results: list[MaintenancePatchOperationApplyResult],
+        failed: MaintenancePatchOperationApplyResult,
+    ) -> None:
+        super().__init__(failed.message or "atomic maintenance operation failed")
+        self.operation_results = operation_results
+        self.failed = failed
 
 
 @runtime_checkable
@@ -158,6 +173,41 @@ def apply_maintenance_patch(
             artifact_id=artifact_id,
         )
 
+    if patch.requires_atomic_replacement:
+        capability = _atomic_mutation_capability(engine)
+        if not capability.supports_atomic_mutation:
+            validation = MaintenancePatchValidationReport(
+                valid=False,
+                issues=[
+                    *validation.issues,
+                    MaintenancePatchValidationIssue(
+                        code="atomic_mutation_required",
+                        message=(
+                            "replacement patches require a backend transaction; "
+                            f"use a ParseView activation path for {capability.mode} "
+                            f"backend ({capability.reason})"
+                        ),
+                    ),
+                ],
+            )
+            artifact_id = (
+                _emit_patch_artifact(
+                    engine,
+                    patch,
+                    validation,
+                    [],
+                    MaintenancePatchStatus.REJECTED,
+                )
+                if emit_artifact
+                else None
+            )
+            return MaintenancePatchApplyResult(
+                patch_id=patch.patch_id,
+                status=MaintenancePatchStatus.REJECTED,
+                validation=validation,
+                artifact_id=artifact_id,
+            )
+
     operation_results: list[MaintenancePatchOperationApplyResult] = []
     status = MaintenancePatchStatus.APPLIED
     try:
@@ -169,6 +219,8 @@ def apply_maintenance_patch(
                 result = _apply_operation(engine, patch, operation)
                 operation_results.append(result)
                 if result.status == "failed":
+                    if patch.requires_atomic_replacement:
+                        raise _AtomicPatchOperationFailed(operation_results[:-1], result)
                     status = MaintenancePatchStatus.NEEDS_REVIEW
         artifact_id = _emit_patch_artifact(engine, patch, validation, operation_results, status) if emit_artifact else None
     except _StaleMaintenancePatch as exc:
@@ -177,6 +229,25 @@ def apply_maintenance_patch(
         return MaintenancePatchApplyResult(
             patch_id=patch.patch_id,
             status=MaintenancePatchStatus.REJECTED,
+            validation=validation,
+            operation_results=operation_results,
+            artifact_id=artifact_id,
+        )
+    except _AtomicPatchOperationFailed as exc:
+        operation_results = [
+            item.model_copy(update={"status": "rolled_back"})
+            for item in exc.operation_results
+        ]
+        operation_results.append(exc.failed)
+        status = MaintenancePatchStatus.NEEDS_REVIEW
+        artifact_id = (
+            _emit_patch_artifact(engine, patch, validation, operation_results, status)
+            if emit_artifact
+            else None
+        )
+        return MaintenancePatchApplyResult(
+            patch_id=patch.patch_id,
+            status=status,
             validation=validation,
             operation_results=operation_results,
             artifact_id=artifact_id,
@@ -473,6 +544,15 @@ def _engine_uow(engine: _MaintenanceEngineLike) -> EngineUnitOfWork:
     if callable(uow):
         return cast(Callable[[], EngineUnitOfWork], uow)()
     return nullcontext()
+
+
+def _atomic_mutation_capability(engine: _MaintenanceEngineLike) -> AtomicMutationCapability:
+    """Read the backend contract without depending on a concrete backend type."""
+
+    declared = getattr(engine, "atomic_mutation_capability", None)
+    if isinstance(declared, AtomicMutationCapability):
+        return declared
+    return get_atomic_mutation_capability(getattr(engine, "backend", None))
 
 
 def _read_active_ids(engine: _MaintenanceEngineLike, kind: str) -> set[str]:

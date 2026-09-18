@@ -7,6 +7,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 
 from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
     parser_llm_cache_transaction,
@@ -25,6 +26,10 @@ from kogwistar.runtime.resolvers import MappingStepResolver
 from kogwistar.runtime.runtime import StepContext, WorkflowRuntime
 from kogwistar.wisdom.template import write_execution_wisdom_artifacts
 
+from .dependency_invalidation import (
+    DependencyInvalidationPlan,
+    plan_dependency_invalidation,
+)
 from .ingest_pipeline import IngestPipeline, IngestPipelineRequest
 from .maintenance_context import (
     append_maintenance_round,
@@ -54,6 +59,24 @@ from .maintenance_strategies import (
 )
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
+from .parse_generation_store import ParseGenerationStore, ParseGenerationStoreConflict
+from .parse_reconciliation import decide_parse_reconciliation
+from .parse_session_store import ParseSessionStore, ParseSessionStoreConflict
+from .parse_views import (
+    ParseFrontierItem,
+    ParseGeneration,
+    ParseGenerationCommit,
+    ParseGenerationMember,
+    ParseSessionPhase,
+    ParseSessionState,
+    ParseView,
+    ParseViewConflict,
+    ParseViewSelection,
+    ParseViewStore,
+    SourceRegion,
+    frontier_id,
+    generation_member_id,
+)
 from .policies import LlmWikiPolicies, build_default_policies
 from .provider_config import resolve_maintenance_provider_settings
 from .usage_projection import UsageProjection, persist_usage_events
@@ -262,6 +285,10 @@ class MaintenanceWorker(BaseWorker):
         trace_sink: Callable[[dict[str, object]], None] | None = None,
         usage_sink: Callable[[str, Mapping[str, float]], None] | None = None,
         document_parser: Callable[[MaintenanceJobExecutionContext], Mapping[str, object]] | None = None,
+        layered_parser: Callable[
+            [MaintenanceJobExecutionContext, ParseSessionState, list[ParseFrontierItem]],
+            Mapping[str, object],
+        ] | None = None,
     ) -> None:
         """
         Initialize the MaintenanceWorker.
@@ -289,6 +316,10 @@ class MaintenanceWorker(BaseWorker):
         self.request_enabled = True
         self.background_enabled = True
         self.document_parser = document_parser or self._parse_seeded_document
+        # The built-in callback reconstructs its bounded parser request from
+        # immutable source evidence. Deployments can still inject a richer
+        # layered parser, but absence must never be treated as completion.
+        self.layered_parser = layered_parser or self._expand_durable_parse_frontier
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
@@ -657,6 +688,25 @@ class MaintenanceWorker(BaseWorker):
         if decision.status != "ready":
             self._block_guarded_job(ctx, decision)
             return
+        if bool(ctx.payload.get("durable_layered_parse")):
+            try:
+                self._mark_durable_parse_expanding(ctx)
+            except (ParseSessionStoreConflict, TypeError, ValueError, KeyError) as exc:
+                self._emit_trace(
+                    "maintenance_parse_failed",
+                    workspace_id=ctx.workspace_id,
+                    source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                    request_node_id=ctx.request_node_id,
+                    job_id=ctx.job_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+                self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
+                return
+            if self._advance_maintenance_plan(ctx):
+                return
+            self._acknowledge_job(ctx)
+            return
         started_ms = int(time.time() * 1000)
         self._emit_trace(
             "maintenance_parse_start",
@@ -706,12 +756,629 @@ class MaintenanceWorker(BaseWorker):
             )
             self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
 
+    def _mark_durable_parse_expanding(self, ctx: MaintenanceJobExecutionContext) -> None:
+        """Advance only durable session state; parsing occurs in the frontier job."""
+
+        session_id = str(ctx.payload.get("parse_session_id") or "")
+        if not session_id:
+            raise ValueError("durable parse requires parse_session_id")
+        store = ParseSessionStore(self.engines.conversation.meta_sqlite, workspace_id=ctx.workspace_id)
+        stored = store.get(session_id)
+        if stored is None:
+            raise ValueError("durable parse session is missing")
+        session, frontier, version = stored
+        if not session.parser_state:
+            raise ValueError("durable parse session has no recoverable parser state")
+        if session.phase == ParseSessionPhase.STABLE:
+            return
+        store.save(
+            session.model_copy(
+                update={
+                    "phase": ParseSessionPhase.EXPANDING,
+                    "failure_reason": None,
+                    "last_progress_at": datetime.now(UTC),
+                }
+            ),
+            frontier,
+            expected_version=version,
+        )
+
+    def _handle_document_expand_parse_children_strategy(
+        self, ctx: MaintenanceJobExecutionContext
+    ) -> None:
+        """Run one durable frontier batch without spawning a new job."""
+
+        decision = self._evaluate_maintenance_guard(ctx)
+        if decision.status != "ready":
+            self._block_guarded_job(ctx, decision)
+            return
+        session_id = str(ctx.payload.get("parse_session_id") or "")
+        if not session_id:
+            self._emit_trace(
+                "maintenance_parse_expansion_blocked",
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                job_id=ctx.job_id,
+                reason="parse_session_id_missing",
+            )
+            self.engines.conversation.jobs.retry_or_fail(
+                ctx.job,
+                RuntimeError("parse_session_id is required for durable expansion"),
+            )
+            return
+        store = ParseSessionStore(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=ctx.workspace_id,
+        )
+        stored = store.get(session_id)
+        if stored is None:
+            self._emit_trace(
+                "maintenance_parse_expansion_blocked",
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                job_id=ctx.job_id,
+                reason="parse_session_missing",
+            )
+            self.engines.conversation.jobs.retry_or_fail(
+                ctx.job,
+                RuntimeError("durable parse session is missing; refusing non-durable expansion"),
+            )
+            return
+        try:
+            session, frontier, version = self._recover_pending_parse_view(store, stored)
+            result = self.layered_parser(ctx, session, frontier)
+            next_session = ParseSessionState.model_validate(result.get("session", {}))
+            self._validate_parse_session_transition(session, next_session)
+            next_frontier = [
+                ParseFrontierItem.model_validate(item)
+                for item in (result.get("frontier") or [])
+            ]
+            if len(next_frontier) > session.max_frontier_items * max(session.max_depth, 1):
+                raise ValueError("layered parser returned an unbounded frontier")
+            if bool(result.get("stable")) and next_frontier:
+                raise ValueError("layered parser cannot report stable with pending frontier items")
+            stable = bool(result.get("stable", not next_frontier))
+            consumed_ids = {
+                str(value)
+                for value in (result.get("consumed_frontier_ids") or [])
+                if str(value).strip()
+            }
+            available_ids = {item.frontier_id for item in frontier}
+            if frontier and not consumed_ids:
+                raise ValueError("layered parser must report consumed_frontier_ids")
+            if not consumed_ids.issubset(available_ids):
+                raise ValueError("layered parser consumed frontier outside the claimed batch")
+            next_session = next_session.model_copy(
+                update={
+                    "phase": ParseSessionPhase.STABLE if stable else ParseSessionPhase.EXPANDING,
+                    "frontier_ids": tuple(item.frontier_id for item in next_frontier),
+                    "consumed_frontier_ids": tuple(
+                        sorted(set(session.consumed_frontier_ids).union(consumed_ids))
+                    ),
+                }
+            )
+            generation_payload = result.get("generation")
+            commit_payload = result.get("commit")
+            members_payload = result.get("members")
+            if any(value is not None for value in (generation_payload, commit_payload, members_payload)):
+                if not isinstance(generation_payload, Mapping) or not isinstance(commit_payload, Mapping):
+                    raise ValueError("layered parser generation and commit payloads are required together")
+                if not isinstance(members_payload, list):
+                    raise ValueError("layered parser members must be a list")
+                generation_store = ParseGenerationStore(
+                    self.engines.conversation.meta_sqlite,
+                    workspace_id=ctx.workspace_id,
+                )
+                generation_store.commit(
+                    ParseGeneration.model_validate(generation_payload),
+                    ParseGenerationCommit.model_validate(commit_payload),
+                    [ParseGenerationMember.model_validate(item) for item in members_payload],
+                )
+            view_payload = result.get("parse_view")
+            pending_version = version
+            if view_payload is not None:
+                if not isinstance(view_payload, Mapping):
+                    raise ValueError("layered parser parse_view must be an object")
+                view = ParseView.model_validate(view_payload)
+                view_store = ParseViewStore(
+                    self.engines.conversation.meta_sqlite,
+                    workspace_id=ctx.workspace_id,
+                )
+                current_view = view_store.get(view.source_document_id)
+                expected_view_version = result.get("expected_view_version")
+                if expected_view_version is None and current_view is not None:
+                    raise ValueError("expected_view_version is required when replacing a ParseView")
+                pending_session = next_session.model_copy(
+                    update={"pending_view": view.model_dump(mode="json")}
+                )
+                pending_version = store.save(
+                    pending_session,
+                    next_frontier,
+                    expected_version=version,
+                )
+                view_store.activate(
+                    view,
+                    expected_view_version=(
+                        None
+                        if expected_view_version is None
+                        else int(expected_view_version)
+                    ),
+                )
+                next_session = pending_session.model_copy(update={"pending_view": None})
+                store.save(next_session, next_frontier, expected_version=pending_version)
+            else:
+                store.save(next_session, next_frontier, expected_version=version)
+            if stable:
+                reconciliation = result.get("reconciliation")
+                review_required = isinstance(reconciliation, Mapping) and bool(
+                    reconciliation.get("requires_review")
+                )
+                if not review_required:
+                    self._record_durable_parse_readiness(ctx, next_session)
+                if review_required:
+                    self._emit_trace(
+                        "maintenance_parse_reconciliation_review_required",
+                        workspace_id=ctx.workspace_id,
+                        source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                        job_id=ctx.job_id,
+                        reconciliation=dict(reconciliation),
+                    )
+                    self._acknowledge_job(ctx)
+                    return
+                if self._advance_maintenance_plan(ctx):
+                    return
+                self._acknowledge_job(ctx)
+            else:
+                self.engines.conversation.jobs.requeue_at_tail(
+                    ctx.job,
+                    payload={**ctx.payload, "parse_session_id": next_session.session_id},
+                )
+            self._emit_trace(
+                "maintenance_parse_expansion_complete",
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                job_id=ctx.job_id,
+                stable=stable,
+                frontier_count=len(next_frontier),
+            )
+        except (
+            ParseGenerationStoreConflict,
+            ParseSessionStoreConflict,
+            ParseViewConflict,
+            TimeoutError,
+            TypeError,
+            ValueError,
+            KeyError,
+        ) as exc:
+            self._emit_trace(
+                "maintenance_parse_expansion_failed",
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                job_id=ctx.job_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
+
+    def _record_durable_parse_readiness(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        session: ParseSessionState,
+    ) -> None:
+        """Publish completion only after the durable frontier is actually stable."""
+
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            document = self.engines.kg.read.get_document(session.revision_document_id)
+        metadata = dict(document.metadata or {})
+        request = IngestPipelineRequest(
+            workspace_id=ctx.workspace_id,
+            source_uri=str(metadata.get("source_uri") or session.revision_document_id),
+            title=str(metadata.get("title") or session.revision_document_id),
+            raw_text=str(document.content or ""),
+            source_format=str(metadata.get("source_format") or "text"),
+            operation_mode="maintenance_first",
+            parser_mode=str(metadata.get("parser_mode") or "heuristic"),
+            parser_lane=str(metadata.get("parser_lane") or "page_index"),
+            promotion_mode=str(metadata.get("promotion_mode") or "pending"),
+            llm_provider=(str(metadata["llm_provider"]) if metadata.get("llm_provider") else None),
+            llm_model=(str(metadata["llm_model"]) if metadata.get("llm_model") else None),
+            parse_limits={
+                "max_depth": session.max_depth,
+                "max_frontier_items": session.max_frontier_items,
+                "max_parser_calls": session.max_parser_calls,
+                "max_region_chars": session.max_region_chars,
+                **({"token_budget": session.token_budget} if session.token_budget is not None else {}),
+                **(
+                    {"wall_time_seconds": session.wall_time_seconds}
+                    if session.wall_time_seconds is not None
+                    else {}
+                ),
+            },
+        )
+        IngestPipeline(self.engines).record_source_readiness(
+            request=request,
+            source_document_id=session.source_document_id,
+            stage="parsed_graph_persisted",
+        )
+
+    @staticmethod
+    def _validate_parse_session_transition(
+        current: ParseSessionState,
+        next_session: ParseSessionState,
+    ) -> None:
+        immutable_fields = (
+            "session_id",
+            "workspace_id",
+            "source_document_id",
+            "source_revision_id",
+            "source_digest",
+            "revision_document_id",
+            "generation_id",
+            "parser_state",
+        )
+        changed = [
+            field
+            for field in immutable_fields
+            if getattr(current, field) != getattr(next_session, field)
+        ]
+        if changed:
+            raise ValueError("layered parser changed immutable session fields: " + ", ".join(changed))
+
+    def _recover_pending_parse_view(
+        self,
+        store: ParseSessionStore,
+        stored: tuple[ParseSessionState, list[ParseFrontierItem], int],
+    ) -> tuple[ParseSessionState, list[ParseFrontierItem], int]:
+        """Finish a view CAS left pending by a worker crash."""
+
+        session, frontier, version = stored
+        if not session.pending_view:
+            return stored
+        view = ParseView.model_validate(session.pending_view)
+        view_store = ParseViewStore(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=session.workspace_id,
+        )
+        current = view_store.get(view.source_document_id)
+        if current is None:
+            view_store.activate(view, expected_view_version=None)
+        elif current.view_id == view.view_id and current.view_version == view.view_version:
+            pass
+        elif current.view_version >= view.view_version:
+            raise ParseViewConflict("pending ParseView was superseded before recovery")
+        else:
+            view_store.activate(view, expected_view_version=current.view_version)
+        recovered = session.model_copy(update={"pending_view": None})
+        recovered_version = store.save(recovered, frontier, expected_version=version)
+        return recovered, frontier, recovered_version
+
+    def _expand_durable_parse_frontier(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        session: ParseSessionState,
+        frontier: list[ParseFrontierItem],
+    ) -> Mapping[str, object]:
+        """Parse one revision-pinned frontier and return an inactive derivation.
+
+        The graph write is deliberately tagged with its generation member before
+        the ParseView is activated by the caller. This keeps a crash between the
+        write and the view CAS from exposing an unselected interpretation.
+        """
+
+        if not frontier:
+            return {
+                "session": session.model_dump(mode="json"),
+                "frontier": [],
+                "consumed_frontier_ids": [],
+                "stable": True,
+            }
+        if session.parser_calls >= session.max_parser_calls:
+            raise ValueError("durable parse parser-call budget is exhausted")
+        selected = min(frontier, key=lambda item: (item.depth, item.ordinal))
+        state = dict(session.parser_state)
+        if int(state.get("schema_version") or 0) != 1:
+            raise ValueError("durable parse session has no supported parser state")
+        revision_document_id = str(state.get("source_revision_document_id") or "")
+        if revision_document_id != session.revision_document_id:
+            raise ValueError("durable parser state does not match the session revision")
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            document = self.engines.kg.read.get_document(revision_document_id)
+        raw_text = str(document.content or "")
+        if not raw_text:
+            raise ValueError("immutable source revision has no text to parse")
+        if selected.region.end_char > len(raw_text):
+            raise ValueError("parse frontier region exceeds immutable source bytes")
+
+        token_region_chars = (
+            session.token_budget * 4 if session.token_budget is not None else session.max_region_chars
+        )
+        effective_region_chars = min(session.max_region_chars, token_region_chars)
+        if selected.region.end_char - selected.region.start_char > effective_region_chars:
+            if selected.depth >= session.max_depth:
+                raise ValueError(
+                    "durable parse region exceeds max_region_chars at max_depth; "
+                    "increase the explicit parse limit or select a smaller region"
+                )
+            split_at = min(
+                selected.region.start_char + effective_region_chars,
+                selected.region.end_char - 1,
+            )
+            # Prefer a whitespace boundary without creating an empty region.
+            boundary = max(
+                raw_text.rfind("\n", selected.region.start_char + 1, split_at + 1),
+                raw_text.rfind(" ", selected.region.start_char + 1, split_at + 1),
+            )
+            split_at = boundary if boundary > selected.region.start_char else split_at
+            regions = (
+                SourceRegion(
+                    source_document_id=selected.region.source_document_id,
+                    start_char=selected.region.start_char,
+                    end_char=split_at,
+                ),
+                SourceRegion(
+                    source_document_id=selected.region.source_document_id,
+                    start_char=split_at,
+                    end_char=selected.region.end_char,
+                ),
+            )
+            children = [
+                ParseFrontierItem(
+                    frontier_id=frontier_id(
+                        session_id=session.session_id,
+                        region=region,
+                        ordinal=ordinal,
+                    ),
+                    session_id=session.session_id,
+                    generation_id=session.generation_id,
+                    workspace_id=session.workspace_id,
+                    source_document_id=session.source_document_id,
+                    source_revision_id=session.source_revision_id,
+                    revision_document_id=session.revision_document_id,
+                    parent_member_id=selected.parent_member_id,
+                    region=region,
+                    depth=selected.depth + 1,
+                    ordinal=ordinal,
+                )
+                for ordinal, region in enumerate(regions)
+            ]
+            next_frontier = [item for item in frontier if item.frontier_id != selected.frontier_id]
+            next_frontier.extend(children)
+            return {
+                "session": session.model_copy(
+                    update={
+                        "phase": ParseSessionPhase.EXPANDING,
+                        "frontier_ids": tuple(item.frontier_id for item in next_frontier),
+                        "consumed_frontier_ids": tuple(
+                            sorted(set(session.consumed_frontier_ids) | {selected.frontier_id})
+                        ),
+                        "last_progress_at": datetime.now(UTC),
+                    }
+                ).model_dump(mode="json"),
+                "frontier": [item.model_dump(mode="json") for item in next_frontier],
+                "consumed_frontier_ids": [selected.frontier_id],
+                "stable": False,
+                "diagnostics": {
+                    "phase": "parse_expanding",
+                    "reason": "region_segmented_before_parse",
+                    "child_count": len(children),
+                },
+            }
+
+        source_request = IngestPipelineRequest(
+            workspace_id=ctx.workspace_id,
+            source_uri=str(state.get("source_uri") or revision_document_id),
+            title=str(state.get("title") or revision_document_id),
+            raw_text=raw_text,
+            source_format=str(state.get("source_format") or "text"),
+            operation_mode="maintenance_first",
+            parser_mode=str(state.get("parser_mode") or "heuristic"),
+            parser_lane=str(state.get("parser_lane") or "page_index"),
+            promotion_mode=str(state.get("promotion_mode") or "pending"),
+            llm_provider=(str(state["llm_provider"]) if state.get("llm_provider") else None),
+            llm_model=(str(state["llm_model"]) if state.get("llm_model") else None),
+        )
+        parser_request = source_request.model_copy(
+            update={"raw_text": raw_text[selected.region.start_char : selected.region.end_char]}
+        )
+        pipeline = IngestPipeline(self.engines)
+        with parser_llm_cache_transaction() as parser_cache_transaction:
+            parse_started = time.monotonic()
+            parse_result = pipeline.parse_source(
+                request=parser_request,
+                source_document_id=revision_document_id,
+            )
+            if (
+                session.wall_time_seconds is not None
+                and time.monotonic() - parse_started > session.wall_time_seconds
+            ):
+                raise TimeoutError("durable parse expansion exceeded wall-time budget")
+            extraction = pipeline.translate_parse_result(
+                parse_result=parse_result,
+                source_document_id=revision_document_id,
+            )
+            self._offset_extraction_spans(extraction, selected.region.start_char)
+            commit_id = str(
+                stable_id(
+                    "kogwistar_llm_wiki.parse_generation_commit",
+                    session.generation_id,
+                    selected.frontier_id,
+                )
+            )
+            member_id = generation_member_id(
+                generation_id=session.generation_id,
+                commit_id=commit_id,
+                ordinal=selected.ordinal,
+            )
+            pipeline.ingest_parse_result(
+                request=source_request,
+                source_document_id=revision_document_id,
+                graph_extraction=extraction,
+                namespace=ns.conv_fg,
+                parse_generation_id=session.generation_id,
+                parse_generation_member_id=member_id,
+                parse_region=selected.region,
+            )
+            parser_cache_transaction.promote()
+
+        generation = ParseGeneration(
+            generation_id=session.generation_id,
+            workspace_id=session.workspace_id,
+            source_document_id=session.source_document_id,
+            source_revision_id=session.source_revision_id,
+            source_digest=session.source_digest,
+            revision_document_id=session.revision_document_id,
+            parser_profile=str(state.get("parser_profile") or state.get("parser_lane") or "page_index"),
+            parser_version="llm-wiki-durable-frontier-v1",
+            status="stable",
+        )
+        member = ParseGenerationMember(
+            member_id=member_id,
+            generation_id=session.generation_id,
+            workspace_id=session.workspace_id,
+            source_document_id=session.source_document_id,
+            source_revision_id=session.source_revision_id,
+            revision_document_id=session.revision_document_id,
+            region=selected.region,
+            depth=selected.depth,
+            payload={"frontier_id": selected.frontier_id},
+        )
+        commit = ParseGenerationCommit(
+            commit_id=commit_id,
+            generation_id=session.generation_id,
+            workspace_id=session.workspace_id,
+            source_document_id=session.source_document_id,
+            source_revision_id=session.source_revision_id,
+            member_ids=(member_id,),
+            consumed_frontier_ids=(selected.frontier_id,),
+        )
+        view_store = ParseViewStore(self.engines.conversation.meta_sqlite, workspace_id=ctx.workspace_id)
+        current_view = view_store.get(session.source_document_id)
+        if current_view is not None and current_view.revision_document_id != session.revision_document_id:
+            raise ValueError("active ParseView targets a different immutable source revision")
+        if ctx.maintenance_kind == "document_reparse_region" and current_view is None:
+            raise ValueError(
+                "legacy_evidence_unavailable: targeted reparse requires an active ParseView"
+            )
+        overlapping_member_ids = tuple(
+            item.member_id
+            for item in (current_view.selections if current_view is not None else ())
+            if item.region.start_char < selected.region.end_char
+            and selected.region.start_char < item.region.end_char
+        )
+        reconciliation = decide_parse_reconciliation(
+            overlapping_member_ids=overlapping_member_ids,
+        )
+        member = member.model_copy(
+            update={
+                "payload": {
+                    **dict(member.payload),
+                    "reconciliation": reconciliation.model_dump(mode="json"),
+                }
+            }
+        )
+        retained = ()
+        expected_view_version: int | None = None
+        predecessor_view_id: str | None = None
+        next_view_version = 1
+        if current_view is not None:
+            retained = tuple(
+                item
+                for item in current_view.selections
+                if item.region.end_char <= selected.region.start_char
+                or item.region.start_char >= selected.region.end_char
+            )
+            expected_view_version = current_view.view_version
+            predecessor_view_id = current_view.view_id
+            next_view_version = current_view.view_version + 1
+        view = ParseView(
+            view_id=str(
+                stable_id(
+                    "kogwistar_llm_wiki.parse_view",
+                    session.source_document_id,
+                    session.source_revision_id,
+                    commit_id,
+                )
+            ),
+            view_version=next_view_version,
+            workspace_id=session.workspace_id,
+            source_document_id=session.source_document_id,
+            source_revision_id=session.source_revision_id,
+            revision_document_id=session.revision_document_id,
+            selections=retained
+            + (
+                ParseViewSelection(
+                    member_id=member_id,
+                    generation_id=session.generation_id,
+                    region=selected.region,
+                ),
+            ),
+            predecessor_view_id=predecessor_view_id,
+        )
+        next_session = session.model_copy(
+            update={
+                "parser_calls": session.parser_calls + 1,
+                "last_progress_at": datetime.now(UTC),
+            }
+        )
+        if reconciliation.requires_review:
+            return {
+                "session": next_session.model_dump(mode="json"),
+                "frontier": [],
+                "consumed_frontier_ids": [selected.frontier_id],
+                "stable": True,
+                "generation": generation.model_dump(mode="json"),
+                "commit": commit.model_dump(mode="json"),
+                "members": [member.model_dump(mode="json")],
+                "reconciliation": reconciliation.model_dump(mode="json"),
+                "diagnostics": {
+                    "phase": "parsed_graph_persisted",
+                    "reason": "reconciliation_review_required",
+                },
+            }
+        return {
+            "session": next_session.model_dump(mode="json"),
+            "frontier": [],
+            "consumed_frontier_ids": [selected.frontier_id],
+            "stable": True,
+            "generation": generation.model_dump(mode="json"),
+            "commit": commit.model_dump(mode="json"),
+            "members": [member.model_dump(mode="json")],
+            "parse_view": view.model_dump(mode="json"),
+            "expected_view_version": expected_view_version,
+            "reconciliation": reconciliation.model_dump(mode="json"),
+            "diagnostics": {"phase": "parsed_graph_persisted", "frontier_id": selected.frontier_id},
+        }
+
+    @staticmethod
+    def _offset_extraction_spans(extraction: GraphExtractionWithIDs, offset: int) -> None:
+        """Translate region-local parser spans back to immutable-document offsets."""
+
+        if offset == 0:
+            return
+        for node in extraction.nodes or []:
+            for mention in getattr(node, "mentions", ()) or ():
+                spans = list(getattr(mention, "spans", ()) or ())
+                mention.spans = [
+                    span.model_copy(
+                        update={
+                            "start_char": span.start_char + offset,
+                            "end_char": span.end_char + offset,
+                        }
+                    )
+                    for span in spans
+                ]
+
     def _parse_seeded_document(self, ctx: MaintenanceJobExecutionContext) -> Mapping[str, object]:
         """Parse and persist a source-map-seeded document without a transaction around the LLM call."""
         source_document_id = str(ctx.payload.get("source_document_id") or "")
+        revision_document_id = str(
+            ctx.payload.get("revision_document_id") or source_document_id
+        )
         ns = WorkspaceNamespaces(ctx.workspace_id)
         with _temporary_namespace(self.engines.kg, ns.source_space):
-            document = self.engines.kg.read.get_document(source_document_id)
+            document = self.engines.kg.read.get_document(revision_document_id)
         metadata = dict(document.metadata or {})
         request = IngestPipelineRequest(
             workspace_id=ctx.workspace_id,
@@ -748,11 +1415,11 @@ class MaintenanceWorker(BaseWorker):
             if extraction is None:
                 parse_result = pipeline.parse_source(
                     request=request,
-                    source_document_id=source_document_id,
+                    source_document_id=revision_document_id,
                 )
                 extraction = pipeline.translate_parse_result(
                     parse_result=parse_result,
-                    source_document_id=source_document_id,
+                    source_document_id=revision_document_id,
                 )
                 candidate = {
                     "kind": "document_parse",
@@ -802,7 +1469,7 @@ class MaintenanceWorker(BaseWorker):
                 )
             pipeline.ingest_parse_result(
                 request=request,
-                source_document_id=source_document_id,
+                source_document_id=revision_document_id,
                 graph_extraction=extraction,
                 namespace=ns.conv_fg,
             )
@@ -897,11 +1564,19 @@ class MaintenanceWorker(BaseWorker):
         source_document_id = str(ctx.payload.get("source_document_id") or "")
         requested_revision_id = str(ctx.payload.get("source_revision_id") or "")
         requested_digest = str(ctx.payload.get("source_digest") or "")
+        requested_revision_document_id = str(
+            ctx.payload.get("revision_document_id") or ""
+        )
         required_stage = str(
             ctx.payload.get("required_stage")
             or required_stage_for_maintenance(ctx.maintenance_kind)
         )
-        if not source_document_id or not requested_revision_id or not requested_digest:
+        if (
+            not source_document_id
+            or not requested_revision_id
+            or not requested_digest
+            or not requested_revision_document_id
+        ):
             return MaintenanceGuardDecision(
                 status="blocked",
                 reason="job_revision_metadata_missing",
@@ -934,6 +1609,11 @@ class MaintenanceWorker(BaseWorker):
             raw = getattr(node, "metadata", {})
             return dict(raw) if isinstance(raw, dict) else {}
 
+        revision_nodes = [
+            node
+            for node in revision_nodes
+            if str(metadata(node).get("workspace_id") or "") == ctx.workspace_id
+        ]
         current_node = max(
             revision_nodes,
             key=lambda node: int(metadata(node).get("created_at_ms") or 0),
@@ -944,6 +1624,7 @@ class MaintenanceWorker(BaseWorker):
                 source_document_id=source_document_id,
                 revision_id=str(metadata(current_node).get("source_revision_id") or current_node.id),
                 source_digest=str(metadata(current_node).get("source_digest") or ""),
+                revision_document_id=str(metadata(current_node).get("revision_document_id") or ""),
             )
             if current_node is not None
             else None
@@ -956,6 +1637,7 @@ class MaintenanceWorker(BaseWorker):
             source_revision=current_revision,
             requested_revision_id=requested_revision_id,
             requested_digest=requested_digest,
+            requested_revision_document_id=requested_revision_document_id,
             required_stage=required_stage,
             ready_revision_ids=ready_revision_ids,
         )
@@ -1155,6 +1837,9 @@ class MaintenanceWorker(BaseWorker):
                 patch,
                 namespace_prefix=str(ctx.payload.get("namespace_prefix") or "") or None,
             )
+            invalidation = None
+            if result.status.value == "applied":
+                invalidation = self._plan_and_enqueue_dependency_invalidation(ctx, patch)
             self._emit_lane_reply(
                 workspace_id=ctx.workspace_id,
                 source_document_id=str(ctx.payload.get("source_document_id") or ""),
@@ -1169,6 +1854,11 @@ class MaintenanceWorker(BaseWorker):
                     "skipped_count": result.skipped_count,
                     "failed_count": result.failed_count,
                     "artifact_id": result.artifact_id,
+                    "dependency_invalidation": (
+                        self._dependency_invalidation_payload(invalidation)
+                        if invalidation is not None
+                        else None
+                    ),
                 },
             )
             if result.status.value == "applied":
@@ -1191,6 +1881,148 @@ class MaintenanceWorker(BaseWorker):
             )
             if ctx.job_id:
                 self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
+
+    @staticmethod
+    def _dependency_invalidation_payload(
+        plan: DependencyInvalidationPlan,
+    ) -> dict[str, object]:
+        return {
+            "workspace_id": plan.workspace_id,
+            "changed_entity_ids": list(plan.changed_entity_ids),
+            "affected_entity_ids": list(plan.affected_entity_ids),
+            "affected_source_document_ids": list(plan.affected_source_document_ids),
+            "follow_up_kinds": list(plan.follow_up_kinds),
+            "skipped_cross_workspace_ids": list(plan.skipped_cross_workspace_ids),
+            "truncated": plan.truncated,
+        }
+
+    def _plan_and_enqueue_dependency_invalidation(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        patch: MaintenancePatch,
+    ) -> DependencyInvalidationPlan | None:
+        """Schedule one bounded same-workspace follow-up per affected source."""
+
+        if ctx.payload.get("maintenance_origin") == "dependency_invalidation":
+            return None
+        graph_engine = self.engines.kg
+        namespace = WorkspaceNamespaces(ctx.workspace_id).curated_kg_space
+        if patch.scope.scope_kind != "workspace":
+            graph_engine = self.engines.conversation
+            namespace = WorkspaceNamespaces(ctx.workspace_id).conv_bg
+        changed_ids = {
+            str(value).strip()
+            for operation in patch.operations
+            for value in (
+                operation.node_id,
+                operation.edge_id,
+                operation.tombstone_target_id,
+                operation.from_node_id,
+                operation.to_node_id,
+            )
+            if value and str(value).strip()
+        }
+        if not changed_ids:
+            return None
+        try:
+            with _temporary_namespace(graph_engine, namespace):
+                nodes = graph_engine.read.get_nodes(limit=None)
+                edges = graph_engine.read.get_edges(limit=None)
+            plan = plan_dependency_invalidation(
+                workspace_id=ctx.workspace_id,
+                changed_entity_ids=changed_ids,
+                nodes=nodes,
+                edges=edges,
+            )
+            if plan.affected_source_document_ids and plan.follow_up_kinds:
+                self._enqueue_dependency_jobs(ctx, plan)
+            self._emit_trace(
+                "maintenance_dependency_invalidation_planned",
+                job_id=ctx.job_id,
+                patch_id=patch.patch_id,
+                **self._dependency_invalidation_payload(plan),
+            )
+            return plan
+        except Exception as exc:  # pragma: no cover - post-commit reporting guard
+            self._emit_trace(
+                "maintenance_dependency_invalidation_failed",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                patch_id=patch.patch_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            logger.exception("Dependency invalidation failed after patch %s", patch.patch_id)
+            return None
+
+    def _enqueue_dependency_jobs(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        plan: DependencyInvalidationPlan,
+    ) -> None:
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        source_metadata: dict[str, dict[str, object]] = {}
+        with _temporary_namespace(self.engines.kg, ns.source_space):
+            revisions = self.engines.kg.read.get_nodes(
+                where={"artifact_kind": "source_revision"},
+                limit=None,
+            )
+        for revision in revisions:
+            metadata = dict(getattr(revision, "metadata", {}) or {})
+            if str(metadata.get("workspace_id") or "") != ctx.workspace_id:
+                continue
+            source_id = str(metadata.get("source_document_id") or "").strip()
+            if not source_id or source_id not in plan.affected_source_document_ids:
+                continue
+            created_at = int(metadata.get("created_at_ms") or 0)
+            previous = source_metadata.get(source_id)
+            if previous is None or created_at > int(previous.get("created_at_ms") or 0):
+                source_metadata[source_id] = metadata
+
+        self.engines.conversation.jobs.require_available(enqueue=True)
+        for source_id in plan.affected_source_document_ids:
+            metadata = source_metadata.get(source_id)
+            if metadata is None:
+                continue
+            for maintenance_kind in plan.follow_up_kinds:
+                job_id = str(
+                    stable_id(
+                        "kogwistar_llm_wiki.dependency_invalidation_job",
+                        ctx.workspace_id,
+                        ctx.job_id,
+                        source_id,
+                        maintenance_kind,
+                    )
+                )
+                self.engines.conversation.jobs.enqueue(
+                    job_id=job_id,
+                    namespace=ns.maintenance_jobs,
+                    entity_kind="maintenance_job",
+                    entity_id=source_id,
+                    job_kind=f"maintenance_job:{maintenance_kind}",
+                    op="UPSERT",
+                    payload={
+                        "workspace_id": ctx.workspace_id,
+                        "request_node_id": job_id,
+                        "source_document_id": source_id,
+                        "maintenance_kind": maintenance_kind,
+                        "maintenance_origin": "dependency_invalidation",
+                        "mode": "invalidation",
+                        "selection_strategy": "dependency_invalidation",
+                        "seed_node_ids": [source_id],
+                        "maintenance_round": 0,
+                        "maintenance_max_rounds": 1,
+                        "maintenance_plan": [maintenance_kind],
+                        "maintenance_phase_index": 0,
+                        "source_revision_id": metadata.get("source_revision_id"),
+                        "source_digest": metadata.get("source_digest"),
+                        "revision_document_id": metadata.get("revision_document_id"),
+                        "required_stage": "parsed_graph_persisted",
+                        "objective": "refresh dependencies after an accepted graph patch",
+                        "budgets": {"steps": 1},
+                        "dependency_invalidation": self._dependency_invalidation_payload(plan),
+                    },
+                )
 
     def _handle_runtime_workflow_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
         decision = self._evaluate_maintenance_guard(ctx)

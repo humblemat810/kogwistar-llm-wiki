@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from kogwistar.engine_core import AtomicMutationCapability
 from kogwistar.engine_core.models import Grounding, Node, Span
 from pydantic import ValidationError
 
@@ -182,6 +183,54 @@ def test_maintenance_patch_accepts_add_tombstone_vocabulary() -> None:
         MaintenanceOperationKind.ADD_NODE,
         MaintenanceOperationKind.ADD_EDGE,
     }
+    assert patch.requires_atomic_replacement is True
+
+
+def test_non_atomic_backend_rejects_replacement_before_any_write() -> None:
+    engine = _FakeEngine()
+    engine.atomic_mutation_capability = AtomicMutationCapability(
+        mode="eventual",
+        reason="physical cleanup is deferred",
+    )
+    existing = Node(
+        id="ws:demo:node:old",
+        label="Old interpretation",
+        type="entity",
+        summary="old",
+        doc_id="doc-1",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation("old")])],
+        metadata={"workspace_id": "demo", "graph_space": "curated_kg"},
+    )
+    engine.nodes[existing.id] = existing
+    patch = MaintenancePatch(
+        patch_id="patch-eventual-replacement",
+        intent=MaintenanceIntent.CORRECT_FACT,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="tombstone-old",
+                kind=MaintenanceOperationKind.TOMBSTONE_NODE,
+                target_id=existing.id,
+                provenance=_provenance(),
+                reason="replace interpretation",
+            ),
+            MaintenancePatchOperation(
+                operation_id="add-new",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="ws:demo:node:new",
+                label="New interpretation",
+                node_type="fact",
+                supersedes_ids=[existing.id],
+                provenance=_provenance(),
+            ),
+        ],
+    )
+    result = apply_maintenance_patch(engine, patch, namespace_prefix="ws:demo:")
+    assert result.status == "rejected"
+    assert any(issue.code == "atomic_mutation_required" for issue in result.validation.issues)
+    assert engine.tombstone_node_calls == []
+    assert existing.metadata.get("lifecycle_status") != "tombstoned"
+    assert "ws:demo:node:new" not in engine.nodes
 
 
 def test_maintenance_patch_models_are_strict_and_do_not_allow_update_ops() -> None:
@@ -344,6 +393,10 @@ class _FakeWrite:
 
 class _FakeEngine:
     def __init__(self) -> None:
+        self.atomic_mutation_capability = AtomicMutationCapability(
+            mode="atomic",
+            reason="test transaction",
+        )
         self.nodes = {}
         self.edges = {}
         self.node_add_calls = []

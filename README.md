@@ -474,6 +474,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/testing_guide.md](doc/testing_guide.md) | Local test-running pitfalls and pytest cache guidance |
 | [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
 | [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |
+| [doc/adr_invariant_safe_layered_reparse.md](doc/adr_invariant_safe_layered_reparse.md) | Immutable source revisions, durable layered parsing, and per-source ParseViews |
 | [doc/glossary.md](doc/glossary.md) | Term definitions |
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
 | [STATUS.md](STATUS.md) | Implementation status |

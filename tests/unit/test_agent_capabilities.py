@@ -38,6 +38,8 @@ def test_agent_capability_fake_payload_flow(pipeline):
     assert inspected["metadata"]["provenance_policy"] == "optional"
     assert "source_raw_text" not in inspected["metadata"]
     assert "source_raw_text" not in inspected["revision"]["metadata"]
+    assert inspected["parse_status"]["session"] is None
+    assert inspected["parse_status"]["active_view"]["is_legacy"] is True
 
     search = gateway.search({"workspace_id": "agent-flow", "query_text": "reinforcement learning"})
     assert "nodes" in search
