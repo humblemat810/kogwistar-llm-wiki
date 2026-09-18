@@ -11,6 +11,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ..parsing import parse_statistics as _parse_statistics
+
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -265,10 +267,6 @@ def summarize_semantic_tree(tree: object) -> dict[str, int]:
         "tree_node_count": _count_tree_nodes(tree),
         "tree_leaf_count": _count_tree_leaves(tree),
     }
-
-
-
-from ..parsing import parse_statistics as _parse_statistics
 
 ParseStatisticsRecord = _parse_statistics.ParseStatisticsRecord
 ParseStatisticsStore = _parse_statistics.ParseStatisticsStore
