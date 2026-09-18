@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 
+from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
-from ..namespaces import WorkspaceNamespaces
 from ..utils import _temporary_namespace
 from .semantic_lens import InvestigationOutcome, SemanticLensSnapshot
 

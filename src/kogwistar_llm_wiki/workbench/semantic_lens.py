@@ -16,8 +16,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
-from ..namespaces import GraphSpace, WorkspaceNamespaces
 from ..utils import _temporary_namespace
 from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 

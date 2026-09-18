@@ -23,7 +23,12 @@ from .codex.codex_workbench_agent import (
     CodexCliSettings,
     HostCockpitResponder,
 )
-from .disambiguation_selection import (
+from .configuration.workspace import (
+    GraphSpace,
+    GraphSpaceNamespace,
+    WorkspaceNamespaces,
+)
+from .disambiguation.selection import (
     DefaultDisambiguationReviewPolicy,
     DisambiguationReviewPick,
     DisambiguationReviewSelection,
@@ -103,7 +108,6 @@ from .models import (
     ProjectionEntity,
     ProjectionSnapshot,
 )
-from .namespaces import GraphSpace, GraphSpaceNamespace, WorkspaceNamespaces
 from .otel import LlmWikiTelemetry
 from .policies import LlmWikiPolicies, build_default_policies
 from .settings import SettingsService

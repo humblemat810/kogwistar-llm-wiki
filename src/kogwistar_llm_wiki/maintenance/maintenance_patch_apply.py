@@ -21,8 +21,8 @@ from kogwistar.typing_interfaces import WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
-from ..namespaces import WorkspaceNamespaces
 from ..utils import _temporary_namespace
 from .maintenance_patches import (
     MaintenanceOperationKind,

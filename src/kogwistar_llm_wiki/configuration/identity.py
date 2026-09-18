@@ -1,8 +1,8 @@
-"""Application-owned authentication and workspace authorization boundary.
+"""Authentication and workspace authorization configuration boundary.
 
-The graph/runtime remains owned by Kogwistar.  This module only translates an
-HTTP/MCP bearer credential into the claims context that Kogwistar already
-understands and applies the llm-wiki workspace boundary before dispatch.
+The graph/runtime remains owned by Kogwistar. This module translates an HTTP
+or MCP bearer credential into the claims context understood by Kogwistar and
+applies the LLM-Wiki workspace boundary before dispatch.
 """
 
 from __future__ import annotations
@@ -66,7 +66,11 @@ def auth_mode() -> str:
 
 def _items(value: object, *, split_words: bool = False) -> set[str]:
     if isinstance(value, str):
-        return {item.strip().lower() for item in (value.split() if split_words else value.split(",")) if item.strip()}
+        return {
+            item.strip().lower()
+            for item in (value.split() if split_words else value.split(","))
+            if item.strip()
+        }
     if isinstance(value, (list, tuple, set, frozenset)):
         return {str(item).strip().lower() for item in value if str(item).strip()}
     return set()
@@ -133,7 +137,9 @@ def authenticate_bearer(value: str | None) -> LlmWikiIdentity | None:
         if not matched_api and not matched_mcp:
             raise IdentityError("invalid bearer token", status=401)
         scopes = _items(
-            os.getenv("LLM_WIKI_MCP_TOKEN_SCOPES", "read,write") if matched_mcp else os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write")
+            os.getenv("LLM_WIKI_MCP_TOKEN_SCOPES", "read,write")
+            if matched_mcp
+            else os.getenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write")
         )
         claims: dict[str, object] = {
             "sub": "llm-wiki-static-client",
@@ -141,14 +147,25 @@ def authenticate_bearer(value: str | None) -> LlmWikiIdentity | None:
             "scope": " ".join(sorted(scopes)),
             "security_scope": os.getenv("LLM_WIKI_SECURITY_SCOPE", "llm-wiki"),
         }
-        return LlmWikiIdentity(claims["sub"], frozenset(scopes), str(claims["role"]), str(claims["security_scope"]), frozenset({"*"}), claims, mode)
+        return LlmWikiIdentity(
+            claims["sub"],
+            frozenset(scopes),
+            str(claims["role"]),
+            str(claims["security_scope"]),
+            frozenset({"*"}),
+            claims,
+            mode,
+        )
     try:
-        claims = verify_jwt(supplied, {
-            "alg": os.getenv("JWT_ALG", "HS256"),
-            "secret": os.getenv("JWT_SECRET"),
-            "iss": os.getenv("JWT_ISS") or None,
-            "aud": os.getenv("JWT_AUD") or None,
-        })
+        claims = verify_jwt(
+            supplied,
+            {
+                "alg": os.getenv("JWT_ALG", "HS256"),
+                "secret": os.getenv("JWT_SECRET"),
+                "iss": os.getenv("JWT_ISS") or None,
+                "aud": os.getenv("JWT_AUD") or None,
+            },
+        )
     except Exception as exc:
         detail = getattr(exc, "detail", "invalid bearer token")
         status = int(getattr(exc, "status_code", 401) or 401)
@@ -167,17 +184,32 @@ def authenticate_bearer(value: str | None) -> LlmWikiIdentity | None:
             or claims.get("allowed_workspaces")
         )
     )
-    security_scope = str(claims.get("security_scope") or claims.get("tenant") or principal).strip().lower()
+    security_scope = str(
+        claims.get("security_scope") or claims.get("tenant") or principal
+    ).strip().lower()
     normalized_claims = dict(claims)
     normalized_claims.setdefault("agent_id", principal)
     normalized_claims.setdefault("role", role)
     normalized_claims.setdefault("security_scope", security_scope)
     if "scope" not in normalized_claims and scopes:
         normalized_claims["scope"] = " ".join(sorted(scopes))
-    return LlmWikiIdentity(principal, scopes, role, security_scope, workspaces, normalized_claims, mode)
+    return LlmWikiIdentity(
+        principal,
+        scopes,
+        role,
+        security_scope,
+        workspaces,
+        normalized_claims,
+        mode,
+    )
 
 
-def authorize(identity: LlmWikiIdentity | None, *, workspace_id: str | None, scope: str) -> None:
+def authorize(
+    identity: LlmWikiIdentity | None,
+    *,
+    workspace_id: str | None,
+    scope: str,
+) -> None:
     if identity is None:
         return
     if not identity.can(scope):
@@ -201,4 +233,11 @@ def claims_context(identity: LlmWikiIdentity | None) -> Iterator[None]:
         reset_claims_ctx(token)
 
 
-__all__ = ["IdentityError", "LlmWikiIdentity", "auth_mode", "authenticate_bearer", "authorize", "claims_context"]
+__all__ = [
+    "IdentityError",
+    "LlmWikiIdentity",
+    "auth_mode",
+    "authenticate_bearer",
+    "authorize",
+    "claims_context",
+]

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
-from ..namespaces import WorkspaceNamespaces
 from ..utils import _temporary_namespace
 from .review_query import MaintenancePatchReport, ReviewQueryService
 
