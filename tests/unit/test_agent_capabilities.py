@@ -83,6 +83,34 @@ def test_agent_capability_fake_payload_flow(pipeline):
     pipeline.engines.close()
 
 
+def test_source_status_exposes_durable_parse_diagnostics(pipeline):
+    gateway = AgentGateway(WorkbenchApi(pipeline))
+    source_uri = "https://example.test/durable-status.txt"
+    gateway.ingest(
+        {
+            "workspace_id": "durable-status",
+            "source_uri": source_uri,
+            "title": "Durable status fixture",
+            "raw_text": "A bounded parser frontier should be inspectable.",
+            "operation_mode": "maintenance_first",
+            "parser_lane": "page_index",
+        }
+    )
+
+    inspected = gateway.source({"workspace_id": "durable-status", "source_uri": source_uri})
+    parse_status = inspected["parse_status"]
+    session = parse_status["session"]
+    assert session["phase"] == "parse_seeded"
+    assert session["frontier_depth_distribution"] == {"0": 1}
+    assert session["frontier_items"][0]["status"] == "pending"
+    assert session["parser"]["lane"] == "page_index"
+    assert session["maintenance_job_ids"]
+    assert parse_status["generations"] == []
+
+    gateway.api.close()
+    pipeline.engines.close()
+
+
 def test_maintain_rejects_unknown_explicit_source_ids_without_partial_enqueue(pipeline):
     gateway = AgentGateway(WorkbenchApi(pipeline))
     with pytest.raises(ValueError, match="do not resolve"):

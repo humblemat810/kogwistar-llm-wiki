@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 from pydantic import ValidationError
@@ -72,6 +74,49 @@ def _commit_member(metadata: InMemoryMetaStore, *, member_id: str = "member-a") 
         member_ids=(member_id,),
     )
     ParseGenerationStore(metadata, workspace_id="demo").commit(generation, commit, [member])
+
+
+def _commit_region(
+    metadata: InMemoryMetaStore,
+    *,
+    generation_id_value: str,
+    parser_profile: str,
+    member_id: str,
+    commit_id: str,
+    start_char: int,
+    end_char: int,
+) -> ParseGenerationMember:
+    generation = ParseGeneration(
+        generation_id=generation_id_value,
+        workspace_id="demo",
+        source_document_id="logical-source",
+        source_revision_id="revision-1",
+        source_digest="digest",
+        revision_document_id="rev-doc",
+        parser_profile=parser_profile,
+        parser_version="1",
+        status="stable",
+        created_at=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+    member = ParseGenerationMember(
+        member_id=member_id,
+        generation_id=generation_id_value,
+        workspace_id="demo",
+        source_document_id="logical-source",
+        source_revision_id="revision-1",
+        revision_document_id="rev-doc",
+        region=_region(start_char, end_char),
+    )
+    commit = ParseGenerationCommit(
+        commit_id=commit_id,
+        generation_id=generation_id_value,
+        workspace_id="demo",
+        source_document_id="logical-source",
+        source_revision_id="revision-1",
+        member_ids=(member_id,),
+    )
+    ParseGenerationStore(metadata, workspace_id="demo").commit(generation, commit, [member])
+    return member
 
 
 def test_parse_evidence_ids_are_stable_but_generation_members_are_event_scoped() -> None:
@@ -156,6 +201,75 @@ def test_parse_view_resolver_uses_legacy_g0_until_a_view_is_activated() -> None:
     assert active.revision_document_id == "rev-doc"
     assert resolver.is_active_revision("logical-source", "rev-doc") is True
     assert resolver.is_active_revision("logical-source", "rev-doc-2") is False
+
+
+def test_selective_reparse_can_replace_one_region_without_dropping_neighbors() -> None:
+    metadata = InMemoryMetaStore()
+    old_a = _commit_region(
+        metadata,
+        generation_id_value="g1",
+        parser_profile="coarse-v1",
+        member_id="old-a",
+        commit_id="commit-a",
+        start_char=0,
+        end_char=10,
+    )
+    old_b = _commit_region(
+        metadata,
+        generation_id_value="g1",
+        parser_profile="coarse-v1",
+        member_id="old-b",
+        commit_id="commit-b",
+        start_char=10,
+        end_char=20,
+    )
+    old_c = _commit_region(
+        metadata,
+        generation_id_value="g1",
+        parser_profile="coarse-v1",
+        member_id="old-c",
+        commit_id="commit-c",
+        start_char=20,
+        end_char=30,
+    )
+    new_b = _commit_region(
+        metadata,
+        generation_id_value="g2",
+        parser_profile="repair-v2",
+        member_id="new-b",
+        commit_id="commit-new-b",
+        start_char=10,
+        end_char=20,
+    )
+    store = ParseViewStore(metadata, workspace_id="demo")
+    store.activate(
+        _view(
+            1,
+            selection=tuple(
+                ParseViewSelection(member_id=member.member_id, generation_id="g1", region=member.region)
+                for member in (old_a, old_b, old_c)
+            ),
+        ),
+        expected_view_version=None,
+    )
+
+    store.activate(
+        _view(
+            2,
+            selection=(
+                ParseViewSelection(member_id=old_a.member_id, generation_id="g1", region=old_a.region),
+                ParseViewSelection(member_id=new_b.member_id, generation_id="g2", region=new_b.region),
+                ParseViewSelection(member_id=old_c.member_id, generation_id="g1", region=old_c.region),
+            ),
+        ),
+        expected_view_version=1,
+    )
+
+    resolved = ParseViewResolver(metadata, workspace_id="demo").resolve("logical-source")
+    assert resolved.view_version == 2
+    assert resolved.member_ids == ("old-a", "new-b", "old-c")
+    assert resolved.generation_ids == ("g1", "g2")
+    assert ParseGenerationStore(metadata, workspace_id="demo").get("g1") is not None
 
 
 def test_parse_view_resolver_requires_selected_member_after_activation() -> None:

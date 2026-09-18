@@ -883,7 +883,11 @@ class MaintenanceWorker(BaseWorker):
                 )
                 generation = ParseGeneration.model_validate(generation_payload)
                 if (
-                    generation.source_digest != session.source_digest
+                    generation.workspace_id != ctx.workspace_id
+                    or generation.generation_id != session.generation_id
+                    or generation.source_document_id != session.source_document_id
+                    or generation.source_revision_id != session.source_revision_id
+                    or generation.source_digest != session.source_digest
                     or generation.revision_document_id != session.revision_document_id
                 ):
                     raise ValueError("layered parser generation is not pinned to the session revision")
@@ -898,6 +902,13 @@ class MaintenanceWorker(BaseWorker):
                 if not isinstance(view_payload, Mapping):
                     raise ValueError("layered parser parse_view must be an object")
                 view = ParseView.model_validate(view_payload)
+                if (
+                    view.workspace_id != ctx.workspace_id
+                    or view.source_document_id != session.source_document_id
+                    or view.source_revision_id != session.source_revision_id
+                    or view.revision_document_id != session.revision_document_id
+                ):
+                    raise ValueError("layered parser ParseView is not pinned to the session source revision")
                 view_store = ParseViewStore(
                     self.engines.conversation.meta_sqlite,
                     workspace_id=ctx.workspace_id,
@@ -1073,8 +1084,15 @@ class MaintenanceWorker(BaseWorker):
             view_store.activate(view, expected_view_version=None)
         elif current.view_id == view.view_id and current.view_version == view.view_version:
             pass
-        elif current.view_version >= view.view_version:
-            raise ParseViewConflict("pending ParseView was superseded before recovery")
+        elif current.view_version > view.view_version:
+            # A concurrent worker won with a newer complete view. The older
+            # pending proposal is no longer actionable, but must be cleared so
+            # the session does not retry forever.
+            recovered = session.model_copy(update={"pending_view": None})
+            recovered_version = store.save(recovered, frontier, expected_version=version)
+            return recovered, frontier, recovered_version
+        elif current.view_version == view.view_version:
+            raise ParseViewConflict("pending ParseView conflicts at the active view version")
         else:
             view_store.activate(view, expected_view_version=current.view_version)
         recovered = session.model_copy(update={"pending_view": None})
@@ -1118,6 +1136,19 @@ class MaintenanceWorker(BaseWorker):
             raise ValueError("immutable source revision has no text to parse")
         if selected.region.end_char > len(raw_text):
             raise ValueError("parse frontier region exceeds immutable source bytes")
+        view_store = ParseViewStore(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=ctx.workspace_id,
+        )
+        current_view = view_store.get(session.source_document_id)
+        if current_view is not None and current_view.revision_document_id != session.revision_document_id:
+            raise ValueError("active ParseView targets a different immutable source revision")
+        if ctx.maintenance_kind == "document_reparse_region":
+            if current_view is None:
+                raise ValueError(
+                    "legacy_evidence_unavailable: targeted reparse requires an active ParseView"
+                )
+            self._validate_reparse_region_coverage(current_view, selected.region)
 
         token_region_chars = (
             session.token_budget * 4 if session.token_budget is not None else session.max_region_chars
@@ -1251,17 +1282,32 @@ class MaintenanceWorker(BaseWorker):
             )
             parser_cache_transaction.promote()
 
-        generation = ParseGeneration(
-            generation_id=session.generation_id,
-            workspace_id=session.workspace_id,
-            source_document_id=session.source_document_id,
-            source_revision_id=session.source_revision_id,
-            source_digest=session.source_digest,
-            revision_document_id=session.revision_document_id,
-            parser_profile=str(state.get("parser_profile") or state.get("parser_lane") or "page_index"),
-            parser_version="llm-wiki-durable-frontier-v1",
-            status="stable",
+        generation_store = ParseGenerationStore(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=ctx.workspace_id,
         )
+        stored_generation = generation_store.get(session.generation_id)
+        if stored_generation is not None:
+            generation = stored_generation[0]
+            if (
+                generation.source_document_id != session.source_document_id
+                or generation.source_revision_id != session.source_revision_id
+                or generation.source_digest != session.source_digest
+                or generation.revision_document_id != session.revision_document_id
+            ):
+                raise ValueError("stored parse generation is not pinned to the session revision")
+        else:
+            generation = ParseGeneration(
+                generation_id=session.generation_id,
+                workspace_id=session.workspace_id,
+                source_document_id=session.source_document_id,
+                source_revision_id=session.source_revision_id,
+                source_digest=session.source_digest,
+                revision_document_id=session.revision_document_id,
+                parser_profile=str(state.get("parser_profile") or state.get("parser_lane") or "page_index"),
+                parser_version="llm-wiki-durable-frontier-v1",
+                status="stable",
+            )
         member = ParseGenerationMember(
             member_id=member_id,
             generation_id=session.generation_id,
@@ -1282,14 +1328,6 @@ class MaintenanceWorker(BaseWorker):
             member_ids=(member_id,),
             consumed_frontier_ids=(selected.frontier_id,),
         )
-        view_store = ParseViewStore(self.engines.conversation.meta_sqlite, workspace_id=ctx.workspace_id)
-        current_view = view_store.get(session.source_document_id)
-        if current_view is not None and current_view.revision_document_id != session.revision_document_id:
-            raise ValueError("active ParseView targets a different immutable source revision")
-        if ctx.maintenance_kind == "document_reparse_region" and current_view is None:
-            raise ValueError(
-                "legacy_evidence_unavailable: targeted reparse requires an active ParseView"
-            )
         overlapping_member_ids = tuple(
             item.member_id
             for item in (current_view.selections if current_view is not None else ())
@@ -1379,6 +1417,31 @@ class MaintenanceWorker(BaseWorker):
             "reconciliation": reconciliation.model_dump(mode="json"),
             "diagnostics": {"phase": "parsed_graph_persisted", "frontier_id": selected.frontier_id},
         }
+
+    @staticmethod
+    def _validate_reparse_region_coverage(
+        current_view: ParseView | None,
+        selected_region: SourceRegion,
+    ) -> None:
+        """Prevent a reparse from dropping an only-partially-covered member."""
+
+        if current_view is None:
+            return
+        partially_replaced = tuple(
+            item.member_id
+            for item in current_view.selections
+            if item.region.start_char < selected_region.end_char
+            and selected_region.start_char < item.region.end_char
+            and (
+                item.region.start_char < selected_region.start_char
+                or item.region.end_char > selected_region.end_char
+            )
+        )
+        if partially_replaced:
+            raise ValueError(
+                "targeted reparse must cover every overlapping active generation member; "
+                "select the existing member or expand the target region"
+            )
 
     @staticmethod
     def _offset_extraction_spans(extraction: GraphExtractionWithIDs, offset: int) -> None:

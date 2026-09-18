@@ -39,6 +39,13 @@ retains its existing retry behavior.
 The Chroma cleanup writer may later tombstone inactive physical objects, but
 cleanup cannot change the active ParseView and is never the visibility fence.
 
+Targeted replacement must cover every active member that it overlaps. A target
+that cuts through the middle of an active member is rejected rather than
+silently removing the old member and leaving an uncovered region. If a worker
+crashes after recording a pending view and another worker has already activated
+a newer view, recovery clears the superseded pending proposal and converges on
+the newer view; equal-version/different-identity conflicts remain errors.
+
 ## Lifecycle
 
 1. Capture the source revision and immutable revision document.
@@ -123,8 +130,10 @@ validation rather than claims made by these provider-free tests.
 - stale revision jobs are rejected before parser work;
 - duplicate delivery is safe through deterministic generation-member event IDs
   and named-projection CAS;
+- generation retries reuse the persisted generation header rather than creating
+  conflicting timestamps for the same generation identity;
 - targeted derivations must keep every grounded span inside the requested
-  immutable revision region;
+  immutable revision region and must not partially replace an active member;
 - maintenance cannot bypass acceptance fences or create recursive maintenance
   jobs during execution.
 
