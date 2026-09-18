@@ -36,8 +36,7 @@ from kogwistar.engine_core import (
     RecoverySurface,
 )
 
-from .maintenance_control import MaintenanceControl, MaintenanceControlState
-from .maintenance_profiles import (
+from .maintenance import (
     MaintenanceProfileLadderDecision,
     add_usage,
     budget_fits,
@@ -48,8 +47,9 @@ from .maintenance_profiles import (
     next_window_reset,
     reset_expired_spend,
     resolve_profile_ladder,
+    select_embedding_exploration,
 )
-from .maintenance_selection import select_embedding_exploration
+from .maintenance.maintenance_control import MaintenanceControl, MaintenanceControlState
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
 from .otel import LlmWikiTelemetry

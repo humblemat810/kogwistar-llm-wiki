@@ -20,7 +20,9 @@ from kogwistar_llm_wiki.ingest_pipeline import (
     build_persistent_namespace_engines,
     build_postgres_namespace_engines,
 )
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
+from kogwistar_llm_wiki.maintenance.maintenance_designs import (
+    materialize_maintenance_designs,
+)
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker

@@ -5,7 +5,7 @@ from enum import StrEnum
 from kogwistar.id_provider import stable_id
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .maintenance_patches import (
+from .maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
     MaintenancePatch,

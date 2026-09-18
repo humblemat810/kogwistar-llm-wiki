@@ -31,32 +31,30 @@ from .dependency_invalidation import (
     plan_dependency_invalidation,
 )
 from .ingest_pipeline import IngestPipeline, IngestPipelineRequest
-from .maintenance_context import (
+from .maintenance import (
+    MaintenanceJobExecutionContext,
+    MaintenanceStrategy,
+    build_default_maintenance_strategy_registry,
+    is_execution_wisdom_kind,
+    operation_category,
+    select_request_candidates,
+    workflow_id_for_maintenance_kind,
+)
+from .maintenance.maintenance_context import (
     append_maintenance_round,
     bound_maintenance_context,
     maintenance_execution_context,
 )
-from .maintenance_designs import materialize_maintenance_designs
-from .maintenance_guards import (
+from .maintenance.maintenance_designs import materialize_maintenance_designs
+from .maintenance.maintenance_guards import (
     MaintenanceGuardDecision,
     SourceRevision,
     evaluate_maintenance_guard,
     required_stage_for_maintenance,
 )
-from .maintenance_patch_apply import apply_maintenance_patch_for_scope
-from .maintenance_patches import MaintenancePatch
-from .maintenance_planner import decide_next_maintenance_phase
-from .maintenance_policy import (
-    is_execution_wisdom_kind,
-    workflow_id_for_maintenance_kind,
-)
-from .maintenance_selection import select_request_candidates
-from .maintenance_statistics import operation_category
-from .maintenance_strategies import (
-    MaintenanceJobExecutionContext,
-    MaintenanceStrategy,
-    build_default_maintenance_strategy_registry,
-)
+from .maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
+from .maintenance.maintenance_patches import MaintenancePatch
+from .maintenance.maintenance_planner import decide_next_maintenance_phase
 from .models import NamespaceEngines
 from .namespaces import WorkspaceNamespaces
 from .parse_generation_store import ParseGenerationStore, ParseGenerationStoreConflict
@@ -460,7 +458,7 @@ class MaintenanceWorker(BaseWorker):
         ns = WorkspaceNamespaces(ctx.workspace_id)
         audit_key = str(
             stable_id(
-                "kogwistar_llm_wiki.maintenance_selection",
+                "kogwistar_llm_wiki.maintenance.maintenance_selection",
                 ctx.workspace_id,
                 ctx.job_id,
                 ctx.payload.get("selection_strategy") or "",

@@ -1,4 +1,4 @@
-from kogwistar_llm_wiki.maintenance_guards import (
+from kogwistar_llm_wiki.maintenance.maintenance_guards import (
     build_source_revision,
     evaluate_maintenance_guard,
 )

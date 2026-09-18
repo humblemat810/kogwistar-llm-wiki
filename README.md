@@ -502,3 +502,9 @@ After a successful ingest/projection run, the most useful manual checks are:
 - projection jobs in the durable meta-store should be `DONE`
 - the projection manifest row should be `ready`
 - the Obsidian vault should contain the expected `.md` files
+
+## Repository map
+
+See [the repository structure guide](doc/repository_structure.md) for source
+ownership, vendored dependency boundaries, test markers, and operational tool
+navigation.

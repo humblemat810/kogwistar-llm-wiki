@@ -79,8 +79,11 @@ from .investigation_history import (
     InvestigationHistoryService,
 )
 from .longrun_parser_worker import run_workflow_layered_parse
-from .maintenance_context import bound_maintenance_context, maintenance_execution_active
-from .maintenance_guards import (
+from .maintenance.maintenance_context import (
+    bound_maintenance_context,
+    maintenance_execution_active,
+)
+from .maintenance.maintenance_guards import (
     SourceRevision,
     build_source_revision,
     readiness_id,
@@ -88,7 +91,7 @@ from .maintenance_guards import (
     source_digest,
     source_revision_document_id,
 )
-from .maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
+from .maintenance.maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
 from .models import (
     IngestPipelineArtifacts,
     IngestPipelineRequest,

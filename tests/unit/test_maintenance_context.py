@@ -5,14 +5,16 @@ import json
 import pytest
 
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-from kogwistar_llm_wiki.maintenance_context import (
+from kogwistar_llm_wiki.maintenance.maintenance_context import (
     MAX_MAINTENANCE_CONTEXT_TOKENS,
     append_maintenance_round,
     bound_maintenance_context,
     maintenance_execution_active,
     maintenance_execution_context,
 )
-from kogwistar_llm_wiki.maintenance_control import configured_default_request_max_rounds
+from kogwistar_llm_wiki.maintenance.maintenance_control import (
+    configured_default_request_max_rounds,
+)
 
 
 def test_default_request_rounds_are_two_and_configurable(monkeypatch) -> None:

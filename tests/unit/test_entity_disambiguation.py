@@ -11,7 +11,7 @@ from kogwistar_llm_wiki.entity_disambiguation import (
     is_review_request_fresh,
     reconcile_disambiguation_candidate,
 )
-from kogwistar_llm_wiki.maintenance_patches import (
+from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
     validate_maintenance_patch,

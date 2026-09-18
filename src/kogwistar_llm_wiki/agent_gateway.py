@@ -15,7 +15,7 @@ from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 from .inspection import build_workspace_quality_report
-from .maintenance_control import configured_default_request_max_rounds
+from .maintenance.maintenance_control import configured_default_request_max_rounds
 from .models import IngestPipelineRequest
 from .otel import LlmWikiTelemetry
 from .parse_generation_store import ParseGenerationStore

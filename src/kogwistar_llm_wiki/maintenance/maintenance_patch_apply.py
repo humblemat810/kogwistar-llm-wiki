@@ -21,6 +21,9 @@ from kogwistar.typing_interfaces import WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..models import NamespaceEngines
+from ..namespaces import WorkspaceNamespaces
+from ..utils import _temporary_namespace
 from .maintenance_patches import (
     MaintenanceOperationKind,
     MaintenancePatch,
@@ -31,9 +34,6 @@ from .maintenance_patches import (
     validate_maintenance_patch,
 )
 from .maintenance_status import graph_status_for_patch
-from .models import NamespaceEngines
-from .namespaces import WorkspaceNamespaces
-from .utils import _temporary_namespace
 
 JsonScalar = str | int | float | bool | None
 EngineUnitOfWork = AbstractContextManager[object | None]

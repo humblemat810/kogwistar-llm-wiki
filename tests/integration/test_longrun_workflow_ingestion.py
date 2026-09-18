@@ -66,9 +66,15 @@ from kogwistar_llm_wiki.longrun_parser_worker import (
     run_longrun_parser_child,
 )
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
-from kogwistar_llm_wiki.maintenance_policy import DERIVED_KNOWLEDGE_WORKFLOW_ID
-from kogwistar_llm_wiki.maintenance_statistics import build_maintenance_statistics
+from kogwistar_llm_wiki.maintenance.maintenance_designs import (
+    materialize_maintenance_designs,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_policy import (
+    DERIVED_KNOWLEDGE_WORKFLOW_ID,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_statistics import (
+    build_maintenance_statistics,
+)
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 from kogwistar_llm_wiki.projection_worker import ProjectionWorker
 from kogwistar_llm_wiki.provider_config import (

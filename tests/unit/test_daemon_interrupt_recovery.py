@@ -10,7 +10,9 @@ from kogwistar_llm_wiki.ingest_pipeline import (
     IngestPipelineRequest,
     build_persistent_namespace_engines,
 )
-from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
+from kogwistar_llm_wiki.maintenance.maintenance_designs import (
+    materialize_maintenance_designs,
+)
 from kogwistar_llm_wiki.namespaces import WorkspaceNamespaces
 
 

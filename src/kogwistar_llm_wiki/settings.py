@@ -11,12 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .identity import auth_mode
-from .maintenance_control import (
-    MaintenanceControl,
-    MaintenanceControlState,
-    configured_default_request_max_rounds,
-)
-from .maintenance_profiles import (
+from .maintenance import (
     configured_maintenance_budget,
     configured_maintenance_enabled,
     configured_maintenance_profile,
@@ -25,6 +20,11 @@ from .maintenance_profiles import (
     configured_token_budget_rate,
     normalize_profile_ladder,
     resolve_profile,
+)
+from .maintenance.maintenance_control import (
+    MaintenanceControl,
+    MaintenanceControlState,
+    configured_default_request_max_rounds,
 )
 from .model_catalog import _safe_endpoint
 from .multimodal_runtime import (
@@ -334,7 +334,7 @@ class SettingsService:
         if "maintenance_budget" in next_desired:
             if not isinstance(next_desired["maintenance_budget"], Mapping):
                 raise ValueError("maintenance_budget must be an object")
-            from .maintenance_profiles import normalize_budget
+            from .maintenance.maintenance_profiles import normalize_budget
 
             next_desired["maintenance_budget"] = normalize_budget(next_desired["maintenance_budget"])
         if (

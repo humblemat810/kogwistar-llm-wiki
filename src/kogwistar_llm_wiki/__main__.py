@@ -228,7 +228,9 @@ def _read_demo_requests_from_source(args: argparse.Namespace) -> list[tuple[Path
 
 def _cmd_demo(args: argparse.Namespace) -> None:
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
-    from kogwistar_llm_wiki.maintenance_designs import materialize_maintenance_designs
+    from kogwistar_llm_wiki.maintenance.maintenance_designs import (
+        materialize_maintenance_designs,
+    )
     from kogwistar_llm_wiki.namespaces import GraphSpace
     from kogwistar_llm_wiki.worker import MaintenanceWorker
 
@@ -444,7 +446,7 @@ def _cmd_daemon_maintenance(args: argparse.Namespace) -> None:
 
 def _cmd_maintenance_control(args: argparse.Namespace) -> None:
     """Change maintenance modes without opening the database or HTTP API."""
-    from .maintenance_control import send_control_command
+    from .maintenance.maintenance_control import send_control_command
 
     if args.status:
         result = send_control_command(

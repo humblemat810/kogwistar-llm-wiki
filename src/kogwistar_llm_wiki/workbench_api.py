@@ -22,8 +22,8 @@ from .compose_config import (
 )
 from .ingest_pipeline import IngestPipeline
 from .investigation_history import InvestigationHistoryRecord
-from .maintenance_patch_apply import apply_maintenance_patch_for_scope
-from .maintenance_patches import MaintenancePatch
+from .maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
+from .maintenance.maintenance_patches import MaintenancePatch
 from .model_catalog import available_models
 from .multimodal_remote import EmbeddingServiceUnavailable
 from .namespaces import GraphSpace

@@ -5,8 +5,10 @@ from kogwistar.engine_core import AtomicMutationCapability
 from kogwistar.engine_core.models import Grounding, Node, Span
 from pydantic import ValidationError
 
-from kogwistar_llm_wiki.maintenance_patch_apply import apply_maintenance_patch
-from kogwistar_llm_wiki.maintenance_patches import (
+from kogwistar_llm_wiki.maintenance.maintenance_patch_apply import (
+    apply_maintenance_patch,
+)
+from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
     MaintenancePatch,

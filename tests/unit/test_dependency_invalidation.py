@@ -4,7 +4,7 @@ import pytest
 from kogwistar.engine_core.models import Grounding, Node, Span
 
 from kogwistar_llm_wiki.dependency_invalidation import plan_dependency_invalidation
-from kogwistar_llm_wiki.maintenance_patches import (
+from kogwistar_llm_wiki.maintenance.maintenance_patches import (
     MaintenanceIntent,
     MaintenanceOperationKind,
     MaintenancePatch,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.maintenance_strategies import (
+from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     DocumentExpandParseChildrenMaintenanceStrategy,
     ExecutionWisdomMaintenanceStrategy,
     GraphPatchApplyMaintenanceStrategy,
