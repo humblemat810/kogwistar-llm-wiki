@@ -6,6 +6,7 @@ from dataclasses import dataclass
 DEFAULT_DOCUMENT_MAINTENANCE_PLAN: tuple[str, ...] = (
     "document_seed_graph",
     "document_parse_graph",
+    "document_expand_parse_children",
     "document_propose_crosslinks",
     "document_validate_crosslinks",
 )
@@ -43,6 +44,11 @@ def decide_next_maintenance_phase(
     claimed maintenance job.
     """
     plan = normalize_maintenance_plan(payload.get("maintenance_plan"))
+    # Older/direct parser lanes remain one-shot. Durable layered and explicit
+    # reparse requests must pass through the bounded frontier phase before
+    # crosslink work can observe a completed interpretation.
+    if not bool(payload.get("durable_layered_parse")):
+        plan = tuple(kind for kind in plan if kind != "document_expand_parse_children")
     current_kind = str(completed_kind).strip()
     current_index = int(payload.get("maintenance_phase_index") or 0)
     completed_rounds = int(payload.get("maintenance_round") or 0)

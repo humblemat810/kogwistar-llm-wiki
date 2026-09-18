@@ -15,6 +15,7 @@ from kogwistar.logical_refs import logical_ref_from_entity
 
 from .models import NamespaceEngines
 from .namespaces import GraphSpace, WorkspaceNamespaces
+from .parse_views import ParseViewResolver
 from .utils import _temporary_namespace
 
 
@@ -60,6 +61,10 @@ class GraphSpaceQueryService:
 
         results: list[GraphSpaceQueryResult] = []
         seen_ids: set[str] = set()
+        resolver = ParseViewResolver(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+        )
         for graph_space in requested_spaces:
             for namespace, resolved_space in self._candidate_namespaces(ns, graph_space):
                 nodes = self._read_nodes(
@@ -68,6 +73,10 @@ class GraphSpaceQueryService:
                     where=query_where,
                 )
                 for node in nodes:
+                    if graph_space == GraphSpace.SOURCE and not self._is_active_source_node(
+                        node, resolver
+                    ):
+                        continue
                     result = self._result_for_node(
                         node=node,
                         graph_space=graph_space,
@@ -85,6 +94,14 @@ class GraphSpaceQueryService:
                         seen_ids.add(node_id)
                     results.append(result)
         return results
+
+    @staticmethod
+    def _is_active_source_node(node: Node, resolver: ParseViewResolver) -> bool:
+        metadata = dict(getattr(node, "metadata", None) or {})
+        source_id = str(metadata.get("source_document_id") or "").strip()
+        if not source_id:
+            return True
+        return resolver.is_active_metadata(source_id, metadata)
 
     def _normalize_graph_space(self, graph_space: GraphSpace | str) -> GraphSpace:
         if isinstance(graph_space, GraphSpace):

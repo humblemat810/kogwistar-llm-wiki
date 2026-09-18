@@ -18,6 +18,8 @@ from .inspection import build_workspace_quality_report
 from .maintenance_control import configured_default_request_max_rounds
 from .models import IngestPipelineRequest
 from .otel import LlmWikiTelemetry
+from .parse_session_store import ParseSessionStore
+from .parse_views import ParseViewResolver, parse_session_id
 from .utils import _temporary_namespace
 from .workbench_api import WorkbenchApi
 
@@ -292,6 +294,12 @@ class AgentGateway:
         metadata = _redact_source_text(dict(source_item["metadata"]))
         if isinstance(metadata, dict):
             metadata["provenance"] = _decode_metadata_mapping(metadata.get("provenance"))
+        parse_status = self._parse_status(
+            workspace_id=workspace_id,
+            source_document_id=source_document_id,
+            metadata=metadata,
+            request=request,
+        )
         latest_revision = max(revisions, key=lambda node: int((getattr(node, "metadata", {}) or {}).get("created_at_ms") or 0), default=None)
         return {
             "exists": True,
@@ -304,7 +312,84 @@ class AgentGateway:
             "revision": _node_json(latest_revision, redact_source_text=True),
             "revisions": [_node_json(node, redact_source_text=True) for node in revisions],
             "readiness": [_node_json(node, redact_source_text=True) for node in readiness],
+            "parse_status": parse_status,
             "maintenance_jobs": jobs,
+        }
+
+    def _parse_status(
+        self,
+        *,
+        workspace_id: str,
+        source_document_id: str,
+        metadata: Mapping[str, object],
+        request: IngestPipelineRequest,
+    ) -> dict[str, object]:
+        """Expose durable session/view state without exposing raw source bytes."""
+
+        revision_id = str(metadata.get("source_revision_id") or "")
+        parser_profile = str(metadata.get("parser_lane") or request.parser_lane)
+        session_id = str(metadata.get("parse_session_id") or "")
+        if not session_id and revision_id:
+            session_id = parse_session_id(
+                workspace_id=workspace_id,
+                source_document_id=source_document_id,
+                source_revision_id=revision_id,
+                parser_profile=parser_profile,
+            )
+        session_store = ParseSessionStore(
+            self.api.pipeline.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+        )
+        session_rows = session_store.list_for_source(source_document_id)
+        if not session_rows and session_id:
+            stored = session_store.get(session_id)
+            if stored is not None:
+                session_rows = [stored]
+
+        def session_payload(
+            stored: tuple[object, list[object], int],
+        ) -> dict[str, object]:
+            session, frontier, version = stored
+            counts: dict[str, int] = {}
+            for item in frontier:
+                status = getattr(getattr(item, "status", None), "value", "unknown")
+                counts[status] = counts.get(status, 0) + 1
+            return {
+                "session_id": session.session_id,
+                "phase": session.phase.value,
+                "source_revision_id": session.source_revision_id,
+                "revision_document_id": session.revision_document_id,
+                "generation_id": session.generation_id,
+                "max_depth": session.max_depth,
+                "max_frontier_items": session.max_frontier_items,
+                "max_parser_calls": session.max_parser_calls,
+                "max_region_chars": session.max_region_chars,
+                "parser_calls": session.parser_calls,
+                "frontier_counts": counts,
+                "frontier_ids": list(session.frontier_ids),
+                "last_progress_at": session.last_progress_at.isoformat(),
+                "projection_version": version,
+            }
+
+        sessions_payload = [session_payload(row) for row in session_rows]
+        view = ParseViewResolver(
+            self.api.pipeline.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+        ).resolve(
+            source_document_id,
+            fallback_revision_document_id=str(metadata.get("revision_document_id") or ""),
+        )
+        return {
+            "session": sessions_payload[0] if sessions_payload else None,
+            "sessions": sessions_payload,
+            "active_view": {
+                "view_id": view.view_id,
+                "view_version": view.view_version,
+                "revision_document_id": view.revision_document_id,
+                "generation_ids": list(view.generation_ids),
+                "member_ids": list(view.member_ids),
+                "is_legacy": view.is_legacy,
+            },
         }
 
     def maintain(self, arguments: Mapping[str, Any]) -> dict[str, object]:
@@ -317,6 +402,9 @@ class AgentGateway:
         maintenance_context = arguments.get("maintenance_context")
         if maintenance_context is not None and not isinstance(maintenance_context, Mapping):
             raise TypeError("maintenance_context must be an object")
+        parse_target = arguments.get("parse_target")
+        if parse_target is not None and not isinstance(parse_target, Mapping):
+            raise TypeError("parse_target must be an object")
         max_rounds = arguments.get("max_rounds")
         if max_rounds is not None and (
             isinstance(max_rounds, bool) or not isinstance(max_rounds, int) or max_rounds < 0
@@ -362,6 +450,7 @@ class AgentGateway:
                 seed_node_ids=[str(value) for value in raw_seed_ids if str(value).strip()],
                 maintenance_context=maintenance_context,
                 max_rounds=max_rounds,
+                parse_target=parse_target,
             )
             jobs.append(job_id)
         return {
@@ -477,6 +566,9 @@ class AgentGateway:
             raise ValueError("provenance must be an object when supplied")
         if policy == "required" and not isinstance(provenance, Mapping):
             raise ValueError("required provenance was not supplied")
+        parse_limits = arguments.get("parse_limits") or {}
+        if not isinstance(parse_limits, Mapping):
+            raise TypeError("parse_limits must be an object when supplied")
         if isinstance(provenance, Mapping):
             _validate_supplied_provenance(
                 provenance,
@@ -505,6 +597,7 @@ class AgentGateway:
             llm_model=str(arguments.get("llm_model")) if arguments.get("llm_model") is not None else None,
             provenance_policy=policy,
             provenance=dict(provenance) if isinstance(provenance, Mapping) else None,
+            parse_limits=dict(parse_limits),
         )
         declared_source_id = str((provenance or {}).get("source_document_id") or "").strip() if isinstance(provenance, Mapping) else ""
         if declared_source_id:
@@ -535,6 +628,7 @@ class AgentGateway:
             promotion_mode=str(metadata.get("promotion_mode") or "pending"),
             provenance_policy=str(metadata.get("provenance_policy") or "optional"),
             provenance=_decode_metadata_mapping(metadata.get("provenance")),
+            parse_limits=dict(metadata.get("parse_limits") or {}),
         )
 
     def _source_documents(self, workspace_id: str) -> list[dict[str, object]]:
@@ -543,20 +637,70 @@ class AgentGateway:
             # Source discovery must not lose records because revision and
             # readiness artifacts consume an arbitrary fixed page size.
             nodes = self.api.pipeline.engines.kg.read.get_nodes(limit=None)
-        result: list[dict[str, object]] = []
-        seen: set[str] = set()
+        resolver = ParseViewResolver(
+            self.api.pipeline.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+        )
+        candidates_by_source: dict[str, list[tuple[int, str, dict[str, object]]]] = {}
         for node in nodes:
             metadata = dict(getattr(node, "metadata", {}) or {})
             if metadata.get("graph_space") != "source" and metadata.get("artifact_kind") != "source_revision":
                 continue
-            source_id = str(metadata.get("source_document_id") or metadata.get("doc_id") or "").strip()
+            declared_workspace = str(metadata.get("workspace_id") or "").strip()
+            if declared_workspace and declared_workspace != workspace_id:
+                continue
+            source_id = str(
+                metadata.get("logical_source_document_id")
+                or metadata.get("source_document_id")
+                or metadata.get("doc_id")
+                or ""
+            ).strip()
             raw_text = metadata.get("source_raw_text")
             if not isinstance(raw_text, str):
                 raw_text = getattr(node, "content", None)
-            if not source_id or not isinstance(raw_text, str) or source_id in seen:
+            if not source_id or not isinstance(raw_text, str):
                 continue
-            seen.add(source_id)
-            result.append({"id": source_id, "metadata": metadata, "content": raw_text})
+            revision_document_id = str(metadata.get("revision_document_id") or "").strip()
+            if not revision_document_id and metadata.get("legacy_alias"):
+                revision_document_id = source_id
+            try:
+                created_at_ms = int(metadata.get("created_at_ms") or 0)
+            except (TypeError, ValueError):
+                created_at_ms = 0
+            candidate = {
+                "id": source_id,
+                "metadata": metadata,
+                "content": raw_text,
+                "revision_document_id": revision_document_id,
+            }
+            candidates_by_source.setdefault(source_id, []).append(
+                (created_at_ms, revision_document_id, candidate)
+            )
+
+        result: list[dict[str, object]] = []
+        for source_id, candidates in candidates_by_source.items():
+            fallback_revision = max(candidates, key=lambda item: item[0])[1]
+            resolution = resolver.resolve(
+                source_id,
+                fallback_revision_document_id=fallback_revision,
+            )
+            active = [
+                item
+                for item in candidates
+                if item[1] and item[1] == resolution.revision_document_id
+            ]
+            # Once a ParseView exists, an absent active revision is a
+            # consistency failure, not permission to fall back to stale data.
+            if not active and not resolution.is_legacy:
+                continue
+            selected = max(
+                active or candidates,
+                key=lambda item: (
+                    1 if item[2]["metadata"].get("artifact_kind") == "source_revision" else 0,
+                    item[0],
+                ),
+            )
+            result.append(selected[2])
         return result
 
     def _source_ids_for_topic(self, workspace_id: str, topic: str) -> list[str]:

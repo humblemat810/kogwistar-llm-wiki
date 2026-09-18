@@ -6,7 +6,7 @@ from typing import Literal
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar_obsidian_sink.core.models import ProjectionEntity
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_extension.model_slicing import DtoType, ModeSlicingMixin
 
 
@@ -65,6 +65,7 @@ class IngestPipelineRequest(ModeSlicingMixin, BaseModel):
     llm_model: DtoType[str | None] = None
     provenance_policy: DtoType[Literal["required", "optional", "disabled"]] = "optional"
     provenance: DtoType[dict[str, object] | None] = None
+    parse_limits: DtoType[dict[str, int | float]] = Field(default_factory=dict)
 
 
 @dataclass(slots=True)

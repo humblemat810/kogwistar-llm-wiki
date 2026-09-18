@@ -19,6 +19,7 @@ from kogwistar_obsidian_sink.sinks.obsidian import ObsidianVaultSink
 
 from .models import NamespaceEngines, ObsidianBuildResult, ProjectionSnapshot
 from .namespaces import GraphSpace, WorkspaceNamespaces
+from .parse_views import ParseViewResolver
 from .policies import LlmWikiPolicies, build_default_policies
 from .utils import _temporary_namespace
 
@@ -44,18 +45,24 @@ class ProjectionManager:
     ) -> ProjectionSnapshot:
         """Returns the current graph-space visible state for a workspace."""
         ns = WorkspaceNamespaces(workspace_id)
+        resolver = ParseViewResolver(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+        )
         requested_spaces = self._normalize_graph_spaces(graph_spaces)
         namespaces = [self._namespace_for_graph_space(ns, graph_space) for graph_space in requested_spaces]
         all_nodes = self._read_workspace_nodes(
             workspace_id=workspace_id,
             namespaces=namespaces,
         )
+        all_nodes = [node for node in all_nodes if self._is_active_artifact(node, resolver)]
         # Edge reads are workspace-scoped first, with endpoint filtering kept as a
         # second line of defense for relationship visibility.
         all_edges = self._read_workspace_edges(
             workspace_id=workspace_id,
             namespaces=namespaces,
         )
+        all_edges = [edge for edge in all_edges if self._is_active_artifact(edge, resolver)]
         manifest_ids = self._load_projection_manifest_ids(workspace_id) if requested_spaces == [GraphSpace.CURATED_KG] else None
         adjacency = self._build_adjacency(all_edges)
 
@@ -139,6 +146,14 @@ class ProjectionManager:
                 for node in visible_nodes
             ]
         )
+
+    @staticmethod
+    def _is_active_artifact(artifact: object, resolver: ParseViewResolver) -> bool:
+        metadata = dict(getattr(artifact, "metadata", None) or {})
+        source_id = str(metadata.get("source_document_id") or "").strip()
+        if not source_id:
+            return True
+        return resolver.is_active_metadata(source_id, metadata)
 
     def _normalize_graph_spaces(self, graph_spaces: list[GraphSpace | str] | None) -> list[GraphSpace]:
         spaces = [GraphSpace.CURATED_KG] if graph_spaces is None else graph_spaces

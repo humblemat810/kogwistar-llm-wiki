@@ -73,6 +73,27 @@ def test_guard_blocks_ready_revision_until_required_stage_exists():
     assert decision.reason == "required_stage_missing:parsed_graph_persisted"
 
 
+def test_guard_rejects_a_different_revision_document_even_with_matching_digest():
+    revision = build_source_revision(
+        workspace_id="ws",
+        source_document_id="doc-1",
+        raw_text="v1",
+        attempt_id="attempt-1",
+    )
+
+    decision = evaluate_maintenance_guard(
+        source_revision=revision,
+        requested_revision_id=revision.revision_id,
+        requested_digest=revision.source_digest,
+        requested_revision_document_id="wrong-revision-document",
+        required_stage="parsed_graph_persisted",
+        ready_revision_ids={revision.revision_id},
+    )
+
+    assert decision.status == "stale"
+    assert decision.reason == "source_revision_document_mismatch"
+
+
 def test_worker_fails_closed_when_seed_job_has_no_source_map_readiness(
     pipeline,
     ingest_request,

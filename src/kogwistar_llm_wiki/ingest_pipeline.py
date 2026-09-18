@@ -74,6 +74,7 @@ from .maintenance_guards import (
     readiness_id,
     required_stage_for_maintenance,
     source_digest,
+    source_revision_document_id,
 )
 from .maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
 from .models import (
@@ -96,6 +97,19 @@ from .multimodal_projection import (
 from .multimodal_sources import MultimodalSourceBundle, build_source_bundle
 from .namespaces import GraphSpace, WorkspaceNamespaces
 from .otel import LlmWikiTelemetry
+from .parse_session_store import ParseSessionStore, ParseSessionStoreConflict
+from .parse_views import (
+    ParseFrontierItem,
+    ParseGeneration,
+    ParseSessionPhase,
+    ParseSessionState,
+    ParseTarget,
+    SourceRegion,
+    frontier_id,
+    generation_id,
+    parse_session_id,
+    reparse_session_id,
+)
 from .policies import LlmWikiPolicies, build_default_policies
 from .projection import ProjectionManager
 from .provider_config import normalize_provider_name, resolve_parser_provider_settings
@@ -978,6 +992,21 @@ class IngestPipeline:
             source_document_id=source_document_id,
             namespace=ns.conv_fg,
         )
+        revision = self.source_revision(request=request, source_document_id=source_document_id)
+        parse_document_id = self._parse_document_id_for_request(
+            request=request,
+            source_document_id=source_document_id,
+            revision=revision,
+        )
+        if operation_mode in {"maintenance_first", "hybrid"} or request.parser_lane == "workflow_layered":
+            parse_limits = self._durable_parse_limits(request)
+            self.initialize_durable_parse_session(
+                request=request,
+                source_document_id=source_document_id,
+                revision_document_id=parse_document_id,
+                revision=revision,
+                **parse_limits,
+            )
         if operation_mode == "maintenance_first":
             self.seed_source_map(
                 request=request,
@@ -1012,22 +1041,22 @@ class IngestPipeline:
             parse_started_at = time.perf_counter()
             parse_result = self.parse_source(
                 request=request,
-                source_document_id=source_document_id,
+                source_document_id=parse_document_id,
             )
             parse_runtime_ms = max(0, int((time.perf_counter() - parse_started_at) * 1000))
             self.create_parse_retry_history(
                 request=request,
-                source_document_id=source_document_id,
+                source_document_id=parse_document_id,
                 parse_result=parse_result,
                 namespace=ns.conv_bg,
             )
             graph_extraction = self.translate_parse_result(
                 parse_result=parse_result,
-                source_document_id=source_document_id,
+                source_document_id=parse_document_id,
             )
             self.ingest_parse_result(
                 request=request,
-                source_document_id=source_document_id,
+                source_document_id=parse_document_id,
                 graph_extraction=graph_extraction,
                 namespace=ns.conv_fg,
             )
@@ -1187,6 +1216,42 @@ class IngestPipeline:
             return "document_expand_parse_children"
         return "distill"
 
+    @staticmethod
+    def _durable_parse_limits(request: IngestPipelineRequest) -> dict[str, int | float | None]:
+        """Validate persisted parser bounds before any worker can consume them."""
+
+        raw = dict(request.parse_limits or {})
+        integer_defaults = {
+            "max_depth": 10,
+            "max_frontier_items": 1,
+            "max_parser_calls": 1000,
+            "max_region_chars": 16_384,
+        }
+        unknown = set(raw) - set(integer_defaults) - {"token_budget", "wall_time_seconds"}
+        if unknown:
+            raise ValueError("unsupported parse_limits: " + ", ".join(sorted(unknown)))
+        limits: dict[str, int | float | None] = {}
+        for name, default in integer_defaults.items():
+            value = raw.get(name, default)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"parse_limits.{name} must be a positive integer")
+            limits[name] = value
+        token_budget = raw.get("token_budget")
+        if token_budget is not None:
+            if isinstance(token_budget, bool) or not isinstance(token_budget, int) or token_budget < 1:
+                raise ValueError("parse_limits.token_budget must be a positive integer")
+            limits["token_budget"] = token_budget
+        wall_time_seconds = raw.get("wall_time_seconds")
+        if wall_time_seconds is not None:
+            if (
+                isinstance(wall_time_seconds, bool)
+                or not isinstance(wall_time_seconds, (int, float))
+                or wall_time_seconds <= 0
+            ):
+                raise ValueError("parse_limits.wall_time_seconds must be positive")
+            limits["wall_time_seconds"] = float(wall_time_seconds)
+        return limits
+
     def source_revision(
         self,
         *,
@@ -1225,6 +1290,14 @@ class IngestPipeline:
                     source_document_id=source_document_id,
                     revision_id=str(metadata.get("source_revision_id") or latest.id),
                     source_digest=str(metadata.get("source_digest") or candidate.source_digest),
+                    revision_document_id=str(
+                        metadata.get("revision_document_id")
+                        or source_revision_document_id(
+                            workspace_id=request.workspace_id,
+                            source_document_id=source_document_id,
+                            revision_id=str(metadata.get("source_revision_id") or latest.id),
+                        )
+                    ),
                 )
             else:
                 revision = candidate
@@ -1263,6 +1336,14 @@ class IngestPipeline:
                 source_document_id=source_document_id,
                 revision_id=str(metadata.get("source_revision_id") or latest.id),
                 source_digest=str(metadata.get("source_digest") or digest),
+                revision_document_id=str(
+                    metadata.get("revision_document_id")
+                    or source_revision_document_id(
+                        workspace_id=request.workspace_id,
+                        source_document_id=source_document_id,
+                        revision_id=str(metadata.get("source_revision_id") or latest.id),
+                    )
+                ),
             )
             self._source_revisions[(request.workspace_id, source_document_id)] = revision
             return revision
@@ -1291,7 +1372,7 @@ class IngestPipeline:
         )
         node = self._artifact_node(
             request=request,
-            source_document_id=source_document_id,
+            source_document_id=revision.revision_document_id or source_document_id,
             namespace=ns.source_space,
             node_id=node_id,
             artifact_kind="source_readiness",
@@ -1300,6 +1381,8 @@ class IngestPipeline:
             label=f"Source Readiness: {stage}",
             summary=f"Source revision is ready for {stage}.",
             extra_metadata={
+                "source_document_id": revision.source_document_id,
+                "source_revision_document_id": revision.revision_document_id,
                 "source_revision_id": revision.revision_id,
                 "source_digest": revision.source_digest,
                 "readiness_stage": stage,
@@ -1312,12 +1395,169 @@ class IngestPipeline:
                 self.engines.kg.write.add_node(node)
         return node_id
 
+    def initialize_durable_parse_session(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        revision_document_id: str,
+        revision: SourceRevision | None = None,
+        max_depth: int = 10,
+        max_frontier_items: int = 1,
+        max_parser_calls: int = 1000,
+        max_region_chars: int = 16_384,
+        token_budget: int | None = None,
+        wall_time_seconds: float | None = None,
+        parser_profile: str | None = None,
+        initial_region: SourceRegion | None = None,
+        session_id_override: str | None = None,
+    ) -> ParseSessionState:
+        """Create idempotent app-owned state for restartable layered parsing."""
+
+        revision = revision or self.source_revision(
+            request=request,
+            source_document_id=source_document_id,
+        )
+        resolved_profile = parser_profile or request.parser_lane
+        if max_parser_calls < 1:
+            raise ValueError("max_parser_calls must be positive")
+        if max_region_chars < 1:
+            raise ValueError("max_region_chars must be positive")
+        if token_budget is not None and token_budget < 1:
+            raise ValueError("token_budget must be positive")
+        if wall_time_seconds is not None and wall_time_seconds <= 0:
+            raise ValueError("wall_time_seconds must be positive")
+        session_id = session_id_override or parse_session_id(
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            source_revision_id=revision.revision_id,
+            parser_profile=resolved_profile,
+        )
+        generation = generation_id(
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            source_revision_id=revision.revision_id,
+            parser_profile=resolved_profile,
+            derivation_id=session_id,
+        )
+        store = ParseSessionStore(
+            self.engines.conversation.meta_sqlite,
+            workspace_id=request.workspace_id,
+        )
+        existing = store.get(session_id)
+        if existing is not None:
+            return existing[0]
+        end_char = max(len(request.raw_text), 1)
+        region = initial_region or SourceRegion(
+            source_document_id=revision_document_id,
+            start_char=0,
+            end_char=end_char,
+        )
+        if region.source_document_id != revision_document_id or region.end_char > end_char:
+            raise ValueError("initial parse region must be within the immutable revision document")
+        frontier = ParseFrontierItem(
+            frontier_id=frontier_id(session_id=session_id, region=region, ordinal=0),
+            session_id=session_id,
+            generation_id=generation,
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            source_revision_id=revision.revision_id,
+            revision_document_id=revision_document_id,
+            region=region,
+            depth=0,
+            ordinal=0,
+        )
+        session = ParseSessionState(
+            session_id=session_id,
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            source_revision_id=revision.revision_id,
+            source_digest=revision.source_digest,
+            revision_document_id=revision_document_id,
+            generation_id=generation,
+            phase=ParseSessionPhase.SEEDED,
+            frontier_ids=(frontier.frontier_id,),
+            max_depth=max_depth,
+            max_frontier_items=max_frontier_items,
+            max_parser_calls=max_parser_calls,
+            max_region_chars=max_region_chars,
+            token_budget=token_budget,
+            wall_time_seconds=wall_time_seconds,
+            parser_state={
+                "schema_version": 1,
+                "source_revision_document_id": revision_document_id,
+                "source_uri": request.source_uri,
+                "title": request.title,
+                "source_format": request.source_format,
+                "parser_mode": request.parser_mode,
+                "parser_lane": request.parser_lane,
+                "parser_profile": resolved_profile,
+                "promotion_mode": request.promotion_mode,
+                "llm_provider": request.llm_provider,
+                "llm_model": request.llm_model,
+            },
+        )
+        try:
+            store.save(session, [frontier], expected_version=None)
+        except ParseSessionStoreConflict:
+            # Another process may have initialized this deterministic session
+            # between our read and first CAS. Reuse its durable state.
+            existing = store.get(session_id)
+            if existing is None:
+                raise
+            return existing[0]
+        generation_evidence = ParseGeneration(
+            generation_id=generation,
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            source_revision_id=revision.revision_id,
+            source_digest=revision.source_digest,
+            revision_document_id=revision_document_id,
+            parser_profile=resolved_profile,
+            parser_version="llm-wiki-layered-contract-v1",
+            status="seeded",
+        )
+        node = self._artifact_node(
+            request=request,
+            source_document_id=revision_document_id,
+            namespace=self.namespaces_for(request.workspace_id).source_space,
+            node_id=generation,
+            artifact_kind="parse_generation",
+            lane="background",
+            visibility="internal",
+            label=f"Parse Generation: {request.title}",
+            summary="Immutable coarse parse generation evidence.",
+            extra_metadata={
+                **generation_evidence.model_dump(mode="json"),
+                "parse_session_id": session_id,
+                "frontier_ids": [frontier.frontier_id],
+            },
+        )
+        with _temporary_namespace(self.engines.kg, self.namespaces_for(request.workspace_id).source_space):
+            if not self.engines.kg.read.node_exists(ids=[generation]):
+                self.engines.kg.write.add_node(node)
+        self.record_source_readiness(
+            request=request,
+            source_document_id=source_document_id,
+            stage="parse_seeded",
+        )
+        return session
+
     def register_source(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> None:
         revision = self.begin_source_revision(request=request, source_document_id=source_document_id)
         source_namespace = self.namespaces_for(request.workspace_id).source_space
+        revision_document_id = revision.revision_document_id or source_revision_document_id(
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            revision_id=revision.revision_id,
+        )
         source_metadata = {
             "workspace_id": request.workspace_id,
             "graph_space": "source",
+            "logical_source_document_id": source_document_id,
+            "source_revision_id": revision.revision_id,
+            "source_digest": revision.source_digest,
+            "revision_document_id": revision_document_id,
             "source_uri": request.source_uri,
             "title": request.title,
             "source_format": request.source_format,
@@ -1327,11 +1567,12 @@ class IngestPipeline:
             "promotion_mode": request.promotion_mode,
             "llm_provider": request.llm_provider,
             "llm_model": request.llm_model,
+            "parse_limits": dict(request.parse_limits or {}),
             "provenance_policy": request.provenance_policy,
             "provenance": _metadata_digest_value(dict(request.provenance or {})),
         }
-        source_document = Document(
-            id=source_document_id,
+        revision_document = Document(
+            id=revision_document_id,
             content=request.raw_text,
             type="text",
             metadata=dict(source_metadata),
@@ -1339,19 +1580,41 @@ class IngestPipeline:
         compatibility_metadata = dict(source_metadata)
         compatibility_metadata["legacy_namespace"] = namespace
         compatibility_document = Document(
-            id=source_document_id,
+            id=revision_document_id,
             content=request.raw_text,
             type="text",
             metadata=compatibility_metadata,
         )
 
         with _temporary_namespace(self.engines.kg, source_namespace):
-            self.engines.kg.write.add_document(source_document)
+            if not self._document_exists(self.engines.kg, revision_document_id):
+                self.engines.kg.write.add_document(revision_document)
+            # The logical ID remains a read-only compatibility alias. It is
+            # intentionally never overwritten when a later revision arrives.
+            if not self._document_exists(self.engines.kg, source_document_id):
+                self.engines.kg.write.add_document(
+                    Document(
+                        id=source_document_id,
+                        content=request.raw_text,
+                        type="text",
+                        metadata={**source_metadata, "legacy_alias": True},
+                    )
+                )
         with _temporary_namespace(self.engines.conversation, namespace):
-            self.engines.conversation.write.add_document(compatibility_document)
+            if not self._document_exists(self.engines.conversation, revision_document_id):
+                self.engines.conversation.write.add_document(compatibility_document)
+            if not self._document_exists(self.engines.conversation, source_document_id):
+                self.engines.conversation.write.add_document(
+                    Document(
+                        id=source_document_id,
+                        content=request.raw_text,
+                        type="text",
+                        metadata={**compatibility_metadata, "legacy_alias": True},
+                    )
+                )
         revision_node = self._artifact_node(
             request=request,
-            source_document_id=source_document_id,
+            source_document_id=revision_document_id,
             namespace=source_namespace,
             node_id=revision.revision_id,
             artifact_kind="source_revision",
@@ -1360,8 +1623,11 @@ class IngestPipeline:
             label=f"Source Revision: {request.title}",
             summary="Authoritative source revision fence for maintenance jobs.",
             extra_metadata={
+                "source_document_id": source_document_id,
+                "source_revision_document_id": revision_document_id,
                 "source_revision_id": revision.revision_id,
                 "source_digest": revision.source_digest,
+                "revision_document_id": revision_document_id,
                 "revision_status": "current",
                 "source_raw_text": request.raw_text,
                 "source_format": request.source_format,
@@ -1385,6 +1651,12 @@ class IngestPipeline:
         )
 
     def seed_source_map(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
+        revision = self.source_revision(request=request, source_document_id=source_document_id)
+        revision_document_id = revision.revision_document_id or source_revision_document_id(
+            workspace_id=request.workspace_id,
+            source_document_id=source_document_id,
+            revision_id=revision.revision_id,
+        )
         source_namespace = self.namespaces_for(request.workspace_id).source_space
         source_map_digest = hashlib.sha256((request.raw_text or "").encode("utf-8")).hexdigest()
         node_id = str(
@@ -1396,6 +1668,11 @@ class IngestPipeline:
             )
         )
         seed_metadata = {
+            # Keep the stable ID as the logical source locator while grounding
+            # the seed span and revision fence in immutable bytes.
+            "source_document_id": self._source_document_id(request),
+            "source_revision_document_id": revision_document_id,
+            "source_revision_id": revision.revision_id,
             "graph_space": "source",
             "operation_mode": self._operation_mode(request),
             "graph_status": "seeded",
@@ -1405,7 +1682,7 @@ class IngestPipeline:
         }
         source_seed = self._artifact_node(
             request=request,
-            source_document_id=source_document_id,
+            source_document_id=revision_document_id,
             namespace=source_namespace,
             node_id=node_id,
             artifact_kind="source_map_seed",
@@ -1417,7 +1694,7 @@ class IngestPipeline:
         )
         compatibility_seed = self._artifact_node(
             request=request,
-            source_document_id=source_document_id,
+            source_document_id=revision_document_id,
             namespace=namespace,
             node_id=node_id,
             artifact_kind="source_map_seed",
@@ -1830,6 +2107,33 @@ class IngestPipeline:
             )
         return {"repaired_count": repaired_count, "rejected_count": rejected_count}
 
+    @staticmethod
+    def _validate_parse_region_spans(
+        *,
+        graph_extraction: GraphExtractionWithIDs,
+        source_document_id: str,
+        parse_region: SourceRegion,
+    ) -> None:
+        """Reject grounded output that escapes a targeted reparse region."""
+
+        for entity in [*(graph_extraction.nodes or []), *(graph_extraction.edges or [])]:
+            for mention in entity.mentions or []:
+                for span in mention.spans or []:
+                    if span.doc_id != source_document_id:
+                        raise ValueError(
+                            "targeted parse span points to a different revision document: "
+                            f"expected={source_document_id!r} got={span.doc_id!r}"
+                        )
+                    if (
+                        span.start_char < parse_region.start_char
+                        or span.end_char > parse_region.end_char
+                    ):
+                        raise ValueError(
+                            "targeted parse span escapes its requested source region: "
+                            f"span=({span.start_char},{span.end_char}) "
+                            f"region=({parse_region.start_char},{parse_region.end_char})"
+                        )
+
     def ingest_parse_result(
         self,
         *,
@@ -1837,8 +2141,22 @@ class IngestPipeline:
         source_document_id: str,
         graph_extraction: GraphExtractionWithIDs,
         namespace: str,
+        parse_generation_id: str | None = None,
+        parse_generation_member_id: str | None = None,
+        parse_region: SourceRegion | None = None,
     ) -> None:
         source_namespace = self.namespaces_for(request.workspace_id).source_space
+        if parse_generation_member_id:
+            graph_extraction = self._scope_generation_extraction_ids(
+                graph_extraction,
+                parse_generation_member_id=parse_generation_member_id,
+            )
+        if parse_region is not None:
+            self._validate_parse_region_spans(
+                graph_extraction=graph_extraction,
+                source_document_id=source_document_id,
+                parse_region=parse_region,
+            )
         self._trace_step(
             "ingest_parse_result_start",
             request=request,
@@ -1851,6 +2169,9 @@ class IngestPipeline:
             request=request,
             source_document_id=source_document_id,
             graph_extraction=graph_extraction,
+            parse_generation_id=parse_generation_id,
+            parse_generation_member_id=parse_generation_member_id,
+            parse_region=parse_region,
         )
         self._repair_graph_extraction_spans(
             graph_extraction=source_parsed,
@@ -1862,6 +2183,9 @@ class IngestPipeline:
             source_document_id=source_document_id,
             graph_extraction=source_parsed,
             legacy_namespace=namespace,
+            parse_generation_id=parse_generation_id,
+            parse_generation_member_id=parse_generation_member_id,
+            parse_region=parse_region,
         )
 
         with _temporary_namespace(self.engines.kg, source_namespace):
@@ -1901,6 +2225,71 @@ class IngestPipeline:
             namespace=namespace,
         )
 
+    @staticmethod
+    def _scope_generation_extraction_ids(
+        graph_extraction: GraphExtractionWithIDs,
+        *,
+        parse_generation_member_id: str,
+    ) -> GraphExtractionWithIDs:
+        """Give derived evidence event IDs scoped to one generation member.
+
+        Semantic IDs remain in metadata as references.  Kogwistar's graph
+        entity IDs are event identities, so reusing parser IDs here would make
+        two derivations appear to be one mutable source extraction.  The
+        shape-based key also makes a retry with a different queue job
+        idempotent without depending on a provider-generated UUID.
+        """
+
+        enriched = graph_extraction.model_copy(deep=True)
+        node_ids: dict[str, str] = {}
+        for ordinal, node in enumerate(enriched.nodes or []):
+            semantic_id = str(getattr(node, "id", "") or "")
+            shape = node.model_dump(dump_format="json", exclude={"id"})
+            event_id = str(
+                stable_id(
+                    "kogwistar_llm_wiki.parse_generation_node",
+                    parse_generation_member_id,
+                    str(ordinal),
+                    json.dumps(shape, sort_keys=True, separators=(",", ":")),
+                )
+            )
+            if semantic_id:
+                node_ids[semantic_id] = event_id
+            node.metadata = {
+                **dict(getattr(node, "metadata", {}) or {}),
+                "semantic_id": semantic_id or None,
+                "parse_generation_event_id": event_id,
+            }
+            node.id = event_id
+
+        edge_ids: dict[str, str] = {}
+        for ordinal, edge in enumerate(enriched.edges or []):
+            semantic_id = str(getattr(edge, "id", "") or "")
+            shape = edge.model_dump(dump_format="json", exclude={"id"})
+            event_id = str(
+                stable_id(
+                    "kogwistar_llm_wiki.parse_generation_edge",
+                    parse_generation_member_id,
+                    str(ordinal),
+                    json.dumps(shape, sort_keys=True, separators=(",", ":")),
+                )
+            )
+            if semantic_id:
+                edge_ids[semantic_id] = event_id
+            edge.metadata = {
+                **dict(getattr(edge, "metadata", {}) or {}),
+                "semantic_id": semantic_id or None,
+                "parse_generation_event_id": event_id,
+            }
+            edge.id = event_id
+
+        for edge in enriched.edges or []:
+            edge.source_ids = [node_ids.get(value, value) for value in edge.source_ids]
+            edge.target_ids = [node_ids.get(value, value) for value in edge.target_ids]
+            edge.source_edge_ids = [edge_ids.get(value, value) for value in (edge.source_edge_ids or [])]
+            edge.target_edge_ids = [edge_ids.get(value, value) for value in (edge.target_edge_ids or [])]
+        return enriched
+
     def create_maintenance_request(
         self,
         *,
@@ -1914,6 +2303,7 @@ class IngestPipeline:
         seed_node_ids: Sequence[str] | None = None,
         maintenance_context: Mapping[str, object] | None = None,
         max_rounds: int | None = None,
+        parse_target: Mapping[str, object] | ParseTarget | None = None,
     ) -> str:
         if maintenance_execution_active():
             raise RuntimeError(
@@ -1924,6 +2314,56 @@ class IngestPipeline:
         seed_node_ids = [str(value) for value in (seed_node_ids or [source_document_id]) if str(value).strip()]
         topic = str(topic or "").strip() or None
         revision = self.source_revision(request=request, source_document_id=source_document_id)
+        target = (
+            parse_target
+            if isinstance(parse_target, ParseTarget)
+            else ParseTarget.model_validate(parse_target)
+            if parse_target is not None
+            else None
+        )
+        if target is not None:
+            if maintenance_kind != "document_reparse_region":
+                raise ValueError("parse_target requires maintenance_kind='document_reparse_region'")
+            if (
+                target.source_document_id != source_document_id
+                or target.source_revision_id != revision.revision_id
+                or target.revision_document_id != (revision.revision_document_id or source_document_id)
+            ):
+                raise ValueError("parse_target must match the current immutable source revision")
+        if target is None:
+            layered_session_id = parse_session_id(
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                source_revision_id=revision.revision_id,
+                parser_profile=request.parser_lane,
+            )
+        else:
+            layered_session_id = reparse_session_id(
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                source_revision_id=revision.revision_id,
+                parser_profile=target.parser_profile,
+                region=target.region,
+            )
+            # A targeted reparse may be requested for a legacy parse-first
+            # source. Seed grounding first so the normal revision guard is
+            # satisfied without rewriting source evidence.
+            self.seed_source_map(
+                request=request,
+                source_document_id=source_document_id,
+                namespace=namespace,
+            )
+            self.initialize_durable_parse_session(
+                request=request,
+                source_document_id=source_document_id,
+                revision_document_id=target.revision_document_id,
+                revision=revision,
+                parser_profile=(
+                    f"reparse:{target.parser_profile}:{target.region.start_char}:{target.region.end_char}"
+                ),
+                initial_region=target.region,
+                session_id_override=layered_session_id,
+            )
         required_stage = required_stage_for_maintenance(maintenance_kind)
         request_fingerprint = str(
             stable_id(
@@ -1933,6 +2373,7 @@ class IngestPipeline:
                 topic or "",
                 json.dumps(sorted(seed_node_ids), separators=(",", ":")),
                 json.dumps(bound_maintenance_context(maintenance_context), sort_keys=True),
+                target.model_dump_json() if target is not None else "",
             )
         )
         self._trace_step(
@@ -1971,6 +2412,8 @@ class IngestPipeline:
                     "maintenance_kind": maintenance_kind,
                     "source_revision_id": revision.revision_id,
                     "source_digest": revision.source_digest,
+                    "revision_document_id": revision.revision_document_id or source_document_id,
+                    "parse_session_id": layered_session_id,
                     "required_stage": required_stage,
                     "objective": objective,
                     "topic": topic,
@@ -1982,6 +2425,7 @@ class IngestPipeline:
                     "maintenance_max_rounds": max(0, int(max_rounds or 0)),
                     "request_fingerprint": request_fingerprint,
                     "budgets": _metadata_digest_value(dict(budgets or {})),
+                    "parse_target": target.model_dump(mode="json") if target is not None else None,
                 },
             )
             with _temporary_namespace(self.engines.conversation, namespace):
@@ -2024,6 +2468,8 @@ class IngestPipeline:
                     "maintenance_kind": maintenance_kind,
                     "source_revision_id": revision.revision_id,
                     "source_digest": revision.source_digest,
+                    "revision_document_id": revision.revision_document_id or source_document_id,
+                    "parse_session_id": layered_session_id,
                     "required_stage": required_stage,
                     "objective": objective,
                     "topic": topic,
@@ -2035,6 +2481,7 @@ class IngestPipeline:
                     "maintenance_max_rounds": max(0, int(max_rounds or 0)),
                     "request_fingerprint": request_fingerprint,
                     "budgets": dict(budgets or {}),
+                    "parse_target": target.model_dump(mode="json") if target is not None else None,
                 },
                 idempotency_key=lane_idempotency_key,
             )
@@ -2065,6 +2512,7 @@ class IngestPipeline:
                 maintenance_kind=maintenance_kind,
                 source_revision_id=revision.revision_id,
                 source_digest=revision.source_digest,
+                revision_document_id=revision.revision_document_id or source_document_id,
                 required_stage=required_stage,
                 objective=objective,
                 budgets=budgets,
@@ -2072,6 +2520,8 @@ class IngestPipeline:
                 seed_node_ids=seed_node_ids,
                 maintenance_context=maintenance_context,
                 max_rounds=max_rounds,
+                parse_target=target,
+                parse_session_id_override=layered_session_id,
             )
         self._trace_step(
             "create_maintenance_request_complete",
@@ -2536,6 +2986,7 @@ class IngestPipeline:
         maintenance_kind: str = "distill",
         source_revision_id: str = "",
         source_digest: str = "",
+        revision_document_id: str = "",
         required_stage: str = "parsed_graph_persisted",
         objective: str | None = None,
         budgets: Mapping[str, object] | None = None,
@@ -2543,6 +2994,8 @@ class IngestPipeline:
         seed_node_ids: Sequence[str] | None = None,
         maintenance_context: Mapping[str, object] | None = None,
         max_rounds: int | None = None,
+        parse_target: ParseTarget | None = None,
+        parse_session_id_override: str | None = None,
     ) -> str:
         if maintenance_execution_active():
             raise RuntimeError(
@@ -2564,9 +3017,20 @@ class IngestPipeline:
             "lane_message_id": lane_message_id,
             "source_revision_id": source_revision_id,
             "source_digest": source_digest,
+            "revision_document_id": revision_document_id or source_document_id,
+            "parse_session_id": parse_session_id_override or parse_session_id(
+                workspace_id=request.workspace_id,
+                source_document_id=source_document_id,
+                source_revision_id=source_revision_id,
+                parser_profile=request.parser_lane,
+            ),
             "required_stage": required_stage,
             "objective": objective,
             "budgets": dict(budgets or {}),
+            "parse_target": parse_target.model_dump(mode="json") if parse_target is not None else None,
+            "durable_layered_parse": bool(
+                request.parser_lane == "workflow_layered" or parse_target is not None
+            ),
         }
         if request.operation_mode == "maintenance_first" and maintenance_kind == "document_seed_graph":
             payload.update(
@@ -2773,6 +3237,30 @@ class IngestPipeline:
         with _temporary_namespace(engine, namespace):
             return bool(engine.read.node_exists(ids=[str(node_id)]))
 
+    @staticmethod
+    def _document_exists(engine: GraphKnowledgeEngine, document_id: str) -> bool:
+        getter = getattr(getattr(engine, "read", None), "get_document", None)
+        if not callable(getter):
+            return False
+        try:
+            return getter(str(document_id)) is not None
+        except (KeyError, LookupError, ValueError):
+            return False
+
+    def _parse_document_id_for_request(
+        self,
+        *,
+        request: IngestPipelineRequest,
+        source_document_id: str,
+        revision: SourceRevision,
+    ) -> str:
+        """Use immutable revision documents for every new parse and Span."""
+
+        # The stable source ID remains a logical locator. Using it as the parse
+        # document would make newly emitted spans point at mutable compatibility
+        # state instead of the exact bytes being parsed.
+        return revision.revision_document_id or source_document_id
+
     def _job_exists(
         self,
         *,
@@ -2822,14 +3310,25 @@ class IngestPipeline:
         source_document_id: str,
         graph_extraction: GraphExtractionWithIDs,
         legacy_namespace: str | None = None,
+        parse_generation_id: str | None = None,
+        parse_generation_member_id: str | None = None,
+        parse_region: SourceRegion | None = None,
     ) -> GraphExtractionWithIDs:
         enriched = graph_extraction.model_copy(deep=True)
+        logical_source_document_id = self._source_document_id(request)
         metadata = {
             "workspace_id": request.workspace_id,
             "graph_space": "source",
-            "source_document_id": source_document_id,
+            "source_document_id": logical_source_document_id,
+            "source_revision_document_id": source_document_id,
             "source_uri": request.source_uri,
         }
+        if parse_generation_id:
+            metadata["parse_generation_id"] = parse_generation_id
+        if parse_generation_member_id:
+            metadata["parse_generation_member_id"] = parse_generation_member_id
+        if parse_region is not None:
+            metadata["parse_region"] = parse_region.model_dump(mode="json")
         for node in enriched.nodes:
             node_metadata = dict(getattr(node, "metadata", {}) or {})
             node_metadata.update(metadata)

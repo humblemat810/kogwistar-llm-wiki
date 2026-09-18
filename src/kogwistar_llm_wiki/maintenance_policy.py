@@ -17,6 +17,7 @@ GRAPH_PATCH_PROPOSAL_KINDS = {
     "document_seed_graph",
     "document_parse_graph",
     "document_expand_parse_children",
+    "document_reparse_region",
     "document_correct_parse_children",
     "document_summarize_units",
     "document_extract_entities",
@@ -33,7 +34,7 @@ GRAPH_PATCH_PROPOSAL_KINDS = {
     "graph_patch_review",
 }
 
-DOCUMENT_PARSE_KINDS = {"document_parse_graph"}
+DOCUMENT_PARSE_KINDS = {"document_parse_graph", "document_reparse_region"}
 
 GRAPH_PATCH_APPLY_KINDS = {
     "graph_patch_apply",

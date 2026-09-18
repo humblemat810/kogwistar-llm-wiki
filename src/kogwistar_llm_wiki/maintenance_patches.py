@@ -149,6 +149,19 @@ class MaintenancePatch(BaseModel):
             raise ValueError("MaintenancePatch requires at least one operation")
         return self
 
+    @property
+    def requires_atomic_replacement(self) -> bool:
+        """Whether this patch replaces an active graph object.
+
+        Additive maintenance can be retried operation by operation. A
+        superseding operation is different: its tombstone and replacement
+        must become visible together, or the old interpretation must remain
+        active. Backends without transaction support must use a ParseView
+        activation path instead of calling the direct patch applier.
+        """
+
+        return any(operation.supersedes_ids for operation in self.operations)
+
 
 class MaintenancePatchValidationIssue(BaseModel):
     model_config = ConfigDict(extra="forbid")
