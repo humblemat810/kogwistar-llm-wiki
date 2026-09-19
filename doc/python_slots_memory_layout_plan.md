@@ -296,7 +296,7 @@ fixture without a material construction-time regression.
 The CPython 3.13 comparison was refreshed in
 `doc/slots_benchmark_cpython.json` using the migrated classes and equivalent
 unslotted baselines at populations of 100 and 10,000. At 10,000 instances, the
-observed retained-memory reduction was approximately 17% to 68% across the
+observed retained-memory reduction was approximately 16% to 68% across the
 migrated classes. The benchmark creates fresh mutable list/dict fields in both
 the slotted and unslotted constructors so the comparison does not give either
 layout an artificial container-sharing advantage.
@@ -312,19 +312,19 @@ The recorded 10,000-instance CPython 3.13 run provides this speed baseline
 
 | Class | Wall time | Process CPU time | Peak allocation reduction |
 | --- | ---: | ---: | ---: |
-| `CodexBridgeState` | 3.481 -> 3.787 | 0.03125 -> 0.046875 s | 16.6% |
-| `CodexMemoryService` | 3.967 -> 14.070 | 0.046875 -> 0.140625 s | 58.3% |
-| `ComposeOptions` | 5.058 -> 4.017 | 0.046875 -> 0.046875 s | 24.9% |
-| `LaunchStep` | 2.214 -> 2.286 | 0.03125 -> 0.015625 s | 35.5% |
-| `LiveTracePrinter` | 3.775 -> 3.291 | 0.03125 -> 0.03125 s | 67.5% |
-| `LlmWikiIdentity` | 3.641 -> 2.656 | 0.046875 -> 0.015625 s | 29.3% |
-| `MaintenanceJobExecutionContext` | 3.187 -> 3.041 | 0.03125 -> 0.03125 s | 31.5% |
-| `MaintenanceStrategyRegistry` | 3.479 -> 1.964 | 0.03125 -> 0.015625 s | 49.9% |
-| `MappingAssetResolver` | 4.152 -> 2.407 | 0.046875 -> 0.03125 s | 48.0% |
-| `ReviewQueryService` | 4.392 -> 1.459 | 0.03125 -> 0.015625 s | 68.2% |
-| `SemanticLensService` | 5.420 -> 3.175 | 0.0625 -> 0.03125 s | 61.1% |
-| `TuiConfiguration` | 4.197 -> 4.178 | 0.03125 -> 0.046875 s | 24.9% |
-| `WorkbenchInteractionStore` | 3.735 -> 1.013 | 0.03125 -> 0.015625 s | 68.2% |
+| `CodexBridgeState` | 3.607 -> 4.085 | 0.03125 -> 0.046875 s | 16.6% |
+| `CodexMemoryService` | 14.687 -> 4.163 | 0.140625 -> 0.046875 s | 58.3% |
+| `ComposeOptions` | 4.994 -> 5.868 | 0.046875 -> 0.062500 s | 24.9% |
+| `LaunchStep` | 1.643 -> 2.948 | 0.015625 -> 0.031250 s | 35.5% |
+| `LiveTracePrinter` | 2.295 -> 3.089 | 0.031250 -> 0.031250 s | 67.5% |
+| `LlmWikiIdentity` | 2.745 -> 2.614 | 0.031250 -> 0.015625 s | 29.3% |
+| `MaintenanceJobExecutionContext` | 2.685 -> 2.805 | 0.031250 -> 0.031250 s | 31.5% |
+| `MaintenanceStrategyRegistry` | 1.731 -> 5.364 | 0.015625 -> 0.046875 s | 49.9% |
+| `MappingAssetResolver` | 1.457 -> 4.815 | 0.015625 -> 0.046875 s | 48.0% |
+| `ReviewQueryService` | 0.948 -> 3.198 | 0.015625 -> 0.031250 s | 68.2% |
+| `SemanticLensService` | 1.956 -> 3.474 | 0.015625 -> 0.031250 s | 61.1% |
+| `TuiConfiguration` | 3.776 -> 3.863 | 0.046875 -> 0.031250 s | 24.9% |
+| `WorkbenchInteractionStore` | 1.010 -> 3.441 | 0.000000 -> 0.031250 s | 68.2% |
 
 These are one benchmark run, not a performance guarantee. The JSON report is
 the authoritative artifact and should be refreshed on the target interpreter

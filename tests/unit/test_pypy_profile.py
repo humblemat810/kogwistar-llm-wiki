@@ -108,3 +108,29 @@ def test_pypy_workflow_has_opt_in_installed_wheel_probe() -> None:
     assert "actions/setup-python@v5" not in workflow
     assert "--installed-only" in workflow
     assert "python -m pip wheel --no-deps" in workflow
+
+
+@pytest.mark.ci
+def test_downstream_workflows_pin_the_checked_out_vendor_revisions() -> None:
+    root = Path(__file__).parents[2]
+    expected = {
+        "KOGWISTAR_REVISION": subprocess.check_output(
+            ["git", "-C", str(root / "kogwistar"), "rev-parse", "HEAD"],
+            text=True,
+        ).strip(),
+        "KG_DOC_PARSER_REVISION": subprocess.check_output(
+            ["git", "-C", str(root / "kg-doc-parser"), "rev-parse", "HEAD"],
+            text=True,
+        ).strip(),
+    }
+    workflows = (
+        root / ".github" / "workflows" / "ci.yml",
+        root / ".github" / "workflows" / "pypy-beta.yml",
+        root / ".github" / "workflows" / "publish-dockerhub.yml",
+        root / ".github" / "workflows" / "publish-dockerhub-main.yml",
+    )
+
+    for workflow_path in workflows:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        for name, revision in expected.items():
+            assert f"{name}: {revision}" in workflow, workflow_path

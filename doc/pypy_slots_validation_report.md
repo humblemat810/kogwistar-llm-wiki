@@ -10,18 +10,18 @@ engineering checkpoint, not a production-support declaration.
 
 ### LLM-Wiki
 
-The deterministic provider-free CI slice completed successfully:
+The deterministic provider-free CI slice completed successfully in the latest
+LLM-Wiki run:
 
 ```text
-696 passed, 4 skipped, 114 deselected, 459 warnings
-18m27s
+Both Python 3.12 and 3.13 jobs passed in run `35445167945`.
 ```
 
 The focused regression set for the new profile, slots, and publishing checks
 completed successfully:
 
 ```text
-21 passed in 0.60s
+22 passed in 0.60s
 ```
 
 Ruff (`E4,E7,E9,F`, Python 3.12 target), workflow YAML parsing, and root
@@ -53,8 +53,11 @@ The corresponding core metadata and normalization changes are committed as
 `80c08c1371148c2a60413f5101e6ec56adf85797`. The parser commit
 `845f0bf344a7ce64f67c42fedd342a09129854de` and root workflow pins reference
 that exact core revision, and all three feature branches are remotely
-available. The PyPy workflow remains manual, so its native probe is still
-pending.
+available. The automatic Kogwistar PyPy probe ran in `35443844532`; its
+CPython and Rust jobs passed, while `pypy-beta-best-effort` reached
+native-extension verification and failed. This keeps the PyPy profile
+correctly experimental rather than claiming native compatibility without
+evidence.
 
 ## Slots Measurement
 
@@ -108,9 +111,8 @@ PyPy 3.12 remains experimental and opt-in:
 - Docker Engine was unavailable locally, so the experimental image was not
   built here;
 - the feature-branch pins reference the NumPy-free Kogwistar commit and are
-  available remotely; the beta lane now applies the temporary
-  `rpds-py==2026.5.1` compatibility constraint, but no completed remote PyPy
-  result has yet been recorded here;
+  available remotely; the beta lane applies the temporary
+  `rpds-py==2026.5.1` compatibility constraint;
 - PyO3/Maturin installed-wheel loading and the pgvector/storage boundary still
   require real PyPy probes.
 
