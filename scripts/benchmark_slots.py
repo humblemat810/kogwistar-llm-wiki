@@ -12,6 +12,7 @@ import gc
 import json
 import platform
 import sys
+import threading
 import time
 import tracemalloc
 from dataclasses import MISSING, field, fields, make_dataclass
@@ -19,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
+from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
+from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings, CodexProcessRunner
 from kogwistar_llm_wiki.compose.options import ComposeOptions
 from kogwistar_llm_wiki.configuration.identity import LlmWikiIdentity
 from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
@@ -69,6 +72,19 @@ def _sample_values() -> dict[type[Any], tuple[Any, ...]]:
             "maintenance",
         ),
     }
+
+
+def _legacy_codex_bridge_state() -> type[Any]:
+    """Create an equivalent unslotted bridge state for the layout baseline."""
+
+    class UnslottedCodexBridgeState:
+        def __init__(self, *, token: str, settings: CodexCliSettings) -> None:
+            self.token = token
+            self.settings = settings
+            self.runner = CodexProcessRunner()
+            self.lock = threading.Lock()
+
+    return UnslottedCodexBridgeState
 
 
 def _measure(factory: Any, count: int, warmup_count: int) -> dict[str, float | int]:
@@ -152,8 +168,8 @@ def _factory(cls: type[Any], args: tuple[Any, ...]) -> Any:
     return create
 
 
-def _layout_sizes(cls: type[Any], args: tuple[Any, ...]) -> dict[str, int]:
-    value = cls(*args)
+def _layout_sizes(factory: Any) -> dict[str, int]:
+    value = factory()
     result = {"instance_size": sys.getsizeof(value)}
     if hasattr(value, "__dict__"):
         result["instance_dict_size"] = sys.getsizeof(value.__dict__)
@@ -168,18 +184,41 @@ def run(*, counts: tuple[int, ...], warmup_count: int = 0) -> dict[str, Any]:
         legacy_factory = _factory(legacy_type, args)
         results[current_type.__name__] = {
             "slotted": {
-                **_layout_sizes(current_type, args),
+                **_layout_sizes(current_factory),
                 "measurements": [
                     _measure(current_factory, count, warmup_count) for count in counts
                 ],
             },
             "unslotted_equivalent": {
-                **_layout_sizes(legacy_type, args),
+                **_layout_sizes(legacy_factory),
                 "measurements": [
                     _measure(legacy_factory, count, warmup_count) for count in counts
                 ],
             },
         }
+    bridge_args = {"token": "benchmark", "settings": CodexCliSettings()}
+    legacy_bridge_type = _legacy_codex_bridge_state()
+
+    def bridge_factory() -> CodexBridgeState:
+        return CodexBridgeState(**bridge_args)
+
+    def legacy_bridge_factory() -> Any:
+        return legacy_bridge_type(**bridge_args)
+
+    results[CodexBridgeState.__name__] = {
+        "slotted": {
+            **_layout_sizes(bridge_factory),
+            "measurements": [
+                _measure(bridge_factory, count, warmup_count) for count in counts
+            ],
+        },
+        "unslotted_equivalent": {
+            **_layout_sizes(legacy_bridge_factory),
+            "measurements": [
+                _measure(legacy_bridge_factory, count, warmup_count) for count in counts
+            ],
+        },
+    }
     return results
 
 

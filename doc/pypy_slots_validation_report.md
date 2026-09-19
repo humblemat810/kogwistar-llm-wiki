@@ -58,19 +58,20 @@ pending.
 
 ## Slots Measurement
 
-The checked-in source is `doc/slots_benchmark_cpython.json`. It compares the
-migrated class with an equivalent dynamically generated unslotted dataclass at
-10,000 instances on CPython 3.13.3. The primary result is retained-memory
-reduction measured with `tracemalloc`; construction speed is deliberately not
-treated as a universal improvement.
+The checked-in source is `doc/slots_benchmark_cpython.json`. It compares each
+migrated class with an equivalent unslotted baseline at 10,000 instances on
+CPython 3.13.3. The primary result is retained-memory reduction measured with
+`tracemalloc`; construction speed is deliberately not treated as a universal
+improvement.
 
 | Class | Slotted peak bytes | Unslotted peak bytes | Peak reduction | Slotted wall us/instance | Unslotted wall us/instance |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `ComposeOptions` | 1,685,408 | 2,245,408 | 25.0% | 6.601 | 5.008 |
-| `LaunchStep` | 725,408 | 1,125,264 | 35.5% | 3.371 | 2.516 |
-| `LlmWikiIdentity` | 965,472 | 1,365,472 | 29.3% | 4.922 | 4.037 |
-| `MaintenanceJobExecutionContext` | 1,045,480 | 1,525,480 | 31.5% | 4.625 | 5.008 |
-| `TuiConfiguration` | 1,445,408 | 1,925,408 | 24.9% | 5.103 | 5.063 |
+| `CodexBridgeState` | 2,015,104 | 2,415,104 | 16.6% | 4.875 | 6.014 |
+| `ComposeOptions` | 1,685,408 | 2,245,408 | 24.9% | 3.396 | 4.915 |
+| `LaunchStep` | 725,264 | 1,125,408 | 35.5% | 2.410 | 2.172 |
+| `LlmWikiIdentity` | 965,472 | 1,365,472 | 29.3% | 4.673 | 3.297 |
+| `MaintenanceJobExecutionContext` | 1,045,480 | 1,525,480 | 31.5% | 2.816 | 5.478 |
+| `TuiConfiguration` | 1,445,408 | 1,925,408 | 24.9% | 6.732 | 3.882 |
 
 The benchmark used `warmup_count=0` because this artifact is a CPython
 baseline. PyPy must be measured separately after a working PyPy 3.12 runtime

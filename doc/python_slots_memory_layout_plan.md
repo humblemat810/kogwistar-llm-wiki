@@ -275,12 +275,13 @@ fixture without a material construction-time regression.
 
 ### Recorded baseline
 
-The first CPython 3.13 comparison was recorded in
+The CPython 3.13 comparison was refreshed in
 `doc/slots_benchmark_cpython.json` using the migrated classes and equivalent
-unslotted dataclasses at populations of 1,000 and 10,000. At 10,000 instances, the
-observed retained-memory reduction was approximately 25% for `ComposeOptions`
-and `TuiConfiguration`, 29% for `LlmWikiIdentity`, 31% for
-`MaintenanceJobExecutionContext`, and 35% for `LaunchStep`.
+unslotted baselines at populations of 1,000 and 10,000. At 10,000 instances, the
+observed retained-memory reduction was approximately 17% for
+`CodexBridgeState`, 25% for `ComposeOptions` and `TuiConfiguration`, 29% for
+`LlmWikiIdentity`, 31% for `MaintenanceJobExecutionContext`, and 36% for
+`LaunchStep`.
 
 The report records wall-clock time and process CPU time per instance. The first
 run shows that construction speed is mixed: slots are a memory-layout
@@ -293,11 +294,12 @@ The recorded 10,000-instance CPython 3.13 run provides this speed baseline
 
 | Class | Wall time | Process CPU time | Peak allocation reduction |
 | --- | ---: | ---: | ---: |
-| `ComposeOptions` | 3.499 -> 3.566 | 0.0469 -> 0.0469 s | 24.9% |
-| `LaunchStep` | 1.344 -> 1.539 | 0.0000 -> 0.0156 s | 35.5% |
-| `LlmWikiIdentity` | 3.433 -> 2.197 | 0.0313 -> 0.0156 s | 29.3% |
-| `MaintenanceJobExecutionContext` | 4.085 -> 2.796 | 0.0469 -> 0.0313 s | 31.5% |
-| `TuiConfiguration` | 7.011 -> 2.878 | 0.0625 -> 0.0313 s | 24.9% |
+| `CodexBridgeState` | 6.014 -> 4.875 | 0.0625 -> 0.0469 s | 16.6% |
+| `ComposeOptions` | 4.915 -> 3.396 | 0.0625 -> 0.0313 s | 24.9% |
+| `LaunchStep` | 2.172 -> 2.410 | 0.0313 -> 0.0313 s | 35.5% |
+| `LlmWikiIdentity` | 3.297 -> 4.673 | 0.0156 -> 0.0313 s | 29.3% |
+| `MaintenanceJobExecutionContext` | 5.478 -> 2.816 | 0.0625 -> 0.0313 s | 31.5% |
+| `TuiConfiguration` | 3.882 -> 6.732 | 0.0469 -> 0.0625 s | 24.9% |
 
 These are one benchmark run, not a performance guarantee. The JSON report is
 the authoritative artifact and should be refreshed on the target interpreter
