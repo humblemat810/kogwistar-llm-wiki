@@ -17,8 +17,8 @@ concurrency:
 env:
   # The application imports these sibling repositories at runtime. Keep CI
   # aligned with the revisions used by publish-dockerhub.yml.
-  KOGWISTAR_REVISION: 8118311c23537c75552f5db445db11108535964a
-  KG_DOC_PARSER_REVISION: 50a454dd83c90f96774393a0feeb21dda463f90d
+  KOGWISTAR_REVISION: 9b5f1ce6fbca449bd65324ef25441737327d82ab
+  KG_DOC_PARSER_REVISION: 9477aface0a4fe5df52bcce44fd7fc77d87a22f7
   OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
 
 jobs:
