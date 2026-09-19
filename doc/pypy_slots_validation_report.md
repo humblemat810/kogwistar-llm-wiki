@@ -53,11 +53,14 @@ The corresponding core metadata and normalization changes are committed as
 `80c08c1371148c2a60413f5101e6ec56adf85797`. The parser commit
 `845f0bf344a7ce64f67c42fedd342a09129854de` and root workflow pins reference
 that exact core revision, and all three feature branches are remotely
-available. The automatic Kogwistar PyPy probe ran in `35443844532`; its
-CPython and Rust jobs passed, while `pypy-beta-best-effort` reached
-native-extension verification and failed. This keeps the PyPy profile
-correctly experimental rather than claiming native compatibility without
-evidence.
+available. The automatic Kogwistar PyPy probe initially ran in
+`35443844532`; its CPython and Rust jobs passed, while
+`pypy-beta-best-effort` reached native-extension verification and failed.
+Follow-up run `35447957681` built a real PyPy wheel after the CI-only PyO3
+override and completed diagnostics, but native import verification still
+failed. The explicit Python-authority fallback suite also failed, so this is
+not yet a usable PyPy execution profile. The PyPy profile remains correctly
+experimental rather than claiming native compatibility without evidence.
 
 ## Slots Measurement
 
@@ -104,7 +107,9 @@ PyPy 3.12 remains experimental and opt-in:
 
 - the required source CI matrix now covers CPython 3.12 and 3.13;
 - the core Kogwistar CI now runs an automatic, non-blocking PyPy 3.12 native
-  probe; the LLM-Wiki application workflow remains manual and non-required;
+  probe; the latest run built the wheel but failed native import verification
+  and the explicit Python-authority fallback suite; the LLM-Wiki application
+  workflow remains manual and non-required;
 - the separate PyPy CI Docker workflow is manual and publishes no production
   release tag;
 - no local PyPy 3.12 runtime was available for a native run;

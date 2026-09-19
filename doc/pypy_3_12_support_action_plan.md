@@ -349,7 +349,11 @@ support. Kogwistar core now also runs an automatic, non-blocking
 builds the PyO3 extension from source, verifies the native import, and runs the
 provider-free core CI selection on every push, pull request, and scheduled CI
 run. A failed beta probe remains visible without blocking required CPython or
-Rust jobs.
+Rust jobs. The latest core probe built a real PyPy wheel, but native import
+verification failed; its explicit Python-authority fallback suite also failed.
+Therefore the lane currently proves build progress, not a supported PyPy
+runtime. Keep the profile blocked until native import and the selected
+provider-free authority tests pass together.
 Because no stable PyPy 3.12 artifact is listed yet, this best-effort core job
 uses the official `nightly/py3.12` archive and prints its size, modification
 time, and SHA-256 in the run log. The archive is intentionally not a required
