@@ -66,6 +66,8 @@ class WorkbenchInteraction:
 class WorkbenchInteractionStore:
     """Append-only request/result artifacts over the conversation graph."""
 
+    __slots__ = ("engines",)
+
     request_kind = "workbench_interaction_request"
     result_kind = "workbench_interaction_result"
     confirmation_kind = "workbench_interaction_confirmation"

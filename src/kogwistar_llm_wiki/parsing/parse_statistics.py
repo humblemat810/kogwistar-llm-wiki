@@ -44,6 +44,8 @@ class ParseStatisticsRecord:
 
 
 class ParseStatisticsStore:
+    __slots__ = ("db_path",)
+
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

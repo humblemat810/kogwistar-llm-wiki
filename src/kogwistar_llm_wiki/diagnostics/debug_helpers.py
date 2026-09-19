@@ -212,6 +212,8 @@ def format_live_trace(prefix: str, payload: Mapping[str, Any]) -> str:
 
 
 class LiveTracePrinter:
+    __slots__ = ("prefix",)
+
     def __init__(self, *, prefix: str = "llm-wiki") -> None:
         self.prefix = prefix
 
