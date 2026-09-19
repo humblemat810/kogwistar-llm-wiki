@@ -7,6 +7,8 @@ from dataclasses import FrozenInstanceError, asdict, replace
 import pytest
 
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
+from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
+from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings
 from kogwistar_llm_wiki.compose.options import ComposeOptions
 from kogwistar_llm_wiki.configuration.identity import LlmWikiIdentity
 from kogwistar_llm_wiki.configuration.settings_service import SettingsService
@@ -97,6 +99,7 @@ def test_fixed_state_services_use_strict_slots(tmp_path) -> None:
         DisambiguationService(object()),
         EvidenceClosureValidator(object()),
         SettingsService(object()),
+        CodexBridgeState(token="secret", settings=CodexCliSettings()),
     )
 
     for value in values:
