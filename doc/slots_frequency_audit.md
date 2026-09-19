@@ -43,6 +43,14 @@ The corresponding Postgres mutable row views and in-memory state records are
 deferred until a process-level profile confirms their retained counts and
 until backend mutation/serialization coverage is expanded.
 
+For a CPython 3.13.3 retained-batch comparison of 10,000
+`ProjectedLaneMessageRow` instances, the slotted layout used 2,405,592 peak
+bytes versus 3,045,672 for an equivalent unslotted frozen dataclass, a 21.0%
+peak reduction. Construction time was 0.235593 seconds versus 0.273478 seconds
+for the same batch in this run. This is a focused measurement, not a release
+benchmark; the existing benchmark artifacts remain the source of the broader
+application-class measurements.
+
 `conversation.ContextItem` is deliberately not included in this wave because
 the current packing path copies it through `it.__dict__`; converting it would
 require a separate `dataclasses.replace` refactor and compatibility tests.
