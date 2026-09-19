@@ -49,18 +49,22 @@ The local NumPy-free embedding normalization regression set completed:
 4 passed
 ```
 
-The corresponding core metadata and normalization changes are committed as
-`80c08c1371148c2a60413f5101e6ec56adf85797`. The parser commit
-`845f0bf344a7ce64f67c42fedd342a09129854de` and root workflow pins reference
-that exact core revision, and all three feature branches are remotely
-available. The automatic Kogwistar PyPy probe initially ran in
-`35443844532`; its CPython and Rust jobs passed, while
-`pypy-beta-best-effort` reached native-extension verification and failed.
-Follow-up run `35447957681` built a real PyPy wheel after the CI-only PyO3
-override and completed diagnostics, but native import verification still
-failed. The explicit Python-authority fallback suite also failed, so this is
-not yet a usable PyPy execution profile. The PyPy profile remains correctly
+The current core CI changes are committed as
+`d60183bd02cfdc253502b864a021ddcf29a115b4`. The parser pins that core revision
+in commit `0e2a66f9331053702e12bf0fbf502abbc59b62f2`, and the root feature
+branch pins both exact revisions in `d4dad4a21ba3bcca1712f7a1291afc34b9438e0f`.
+The automatic Kogwistar PyPy probe initially ran in `35443844532`; its CPython
+and Rust jobs passed, while `pypy-beta-best-effort` reached native-extension
+verification and failed. Follow-up run `35447957681` built a real PyPy wheel
+after the CI-only PyO3 override and completed diagnostics, but native import
+verification still failed. The explicit Python-authority fallback suite also
+failed, so this is not yet a usable PyPy execution profile. The profile remains
 experimental rather than claiming native compatibility without evidence.
+
+The current local parser provider-free focused slice is `47 passed, 64
+deselected` in 288.69 seconds. Root profile/slot contract tests are `15
+passed`; these are CPython checks and do not replace the missing PyPy runtime
+evidence.
 
 ## Slots Measurement
 
