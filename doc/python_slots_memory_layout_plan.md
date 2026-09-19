@@ -330,6 +330,18 @@ These are one benchmark run, not a performance guarantee. The JSON report is
 the authoritative artifact and should be refreshed on the target interpreter
 before making a release-level performance claim.
 
+### Frequency gate for future waves
+
+The migrated service classes are mostly retained once per process. Their
+synthetic 10,000-instance savings validate the layout change, but do not prove
+that another broad service migration will materially reduce host memory. The
+remaining optimization goal is considered complete unless a process-level
+profile identifies an unslotted, high-cardinality application class. Future
+migrations must record retained counts and before/after process memory, and
+must not trade away dependency-injection or serialization behavior for a
+synthetic benchmark result. See `doc/slots_frequency_audit.md` for the current
+construction-site audit.
+
 To refresh the CPython report:
 
 ```powershell
