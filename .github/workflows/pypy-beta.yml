@@ -15,7 +15,7 @@ permissions:
 env:
   # Keep the manual profile aligned with the revisions tested by required CI.
   KOGWISTAR_REVISION: 80c08c1371148c2a60413f5101e6ec56adf85797
-  KG_DOC_PARSER_REVISION: 77d134d4791cb17af555442dade009f69101ae03
+  KG_DOC_PARSER_REVISION: 845f0bf344a7ce64f67c42fedd342a09129854de
   OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
 
 jobs:

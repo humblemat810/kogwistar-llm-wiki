@@ -358,28 +358,25 @@ recorded checksum.
 Set its `installed_wheel` input to `true` for the slower non-editable wheel
 probe; that path installs into a temporary environment outside the checkout
 and runs the installed-only origin checks.
-Because `actions/setup-python` currently resolves the PyPy selector through its
-toolcache manifest rather than accepting a repository-local archive checksum,
-this first lane is a capability probe, not yet a reproducibly pinned release
-lane. The release-quality lane below remains a follow-up gate: it must pin the
-official archive URL and checksum before it can be required or used for a
-published image.
-
-The application lane intentionally uses the `pypy3.12` selector as a capability
-probe. Before making it required or using it for a published image, replace
-that selector with a reproducibly pinned PyPy 8.0.0 Python 3.12 beta artifact.
-If `actions/setup-python` does not yet expose that build, download the official
-beta artifact, verify its published checksum, and cache only the verified
-archive. Do not use an unpinned moving nightly for required CI.
+The application lane now downloads the official `nightly/py3.12` archive
+directly, prints its size, modification time, and SHA-256, and validates the
+extracted interpreter before installation. This is still a non-required
+capability probe because the URL is a moving nightly rather than a versioned,
+immutable release artifact. Before using PyPy for a published image, replace it
+with a versioned archive and published checksum; do not use the moving nightly
+for required CI or release promotion.
 
 Start with interpreter/build/dependency probes. Enable full application tests
 after the selected upstream revisions and storage route are installable.
 
 The bounded source profile is checked in at
 `requirements/pypy-3.12-beta.txt`. It is installed only after the four local
-packages are present with `--no-deps`; this prevents the resolver from pulling
-the full CPython/dev extras or silently adding NumPy, Chroma, pgvector, Torch,
-or pikepdf. The current evidence for each boundary is tracked in
+packages are present with `--no-deps`; the application probe applies the
+Kogwistar CI-only `constraints-pypy-3.12.txt` file, which temporarily pins
+`rpds-py==2026.5.1` while the newer PyO3 path is incompatible with PyPy 3.12.
+This constraint is not used by production CPython environments and must be
+removed after an upstream-compatible `rpds-py` release is available. The
+current evidence for each boundary is tracked in
 `doc/pypy_3_12_compatibility_matrix.md`.
 
 The lane should:

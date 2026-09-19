@@ -8,7 +8,7 @@ result and exact dependency/interpreter evidence before any row is promoted.
 
 | Boundary | Profile requirement | Current state | Evidence or blocking condition |
 | --- | --- | --- | --- |
-| PyPy interpreter | Python 3.12 beta | Probe only | `pypy-beta.yml` uses the `pypy3.12` selector; no local PyPy 3.12 runtime is installed. |
+| PyPy interpreter | Python 3.12 beta | Probe only | `pypy-beta.yml` downloads the official moving `nightly/py3.12` archive; no local PyPy 3.12 runtime is installed. |
 | Kogwistar base | Import and Rust bridge parity | Blocked | Requires a PyPy-native build/test of the pinned PyO3 extension. |
 | Kogwistar NumPy boundary | Base import without NumPy | Feature revision ready, automatic beta probe | Core commit `80c08c1371148c2a60413f5101e6ec56adf85797` removes the base NumPy dependency, refreshes SQLite reads after external commits, and adds the automatic non-blocking PyPy core probe. |
 | Parser text path | Import and fake-provider tests | Probe | `pikepdf` is excluded on PyPy and loaded lazily; PDF splitting remains capability-gated. |

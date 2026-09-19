@@ -62,6 +62,16 @@ def test_bounded_pypy_requirements_exclude_gpu_and_numpy_profiles() -> None:
 
 
 @pytest.mark.ci
+def test_pypy_beta_profile_pins_only_the_temporary_rpds_compatibility_workaround() -> None:
+    constraints_path = Path(__file__).parents[2] / "kogwistar" / "constraints-pypy-3.12.txt"
+    constraints = constraints_path.read_text(encoding="utf-8")
+
+    assert "rpds-py==2026.5.1" in constraints
+    assert "numpy" not in constraints.lower()
+    assert "chromadb" not in constraints.lower()
+
+
+@pytest.mark.ci
 def test_pinned_parser_metadata_supports_python_312() -> None:
     parser_pyproject = Path(__file__).parents[2] / "kg-doc-parser" / "pyproject.toml"
     metadata = tomllib.loads(parser_pyproject.read_text(encoding="utf-8"))
@@ -93,5 +103,8 @@ def test_pypy_workflow_has_opt_in_installed_wheel_probe() -> None:
     )
 
     assert "installed_wheel:" in workflow
+    assert "nightly/py3.12/pypy-c-jit-latest-linux64.tar.gz" in workflow
+    assert "constraints-pypy-3.12.txt" in workflow
+    assert "actions/setup-python@v5" not in workflow
     assert "--installed-only" in workflow
     assert "python -m pip wheel --no-deps" in workflow
