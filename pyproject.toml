@@ -37,7 +37,7 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
 agent = [
-    "fastmcp==3.0.0",
+    "fastmcp==3.2.4",
 ]
 multimodal = [
     # PyPI resolves this portable default to a CPU-capable wheel. CUDA builds
@@ -113,7 +113,7 @@ test = [
 pypy = [
     "pytest>=8.0",
     "pytest-anyio",
-    "fastmcp==3.0.0",
+    "fastmcp==3.2.4",
     "sqlalchemy>=2.0",
     "psycopg>=3.1",
 ]

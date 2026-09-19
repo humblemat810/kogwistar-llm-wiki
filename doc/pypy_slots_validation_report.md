@@ -50,8 +50,8 @@ The local NumPy-free embedding normalization regression set completed:
 ```
 
 The corresponding core metadata and normalization changes are committed as
-`298ee4a3ecb74d1dce05c291e233572a88aa20b9`. The parser commit
-`0c393e6e9e803ae38276f0b14680015b6a82869a` and root workflow pins reference
+`f5bf522e0ccd9ed35ea3b3043f8f8fc5712fc6b8`. The parser commit
+`79a6e825a0fa17d4b55d1aa75a0ff17e96059a17` and root workflow pins reference
 that exact core revision, and all three feature branches are remotely
 available. The PyPy workflow remains manual, so its native probe is still
 pending.
@@ -66,16 +66,28 @@ improvement.
 
 | Class | Slotted peak bytes | Unslotted peak bytes | Peak reduction | Slotted wall us/instance | Unslotted wall us/instance |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `CodexBridgeState` | 2,015,104 | 2,415,104 | 16.6% | 4.875 | 6.014 |
-| `ComposeOptions` | 1,685,408 | 2,245,408 | 24.9% | 3.396 | 4.915 |
-| `LaunchStep` | 725,264 | 1,125,408 | 35.5% | 2.410 | 2.172 |
-| `LlmWikiIdentity` | 965,472 | 1,365,472 | 29.3% | 4.673 | 3.297 |
-| `MaintenanceJobExecutionContext` | 1,045,480 | 1,525,480 | 31.5% | 2.816 | 5.478 |
-| `TuiConfiguration` | 1,445,408 | 1,925,408 | 24.9% | 6.732 | 3.882 |
+| `CodexBridgeState` | 2,015,104 | 2,415,104 | 16.6% | 4.828 | 6.557 |
+| `CodexMemoryService` | 736,046 | 1,765,024 | 58.3% | 21.198 | 2.424 |
+| `ComposeOptions` | 1,685,408 | 2,245,408 | 24.9% | 6.844 | 5.909 |
+| `LaunchStep` | 725,408 | 1,125,408 | 35.5% | 2.977 | 2.595 |
+| `LiveTracePrinter` | 495,096 | 1,524,880 | 67.5% | 3.580 | 1.982 |
+| `LlmWikiIdentity` | 965,472 | 1,365,472 | 29.3% | 4.763 | 4.544 |
+| `MaintenanceJobExecutionContext` | 1,045,480 | 1,525,480 | 31.5% | 4.152 | 5.121 |
+| `MaintenanceStrategyRegistry` | 1,045,320 | 1,524,880 | 31.5% | 2.422 | 2.505 |
+| `MappingAssetResolver` | 1,125,408 | 1,525,024 | 26.2% | 2.630 | 3.264 |
+| `ReviewQueryService` | 485,264 | 1,524,880 | 68.2% | 1.625 | 2.502 |
+| `SemanticLensService` | 655,112 | 1,685,024 | 61.1% | 2.550 | 2.644 |
+| `TuiConfiguration` | 1,445,408 | 1,925,408 | 24.9% | 4.620 | 5.915 |
+| `WorkbenchInteractionStore` | 485,408 | 1,525,024 | 68.1% | 1.528 | 2.674 |
 
-The benchmark used `warmup_count=0` because this artifact is a CPython
-baseline. PyPy must be measured separately after a working PyPy 3.12 runtime
-profile exists, with a warm-up population such as:
+The benchmark used counts of 100 and 10,000 with `warmup_count=0` because this
+artifact is a CPython baseline. The peak column is the retained `tracemalloc`
+allocation for the batch, including the unslotted instance dictionary; the
+wall-time columns are construction time only. Slots reduced memory for every
+class in this wave, but construction became slower for `CodexMemoryService`,
+`LiveTracePrinter`, and a few other small objects. PyPy must be measured
+separately after a working PyPy 3.12 runtime profile exists, with a warm-up
+population such as:
 
 ```powershell
 pypy3 scripts\benchmark_slots.py `

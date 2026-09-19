@@ -180,6 +180,8 @@ class CodexMemoryRecord(BaseModel):
 class CodexMemoryService:
     """Persist and retrieve project memory using existing graph primitives."""
 
+    __slots__ = ("engines", "enabled", "max_records_per_capture", "max_recall_records")
+
     artifact_kind = "codex_memory"
     evidence_artifact_kind = "codex_memory_evidence"
 

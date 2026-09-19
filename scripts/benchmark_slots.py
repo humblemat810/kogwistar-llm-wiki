@@ -21,12 +21,19 @@ from typing import Any
 
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
 from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
+from kogwistar_llm_wiki.codex.codex_memory import CodexMemoryService
 from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings, CodexProcessRunner
 from kogwistar_llm_wiki.compose.options import ComposeOptions
 from kogwistar_llm_wiki.configuration.identity import LlmWikiIdentity
+from kogwistar_llm_wiki.diagnostics.debug_helpers import LiveTracePrinter
+from kogwistar_llm_wiki.embeddings.multimodal_sources import MappingAssetResolver
+from kogwistar_llm_wiki.maintenance.maintenance_strategies import MaintenanceStrategyRegistry
 from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
 )
+from kogwistar_llm_wiki.workbench.review_query import ReviewQueryService
+from kogwistar_llm_wiki.workbench.semantic_lens import SemanticLensService
+from kogwistar_llm_wiki.workbench.workbench_background import WorkbenchInteractionStore
 
 
 def _legacy_dataclass(current_type: type[Any]) -> type[Any]:
@@ -85,6 +92,16 @@ def _legacy_codex_bridge_state() -> type[Any]:
             self.lock = threading.Lock()
 
     return UnslottedCodexBridgeState
+
+
+def _legacy_fixed_state_type(values: dict[str, object]) -> type[Any]:
+    """Create an unslotted fixed-state baseline with the same fields."""
+
+    class UnslottedFixedState:
+        def __init__(self) -> None:
+            self.__dict__.update(values)
+
+    return UnslottedFixedState
 
 
 def _measure(factory: Any, count: int, warmup_count: int) -> dict[str, float | int]:
@@ -168,6 +185,17 @@ def _factory(cls: type[Any], args: tuple[Any, ...]) -> Any:
     return create
 
 
+def _factory_with_kwargs(cls: type[Any], *args: Any, **kwargs: Any) -> Any:
+    def create() -> Any:
+        return cls(*args, **kwargs)
+
+    return create
+
+
+def _benchmark_clock_ms() -> int:
+    return 0
+
+
 def _layout_sizes(factory: Any) -> dict[str, int]:
     value = factory()
     result = {"instance_size": sys.getsizeof(value)}
@@ -219,6 +247,61 @@ def run(*, counts: tuple[int, ...], warmup_count: int = 0) -> dict[str, Any]:
             ],
         },
     }
+    fixed_states = {
+        CodexMemoryService.__name__: (
+            _factory_with_kwargs(CodexMemoryService, object(), enabled=False),
+            _factory(_legacy_fixed_state_type({"engines": object(), "enabled": False, "max_records_per_capture": 8, "max_recall_records": 12}), ()),
+        ),
+        SemanticLensService.__name__: (
+            _factory_with_kwargs(
+                SemanticLensService,
+                object(),
+                query_service=object(),
+                clock_ms=_benchmark_clock_ms,
+            ),
+            _factory(
+                _legacy_fixed_state_type(
+                    {"engines": object(), "query_service": object(), "_clock_ms": _benchmark_clock_ms}
+                ),
+                (),
+            ),
+        ),
+        ReviewQueryService.__name__: (
+            _factory(ReviewQueryService, (object(),)),
+            _factory(_legacy_fixed_state_type({"engines": object()}), ()),
+        ),
+        WorkbenchInteractionStore.__name__: (
+            _factory(WorkbenchInteractionStore, (object(),)),
+            _factory(_legacy_fixed_state_type({"engines": object()}), ()),
+        ),
+        MaintenanceStrategyRegistry.__name__: (
+            _factory(MaintenanceStrategyRegistry, ()),
+            _factory(_legacy_fixed_state_type({"_strategies": []}), ()),
+        ),
+        LiveTracePrinter.__name__: (
+            _factory_with_kwargs(LiveTracePrinter, prefix="benchmark"),
+            _factory(_legacy_fixed_state_type({"prefix": "benchmark"}), ()),
+        ),
+        MappingAssetResolver.__name__: (
+            _factory(MappingAssetResolver, ({},)),
+            _factory(_legacy_fixed_state_type({"_assets": {}}), ()),
+        ),
+    }
+    for name, (current_factory, legacy_factory) in fixed_states.items():
+        results[name] = {
+            "slotted": {
+                **_layout_sizes(current_factory),
+                "measurements": [
+                    _measure(current_factory, count, warmup_count) for count in counts
+                ],
+            },
+            "unslotted_equivalent": {
+                **_layout_sizes(legacy_factory),
+                "measurements": [
+                    _measure(legacy_factory, count, warmup_count) for count in counts
+                ],
+            },
+        }
     return results
 
 

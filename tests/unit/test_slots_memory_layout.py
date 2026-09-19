@@ -9,11 +9,15 @@ import pytest
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
 from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
 from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings
+from kogwistar_llm_wiki.codex.codex_memory import CodexMemoryService
 from kogwistar_llm_wiki.compose.options import ComposeOptions
 from kogwistar_llm_wiki.configuration.identity import LlmWikiIdentity
 from kogwistar_llm_wiki.configuration.settings_service import SettingsService
+from kogwistar_llm_wiki.diagnostics.debug_helpers import LiveTracePrinter
+from kogwistar_llm_wiki.embeddings.multimodal_sources import MappingAssetResolver
 from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
+    MaintenanceStrategyRegistry,
 )
 from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
 from kogwistar_llm_wiki.parsing.parse_statistics import ParseStatisticsStore
@@ -22,6 +26,9 @@ from kogwistar_llm_wiki.disambiguation.service import DisambiguationService
 from kogwistar_llm_wiki.embeddings.multimodal_grounding import EvidenceClosureValidator
 from kogwistar_llm_wiki.workbench.investigation_history import InvestigationHistoryService
 from kogwistar_llm_wiki.workbench.query import GraphSpaceQueryService
+from kogwistar_llm_wiki.workbench.review_query import ReviewQueryService
+from kogwistar_llm_wiki.workbench.semantic_lens import SemanticLensService
+from kogwistar_llm_wiki.workbench.workbench_background import WorkbenchInteractionStore
 
 
 @pytest.mark.ci
@@ -100,6 +107,13 @@ def test_fixed_state_services_use_strict_slots(tmp_path) -> None:
         EvidenceClosureValidator(object()),
         SettingsService(object()),
         CodexBridgeState(token="secret", settings=CodexCliSettings()),
+        CodexMemoryService(object(), enabled=False),
+        SemanticLensService(object(), query_service=object()),
+        ReviewQueryService(object()),
+        WorkbenchInteractionStore(object()),
+        MaintenanceStrategyRegistry(),
+        LiveTracePrinter(),
+        MappingAssetResolver({}),
     )
 
     for value in values:

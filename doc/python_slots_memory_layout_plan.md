@@ -149,6 +149,24 @@ stateless application-owned mixin `__slots__ = ()`. Then add slots only on the
 leaf class. Do not put non-empty slot layouts on multiple sibling mixins;
 Python can reject multiple inheritance with incompatible instance layouts.
 
+## Implemented Measured Wave
+
+The first measured service wave is implemented with strict slots for fixed
+state classes that have no supported instance extension contract:
+
+- `CodexMemoryService`, `LiveTracePrinter`, and `MappingAssetResolver`;
+- `MaintenanceStrategyRegistry`;
+- `ReviewQueryService`, `SemanticLensService`, and
+  `WorkbenchInteractionStore`.
+
+The CPython artifact records the before/after memory and construction timing in
+`doc/slots_benchmark_cpython.json`. At 10,000 instances, retained peak memory
+fell by approximately 25% to 68% for these classes. Construction timing was
+mixed, so no CPU improvement is assumed without a workload-specific profile.
+The next step is not to slot orchestration services automatically: profile a
+real bounded workload first, then preserve `__dict__` for classes with test
+injection, monkeypatching, plugin, or multiple-inheritance contracts.
+
 ## Framework-Managed Classes: Do Not Add Application Slots
 
 ### Pydantic models
