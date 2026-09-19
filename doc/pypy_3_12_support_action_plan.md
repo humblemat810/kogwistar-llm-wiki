@@ -510,9 +510,9 @@ prove that the released artifact matches the tested build.
 - [ ] Resolve Python pgvector's transitive NumPy requirement before selecting
   the initial storage profile.
 - [ ] Prove the selected Rust/Python boundary with application integration tests.
-- [ ] Replace factory normalization with a numerically tested implementation.
+- [x] Replace factory normalization with a numerically tested implementation.
 - [ ] Validate client dependencies including tiktoken and pydantic-core.
-- [ ] Split parser media dependencies if the text-only profile needs it.
+- [x] Split parser media dependencies if the text-only profile needs it.
 - [ ] Prove the new CPython 3.12 CI leg and serialization parity before
   treating the lowered Python floors as stable.
 - [ ] Add clean installed-wheel tests outside repository import overrides.
