@@ -50,8 +50,8 @@ The local NumPy-free embedding normalization regression set completed:
 ```
 
 The corresponding core metadata and normalization changes are committed as
-`7e506b2ea94f2b7170eabff6e96112fe54815779`. The parser commit
-`f35aea533e88ee5d77eec184bf728c6e044093e1` and root workflow pins reference
+`80c08c1371148c2a60413f5101e6ec56adf85797`. The parser commit
+`77d134d4791cb17af555442dade009f69101ae03` and root workflow pins reference
 that exact core revision, and all three feature branches are remotely
 available. The PyPy workflow remains manual, so its native probe is still
 pending.

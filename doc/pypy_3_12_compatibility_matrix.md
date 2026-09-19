@@ -10,7 +10,7 @@ result and exact dependency/interpreter evidence before any row is promoted.
 | --- | --- | --- | --- |
 | PyPy interpreter | Python 3.12 beta | Probe only | `pypy-beta.yml` uses the `pypy3.12` selector; no local PyPy 3.12 runtime is installed. |
 | Kogwistar base | Import and Rust bridge parity | Blocked | Requires a PyPy-native build/test of the pinned PyO3 extension. |
-| Kogwistar NumPy boundary | Base import without NumPy | Feature revision ready, automatic beta probe | Core commit `7e506b2ea94f2b7170eabff6e96112fe54815779` removes the base NumPy dependency, refreshes SQLite reads after external commits, raises the FastMCP/MCP security floors, and adds the automatic non-blocking PyPy core probe. |
+| Kogwistar NumPy boundary | Base import without NumPy | Feature revision ready, automatic beta probe | Core commit `80c08c1371148c2a60413f5101e6ec56adf85797` removes the base NumPy dependency, refreshes SQLite reads after external commits, and adds the automatic non-blocking PyPy core probe. |
 | Parser text path | Import and fake-provider tests | Probe | `pikepdf` is excluded on PyPy and loaded lazily; PDF splitting remains capability-gated. |
 | FastMCP | MCP contract | Probe | Included in the bounded profile; requires the PyPy runner and native dependency resolution. |
 | PostgreSQL driver | Transaction/ACL/provenance parity | Probe | `psycopg` is included without the binary extra; pgvector is intentionally excluded. |
