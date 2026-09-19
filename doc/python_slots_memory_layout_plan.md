@@ -295,11 +295,11 @@ fixture without a material construction-time regression.
 
 The CPython 3.13 comparison was refreshed in
 `doc/slots_benchmark_cpython.json` using the migrated classes and equivalent
-unslotted baselines at populations of 1,000 and 10,000. At 10,000 instances, the
-observed retained-memory reduction was approximately 17% for
-`CodexBridgeState`, 25% for `ComposeOptions` and `TuiConfiguration`, 29% for
-`LlmWikiIdentity`, 31% for `MaintenanceJobExecutionContext`, and 36% for
-`LaunchStep`.
+unslotted baselines at populations of 100 and 10,000. At 10,000 instances, the
+observed retained-memory reduction was approximately 17% to 68% across the
+migrated classes. The benchmark creates fresh mutable list/dict fields in both
+the slotted and unslotted constructors so the comparison does not give either
+layout an artificial container-sharing advantage.
 
 The report records wall-clock time and process CPU time per instance. The first
 run shows that construction speed is mixed: slots are a memory-layout
@@ -312,12 +312,19 @@ The recorded 10,000-instance CPython 3.13 run provides this speed baseline
 
 | Class | Wall time | Process CPU time | Peak allocation reduction |
 | --- | ---: | ---: | ---: |
-| `CodexBridgeState` | 6.014 -> 4.875 | 0.0625 -> 0.0469 s | 16.6% |
-| `ComposeOptions` | 4.915 -> 3.396 | 0.0625 -> 0.0313 s | 24.9% |
-| `LaunchStep` | 2.172 -> 2.410 | 0.0313 -> 0.0313 s | 35.5% |
-| `LlmWikiIdentity` | 3.297 -> 4.673 | 0.0156 -> 0.0313 s | 29.3% |
-| `MaintenanceJobExecutionContext` | 5.478 -> 2.816 | 0.0625 -> 0.0313 s | 31.5% |
-| `TuiConfiguration` | 3.882 -> 6.732 | 0.0469 -> 0.0625 s | 24.9% |
+| `CodexBridgeState` | 3.481 -> 3.787 | 0.03125 -> 0.046875 s | 16.6% |
+| `CodexMemoryService` | 3.967 -> 14.070 | 0.046875 -> 0.140625 s | 58.3% |
+| `ComposeOptions` | 5.058 -> 4.017 | 0.046875 -> 0.046875 s | 24.9% |
+| `LaunchStep` | 2.214 -> 2.286 | 0.03125 -> 0.015625 s | 35.5% |
+| `LiveTracePrinter` | 3.775 -> 3.291 | 0.03125 -> 0.03125 s | 67.5% |
+| `LlmWikiIdentity` | 3.641 -> 2.656 | 0.046875 -> 0.015625 s | 29.3% |
+| `MaintenanceJobExecutionContext` | 3.187 -> 3.041 | 0.03125 -> 0.03125 s | 31.5% |
+| `MaintenanceStrategyRegistry` | 3.479 -> 1.964 | 0.03125 -> 0.015625 s | 49.9% |
+| `MappingAssetResolver` | 4.152 -> 2.407 | 0.046875 -> 0.03125 s | 48.0% |
+| `ReviewQueryService` | 4.392 -> 1.459 | 0.03125 -> 0.015625 s | 68.2% |
+| `SemanticLensService` | 5.420 -> 3.175 | 0.0625 -> 0.03125 s | 61.1% |
+| `TuiConfiguration` | 4.197 -> 4.178 | 0.03125 -> 0.046875 s | 24.9% |
+| `WorkbenchInteractionStore` | 3.735 -> 1.013 | 0.03125 -> 0.015625 s | 68.2% |
 
 These are one benchmark run, not a performance guarantee. The JSON report is
 the authoritative artifact and should be refreshed on the target interpreter
@@ -327,7 +334,7 @@ To refresh the CPython report:
 
 ```powershell
 .venv\Scripts\python.exe scripts\benchmark_slots.py `
-  --count 1000 --count 10000 `
+  --count 100 --count 10000 `
   --json-out doc\slots_benchmark_cpython.json
 ```
 

@@ -97,9 +97,16 @@ def _legacy_codex_bridge_state() -> type[Any]:
 def _legacy_fixed_state_type(values: dict[str, object]) -> type[Any]:
     """Create an unslotted fixed-state baseline with the same fields."""
 
+    def copy_value(value: object) -> object:
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, list):
+            return list(value)
+        return value
+
     class UnslottedFixedState:
         def __init__(self) -> None:
-            self.__dict__.update(values)
+            self.__dict__.update({key: copy_value(value) for key, value in values.items()})
 
     return UnslottedFixedState
 

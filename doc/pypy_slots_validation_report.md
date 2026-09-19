@@ -64,21 +64,21 @@ CPython 3.13.3. The primary result is retained-memory reduction measured with
 `tracemalloc`; construction speed is deliberately not treated as a universal
 improvement.
 
-| Class | Slotted peak bytes | Unslotted peak bytes | Peak reduction | Slotted wall us/instance | Unslotted wall us/instance |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `CodexBridgeState` | 2,015,104 | 2,415,104 | 16.6% | 4.828 | 6.557 |
-| `CodexMemoryService` | 736,046 | 1,765,024 | 58.3% | 21.198 | 2.424 |
-| `ComposeOptions` | 1,685,408 | 2,245,408 | 24.9% | 6.844 | 5.909 |
-| `LaunchStep` | 725,408 | 1,125,408 | 35.5% | 2.977 | 2.595 |
-| `LiveTracePrinter` | 495,096 | 1,524,880 | 67.5% | 3.580 | 1.982 |
-| `LlmWikiIdentity` | 965,472 | 1,365,472 | 29.3% | 4.763 | 4.544 |
-| `MaintenanceJobExecutionContext` | 1,045,480 | 1,525,480 | 31.5% | 4.152 | 5.121 |
-| `MaintenanceStrategyRegistry` | 1,045,320 | 1,524,880 | 31.5% | 2.422 | 2.505 |
-| `MappingAssetResolver` | 1,125,408 | 1,525,024 | 26.2% | 2.630 | 3.264 |
-| `ReviewQueryService` | 485,264 | 1,524,880 | 68.2% | 1.625 | 2.502 |
-| `SemanticLensService` | 655,112 | 1,685,024 | 61.1% | 2.550 | 2.644 |
-| `TuiConfiguration` | 1,445,408 | 1,925,408 | 24.9% | 4.620 | 5.915 |
-| `WorkbenchInteractionStore` | 485,408 | 1,525,024 | 68.1% | 1.528 | 2.674 |
+| Class | Slotted peak bytes | Unslotted peak bytes | Peak reduction | Slotted wall us/instance | Unslotted wall us/instance | Slotted CPU s/10k | Unslotted CPU s/10k |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `CodexBridgeState` | 2,015,104 | 2,414,960 | 16.6% | 3.787 | 3.481 | 0.046875 | 0.031250 |
+| `CodexMemoryService` | 736,094 | 1,765,160 | 58.3% | 14.070 | 3.967 | 0.140625 | 0.046875 |
+| `ComposeOptions` | 1,685,408 | 2,245,408 | 24.9% | 4.017 | 5.058 | 0.046875 | 0.046875 |
+| `LaunchStep` | 725,264 | 1,125,264 | 35.5% | 2.286 | 2.214 | 0.015625 | 0.031250 |
+| `LiveTracePrinter` | 495,096 | 1,525,160 | 67.5% | 3.291 | 3.775 | 0.031250 | 0.031250 |
+| `LlmWikiIdentity` | 965,328 | 1,365,472 | 29.3% | 2.656 | 3.641 | 0.015625 | 0.046875 |
+| `MaintenanceJobExecutionContext` | 1,045,480 | 1,525,480 | 31.5% | 3.041 | 3.187 | 0.031250 | 0.031250 |
+| `MaintenanceStrategyRegistry` | 1,045,464 | 2,085,160 | 49.9% | 1.964 | 3.479 | 0.015625 | 0.031250 |
+| `MappingAssetResolver` | 1,125,408 | 2,165,160 | 48.0% | 2.407 | 4.152 | 0.031250 | 0.046875 |
+| `ReviewQueryService` | 485,264 | 1,525,160 | 68.2% | 1.459 | 4.392 | 0.015625 | 0.031250 |
+| `SemanticLensService` | 655,112 | 1,685,160 | 61.1% | 3.175 | 5.420 | 0.031250 | 0.062500 |
+| `TuiConfiguration` | 1,445,408 | 1,925,408 | 24.9% | 4.178 | 4.197 | 0.046875 | 0.031250 |
+| `WorkbenchInteractionStore` | 485,264 | 1,525,160 | 68.2% | 1.013 | 3.735 | 0.015625 | 0.031250 |
 
 The benchmark used counts of 100 and 10,000 with `warmup_count=0` because this
 artifact is a CPython baseline. The peak column is the retained `tracemalloc`
