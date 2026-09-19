@@ -329,7 +329,7 @@ dependency leakage a test failure rather than an undocumented profile change.
 
 ## Phase 4: Add an Experimental PyPy CI Lane
 
-The repository now provides a manual probe at
+The LLM-Wiki repository provides a manual application probe at
 `.github/workflows/pypy-beta.yml`. Run it from **Actions -> Experimental PyPy
 3.12 beta** for the initial interpreter and dependency-boundary check. The
 reusable local checker is:
@@ -342,8 +342,19 @@ After a genuinely installed, non-editable application profile exists, run the
 checker with `--installed-only --require-import kogwistar
 --require-import kogwistar_llm_wiki`; it rejects checkout imports and requires
 both packages to resolve from the environment.
-The workflow is manual and non-required by design. It records the exact
-interpreter and wheel-tag diagnostics, but does not claim production support.
+The application workflow is manual and non-required by design. It records the
+exact interpreter and wheel-tag diagnostics, but does not claim production
+support. Kogwistar core now also runs an automatic, non-blocking
+`pypy-beta-best-effort` job in its normal `.github/workflows/ci.yml`; that job
+builds the PyO3 extension from source, verifies the native import, and runs the
+provider-free core CI selection on every push, pull request, and scheduled CI
+run. A failed beta probe remains visible without blocking required CPython or
+Rust jobs.
+Because no stable PyPy 3.12 artifact is listed yet, this best-effort core job
+uses the official `nightly/py3.12` archive and prints its size, modification
+time, and SHA-256 in the run log. The archive is intentionally not a required
+release input; promotion still requires a versioned immutable artifact and
+recorded checksum.
 Set its `installed_wheel` input to `true` for the slower non-editable wheel
 probe; that path installs into a temporary environment outside the checkout
 and runs the installed-only origin checks.
@@ -354,7 +365,7 @@ lane. The release-quality lane below remains a follow-up gate: it must pin the
 official archive URL and checksum before it can be required or used for a
 published image.
 
-The current lane intentionally uses the `pypy3.12` selector as a capability
+The application lane intentionally uses the `pypy3.12` selector as a capability
 probe. Before making it required or using it for a published image, replace
 that selector with a reproducibly pinned PyPy 8.0.0 Python 3.12 beta artifact.
 If `actions/setup-python` does not yet expose that build, download the official

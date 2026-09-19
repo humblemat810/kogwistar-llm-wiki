@@ -50,8 +50,8 @@ The local NumPy-free embedding normalization regression set completed:
 ```
 
 The corresponding core metadata and normalization changes are committed as
-`a2cdf226f11880d394f14a004f95030de0359bf9`. The parser commit
-`48859213e32a81858ea2811f58868e54388fadbb` and root workflow pins reference
+`7e506b2ea94f2b7170eabff6e96112fe54815779`. The parser commit
+`f35aea533e88ee5d77eec184bf728c6e044093e1` and root workflow pins reference
 that exact core revision, and all three feature branches are remotely
 available. The PyPy workflow remains manual, so its native probe is still
 pending.
@@ -100,14 +100,15 @@ pypy3 scripts\benchmark_slots.py `
 PyPy 3.12 remains experimental and opt-in:
 
 - the required source CI matrix now covers CPython 3.12 and 3.13;
-- `.github/workflows/pypy-beta.yml` is manual and non-required;
+- the core Kogwistar CI now runs an automatic, non-blocking PyPy 3.12 native
+  probe; the LLM-Wiki application workflow remains manual and non-required;
 - the separate PyPy CI Docker workflow is manual and publishes no production
   release tag;
 - no local PyPy 3.12 runtime was available for a native run;
 - Docker Engine was unavailable locally, so the experimental image was not
   built here;
 - the feature-branch pins reference the NumPy-free Kogwistar commit and are
-  available remotely, but the PyPy workflow has not yet been run;
+  available remotely, but no PyPy result has yet been recorded here;
 - PyO3/Maturin installed-wheel loading and the pgvector/storage boundary still
   require real PyPy probes.
 

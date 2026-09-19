@@ -1,15 +1,16 @@
 # PyPy 3.12 Compatibility Matrix
 
 This is the evidence ledger for the experimental NumPy-free, Chroma-free
-PyPy 3.12 profile. It is not a production-support declaration. The manual
-workflow in `.github/workflows/pypy-beta.yml` must update the probe result and
-the exact dependency/interpreter evidence before any row is promoted.
+PyPy 3.12 profile. It is not a production-support declaration. The automatic,
+non-blocking core job in `kogwistar/.github/workflows/ci.yml` and the manual
+application workflow in `.github/workflows/pypy-beta.yml` must update the probe
+result and exact dependency/interpreter evidence before any row is promoted.
 
 | Boundary | Profile requirement | Current state | Evidence or blocking condition |
 | --- | --- | --- | --- |
 | PyPy interpreter | Python 3.12 beta | Probe only | `pypy-beta.yml` uses the `pypy3.12` selector; no local PyPy 3.12 runtime is installed. |
 | Kogwistar base | Import and Rust bridge parity | Blocked | Requires a PyPy-native build/test of the pinned PyO3 extension. |
-| Kogwistar NumPy boundary | Base import without NumPy | Feature revision ready, CI probe pending | Core commit `a2cdf226f11880d394f14a004f95030de0359bf9` removes the base NumPy dependency, refreshes SQLite reads after external commits, and raises the FastMCP/MCP security floors; the feature branch is remotely available, but the PyPy workflow is manual. |
+| Kogwistar NumPy boundary | Base import without NumPy | Feature revision ready, automatic beta probe | Core commit `7e506b2ea94f2b7170eabff6e96112fe54815779` removes the base NumPy dependency, refreshes SQLite reads after external commits, raises the FastMCP/MCP security floors, and adds the automatic non-blocking PyPy core probe. |
 | Parser text path | Import and fake-provider tests | Probe | `pikepdf` is excluded on PyPy and loaded lazily; PDF splitting remains capability-gated. |
 | FastMCP | MCP contract | Probe | Included in the bounded profile; requires the PyPy runner and native dependency resolution. |
 | PostgreSQL driver | Transaction/ACL/provenance parity | Probe | `psycopg` is included without the binary extra; pgvector is intentionally excluded. |
