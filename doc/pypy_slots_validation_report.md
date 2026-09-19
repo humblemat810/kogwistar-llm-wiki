@@ -51,8 +51,8 @@ The local NumPy-free embedding normalization regression set completed:
 
 The current core CI changes are committed as
 `d60183bd02cfdc253502b864a021ddcf29a115b4`. The parser pins that core revision
-in commit `0e2a66f9331053702e12bf0fbf502abbc59b62f2`, and the root feature
-branch pins both exact revisions in `d4dad4a21ba3bcca1712f7a1291afc34b9438e0f`.
+in commit `271ca53377f7ae13e0f4dec5809a7e075a7f46d3`, and the root feature
+branch pins both exact revisions in `093489ce987fb2bd42c80b0e3c24e40bf6a5d1f3`.
 The automatic Kogwistar PyPy probe initially ran in `35443844532`; its CPython
 and Rust jobs passed, while `pypy-beta-best-effort` reached native-extension
 verification and failed. Follow-up run `35447957681` built a real PyPy wheel
@@ -60,6 +60,14 @@ after the CI-only PyO3 override and completed diagnostics, but native import
 verification still failed. The explicit Python-authority fallback suite also
 failed, so this is not yet a usable PyPy execution profile. The profile remains
 experimental rather than claiming native compatibility without evidence.
+
+The later synchronized runs provide the current cross-repository evidence:
+core run `35450150380` completed its required CPython/Rust jobs successfully
+but retained the visible nonblocking PyPy failure; parser run `35450654679`
+passed on Python 3.12 and 3.13; and root run `35450724414` passed lint, Rust,
+and provider-free Python 3.12/3.13 tests. The root branch pins parser commit
+`271ca53377f7ae13e0f4dec5809a7e075a7f46d3` in commit
+`093489ce987fb2bd42c80b0e3c24e40bf6a5d1f3`.
 
 The current local parser provider-free focused slice is `47 passed, 64
 deselected` in 288.69 seconds. Root profile/slot contract tests are `15

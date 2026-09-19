@@ -9,7 +9,7 @@ result and exact dependency/interpreter evidence before any row is promoted.
 | Boundary | Profile requirement | Current state | Evidence or blocking condition |
 | --- | --- | --- | --- |
 | PyPy interpreter | Python 3.12 beta | Probe only | `pypy-beta.yml` downloads the official moving `nightly/py3.12` archive; no local PyPy 3.12 runtime is installed. |
-| Kogwistar base | Import and Rust bridge parity | Blocked | Follow-up run `35447957681` built a real PyPy wheel and completed diagnostics, but native import verification failed; the explicit Python-authority fallback suite also failed. A PyPy-native/runtime compatibility fix is still required. |
+| Kogwistar base | Import and Rust bridge parity | Blocked | Automatic core run `35450150380` built a real PyPy wheel and completed native diagnostics, but native import verification failed; the explicit Python-authority fallback exited during pytest collection. A PyPy-native/runtime compatibility fix is still required. |
 | Kogwistar NumPy boundary | Base import without NumPy | Feature revision ready, automatic beta probe | Core commit `d60183bd02cfdc253502b864a021ddcf29a115b4` removes the base NumPy dependency, keeps the PyPy-only `rpds-py==2026.5.1` workaround isolated to CI, and quotes PyPy dependency specs so shell redirection cannot corrupt installation. |
 | Parser text path | Import and fake-provider tests | Probe | `pikepdf` is excluded on PyPy and loaded lazily; PDF splitting remains capability-gated. |
 | FastMCP | MCP contract | Probe | Included in the bounded profile; requires the PyPy runner and native dependency resolution. |
