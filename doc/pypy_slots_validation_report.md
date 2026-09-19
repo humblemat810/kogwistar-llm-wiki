@@ -50,24 +50,20 @@ The local NumPy-free embedding normalization regression set completed:
 ```
 
 The current core CI changes are committed as
-`d60183bd02cfdc253502b864a021ddcf29a115b4`. The parser pins that core revision
-in commit `271ca53377f7ae13e0f4dec5809a7e075a7f46d3`, and the root feature
-branch pins both exact revisions in `093489ce987fb2bd42c80b0e3c24e40bf6a5d1f3`.
-The automatic Kogwistar PyPy probe initially ran in `35443844532`; its CPython
-and Rust jobs passed, while `pypy-beta-best-effort` reached native-extension
-verification and failed. Follow-up run `35447957681` built a real PyPy wheel
-after the CI-only PyO3 override and completed diagnostics, but native import
-verification still failed. The explicit Python-authority fallback suite also
-failed, so this is not yet a usable PyPy execution profile. The profile remains
-experimental rather than claiming native compatibility without evidence.
+`9b5f1ce6fbca449bd65324ef25441737327d82ab`. The parser pins that core revision
+in commit `9477aface0a4fe5df52bcce44fd7fc77d87a22f7`, and the root feature
+branch pins both exact revisions in `a8dfd86fdb361916b4ebd32a1976eb3f0a5255c8`.
+The automatic Kogwistar PyPy probe is run in `35452203189`; its CPython, Rust,
+and native-wheel jobs passed, and the beta job built and installed a real PyPy
+wheel. The native verification/fallback path still failed, so this is not yet
+a usable PyPy execution profile. The profile remains experimental rather than
+claiming native compatibility without evidence.
 
-The later synchronized runs provide the current cross-repository evidence:
-core run `35450150380` completed its required CPython/Rust jobs successfully
-but retained the visible nonblocking PyPy failure; parser run `35450654679`
-passed on Python 3.12 and 3.13; and root run `35450724414` passed lint, Rust,
-and provider-free Python 3.12/3.13 tests. The root branch pins parser commit
-`271ca53377f7ae13e0f4dec5809a7e075a7f46d3` in commit
-`093489ce987fb2bd42c80b0e3c24e40bf6a5d1f3`.
+The latest synchronized parser run `35452267611` passed on Python 3.12 and
+3.13. Root run `35452342294` passed lint, Rust, and provider-free Python
+3.12/3.13 tests. The root branch pins parser commit
+`9477aface0a4fe5df52bcce44fd7fc77d87a22f7` in commit
+`a8dfd86fdb361916b4ebd32a1976eb3f0a5255c8`.
 
 The current local parser provider-free focused slice is `47 passed, 64
 deselected` in 288.69 seconds. Root profile/slot contract tests are `15
@@ -119,9 +115,9 @@ PyPy 3.12 remains experimental and opt-in:
 
 - the required source CI matrix now covers CPython 3.12 and 3.13;
 - the core Kogwistar CI now runs an automatic, non-blocking PyPy 3.12 native
-  probe; the latest run built the wheel but failed native import verification
-  and the explicit Python-authority fallback suite; the LLM-Wiki application
-  workflow remains manual and non-required;
+  probe; the latest run built and installed the wheel but its verification /
+  fallback path still failed; the LLM-Wiki application workflow remains manual
+  and non-required;
 - the separate PyPy CI Docker workflow is manual and publishes no production
   release tag;
 - no local PyPy 3.12 runtime was available for a native run;
