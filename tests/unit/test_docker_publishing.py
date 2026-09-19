@@ -28,6 +28,26 @@ def test_embedding_release_workflow_is_manual_and_explicit() -> None:
     assert "promote_latest:" in workflow
 
 
+def test_pypy_ci_image_release_is_manual_pinned_and_separate() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "publish-pypy-ci-dockerhub.yml").read_text(
+        encoding="utf-8"
+    )
+    dockerfile = (ROOT / "Dockerfile.pypy-ci").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm:" in workflow
+    assert "pypy_sha256:" in workflow
+    assert "pypy_url:" in workflow
+    assert "kogwistar-llm-wiki-pypy-ci" in workflow
+    assert "Dockerfile.pypy-ci" in workflow
+    assert "cache-from: type=gha,scope=pypy-ci" in workflow
+    assert "docker push" in workflow
+    assert "PYPY_SHA256" in dockerfile
+    assert "sha256sum --check" in dockerfile
+    assert "pypy-c-jit-latest" not in dockerfile
+    assert "ENTRYPOINT [\"pypy3\"]" in dockerfile
+
+
 def test_local_publishers_default_to_application_and_offer_explicit_targets() -> None:
     powershell = (ROOT / "scripts" / "publish_docker_images.ps1").read_text(encoding="utf-8")
     bash = (ROOT / "scripts" / "publish_docker_images.sh").read_text(encoding="utf-8")
@@ -98,6 +118,7 @@ def test_github_workflows_pin_all_checked_out_vendor_revisions() -> None:
         ROOT / ".github" / "workflows" / "ci.yml",
         ROOT / ".github" / "workflows" / "publish-dockerhub.yml",
         ROOT / ".github" / "workflows" / "publish-dockerhub-main.yml",
+        ROOT / ".github" / "workflows" / "pypy-beta.yml",
     )
     expected = {
         "KOGWISTAR_REVISION": "kogwistar",

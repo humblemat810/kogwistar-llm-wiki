@@ -14,7 +14,7 @@ from .maintenance_policy import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MaintenanceJobExecutionContext:
     workspace_id: str
     job: JobQueueItem

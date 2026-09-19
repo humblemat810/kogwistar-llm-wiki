@@ -8,12 +8,13 @@ version = "0.4.0"
 description = "LLM-Wiki: a continuously-learning knowledge system built on Kogwistar"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 keywords = ["knowledge-graph", "llm", "obsidian", "kogwistar", "wiki"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
@@ -109,6 +110,13 @@ test = [
     "sqlalchemy>=2.0",
     "langchain-ollama>=0.3.0",
 ]
+pypy = [
+    "pytest>=8.0",
+    "pytest-anyio",
+    "fastmcp==3.0.0",
+    "sqlalchemy>=2.0",
+    "psycopg>=3.1",
+]
 dev = [
     "kogwistar-llm-wiki[test,chromadb,otel,agent]",
 ]
@@ -148,6 +156,9 @@ markers = [
     "e2e: end-to-end tests spanning multiple running services",
     "requires_ollama: tests that require a local Ollama service",
 ]
+
+[tool.ruff]
+target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
 # These files intentionally import after runtime path/bootstrap setup.

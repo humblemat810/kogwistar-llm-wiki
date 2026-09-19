@@ -26,6 +26,7 @@ class _MetadataStore(Protocol):
 class ParseSessionStore:
     """Persist session/frontier state independently from parser temp files."""
 
+    __slots__ = ("metadata", "workspace_id", "namespace")
     schema_version = 1
 
     def __init__(self, metadata: _MetadataStore, *, workspace_id: str) -> None:

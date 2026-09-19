@@ -121,3 +121,21 @@ The scripts use `docker buildx build --load` so Dockerfile cache mounts work in
 local Docker Desktop builds. No model checkpoint is copied into either image.
 For CI, use `DOCKERHUB_TOKEN` with the GitHub secret and the Docker login action
 rather than putting a token in a command or shell history.
+
+## Experimental PyPy CI image
+
+The repository also has a separate, manually confirmed workflow for the
+experimental PyPy 3.12 beta CI image:
+
+```text
+docker.io/<dockerhub-user>/kogwistar-llm-wiki-pypy-ci:pypy3.12-beta-<build>
+```
+
+Run `.github/workflows/publish-pypy-ci-dockerhub.yml` only after selecting a
+versioned PyPy archive and recording its SHA-256. The workflow rejects moving
+`latest` archive URLs, requires the `confirm` input, refuses an existing tag,
+smoke-tests the interpreter and Rust toolchain, and pushes only after those
+checks pass. It does not publish `kogwistar-llm-wiki`, an embedding image, or
+any `latest` alias. This image is a CI/build environment, not a supported
+runtime image and does not contain application code, model weights, or user
+credentials.
