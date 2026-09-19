@@ -50,9 +50,9 @@ The local NumPy-free embedding normalization regression set completed:
 ```
 
 The current core CI changes are committed as
-`9b5f1ce6fbca449bd65324ef25441737327d82ab`. The parser pins that core revision
-in commit `9477aface0a4fe5df52bcce44fd7fc77d87a22f7`, and the root feature
-branch pins both exact revisions in `a8dfd86fdb361916b4ebd32a1976eb3f0a5255c8`.
+`c2a0589db9905c62449d5b16d2bac05974e97a1e`. The parser pins that core revision
+in commit `061d506ea7f413028b811844ce8f09ee2733f234`, and the root feature
+branch pins both exact revisions in `8821940c178353d96e1e4f374805fa57782b5eb3`.
 The automatic Kogwistar PyPy probe is run in `35452203189`; its CPython, Rust,
 and native-wheel jobs passed, and the beta job built and installed a real PyPy
 wheel. The native verification/fallback path still failed, so this is not yet
@@ -62,8 +62,8 @@ claiming native compatibility without evidence.
 The latest synchronized parser run `35452267611` passed on Python 3.12 and
 3.13. Root run `35452342294` passed lint, Rust, and provider-free Python
 3.12/3.13 tests. The root branch pins parser commit
-`9477aface0a4fe5df52bcce44fd7fc77d87a22f7` in commit
-`a8dfd86fdb361916b4ebd32a1976eb3f0a5255c8`.
+`061d506ea7f413028b811844ce8f09ee2733f234` in commit
+`8821940c178353d96e1e4f374805fa57782b5eb3`.
 
 The current local parser provider-free focused slice is `47 passed, 64
 deselected` in 288.69 seconds. Root profile/slot contract tests are `15
