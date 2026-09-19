@@ -17,8 +17,8 @@ jobs:
     env:
       # Keep the post-CI image reproducible even though these packages are
       # maintained as sibling repositories rather than Git submodules.
-      KOGWISTAR_REVISION: d60183bd02cfdc253502b864a021ddcf29a115b4
-      KG_DOC_PARSER_REVISION: 271ca53377f7ae13e0f4dec5809a7e075a7f46d3
+      KOGWISTAR_REVISION: 8118311c23537c75552f5db445db11108535964a
+      KG_DOC_PARSER_REVISION: 50a454dd83c90f96774393a0feeb21dda463f90d
       OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
     steps:
       - name: Check out tested application commit
