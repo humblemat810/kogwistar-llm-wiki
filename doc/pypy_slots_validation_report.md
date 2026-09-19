@@ -49,11 +49,12 @@ The local NumPy-free embedding normalization regression set completed:
 4 passed
 ```
 
-The corresponding core metadata and normalization changes are committed
-locally as `298ee4a3ecb74d1dce05c291e233572a88aa20b9`. The parser commit
-`0c393e6e9e803ae38276f0b14680015b6a82869a` and root workflow pins now
-reference that exact core revision. Both dependency commits must be pushed to
-their upstream repositories before GitHub can resolve and prove them.
+The corresponding core metadata and normalization changes are committed as
+`298ee4a3ecb74d1dce05c291e233572a88aa20b9`. The parser commit
+`0c393e6e9e803ae38276f0b14680015b6a82869a` and root workflow pins reference
+that exact core revision, and all three feature branches are remotely
+available. The PyPy workflow remains manual, so its native probe is still
+pending.
 
 ## Slots Measurement
 
@@ -92,8 +93,8 @@ PyPy 3.12 remains experimental and opt-in:
 - no local PyPy 3.12 runtime was available for a native run;
 - Docker Engine was unavailable locally, so the experimental image was not
   built here;
-- the local pins now reference the NumPy-free Kogwistar commit, but that core
-  commit is not yet available from the remote repository for GitHub CI;
+- the feature-branch pins reference the NumPy-free Kogwistar commit and are
+  available remotely, but the PyPy workflow has not yet been run;
 - PyO3/Maturin installed-wheel loading and the pgvector/storage boundary still
   require real PyPy probes.
 
