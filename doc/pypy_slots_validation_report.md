@@ -52,7 +52,7 @@ The local NumPy-free embedding normalization regression set completed:
 The current core CI changes are committed as
 `121314be28f300eca0cc55d87a83f40c302b81af`. The parser pins that core revision
 in commit `0d3ac02c042e642d6db6c4dedac1793f6eaad54d`, and the root feature
-branch pins both exact revisions in `8821940c178353d96e1e4f374805fa57782b5eb3`.
+branch pins both exact revisions in `f048ff1`.
 The automatic Kogwistar PyPy probe is run in `35454026253`; its CPython, Rust,
 and native-wheel jobs passed, and the beta job built and installed a real PyPy
 wheel. Native verification and the Python-authority fallback still failed, so
