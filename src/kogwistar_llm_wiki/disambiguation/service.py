@@ -43,6 +43,8 @@ class DisambiguationAnswerRecord:
 class DisambiguationService:
     """App-level API for recording disambiguation answers and reviewer decisions."""
 
+    __slots__ = ("engines",)
+
     def __init__(self, engines: NamespaceEngines) -> None:
         self.engines = engines
 

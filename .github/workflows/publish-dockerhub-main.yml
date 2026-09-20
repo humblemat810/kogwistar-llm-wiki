@@ -17,28 +17,28 @@ jobs:
     env:
       # Keep the post-CI image reproducible even though these packages are
       # maintained as sibling repositories rather than Git submodules.
-      KOGWISTAR_REVISION: fd47df2894ea020ef4199d9a8e1d089242467df4
-      KG_DOC_PARSER_REVISION: 4c4748ad5eeb47addafda59cd0ac90d70177f298
-      OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
+      KOGWISTAR_REVISION: 3276b6f2c88dd5330e57b9d3d148f8af021c8f4a
+      KG_DOC_PARSER_REVISION: 459afe01a56c8f9916573173ac5c7800fd9fc5d1
+      OBSIDIAN_SINK_REVISION: 30e64d30f04f5b175f9ea3b537c18e0523017398
     steps:
       - name: Check out tested application commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - name: Check out pinned sibling packages
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kogwistar
           ref: ${{ env.KOGWISTAR_REVISION }}
           path: kogwistar
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: humblemat810/kg-doc-parser
           ref: ${{ env.KG_DOC_PARSER_REVISION }}
           path: kg-doc-parser
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: humblemat810/kogwistar-obsidian-sink
           ref: ${{ env.OBSIDIAN_SINK_REVISION }}

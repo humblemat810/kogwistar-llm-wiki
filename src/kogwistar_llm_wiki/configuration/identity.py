@@ -29,7 +29,7 @@ class IdentityError(ValueError):
         self.status = status
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LlmWikiIdentity:
     principal_id: str
     scopes: frozenset[str]

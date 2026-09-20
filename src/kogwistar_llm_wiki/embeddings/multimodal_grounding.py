@@ -307,6 +307,8 @@ class EvidenceClosureResolver(Protocol):
 class EvidenceClosureValidator:
     """Validate typed evidence closure before an app-level authoritative write."""
 
+    __slots__ = ("max_refs", "resolver")
+
     def __init__(self, resolver: EvidenceClosureResolver, *, max_refs: int = 256) -> None:
         if max_refs <= 0:
             raise ValueError("max_refs must be positive")

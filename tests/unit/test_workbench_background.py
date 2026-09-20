@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
 from kogwistar_llm_wiki import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.ingest_pipeline import build_persistent_namespace_engines
 from kogwistar_llm_wiki.workbench.workbench_background import (
@@ -140,6 +141,7 @@ def test_lost_claim_cannot_publish_a_terminal_failure(monkeypatch):
         engines.close()
 
 
+@pytest.mark.requires_chroma
 def test_pending_interaction_recovers_after_process_style_engine_restart(tmp_path):
     base_dir = tmp_path / "persistent-workbench"
     first = build_persistent_namespace_engines(base_dir=base_dir)

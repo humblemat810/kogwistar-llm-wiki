@@ -1,0 +1,195 @@
+name: Experimental PyPy 3.11 profile
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Keep the experimental profile aligned with the revisions tested by CI.
+  KOGWISTAR_REVISION: 3276b6f2c88dd5330e57b9d3d148f8af021c8f4a
+  KG_DOC_PARSER_REVISION: 459afe01a56c8f9916573173ac5c7800fd9fc5d1
+  OBSIDIAN_SINK_REVISION: 30e64d30f04f5b175f9ea3b537c18e0523017398
+
+jobs:
+  pypy-311-probe:
+    name: PyPy 3.11 Python-authority probe
+    # This is an automatic compatibility signal, not a release gate.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Set up official PyPy 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: pypy-3.11-v7.3.20
+          cache: pip
+
+      - name: Report interpreter
+        shell: bash
+        run: |
+          set -euo pipefail
+          python --version
+          python -c 'import sys, sysconfig; assert sys.implementation.name == "pypy"; assert sys.version_info[:2] == (3, 11); print(sys.implementation); print(sysconfig.get_platform()); print(sysconfig.get_config_var("SOABI"))'
+
+      - name: Add pinned source packages to the import path
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src"
+          } >> "$GITHUB_ENV"
+
+      - name: Install bounded NumPy-free Python profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps --ignore-requires-python -e .
+          python -m pip install -r requirements/pypy-3.11-experimental.txt
+
+      - name: Capture PyPy 3.11 resolver evidence
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          python -m pip freeze --all > test-results/pip-freeze-pypy311.txt
+          freeze_status=$?
+          python -m pip check > test-results/pip-check-pypy311.txt 2>&1
+          check_status=$?
+          python -c 'import importlib.util; names=("langchain_openai", "langchain_google_genai", "langchain_ollama"); print("provider_sdk_origins=" + repr({name: (importlib.util.find_spec(name).origin if importlib.util.find_spec(name) else None) for name in names}))' \
+            > test-results/provider-sdk-status-pypy311.txt 2>&1 || true
+          {
+            echo "pip_freeze_exit_code=$freeze_status"
+            echo "pip_check_exit_code=$check_status"
+            echo "--- pip check output ---"
+            cat test-results/pip-check-pypy311.txt
+            echo "--- provider SDK status (expected absent) ---"
+            cat test-results/provider-sdk-status-pypy311.txt
+          } | tee test-results/pip-resolver-status-pypy311.txt
+          # The sibling repositories are intentionally supplied through
+          # PYTHONPATH in this provider-free lane, not installed as wheels.
+          # pip check can therefore report metadata-only missing packages;
+          # keep that diagnostic visible without mistaking it for a Linux
+          # resolver or pywin32 failure.
+          if [ "$freeze_status" -ne 0 ]; then
+            echo "pip freeze failed; continuing to the profile probe for a useful diagnostic."
+            exit 1
+          fi
+          if [ "$check_status" -ne 0 ]; then
+            echo "pip check reported source-profile metadata gaps; continuing to the profile probe."
+          fi
+
+      - name: Run shared PyPy 3.11 compatibility profile
+        shell: bash
+        run: python scripts/run_pypy311_ci.py --skip-install
+
+      - name: Publish PyPy 3.11 result summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile_status=0
+          pytest_status=0
+          test -s test-results/pypy-profile-pypy311.json || profile_status=1
+          grep -q '"ok": true' test-results/pypy-profile-pypy311.json 2>/dev/null || profile_status=1
+          test -s test-results/pytest-pypy311.log || pytest_status=1
+          grep -Eq '^FAILED |^ERROR |[0-9]+ failed' test-results/pytest-pypy311.log 2>/dev/null && pytest_status=1 || true
+          {
+            echo "### PyPy 3.11 provider-free test summary"
+            echo "profile_status=$profile_status"
+            echo "pytest_status=$pytest_status"
+            if [ "$profile_status" -eq 0 ] && [ "$pytest_status" -eq 0 ]; then
+              echo "The shared provider-free PyPy profile passed."
+            else
+              echo '```text'
+              tail -n 200 test-results/pytest-pypy311.log 2>/dev/null || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$profile_status" -ne 0 ] || [ "$pytest_status" -ne 0 ]; then
+            echo "::error title=PyPy 3.11 compatibility profile failure::see uploaded profile and pytest logs"
+          fi
+
+      - name: Upload PyPy 3.11 profile evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pypy311-profile-evidence
+          path: |
+            test-results/pypy-profile-pypy311.json
+            test-results/pip-freeze-pypy311.txt
+            test-results/pip-check-pypy311.txt
+            test-results/provider-sdk-status-pypy311.txt
+            test-results/pip-resolver-status-pypy311.txt
+          if-no-files-found: warn
+
+
+      - name: Upload per-test PyPy resource report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: resource-report-pypy311
+          path: test-results/resource-report-pypy311.json
+          if-no-files-found: warn
+
+      - name: Upload PyPy test log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-log-pypy311
+          path: test-results/pytest-pypy311.log
+          if-no-files-found: warn
+
+      - name: Publish resource summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="test-results/resource-report-pypy311.json"
+          if test -f "$report"; then
+            python scripts/summarize_resource_report.py "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Resource Report" >> "$GITHUB_STEP_SUMMARY"
+            echo "Resource report was not produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Report PyPy 3.11 limitation
+        run: |
+          echo "PyPy 3.11 Python-authority profile completed."
+          echo "Native Kogwistar extension compatibility is a separate gate; this lane does not publish an image."

@@ -14,7 +14,7 @@ from .maintenance_policy import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MaintenanceJobExecutionContext:
     workspace_id: str
     job: JobQueueItem
@@ -51,6 +51,8 @@ class MaintenanceStrategy(Protocol):
 
 
 class MaintenanceStrategyRegistry:
+    __slots__ = ("_strategies",)
+
     def __init__(self, strategies: list[MaintenanceStrategy] | None = None) -> None:
         self._strategies = list(strategies or [])
 

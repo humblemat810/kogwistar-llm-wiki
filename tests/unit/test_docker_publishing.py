@@ -28,6 +28,61 @@ def test_embedding_release_workflow_is_manual_and_explicit() -> None:
     assert "promote_latest:" in workflow
 
 
+def test_pypy_ci_image_release_is_manual_pinned_and_separate() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "publish-pypy-ci-dockerhub.yml").read_text(
+        encoding="utf-8"
+    )
+    dockerfile = (ROOT / "Dockerfile.pypy-ci").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "confirm:" in workflow
+    assert "pypy_sha256:" in workflow
+    assert "pypy_url:" in workflow
+    assert "kogwistar-llm-wiki-pypy-ci" in workflow
+    assert "Dockerfile.pypy-ci" in workflow
+    assert "cache-from: type=gha,scope=pypy-ci" in workflow
+    assert "docker push" in workflow
+    assert "PYPY_SHA256" in dockerfile
+    assert "ARG PYPY_VERSION=3.12" in dockerfile
+    assert "sha256sum --check" in dockerfile
+    assert "pypy-c-jit-latest" not in dockerfile
+    assert "ENTRYPOINT [\"pypy3\"]" in dockerfile
+
+
+def test_pypy311_ci_container_uses_the_same_pinned_builder_without_publishing() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "pypy-311-ci-container.yml").read_text(
+        encoding="utf-8"
+    )
+    dockerfile = (ROOT / "Dockerfile.pypy-ci").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "pull_request:" in workflow
+    assert "downloads.python.org/pypy/pypy3.11-v7.3.20-linux64.tar.bz2" in workflow
+    assert "1410db3a7ae47603e2b7cbfd7ff6390b891b2e041c9eb4f1599f333677bccb3e" in workflow
+    assert "PYPY_SHA256=${{ env.PYPY_SHA256 }}" in workflow
+    assert "PYPY_VERSION: \"3.11\"" in workflow
+    assert "PYPY_VERSION=${{ env.PYPY_VERSION }}" in workflow
+    assert "Build the pinned PyPy 3.11 CI image (pull request)" in workflow
+    assert "Build the pinned PyPy 3.11 CI image (cached)" in workflow
+    assert "if: github.event_name == 'pull_request'" in workflow
+    assert "if: github.event_name != 'pull_request'" in workflow
+    assert "cache-to: type=gha,mode=max,scope=pypy311-ci" in workflow
+    assert "load: true" in workflow
+    assert "push: false" in workflow
+    assert "docker push" not in workflow
+    assert "scripts/run_pypy311_ci.py" in workflow
+    assert "--venv /tmp/pypy311-venv" in workflow
+    assert "safe.directory /workspace" in workflow
+    assert "pypy311-container-smoke.log" in workflow
+    assert "GITHUB_STEP_SUMMARY" in workflow
+    assert "::error title=PyPy 3.11 container smoke failure::" in workflow
+    runner = (ROOT / "scripts" / "run_pypy311_ci.py").read_text(encoding="utf-8")
+    assert '"-p"' in runner
+    assert '"no:cacheprovider"' in runner
+    assert "*.tar.bz2" in dockerfile
+    assert "*.tar.gz|*.tgz" in dockerfile
+
+
 def test_local_publishers_default_to_application_and_offer_explicit_targets() -> None:
     powershell = (ROOT / "scripts" / "publish_docker_images.ps1").read_text(encoding="utf-8")
     bash = (ROOT / "scripts" / "publish_docker_images.sh").read_text(encoding="utf-8")
@@ -94,11 +149,7 @@ def test_main_image_publishes_only_after_successful_ci_to_configured_namespace()
 
 
 def test_github_workflows_pin_all_checked_out_vendor_revisions() -> None:
-    workflow_paths = (
-        ROOT / ".github" / "workflows" / "ci.yml",
-        ROOT / ".github" / "workflows" / "publish-dockerhub.yml",
-        ROOT / ".github" / "workflows" / "publish-dockerhub-main.yml",
-    )
+    workflow_paths = tuple((ROOT / ".github" / "workflows").glob("*.yml"))
     expected = {
         "KOGWISTAR_REVISION": "kogwistar",
         "KG_DOC_PARSER_REVISION": "kg-doc-parser",
@@ -111,6 +162,9 @@ def test_github_workflows_pin_all_checked_out_vendor_revisions() -> None:
             text=True,
         ).strip()
         for path in workflow_paths:
-            pins = re.findall(rf"{variable}:\s*([0-9a-f]{{40}})", path.read_text(encoding="utf-8"))
+            workflow = path.read_text(encoding="utf-8")
+            if f"{variable}:" not in workflow:
+                continue
+            pins = re.findall(rf"{variable}:\s*([0-9a-f]{{40}})", workflow)
             assert pins
             assert set(pins) == {current}

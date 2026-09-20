@@ -7,12 +7,15 @@ from http.server import ThreadingHTTPServer
 from threading import Thread
 from types import SimpleNamespace
 
+import httpx
 import pytest
-from fastmcp.server.auth import AccessToken, AuthContext, run_auth_checks
 from jose import jwt
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 from kogwistar_llm_wiki.agent.gateway import AgentGateway
 from kogwistar_llm_wiki.agent.mcp_server import build_agent_mcp
+from kogwistar_llm_wiki.configuration.identity import IdentityError, authenticate_bearer
 from kogwistar_llm_wiki.workbench.workbench_http import (
     _payload_workspace,
     build_workbench_handler,
@@ -247,6 +250,7 @@ def test_native_mcp_accepts_explicit_token(monkeypatch):
     monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
     monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
     monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "secret")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN_SCOPES", "read")
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     assert mcp.auth is not None
 
@@ -309,28 +313,81 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     ]
     assert all(tool.description for tool in tools)
     query = next(tool for tool in tools if tool.name == "query")
-    assert query.parameters["required"] == ["workspace_id", "query_text"]
+    assert query.inputSchema["required"] == ["workspace_id", "query_text"]
     reingest = next(tool for tool in tools if tool.name == "reingest")
-    assert "source_document_id" in reingest.parameters["properties"]
+    assert "source_document_id" in reingest.inputSchema["properties"]
+
+
+def test_native_mcp_streamable_http_preserves_wire_contract():
+    async def exercise() -> None:
+        mcp = build_agent_mcp(AgentGateway(FakeApi()))
+        app = mcp._streamable_http_app("/mcp")
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with (
+                httpx.AsyncClient(
+                    transport=transport, base_url="http://testserver"
+                ) as http_client,
+                streamable_http_client(
+                    "http://testserver/mcp", http_client=http_client
+                ) as (read_stream, write_stream, _),
+                ClientSession(read_stream, write_stream) as session,
+            ):
+                await session.initialize()
+                tools = await session.list_tools()
+                assert {tool.name for tool in tools.tools} == {
+                    "query",
+                    "search",
+                    "ingest",
+                    "source",
+                    "reingest",
+                    "maintain",
+                    "status",
+                    "hypergraph_search",
+                    "history",
+                    "memory_recall",
+                    "memory_capture",
+                    "memory_review",
+                    "propose",
+                    "confirm",
+                }
+                result = await session.call_tool(
+                    "query",
+                    {"workspace_id": "w", "query_text": "hello"},
+                )
+                assert result.isError is False
+                assert result.structuredContent["answer"]["text"] == (
+                    "grounded: hello"
+                )
+
+    asyncio.run(exercise())
 
 
 def test_native_mcp_applies_read_and_write_scopes_to_tools(monkeypatch):
     monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
     monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
     monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "secret")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN_SCOPES", "read")
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
-    # The provider-level list is intentionally unfiltered; list_tools() needs a
-    # live transport auth context and would hide every tool in this unit test.
-    tools = {tool.name: tool for tool in asyncio.run(mcp._list_tools())}
-    read_token = AccessToken(token="secret", client_id="client", scopes=["read"])
-    write_token = AccessToken(token="secret", client_id="client", scopes=["write"])
-    def read_ctx(name, token):
-        return AuthContext(token=token, component=tools[name])
+    read_identity = authenticate_bearer("Bearer secret")
+    assert read_identity is not None
+    assert read_identity.scopes == frozenset({"read"})
+    with pytest.raises(IdentityError, match="scope 'write'"):
+        mcp._dispatch(
+            "confirm",
+            {"workspace_id": "w", "interaction_id": "i", "confirmed": False},
+            identity=read_identity,
+        )
 
-    assert asyncio.run(run_auth_checks(tools["search"].auth, read_ctx("search", read_token))) is True
-    assert asyncio.run(run_auth_checks(tools["confirm"].auth, read_ctx("confirm", read_token))) is False
-    assert asyncio.run(run_auth_checks(tools["confirm"].auth, read_ctx("confirm", write_token))) is True
-    assert asyncio.run(run_auth_checks(tools["query"].auth, read_ctx("query", write_token))) is False
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN_SCOPES", "write")
+    write_identity = authenticate_bearer("Bearer secret")
+    assert write_identity is not None
+    with pytest.raises(IdentityError, match="scope 'read'"):
+        mcp._dispatch(
+            "query",
+            {"workspace_id": "w", "query_text": "q"},
+            identity=write_identity,
+        )
 
 
 def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):

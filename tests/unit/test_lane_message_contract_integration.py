@@ -87,7 +87,14 @@ def _build_namespace_engines(backend_name: str, tmp_path: Path):
     raise ValueError(f"Unsupported backend_name={backend_name!r}")
 
 
-@pytest.mark.parametrize("backend_name", ["memory", "sqlite", "postgres"])
+@pytest.mark.parametrize(
+    "backend_name",
+    [
+        "memory",
+        pytest.param("sqlite", marks=pytest.mark.requires_chroma),
+        "postgres",
+    ],
+)
 def test_lane_message_request_reply_round_trip_is_backend_agnostic(tmp_path: Path, backend_name: str):
     engines = _build_namespace_engines(backend_name, tmp_path)
     pipeline = IngestPipeline(engines)
@@ -179,7 +186,14 @@ def test_maintenance_lane_progress_reports_projected_request_and_reply(tmp_path:
     assert by_type["reply.maintenance.completed"]["inbox_id"] == "inbox:foreground"
 
 
-@pytest.mark.parametrize("backend_name", ["memory", "sqlite", "postgres"])
+@pytest.mark.parametrize(
+    "backend_name",
+    [
+        "memory",
+        pytest.param("sqlite", marks=pytest.mark.requires_chroma),
+        "postgres",
+    ],
+)
 def test_lane_message_projection_claim_ack_requeue_contract_is_backend_agnostic(
     tmp_path: Path,
     backend_name: str,
@@ -249,6 +263,7 @@ def test_lane_message_projection_claim_ack_requeue_contract_is_backend_agnostic(
     assert after_ack[0][2] == "completed"
 
 
+@pytest.mark.requires_chroma
 def test_sqlite_lane_message_projection_persists_across_engine_reload(tmp_path: Path):
     base_dir = tmp_path / "sqlite-persist"
     pipeline = IngestPipeline(build_persistent_namespace_engines(base_dir))
@@ -267,6 +282,7 @@ def test_sqlite_lane_message_projection_persists_across_engine_reload(tmp_path: 
     assert after == before
 
 
+@pytest.mark.requires_chroma
 def test_worker_recovers_after_lane_message_projection_repair(tmp_path: Path, monkeypatch):
     engines = build_persistent_namespace_engines(tmp_path / "sqlite-repair")
     pipeline = IngestPipeline(engines)

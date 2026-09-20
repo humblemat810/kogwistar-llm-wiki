@@ -84,6 +84,14 @@ def _redact(value: object) -> object:
 class SettingsService:
     """Expose safe operational state without becoming a second runtime config system."""
 
+    __slots__ = (
+        "_runtime_multimodal_enabled",
+        "_runtime_otel_enabled",
+        "codex_memory",
+        "path",
+        "pipeline",
+    )
+
     def __init__(
         self,
         pipeline: Any,

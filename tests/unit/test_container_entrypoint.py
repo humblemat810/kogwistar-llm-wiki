@@ -68,7 +68,14 @@ def test_real_module_entrypoint_reports_invalid_environment_before_exec():
     )
 
     result = subprocess.run(
-        [sys.executable, "-m", "kogwistar_llm_wiki.container_entrypoint", "python", "-c", "pass"],
+        [
+            sys.executable,
+            "-m",
+            "kogwistar_llm_wiki.container_entrypoint",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
         cwd=ROOT,
         env=environment,
         capture_output=True,
@@ -137,15 +144,22 @@ def test_container_contract_keeps_entrypoint_and_compose_commands():
     assert "      - mcp\n" in compose
 
 
-def test_dockerfile_pins_and_build_checks_fastmcp_imports():
+def test_dockerfile_pins_and_build_checks_official_mcp_imports():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     constraints = (ROOT / "docker" / "container-constraints.txt").read_text(encoding="utf-8")
     parser_pyproject = (ROOT / "kg-doc-parser" / "pyproject.toml").read_text(encoding="utf-8")
+    core_pyproject = (ROOT / "kogwistar" / "pyproject.toml").read_text(encoding="utf-8")
+    pypy_requirements = (ROOT / "requirements" / "pypy-3.12-beta.txt").read_text(encoding="utf-8")
     assert "COPY docker/container-constraints.txt" in dockerfile
-    assert "fastmcp==3.0.0" in constraints
-    assert 'fastmcp = "3.0.0"' in parser_pyproject
-    assert "from fastmcp import FastMCP" in dockerfile
-    assert "from fastmcp.server.auth import StaticTokenVerifier, require_scopes" in dockerfile
+    assert "mcp>=1.27,<2" in constraints
+    assert 'fastmcp = "3.2.4"' not in parser_pyproject
+    assert 'mcp = "^1.27.0"' in parser_pyproject
+    assert '"mcp>=1.27,<2"' in core_pyproject
+    assert '"fastmcp==3.2.4"' not in core_pyproject
+    assert "fastmcp==3.2.4" not in pypy_requirements
+    assert "mcp>=1.27,<2" in pypy_requirements
+    assert "from mcp.server.lowlevel import Server" in dockerfile
+    assert "from fastmcp" not in dockerfile
 
 
 def test_application_dockerfile_separates_churn_layers_and_runtime_tools() -> None:

@@ -19,7 +19,7 @@ StackMode = Literal["split", "combined"]
 EmbeddingMode = Literal["none", "vllm", "transformers"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LaunchStep:
     """One visible process action in a guided launch plan."""
 
@@ -29,7 +29,7 @@ class LaunchStep:
     environment: dict[str, str] | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TuiConfiguration:
     """Non-secret deployment settings collected by the guided launcher."""
 

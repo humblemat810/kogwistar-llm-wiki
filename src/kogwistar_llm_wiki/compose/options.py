@@ -10,7 +10,7 @@ class ComposeConfigurationError(ValueError):
     """The requested deployment cannot be generated safely."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ComposeOptions:
     backend: str = "postgres"
     workspace: str = "default"
@@ -72,4 +72,3 @@ def validate_options(options: ComposeOptions) -> list[str]:
     if options.embedding_vllm_max_num_seqs <= 0:
         errors.append("embedding_vllm_max_num_seqs must be positive")
     return errors
-

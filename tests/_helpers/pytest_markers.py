@@ -10,6 +10,7 @@ _DEFAULT_CI_BLOCKERS = {
     "manual",
     "longrun",
     "requires_ollama",
+    "requires_chroma",
     "slow",
 }
 

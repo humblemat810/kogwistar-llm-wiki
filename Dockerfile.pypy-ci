@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1.7
+
+# This is an experimental CI base image, not the production application image.
+ARG UBUNTU_IMAGE=ubuntu:24.04
+FROM ${UBUNTU_IMAGE}
+
+ARG PYPY_URL=https://buildbot.pypy.org/pypy/pypy3.12-v8.0.0-linux64.tar.gz
+ARG PYPY_SHA256=a1b4851459c2b3dffccab71cb08989534fab0839deddd34f0e6bf18add256fd7
+ARG PYPY_VERSION=3.12
+ARG RUST_VERSION=1.91.1
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYPY_HOME=/opt/pypy \
+    PATH=/opt/pypy/bin:/root/.cargo/bin:$PATH \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN test -n "${PYPY_SHA256}" \
+    && test "${#PYPY_SHA256}" -eq 64 \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y \
+        bzip2 \
+        ca-certificates \
+        curl \
+        gcc \
+        g++ \
+        git \
+        libffi-dev \
+        libssl-dev \
+        make \
+        pkg-config \
+        zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p "${PYPY_HOME}" \
+    && curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        "${PYPY_URL}" --output /tmp/pypy.tar.gz \
+    && echo "${PYPY_SHA256}  /tmp/pypy.tar.gz" | sha256sum --check --status \
+    && case "${PYPY_URL}" in \
+        *.tar.bz2) tar --extract --bzip2 --strip-components=1 --file /tmp/pypy.tar.gz --directory "${PYPY_HOME}" ;; \
+        *.tar.gz|*.tgz) tar --extract --gzip --strip-components=1 --file /tmp/pypy.tar.gz --directory "${PYPY_HOME}" ;; \
+        *) echo "Unsupported PyPy archive format: ${PYPY_URL}" >&2; exit 1 ;; \
+    esac \
+    && rm /tmp/pypy.tar.gz \
+    && test -x "${PYPY_HOME}/bin/pypy3" \
+    && "${PYPY_HOME}/bin/pypy3" --version \
+    && "${PYPY_HOME}/bin/pypy3" -c "import sys; expected = tuple(map(int, '${PYPY_VERSION}'.split('.'))); assert sys.version_info[:2] == expected, (sys.version, expected)" \
+    && "${PYPY_HOME}/bin/pypy3" -m ensurepip \
+    && pypy3 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && curl --fail --silent --show-error --location https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}" \
+    && rustup component add rust-src \
+    && pypy3 -c 'import sys; print(sys.version); print(sys.implementation)' \
+    && rustc --version
+
+WORKDIR /workspace
+
+ENTRYPOINT ["pypy3"]
+CMD ["--version"]

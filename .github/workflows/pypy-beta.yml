@@ -1,0 +1,258 @@
+name: Experimental PyPy 3.12 beta
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      installed_wheel:
+        description: Also build and validate non-editable wheels outside the checkout
+        required: true
+        default: false
+        type: boolean
+      pypy_url:
+        description: Optional immutable PyPy 3.12 beta archive URL
+        required: false
+        default: https://buildbot.pypy.org/pypy/pypy3.12-v8.0.0-linux64.tar.gz
+        type: string
+      pypy_sha256:
+        description: SHA-256 for the selected PyPy archive
+        required: false
+        default: a1b4851459c2b3dffccab71cb08989534fab0839deddd34f0e6bf18add256fd7
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # Keep the experimental profile aligned with the revisions tested by CI.
+  KOGWISTAR_REVISION: 3276b6f2c88dd5330e57b9d3d148f8af021c8f4a
+  KG_DOC_PARSER_REVISION: 459afe01a56c8f9916573173ac5c7800fd9fc5d1
+  OBSIDIAN_SINK_REVISION: 30e64d30f04f5b175f9ea3b537c18e0523017398
+
+jobs:
+  pypy-beta-probe:
+    name: PyPy 3.12 beta profile probe
+    # This is an automatic compatibility signal, not a release gate while
+    # PyPy 3.12 and its native dependencies remain beta.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # This lane is automatic and non-required while PyPy 3.12 is beta.
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Install official PyPy 3.12 beta
+        env:
+          PYPY_URL: ${{ inputs.pypy_url || 'https://buildbot.pypy.org/pypy/pypy3.12-v8.0.0-linux64.tar.gz' }}
+          PYPY_SHA256: ${{ inputs.pypy_sha256 || 'a1b4851459c2b3dffccab71cb08989534fab0839deddd34f0e6bf18add256fd7' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pypy_home="$RUNNER_TEMP/pypy"
+          archive="$RUNNER_TEMP/pypy.tar.gz"
+          mkdir -p "$pypy_home"
+          echo "Downloading official PyPy beta archive: $PYPY_URL"
+          curl --fail --show-error --location --retry 3 --proto '=https' --tlsv1.2 \
+            "$PYPY_URL" --output "$archive"
+          test -s "$archive"
+          stat --format='bytes=%s modified=%y' "$archive"
+          actual_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+          echo "expected_sha256=$PYPY_SHA256"
+          echo "actual_sha256=$actual_sha256"
+          test "$actual_sha256" = "$PYPY_SHA256"
+          tar --extract --gzip --strip-components=1 --file "$archive" \
+            --directory "$pypy_home"
+          test -x "$pypy_home/bin/pypy3"
+          "$pypy_home/bin/pypy3" --version
+          "$pypy_home/bin/pypy3" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
+          echo "$pypy_home/bin" >> "$GITHUB_PATH"
+          "$pypy_home/bin/pypy3" -m ensurepip
+          "$pypy_home/bin/pypy3" -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+      - name: Report interpreter and wheel tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          python --version
+          python -c 'import sys, sysconfig; print(sys.implementation); print(sysconfig.get_platform()); print(sysconfig.get_config_var("SOABI"))'
+
+      - name: Verify NumPy-free Kogwistar source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c 'import tomllib; from pathlib import Path; d=tomllib.loads(Path("kogwistar/pyproject.toml").read_text(encoding="utf-8")); deps=d["project"]["dependencies"]; assert not any(str(dep).lower().startswith("numpy") for dep in deps), "pinned Kogwistar base dependencies still require NumPy"'
+
+      - name: Install bounded NumPy-free source profile
+        shell: bash
+        run: |
+          set +e
+          mkdir -p test-results
+          {
+            python -m pip install --upgrade pip
+            python -m pip install -e ./kogwistar --no-deps
+            python -m pip install -e ./kg-doc-parser --no-deps
+            python -m pip install -e ./kogwistar-obsidian-sink --no-deps
+            python -m pip install -e . --no-deps
+            python -m pip install -c kogwistar/constraints-pypy-3.12.txt \
+              -r requirements/pypy-3.12-beta.txt
+          } 2>&1 | tee test-results/pip-install-pypy312.log
+          status=${PIPESTATUS[0]}
+          echo "pip_install_exit_code=$status" | tee test-results/pip-install-status-pypy312.txt
+          exit "$status"
+
+      - name: Capture PyPy beta resolver evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          python -m pip freeze --all > test-results/pip-freeze-pypy312.txt
+          freeze_status=$?
+          python -m pip check > test-results/pip-check-pypy312.txt 2>&1
+          check_status=$?
+          python -c 'import importlib.util; names=("langchain_openai", "langchain_google_genai", "langchain_ollama"); print("provider_sdk_origins=" + repr({name: (importlib.util.find_spec(name).origin if importlib.util.find_spec(name) else None) for name in names}))' \
+            > test-results/provider-sdk-status-pypy312.txt 2>&1 || true
+          {
+            echo "pip_freeze_exit_code=$freeze_status"
+            echo "pip_check_exit_code=$check_status"
+            echo "--- pip check output ---"
+            cat test-results/pip-check-pypy312.txt
+            echo "--- provider SDK status (expected absent) ---"
+            cat test-results/provider-sdk-status-pypy312.txt
+          } | tee test-results/pip-resolver-status-pypy312.txt
+          # This is evidence collection only. The install step remains the
+          # authoritative failure so partial resolver output cannot hide it.
+          exit 0
+
+      - name: Check NumPy-free profile and crash-sensitive imports
+        shell: bash
+        run: |
+          set +e
+          python scripts/check_pypy_profile.py --json \
+            --require-import kogwistar --require-import kogwistar_llm_wiki \
+            --probe-import mcp.server.lowlevel \
+            > test-results/pypy-profile-pypy312.json
+          status=$?
+          cat test-results/pypy-profile-pypy312.json
+          exit "$status"
+
+      - name: Upload PyPy beta profile evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pypy312-profile-evidence
+          path: |
+            test-results/pypy-profile-pypy312.json
+            test-results/pip-freeze-pypy312.txt
+            test-results/pip-check-pypy312.txt
+            test-results/pip-install-pypy312.log
+            test-results/pip-install-status-pypy312.txt
+            test-results/provider-sdk-status-pypy312.txt
+            test-results/pip-resolver-status-pypy312.txt
+          if-no-files-found: warn
+
+      - name: Run provider-free PyPy tests
+        shell: bash
+        env:
+          LLM_WIKI_AUTH_MODE: disabled
+          LLM_WIKI_OTEL_ENABLED: "false"
+          KOGWISTAR_LOG_LEVEL: WARNING
+          LOG_LEVEL: WARNING
+        run: >-
+          python -m pytest
+          -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama"
+          tests -q --durations=25 --durations-min=0 --resource-report
+          --resource-report-json "test-results/resource-report-pypy312.json"
+          -p no:cacheprovider
+
+      - name: Upload per-test PyPy beta resource report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: resource-report-pypy312-beta
+          path: test-results/resource-report-pypy312.json
+          if-no-files-found: warn
+
+      - name: Publish resource summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="test-results/resource-report-pypy312.json"
+          if test -f "$report"; then
+            python scripts/summarize_resource_report.py "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Resource Report" >> "$GITHUB_STEP_SUMMARY"
+            echo "Resource report was not produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Build and validate installed wheels
+        if: inputs.installed_wheel == true
+        shell: bash
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade build maturin poetry-core setuptools wheel
+          mkdir -p "$RUNNER_TEMP/pypy-wheels"
+          python -m pip wheel --no-deps --no-build-isolation \
+            ./kogwistar ./kg-doc-parser ./kogwistar-obsidian-sink . \
+            --wheel-dir "$RUNNER_TEMP/pypy-wheels"
+          python -m venv "$RUNNER_TEMP/pypy-installed"
+          "$RUNNER_TEMP/pypy-installed/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/pypy-installed/bin/python" -m pip install \
+            --no-index --find-links "$RUNNER_TEMP/pypy-wheels" \
+            kogwistar graph-knowledge-doc-parser kogwistar-obsidian-sink kogwistar-llm-wiki \
+            --no-deps
+          "$RUNNER_TEMP/pypy-installed/bin/python" -m pip install \
+            -c kogwistar/constraints-pypy-3.12.txt \
+            -r requirements/pypy-3.12-beta.txt
+          cp scripts/check_pypy_profile.py "$RUNNER_TEMP/check_pypy_profile.py"
+          env -u PYTHONPATH "$RUNNER_TEMP/pypy-installed/bin/python" \
+            "$RUNNER_TEMP/check_pypy_profile.py" --installed-only --json \
+            --require-import kogwistar --require-import kogwistar_llm_wiki \
+            --probe-import mcp.server.lowlevel \
+            > test-results/pypy-installed-profile-pypy312.json
+
+      - name: Upload installed PyPy beta profile evidence
+        if: always() && inputs.installed_wheel == true
+        uses: actions/upload-artifact@v6
+        with:
+          name: pypy312-installed-profile-evidence
+          path: test-results/pypy-installed-profile-pypy312.json
+          if-no-files-found: warn
+
+      - name: Report PyPy beta limitation
+        run: |
+          echo "PyPy 3.12 beta source-profile probe completed. Production support remains opt-in"
+          echo "while the native-extension, storage, and installed-wheel gates remain unresolved."
+          echo "This lane uses source installs only; installed-wheel validation remains a separate gate."

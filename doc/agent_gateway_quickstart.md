@@ -209,7 +209,7 @@ The MCP surface intentionally hides raw queue administration, worker control,
 database access, migrations, projection controls, debug operations, arbitrary
 graph writes, and internal daemon mechanics.
 
-For a native MCP client such as Hermes, use the full FastMCP server instead of
+For a native MCP client such as Hermes, use the full official MCP server instead of
 the lightweight REST bridge:
 
 ```powershell

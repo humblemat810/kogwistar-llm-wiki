@@ -4,11 +4,11 @@ import asyncio
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 from kogwistar.runtime.pricing import TokenPricing
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_openai import AzureChatOpenAI
 
 from kogwistar_llm_wiki.usage.provider import (
     ProviderUsageCallback,
@@ -213,6 +213,9 @@ def test_provider_usage_callback_labels_missing_token_cost_without_fabricating_e
 
 
 def test_provider_usage_callback_is_accepted_by_azure_chat_model() -> None:
+    # Keep the provider-free PyPy lane collectable when an optional provider
+    # SDK is unavailable. The remaining usage-contract tests do not need it.
+    AzureChatOpenAI = pytest.importorskip("langchain_openai").AzureChatOpenAI
     ledger = StateBackedBudgetLedger({"token_budget": 10_000, "budget_scope": "run"})
     callback = ProviderUsageCallback(
         ledger=ledger,

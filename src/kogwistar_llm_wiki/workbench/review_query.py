@@ -43,6 +43,8 @@ class MaintenancePatchReport:
 class ReviewQueryService:
     """Tiny app-level helper for review artifacts stored in background conversation."""
 
+    __slots__ = ("engines",)
+
     def __init__(self, engines: NamespaceEngines) -> None:
         self.engines = engines
 

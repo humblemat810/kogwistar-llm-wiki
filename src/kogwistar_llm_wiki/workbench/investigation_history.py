@@ -34,6 +34,7 @@ class InvestigationHistoryRecord:
 class InvestigationHistoryService:
     """Persist and query meaningful turns; transient browser state stays local."""
 
+    __slots__ = ("engines",)
     artifact_kind = "investigation_history"
 
     def __init__(self, engines: NamespaceEngines) -> None:
