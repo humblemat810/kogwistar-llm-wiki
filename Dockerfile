@@ -17,7 +17,7 @@ COPY docker/container-constraints.txt ./docker/container-constraints.txt
 # This toolchain is confined to the builder. BuildKit caches make Rust and
 # Python dependency downloads reusable without copying them to the runtime.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ca-certificates curl gcc libc6-dev \
+    && apt-get install --no-install-recommends -y ca-certificates curl gcc git libc6-dev \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH=/root/.cargo/bin:/opt/venv/bin:$PATH
