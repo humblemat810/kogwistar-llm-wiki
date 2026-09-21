@@ -68,3 +68,4 @@ Thumbs.db
 #tmp files
 /.tmp-pypy311-mcp
 .tmp-pypy311-fastmcp
+.tmp*

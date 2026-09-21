@@ -44,3 +44,7 @@
 - Keep `Any` only at true external boundaries such as raw third-party payloads,
   opaque SDK objects, or short-lived compatibility shims that cannot yet be
   narrowed safely.
+
+# Source management Policy
+
+On every push, you must watch github CI results for errors instead of push and forget
