@@ -66,6 +66,15 @@ def test_real_module_entrypoint_reports_invalid_environment_before_exec():
             "KOGWISTAR_LLM_WIKI_EMBED_DIMENSION": "not-an-integer",
         }
     )
+    environment["PYTHONPATH"] = os.pathsep.join(
+        str(path)
+        for path in (
+            ROOT / "src",
+            ROOT / "kogwistar",
+            ROOT / "kg-doc-parser",
+            ROOT / "kogwistar-obsidian-sink",
+        )
+    )
 
     result = subprocess.run(
         [
@@ -151,13 +160,13 @@ def test_dockerfile_pins_and_build_checks_official_mcp_imports():
     core_pyproject = (ROOT / "kogwistar" / "pyproject.toml").read_text(encoding="utf-8")
     pypy_requirements = (ROOT / "requirements" / "pypy-3.12-beta.txt").read_text(encoding="utf-8")
     assert "COPY docker/container-constraints.txt" in dockerfile
-    assert "mcp>=1.27,<2" in constraints
+    assert "mcp>=2.2.0,<3" in constraints
     assert 'fastmcp = "3.2.4"' not in parser_pyproject
-    assert 'mcp = "^1.27.0"' in parser_pyproject
-    assert '"mcp>=1.27,<2"' in core_pyproject
+    assert 'mcp = "^2.2.0"' in parser_pyproject
+    assert '"mcp>=2.2.0,<3"' in core_pyproject
     assert '"fastmcp==3.2.4"' not in core_pyproject
     assert "fastmcp==3.2.4" not in pypy_requirements
-    assert "mcp>=1.27,<2" in pypy_requirements
+    assert "mcp>=2.2.0,<3" in pypy_requirements
     assert "from mcp.server.lowlevel import Server" in dockerfile
     assert "from fastmcp" not in dockerfile
 

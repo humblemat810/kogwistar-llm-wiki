@@ -12,6 +12,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,10 @@ from ..configuration.identity import (
     claims_context,
 )
 from .gateway import AgentGateway
+
+_MCP_REQUEST_HEADERS: ContextVar[dict[str, str] | None] = ContextVar(
+    "llm_wiki_mcp_request_headers", default=None
+)
 
 READ_TOOL_NAMES = frozenset(
     {
@@ -280,9 +285,13 @@ class AgentMcpServer:
 
     def __init__(self, gateway: AgentGateway) -> None:
         self.gateway = gateway
-        self.server = Server("llm-wiki")
+        self.server = Server(
+            "llm-wiki",
+            on_list_tools=self._handle_list_tools,
+            on_call_tool=self._handle_call_tool,
+        )
         self._tools = tuple(
-            types.Tool(name=name, description=description, inputSchema=schema)
+            types.Tool(name=name, description=description, input_schema=schema)
             for name, description, schema in _tool_specs()
         )
         selected_mode = auth_mode()
@@ -312,7 +321,6 @@ class AgentMcpServer:
             if selected_mode != "disabled" and required
             else None
         )
-        self._register_handlers()
 
     async def list_tools(self) -> list[types.Tool]:
         """Return the complete tool contract for local inspection and tests."""
@@ -324,32 +332,52 @@ class AgentMcpServer:
 
         return await self.list_tools()
 
-    def _register_handlers(self) -> None:
-        @self.server.list_tools()
-        async def _handle_list_tools() -> list[types.Tool]:
-            self._authenticate_request()
-            return list(self._tools)
+    async def _handle_list_tools(self, _context: Any, _params: Any) -> types.ListToolsResult:
+        self._authenticate_request()
+        return types.ListToolsResult(tools=list(self._tools))
 
-        @self.server.call_tool()
-        async def _handle_call_tool(
-            name: str, arguments: dict[str, object]
-        ) -> dict[str, object]:
-            identity = self._authenticate_request()
-            return self._dispatch(name, arguments, identity=identity)
-
-    def _request(self) -> Any | None:
+    async def _handle_call_tool(
+        self, _context: Any, params: types.CallToolRequestParams
+    ) -> types.CallToolResult:
         try:
-            return self.server.request_context.request
-        except LookupError:
-            return None
+            identity = self._authenticate_request()
+            result = self._dispatch(
+                params.name,
+                params.arguments or {},
+                identity=identity,
+            )
+        except Exception as exc:  # noqa: BLE001 - expose failures as tool results
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=str(exc))],
+                is_error=True,
+            )
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
+            structured_content=result,
+        )
 
     def _authenticate_request(self) -> LlmWikiIdentity | None:
         if self.auth is None:
             return None
-        request = self._request()
-        headers = getattr(request, "headers", {}) if request is not None else {}
-        authorization = headers.get("authorization") if hasattr(headers, "get") else None
+        headers = _MCP_REQUEST_HEADERS.get() or {}
+        authorization = headers.get("authorization")
         return authenticate_bearer(authorization)
+
+    @staticmethod
+    def _headers_from_scope(scope: Any) -> dict[str, str]:
+        return {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope.get("headers", ())
+        }
+
+    async def _with_request_headers(
+        self, scope: Any, operation: Any
+    ) -> None:
+        token = _MCP_REQUEST_HEADERS.set(self._headers_from_scope(scope))
+        try:
+            await operation()
+        finally:
+            _MCP_REQUEST_HEADERS.reset(token)
 
     def _dispatch(
         self,
@@ -395,12 +423,11 @@ class AgentMcpServer:
         except Exception as exc:  # noqa: BLE001 - MCP tools expose errors as protocol results
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=str(exc))],
-                isError=True,
+                is_error=True,
             )
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
-            structuredContent=result,
-            isError=False,
+            structured_content=result,
         )
 
     async def _run_stdio(self) -> None:
@@ -446,7 +473,9 @@ class AgentMcpServer:
                     scope, receive, send
                 )
                 return
-            await manager.handle_request(scope, receive, send)
+            await self._with_request_headers(
+                scope, lambda: manager.handle_request(scope, receive, send)
+            )
 
         # Mount at the root of this small ASGI app and perform exact endpoint
         # matching ourselves.  A direct Starlette Mount(endpoint) redirects
@@ -469,14 +498,20 @@ class AgentMcpServer:
             if request_path == endpoint:
                 async with transport.connect_sse(scope, receive, send) as streams:
                     read_stream, write_stream = streams
-                    await self.server.run(
-                        read_stream,
-                        write_stream,
-                        self.server.create_initialization_options(),
+                    await self._with_request_headers(
+                        scope,
+                        lambda: self.server.run(
+                            read_stream,
+                            write_stream,
+                            self.server.create_initialization_options(),
+                        ),
                     )
                 return
             if request_path == messages_path.rstrip("/"):
-                await transport.handle_post_message(scope, receive, send)
+                await self._with_request_headers(
+                    scope,
+                    lambda: transport.handle_post_message(scope, receive, send),
+                )
                 return
             await PlainTextResponse("Not Found", status_code=404)(scope, receive, send)
 
