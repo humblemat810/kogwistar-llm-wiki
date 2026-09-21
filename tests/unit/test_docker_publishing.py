@@ -108,7 +108,7 @@ def test_local_publishers_default_to_application_and_offer_explicit_targets() ->
 def test_release_verifier_matches_package_version_and_rejects_mismatch() -> None:
     script = ROOT / "scripts" / "verify_release_version.py"
     matching = subprocess.run(
-        [sys.executable, str(script), "--tag", "v0.4.0"],
+        [sys.executable, str(script), "--tag", "v0.4.1"],
         cwd=ROOT,
         check=False,
         capture_output=True,
