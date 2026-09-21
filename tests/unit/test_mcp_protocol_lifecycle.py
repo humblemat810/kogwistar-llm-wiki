@@ -51,7 +51,10 @@ def test_official_mcp_server_completes_real_session_lifecycle() -> None:
     assert gateway.calls == [("status", {"workspace_id": "demo"})]
 
 
-def test_official_mcp_streamable_http_round_trip() -> None:
+def test_official_mcp_streamable_http_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
+    monkeypatch.setenv("LLM_WIKI_MCP_AUTH_REQUIRED", "true")
+    monkeypatch.setenv("LLM_WIKI_MCP_TOKEN", "test-token")
     gateway = _Gateway()
     server = AgentMcpServer(gateway)
     app = server._streamable_http_app("/mcp")
@@ -59,6 +62,7 @@ def test_official_mcp_streamable_http_round_trip() -> None:
     async def exercise() -> None:
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(
+                headers={"Authorization": "Bearer test-token"},
                 follow_redirects=True,
                 transport=httpx.ASGITransport(app=app),
             ) as http_client:
@@ -75,6 +79,18 @@ def test_official_mcp_streamable_http_round_trip() -> None:
                             "workspace_id": "http-demo",
                             "ok": True,
                         }
+                        write_result = await client.call_tool(
+                            "maintain", {"workspace_id": "http-demo", "topic": "mcp"}
+                        )
+                        assert write_result.isError is False
+                        assert write_result.structuredContent == {
+                            "tool": "maintain",
+                            "workspace_id": "http-demo",
+                            "ok": True,
+                        }
 
     anyio.run(exercise)
-    assert gateway.calls == [("status", {"workspace_id": "http-demo"})]
+    assert gateway.calls == [
+        ("status", {"workspace_id": "http-demo"}),
+        ("maintain", {"workspace_id": "http-demo", "topic": "mcp"}),
+    ]
