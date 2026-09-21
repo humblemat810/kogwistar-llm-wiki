@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1.7
+
+# Local development image only.  PyPy itself comes from the official image;
+# the extra packages are build tools for dependencies without PyPy wheels.
+FROM pypy:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        ca-certificates \
+        gcc \
+        g++ \
+        git \
+        libffi-dev \
+        libssl-dev \
+        make \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && pypy3 --version
+
+WORKDIR /workspace
+
+ENTRYPOINT ["pypy3"]
+CMD ["--version"]

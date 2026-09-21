@@ -16,7 +16,9 @@ httpx>=0.28.1
 python-jose[cryptography]>=3.3
 PyJWT>=2.8
 RapidFuzz>=3.13.0
-joblib>=1.3
+# PyPy uses the shared cache adapter's DiskCache backend; Joblib remains the
+# CPython provider and is intentionally absent from this experimental lane.
+diskcache>=5.6,<6
 python-dotenv>=1.0.1
 requests>=2.32
 typing-extensions>=4.8

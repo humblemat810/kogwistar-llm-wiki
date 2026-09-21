@@ -86,8 +86,8 @@ def test_pypy311_ci_container_uses_the_same_pinned_builder_without_publishing() 
 def test_local_pypy311_runner_is_a_docker_dev_environment_not_a_hosted_runner() -> None:
     runner = (ROOT / "scripts" / "run_pypy311_linux_ci.ps1").read_text(encoding="utf-8")
 
-    assert "Dockerfile.pypy-ci" in runner
-    assert "PYPY_VERSION=3.11" in runner
+    assert "Dockerfile.pypy311-ci" in runner
+    assert 'pypy311-ci:local' in runner
     assert "scripts/run_pypy311_ci.py" in runner
     assert "--venv /tmp/pypy311-venv" in runner
     assert "--volume \"${root}:/workspace\"" in runner

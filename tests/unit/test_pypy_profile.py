@@ -357,7 +357,7 @@ def test_pypy_311_base_requirements_use_the_official_mcp_sdk() -> None:
     requirements = (
         Path(__file__).parents[2] / "requirements" / "pypy-3.11-experimental.txt"
     ).read_text(encoding="utf-8")
-    assert "mcp>=1.27,<2" in requirements
+    assert "mcp==1.27.0" in requirements
     for provider_package in ("langchain-openai", "langchain-google-genai", "langchain-ollama"):
         assert provider_package not in requirements
     assert "fastmcp" not in requirements.lower()
