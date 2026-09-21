@@ -507,7 +507,7 @@ def test_ci_aggregates_runtime_resource_reports_without_making_comparison_a_gate
     comparison = (root / "scripts" / "compare_resource_reports.py").read_text(encoding="utf-8")
 
     assert "resource-comparison:" in workflow
-    assert "actions/download-artifact@v6" in workflow
+    assert "actions/download-artifact@v7" in workflow
     assert "merge-multiple: true" in workflow
     assert "continue-on-error: true" in workflow
     assert "cpython312=" in workflow

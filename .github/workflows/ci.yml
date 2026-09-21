@@ -239,7 +239,7 @@ jobs:
       - name: Download per-runtime resource reports
         if: always()
         continue-on-error: true
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           pattern: resource-report-cpython-*
           path: test-results/resource-reports
