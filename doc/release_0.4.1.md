@@ -10,9 +10,9 @@ The application workflows check out these immutable sibling revisions:
 
 | Component | Revision | Role |
 |---|---|---|
-| Kogwistar | `479f218c421198d8a117ced41a11513d33247352` | Core runtime and graph substrate |
-| kg-doc-parser | `7a4f215d546ef55c67f2bc790429f843a31bb8d1` | Parser workflow and layered ingestion |
-| kogwistar-obsidian-sink | `30e64d30f04f5b175f9ea3b537c18e0523017398` | Obsidian projection sink |
+| Kogwistar | `519f69de352f61e12ab316b300818e1564650650` | Core runtime and graph substrate |
+| kg-doc-parser | `c82a9e59217a7292d78fdce51300b17010112327` | Parser workflow and layered ingestion |
+| kogwistar-obsidian-sink | `cb7ccf1247ac3875356d2cb9f1849b1796484c08` | Obsidian projection sink |
 
 The parser main revision includes the refreshed Poetry lock metadata for the
 merged Kogwistar revision.
