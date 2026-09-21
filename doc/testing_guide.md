@@ -309,3 +309,17 @@ Use `-p no:cacheprovider` for a quick local signal on Windows. The test writes a
 diagnostic dump after the run starts, including raw documents, status
 transitions, graph/projection summaries, maintenance evidence, promotion
 evidence packs, failure records, and a final report.
+### Local Linux PyPy 3.11 development container
+
+On Windows, use Docker Desktop only as a local Linux development environment;
+this is not a self-hosted GitHub runner. The helper builds the pinned Linux
+PyPy 3.11 image, mounts the current checkout, creates the virtual environment
+inside the container, and runs the shared provider-free test profile:
+
+```powershell
+.\scripts\run_pypy311_linux_ci.ps1
+```
+
+Use `-SkipBuild` when the local image is already current. GitHub Actions uses
+the hosted `actions/setup-python@v7` PyPy matrix directly; it does not depend on
+this Docker helper.

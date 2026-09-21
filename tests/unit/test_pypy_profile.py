@@ -489,7 +489,10 @@ def test_ci_uploads_per_test_resource_reports_without_making_them_gates() -> Non
     assert "--resource-report" in workflow
     assert "--resource-report-json" in workflow
     assert "actions/upload-artifact@v6" in workflow
-    assert "resource-report-cpython-${{ matrix.python-version }}" in workflow
+    assert "resource-report-${{ matrix.label }}" in workflow
+    assert "python-version: pypy-3.11-v7.3.20" in workflow
+    assert "label: cpython314" in workflow
+    assert "Run PyPy 3.11 provider-free CI profile" in workflow
     reporter = (Path(__file__).parents[2] / "tests" / "_helpers" / "resource_report.py").read_text(
         encoding="utf-8"
     )
@@ -509,6 +512,8 @@ def test_ci_aggregates_runtime_resource_reports_without_making_comparison_a_gate
     assert "continue-on-error: true" in workflow
     assert "cpython312=" in workflow
     assert "cpython313=" in workflow
+    assert "cpython314=" in workflow
+    assert "pypy311=" in workflow
     assert "mixed host environments" in comparison
 
 
