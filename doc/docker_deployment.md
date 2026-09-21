@@ -46,10 +46,10 @@ The native MCP transport has its own equivalent boundary: set
 omitted, it falls back to `LLM_WIKI_API_TOKEN`; `LLM_WIKI_MCP_TOKEN_SCOPES`
 falls back to `LLM_WIKI_API_TOKEN_SCOPES`. Static tokens are intended for local
 or private development deployments; use a terminating proxy or an OAuth-aware
-FastMCP provider for production identity management.
-The application agent extra pins the tested FastMCP release, and the Docker
-image installs that extra from `pyproject.toml` so the Dockerfile does not carry
-a second FastMCP version declaration.
+MCP gateway for production identity management.
+The application agent extra pins the official `mcp` SDK, and the Docker image
+installs that extra from `pyproject.toml` so the Dockerfile does not carry a
+second MCP version declaration.
 For production identity, set `LLM_WIKI_AUTH_MODE=kogwistar_jwt`, `JWT_ALG`,
 `JWT_SECRET` (and optional `JWT_ISS`/`JWT_AUD`), then provide workspace
 membership through JWT `workspaces`/`workspace_ids` claims or

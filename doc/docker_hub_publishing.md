@@ -121,3 +121,47 @@ The scripts use `docker buildx build --load` so Dockerfile cache mounts work in
 local Docker Desktop builds. No model checkpoint is copied into either image.
 For CI, use `DOCKERHUB_TOKEN` with the GitHub secret and the Docker login action
 rather than putting a token in a command or shell history.
+
+## Experimental PyPy CI image
+
+The repository also has a separate, manually confirmed workflow for the
+experimental PyPy 3.12 beta CI image:
+
+```text
+docker.io/<dockerhub-user>/kogwistar-llm-wiki-pypy-ci:pypy3.12-beta-<build>
+```
+
+Run `.github/workflows/publish-pypy-ci-dockerhub.yml` only after selecting a
+versioned PyPy archive and recording its SHA-256. The workflow rejects moving
+`latest` archive URLs, requires the `confirm` input, refuses an existing tag,
+smoke-tests the interpreter and Rust toolchain, and pushes only after those
+checks pass. It does not publish `kogwistar-llm-wiki`, an embedding image, or
+any `latest` alias. This image is a CI/build environment, not a supported
+runtime image and does not contain application code, model weights, or user
+credentials.
+
+The PyPy 3.11 workflow is intentionally stricter at this stage:
+`.github/workflows/pypy-311-experimental.yml` runs on Linux and validates the
+Python-authority profile independently of the native-Windows `pywin32`
+limitation. The slot benchmark lane is evidence only; neither lane currently
+publishes a PyPy3.11 image. Publication requires a passing Linux
+native-extension ABI gate, installed-wheel test, application smoke test, and
+image health check. A successful Windows dependency-light probe or Python-only
+probe is not sufficient, but neither is required for the Linux gate.
+
+For reproducible container-level testing, `.github/workflows/pypy-311-ci-container.yml`
+builds the pinned PyPy 3.11 toolchain image with Docker, loads it locally on the
+runner, creates a virtual environment inside that container, and runs the
+full provider-free application test selection there, including the official MCP
+gateway tests, with per-test timing output.
+It is intentionally a smoke/build image only: it does not publish to Docker
+Hub and does not imply that the full LLM-Wiki application or its MCP runtime works on
+PyPy. The same image can be built locally with:
+
+```text
+docker build -f Dockerfile.pypy-ci \
+  --build-arg PYPY_URL=https://downloads.python.org/pypy/pypy3.11-v7.3.20-linux64.tar.bz2 \
+  --build-arg PYPY_SHA256=1410db3a7ae47603e2b7cbfd7ff6390b891b2e041c9eb4f1599f333677bccb3e \
+  -t llm-wiki-pypy311-ci:local .
+docker run --rm llm-wiki-pypy311-ci:local --version
+```

@@ -39,7 +39,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}-cpu
       LATEST_TAG: latest-cpu
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify package version matches release tag
         shell: bash
         run: python scripts/verify_release_version.py --tag "${{ inputs.tag }}"
@@ -81,7 +81,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}-cuda12.8
       LATEST_TAG: latest-cuda12.8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify package version matches release tag
         shell: bash
         run: python scripts/verify_release_version.py --tag "${{ inputs.tag }}"

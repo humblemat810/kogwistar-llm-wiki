@@ -1,0 +1,151 @@
+name: PyPy 3.11 CI container smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  PYPY_URL: https://downloads.python.org/pypy/pypy3.11-v7.3.20-linux64.tar.bz2
+  PYPY_SHA256: 1410db3a7ae47603e2b7cbfd7ff6390b891b2e041c9eb4f1599f333677bccb3e
+  PYPY_VERSION: "3.11"
+  KOGWISTAR_REVISION: 479f218c421198d8a117ced41a11513d33247352
+  KG_DOC_PARSER_REVISION: 7a4f215d546ef55c67f2bc790429f843a31bb8d1
+  OBSIDIAN_SINK_REVISION: 30e64d30f04f5b175f9ea3b537c18e0523017398
+  IMAGE: llm-wiki-pypy311-ci:local
+
+jobs:
+  smoke:
+    name: Build and smoke-test pinned PyPy 3.11 image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out application metadata
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Build the pinned PyPy 3.11 CI image (pull request)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.pypy-ci
+          build-args: |
+            PYPY_URL=${{ env.PYPY_URL }}
+            PYPY_SHA256=${{ env.PYPY_SHA256 }}
+            PYPY_VERSION=${{ env.PYPY_VERSION }}
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+
+      - name: Build the pinned PyPy 3.11 CI image (cached)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.pypy-ci
+          build-args: |
+            PYPY_URL=${{ env.PYPY_URL }}
+            PYPY_SHA256=${{ env.PYPY_SHA256 }}
+            PYPY_VERSION=${{ env.PYPY_VERSION }}
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=pypy311-ci
+          cache-to: type=gha,mode=max,scope=pypy311-ci
+
+      - name: Verify the image toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm "${IMAGE}" --version
+          docker run --rm -e PYPY_VERSION="${PYPY_VERSION}" --entrypoint pypy3 "${IMAGE}" -c \
+            'import os, sys; expected = tuple(map(int, os.environ["PYPY_VERSION"].split("."))); assert sys.implementation.name == "pypy"; assert sys.version_info[:2] == expected; print(sys.implementation); print(sys.version)'
+          docker run --rm --entrypoint rustc "${IMAGE}" --version
+
+      - name: Create a venv and run the provider-free PyPy profile in the image
+        shell: bash
+        run: |
+          set +e
+          mkdir -p test-results
+          docker run --rm \
+            -e KOGWISTAR_IMPL_MODE=python \
+            -e LLM_WIKI_AUTH_MODE=disabled \
+            -e LLM_WIKI_OTEL_ENABLED=false \
+            -e KOGWISTAR_LOG_LEVEL=WARNING \
+            -e LOG_LEVEL=WARNING \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            --entrypoint sh "${IMAGE}" -c \
+            'git config --global --add safe.directory /workspace && \
+             git config --global --add safe.directory /workspace/kogwistar && \
+             git config --global --add safe.directory /workspace/kg-doc-parser && \
+             git config --global --add safe.directory /workspace/kogwistar-obsidian-sink && \
+             exec pypy3 scripts/run_pypy311_ci.py --venv /tmp/pypy311-venv' \
+            2>&1 | tee test-results/pypy311-container-smoke.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            failure_summary=$(grep -E 'FAILED|ERROR|passed|failed|Error|ModuleNotFoundError|AssertionError' \
+              test-results/pypy311-container-smoke.log \
+              | tail -n 12 | tr '\n' ' ' | cut -c1-2000)
+            if [ -z "$failure_summary" ]; then
+              failure_summary=$(tail -n 12 test-results/pypy311-container-smoke.log \
+                | tr '\n' ' ' | cut -c1-2000)
+            fi
+            echo "::error title=PyPy 3.11 container smoke failure::$failure_summary"
+          fi
+          {
+            echo "### PyPy 3.11 container smoke summary"
+            echo "container_smoke_exit_code=$status"
+            if [ "$status" -ne 0 ]; then
+              echo '```text'
+              tail -n 200 test-results/pypy311-container-smoke.log 2>/dev/null || true
+              echo '```'
+            else
+              echo "The bounded container smoke slice passed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Record image metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker image inspect "${IMAGE}" --format \
+            'image={{.Id}} size_bytes={{.Size}} created={{.Created}}' \
+            | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload PyPy container smoke log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pypy311-container-smoke-${{ github.run_id }}
+          path: test-results/pypy311-container-smoke.log
+          if-no-files-found: warn

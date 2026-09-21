@@ -17,7 +17,7 @@ those sibling checkouts and package metadata aligned.
 
 ## 2. Prerequisites
 
-- Python 3.13+
+- Python 3.12+
 - Git
 - SSH access to `github.com` if you plan to install the vendored repos directly from GitHub
 - A terminal with access to the repo root

@@ -1,0 +1,39 @@
+# Experimental PyPy 3.11 control-plane profile.
+#
+# This lane intentionally excludes NumPy, Chroma, pgvector, Torch, pikepdf,
+# and GPU packages.  It uses KOGWISTAR_IMPL_MODE=python; the Kogwistar native
+# extension remains a separate compatibility gate and is not a publish claim.
+
+# Kogwistar base runtime
+pydantic>=2.12.5
+pydantic-extension>=0.0.7
+anyio>=4.0
+Jinja2>=3.1
+fastapi>=0.111
+# The registry uses the MCP 1.27 low-level Server decorator contract.  Later
+# releases changed that surface; advance this pin only with an API migration.
+mcp==1.27.0
+httpx>=0.28.1
+python-jose[cryptography]>=3.3
+PyJWT>=2.8
+RapidFuzz>=3.13.0
+# joblib is optional in this provider-free lane.  Kogwistar selects DiskCache
+# through kogwistar.utils.cache_backend on PyPy.
+diskcache>=5.6,<6
+python-dotenv>=1.0.1
+requests>=2.32
+typing-extensions>=4.8
+
+# Parser text/workflow path.  pikepdf is intentionally omitted.
+pdf2image>=1.17
+pypdf>=6.5
+pathspec>=0.12
+langchain-core>=1.2
+# Provider adapters are intentionally excluded from this provider-free lane.
+# Their imports are lazy; live/provider contract tests remain CPython/manual.
+
+# LLM-Wiki control plane and provider-free tests use the official MCP SDK.
+pytest>=8
+pytest-anyio
+sqlalchemy>=2.0
+psycopg>=3.1

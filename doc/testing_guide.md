@@ -58,6 +58,131 @@ real LLM credentials, and GPU model tests remain opt-in.
 The Python job prints the slowest 25 tests using `--durations`, so a growing
 CI runtime is visible in the job log rather than hidden behind one total.
 
+### Per-Test Resource Reports
+
+The CI Python matrix also enables the opt-in resource reporter.  It prints
+average wall time, process CPU time, CPU utilization (`CPU time / wall time`),
+current RSS, and best-effort RSS delta, then uploads one JSON artifact per
+interpreter.  Each JSON file also contains one record per test.  The report is
+diagnostic only: shared-runner load and JIT warm-up make absolute timings
+non-gating. GitHub Actions also renders the aggregate table in the job Step
+Summary through `scripts/summarize_resource_report.py`; the JSON artifact
+remains the authoritative per-test detail.
+
+The default report intentionally does not enable `tracemalloc`, so CI does not
+pay a large profiler slowdown.  For a focused allocation investigation, add
+`--resource-report-tracemalloc`; its `average_traced_peak_bytes` value is more
+allocation-specific but can substantially increase runtime and is unavailable
+on some PyPy builds.
+
+Enable the same report locally:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q `
+  -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama" `
+  --resource-report `
+  --resource-report-json test-results\resource-report-cpython.json `
+  -p no:cacheprovider
+```
+
+For fair interpreter comparisons, run the command inside the same operating
+system environment for every runtime.  In particular, compare WSL PyPy with
+WSL CPython, not WSL PyPy with native Windows CPython.  Treat
+`average_rss_after_bytes` as the cross-runtime memory signal; RSS is
+process-wide and can be affected by allocator and JIT behavior.  Use traced
+peak bytes only when the report explicitly says `tracemalloc_enabled`.
+
+For a same-host slot comparison, run every interpreter sequentially through
+the runner. The runner writes one report per interpreter plus a manifest and
+rejects mixed host environments. On WSL, provide WSL CPython 3.13/3.14 and
+WSL PyPy 3.11 paths; on native Windows, provide native Windows paths instead:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_same_host_benchmarks.py `
+  --runtime "cpython313|C:\\Python313\\python.exe|0" `
+  --runtime "cpython314|C:\\Python314\\python.exe|0" `
+  --runtime "pypy311|C:\\pypy311\\pypy3.exe|1000" `
+  --count 1000 --count 10000 `
+  --output-dir test-results\slots-benchmark-same-host
+```
+
+From WSL, use Linux interpreter paths and run the same command in the WSL
+shell, for example:
+
+```bash
+python3.13 scripts/run_same_host_benchmarks.py \
+  --runtime "cpython313|$(command -v python3.13)|0" \
+  --runtime "cpython314|$(command -v python3.14)|0" \
+  --runtime "pypy311|$HOME/.local/pypy311/bin/pypy3|1000" \
+  --count 1000 --count 10000 \
+  --output-dir test-results/slots-benchmark-same-host
+```
+
+The WSL PyPy path may differ; it must resolve to a PyPy binary inside WSL,
+not a Windows `pypy.exe`. Likewise, a native Windows run must not mix in a
+WSL interpreter. The full PyPy application profile is currently Linux/WSL-only
+because MCP has no matching Windows PyPy `pywin32` distribution; a native
+Windows PyPy venv can still be used for interpreter-only or dependency-light
+slot probes.
+
+The automatic slot workflow also has a non-required same-host job. It runs
+CPython 3.13, CPython 3.14, and PyPy 3.11 sequentially on one Ubuntu runner;
+the separate matrix remains useful for per-runtime trend artifacts.
+
+The PyPy compatibility workflows upload `pypy*-profile-evidence` artifacts even
+when a crash-sensitive import gate fails. They contain the machine-readable
+profile result, `pip freeze --all`, and `pip check` output. The optional
+installed-wheel PyPy 3.12 run uploads a separate installed-profile artifact;
+these reports are evidence only and do not override a failed compatibility gate.
+
+The latest native-Windows provider-free baseline used this reporter with
+`712 passed, 4 skipped, 114 deselected` in 17:09. Its aggregate report was
+`1432.592 ms` average wall time, `1368.846 ms` average process CPU time,
+`81.9%` average CPU utilization, `1454.17 MiB` average RSS after each test,
+and `1851.8 KiB` average RSS delta. These values are a machine-specific
+baseline, not a cross-runtime performance claim; the full JSON is generated
+as `test-results/resource-report-local-full.json`.
+
+To compare several local interpreter reports after running the same selected
+pytest slice under each interpreter, use the comparison helper. The labels are
+only display names; each report still retains its exact executable and host
+metadata:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\compare_resource_reports.py `
+  --report "cpython313=test-results\resource-report-cpython313.json" `
+  --report "pypy311=test-results\resource-report-pypy311.json"
+```
+
+To run that same selected slice under each interpreter and create the reports
+in one step, use the same-host runner. Repeat `--pytest-arg` once per pytest
+argument; the default target is the full `tests` path with cache disabled:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_same_host_resource_reports.py `
+  --runtime "cpython313=C:\Python313\python.exe" `
+  --runtime "pypy311=C:\pypy311\pypy3.exe" `
+  --pytest-arg "tests" `
+  --pytest-arg "-q" `
+  --pytest-arg "-p" `
+  --pytest-arg "no:cacheprovider" `
+  --pytest-arg "-m" `
+  --pytest-arg "ci and not ci_full and not slow and not manual and not llm_real" `
+  --output-dir test-results\resource-reports-same-host
+```
+
+It writes one JSON file per interpreter, `comparison.md`, and a manifest with
+the exact command and exit code. A PyPy runtime that cannot import the selected
+application profile is reported as a failed runtime rather than being silently
+omitted from the comparison.
+
+The helper rejects reports from different host environments, such as native
+Windows and WSL. It compares aggregate wall/CPU/RSS values and leaves the
+per-test records in the original JSON files. GitHub CI runs the same
+aggregation for its CPython matrix in a non-gating job summary; PyPy probe
+jobs publish their own report and summary because they are intentionally
+experimental and may not complete the application test slice.
+
 ## Debug Run Mode
 
 The llm-wiki CLI can write a debug log, JSONL trace, and sqlite statistics file
@@ -184,3 +309,17 @@ Use `-p no:cacheprovider` for a quick local signal on Windows. The test writes a
 diagnostic dump after the run starts, including raw documents, status
 transitions, graph/projection summaries, maintenance evidence, promotion
 evidence packs, failure records, and a final report.
+### Local Linux PyPy 3.11 development container
+
+On Windows, use Docker Desktop only as a local Linux development environment;
+this is not a self-hosted GitHub runner. The helper builds the pinned Linux
+PyPy 3.11 image, mounts the current checkout, creates the virtual environment
+inside the container, and runs the shared provider-free test profile:
+
+```powershell
+.\scripts\run_pypy311_linux_ci.ps1
+```
+
+Use `-SkipBuild` when the local image is already current. GitHub Actions uses
+the hosted `actions/setup-python@v7` PyPy matrix directly; it does not depend on
+this Docker helper.

@@ -135,6 +135,19 @@ def resolve_embedding_function(
             embedding_tokenizer_fingerprint or embedding_env("TOKENIZER_FINGERPRINT")
         ),
     )
+    # Validate the vector-space contract before importing provider-specific
+    # SDKs. Provider-free profiles may not have langchain-ollama/openai
+    # installed, but a missing dimension is invalid independently of them.
+    has_declared_dimension = (
+        embedding_dimension is not None
+        or embedding_config is not None
+        or embedding_env("DIMENSION") is not None
+    )
+    if config.provider != "fake" and not has_declared_dimension:
+        raise ValueError(
+            f"embedding dimension is required for the real {namespace} provider; "
+            "set the scoped dimension or a global embedding dimension"
+        )
     factory = embedding_factory or build_embedding_function
     return factory(config), config
 

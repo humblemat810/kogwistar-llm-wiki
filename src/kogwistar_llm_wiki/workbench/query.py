@@ -35,6 +35,8 @@ def workspace_graph_spaces(*, include_wisdom: bool = False) -> list[GraphSpace]:
 
 
 class GraphSpaceQueryService:
+    __slots__ = ("engines",)
+
     def __init__(self, engines: NamespaceEngines) -> None:
         self.engines = engines
 

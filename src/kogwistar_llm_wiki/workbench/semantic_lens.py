@@ -175,6 +175,8 @@ def validate_edit_proposal(
 class SemanticLensService:
     """Resolve bounded lenses without inventing storage semantics."""
 
+    __slots__ = ("_clock_ms", "engines", "query_service")
+
     def __init__(
         self,
         engines: NamespaceEngines,

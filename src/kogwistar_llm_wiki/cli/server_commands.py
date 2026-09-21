@@ -305,7 +305,7 @@ def mcp(
     close_engines: CloseEngines,
     persistence_kwargs: PersistenceKwargs,
 ) -> None:
-    """Serve the full MCP protocol through the optional FastMCP dependency."""
+    """Serve the full MCP protocol through the official MCP SDK."""
     from ..agent.gateway import AgentGateway
     from ..agent.mcp_server import build_agent_mcp
     from ..ingest_pipeline import IngestPipeline

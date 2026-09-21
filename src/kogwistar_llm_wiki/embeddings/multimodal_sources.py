@@ -492,6 +492,8 @@ def build_source_bundle(
 class MappingAssetResolver:
     """Small test/local adapter for externally stored asset references."""
 
+    __slots__ = ("_assets",)
+
     def __init__(self, assets: Mapping[str, object]) -> None:
         self._assets = dict(assets)
 

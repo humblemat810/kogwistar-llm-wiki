@@ -94,8 +94,8 @@ RUN useradd --create-home --uid 10001 llmwiki \
 USER llmwiki
 
 # Catch namespace-package/split-install failures before the container enters
-# a restart loop. This also verifies the pinned FastMCP server contract.
-RUN python -c "from fastmcp import FastMCP; from fastmcp.server.auth import StaticTokenVerifier, require_scopes; FastMCP('build-import-check'); print('FastMCP import check passed')"
+# a restart loop. This also verifies the pinned official MCP server contract.
+RUN python -c "from mcp.server.lowlevel import Server; Server('build-import-check'); print('official MCP SDK import check passed')"
 
 EXPOSE 8765 8780
 

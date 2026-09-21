@@ -15,6 +15,8 @@ from kogwistar_llm_wiki.maintenance.maintenance_designs import (
     materialize_maintenance_designs,
 )
 
+pytestmark = pytest.mark.requires_chroma
+
 
 def _request() -> IngestPipelineRequest:
     return IngestPipelineRequest(

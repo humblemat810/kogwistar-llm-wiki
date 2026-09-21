@@ -33,6 +33,9 @@ logs
 .tmp_*
 test*.txt
 
+# Test results
+test-results
+
 # Editor settings
 .vscode/
 .idea/
@@ -61,3 +64,7 @@ Thumbs.db
 
 # Optional local multimodal model checkpoints; never commit model weights.
 /data/models/
+
+#tmp files
+/.tmp-pypy311-mcp
+.tmp-pypy311-fastmcp

@@ -1,0 +1,239 @@
+name: Slot and runtime benchmarks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KOGWISTAR_REVISION: 479f218c421198d8a117ced41a11513d33247352
+  KG_DOC_PARSER_REVISION: 7a4f215d546ef55c67f2bc790429f843a31bb8d1
+  OBSIDIAN_SINK_REVISION: 30e64d30f04f5b175f9ea3b537c18e0523017398
+
+jobs:
+  benchmark:
+    name: ${{ matrix.runtime }} ${{ matrix.version }} slot benchmark
+    # Performance measurements are evidence, not a release gate. GitHub-hosted
+    # runner load makes absolute timings unsuitable as required checks.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: cpython
+            version: "3.12"
+            warmup_count: 0
+          - runtime: cpython
+            version: "3.13"
+            warmup_count: 0
+          - runtime: cpython
+            version: "3.14"
+            warmup_count: 0
+          - runtime: pypy311
+            version: "3.11"
+            warmup_count: 1000
+
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Set up CPython
+        if: matrix.runtime == 'cpython'
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.version }}
+          cache: pip
+
+      - name: Set up official PyPy 3.11
+        if: matrix.runtime == 'pypy311'
+        uses: actions/setup-python@v7
+        with:
+          python-version: pypy-3.11-v7.3.20
+          cache: pip
+
+      - name: Report interpreter
+        shell: bash
+        run: |
+          set -euo pipefail
+          python --version
+          python -c 'import platform, sys; print(platform.python_implementation()); print(sys.implementation); print(sys.platform)'
+
+      - name: Add pinned source packages to the import path
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src"
+          } >> "$GITHUB_ENV"
+
+      - name: Install benchmark profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # Source checkouts stay on PYTHONPATH so PyPy benchmarks do not
+          # accidentally build the native Kogwistar extension.
+          python -m pip install --no-deps --ignore-requires-python -e .
+          python -m pip install -r requirements/pypy-3.11-experimental.txt
+
+      - name: Run benchmark
+        env:
+          KOGWISTAR_IMPL_MODE: python
+          LLM_WIKI_AUTH_MODE: disabled
+          LLM_WIKI_OTEL_ENABLED: "false"
+          KOGWISTAR_LOG_LEVEL: WARNING
+          LOG_LEVEL: WARNING
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/slots-benchmark
+          python scripts/benchmark_slots.py \
+            --warmup-count "${{ matrix.warmup_count }}" \
+            --count 1000 \
+            --count 10000 \
+            --json-out "test-results/slots-benchmark/${{ matrix.runtime }}-${{ matrix.version }}.json"
+
+      - name: Upload benchmark result
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: slots-benchmark-${{ matrix.runtime }}-${{ matrix.version }}
+          path: test-results/slots-benchmark/
+          if-no-files-found: warn
+
+  same-host-benchmark:
+    name: Same-host runtime comparison
+    # This is evidence only. It must never block a release because hosted
+    # runner load and PyPy's JIT make absolute values non-gating.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Set up CPython 3.13
+        id: cpython313
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Set up CPython 3.14
+        id: cpython314
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Set up official PyPy 3.11
+        id: pypy311
+        uses: actions/setup-python@v7
+        with:
+          python-version: pypy-3.11-v7.3.20
+          cache: pip
+
+      - name: Install the same benchmark profile for every runtime
+        shell: bash
+        env:
+          CPYTHON313: ${{ steps.cpython313.outputs.python-path }}
+          CPYTHON314: ${{ steps.cpython314.outputs.python-path }}
+          PYPY311: ${{ steps.pypy311.outputs.python-path }}
+        run: |
+          set -euo pipefail
+          for interpreter in "$CPYTHON313" "$CPYTHON314" "$PYPY311"; do
+            "$interpreter" -m pip install --no-cache-dir --upgrade pip setuptools wheel
+            "$interpreter" -m pip install --no-cache-dir --no-deps --ignore-requires-python -e .
+            "$interpreter" -m pip install --no-cache-dir -r requirements/pypy-3.11-experimental.txt
+          done
+          {
+            echo "CPYTHON313=$CPYTHON313"
+            echo "CPYTHON314=$CPYTHON314"
+            echo "PYPY311=$PYPY311"
+          } >> "$GITHUB_ENV"
+
+      - name: Add pinned source packages to the import path
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src" >> "$GITHUB_ENV"
+
+      - name: Run same-host benchmark matrix
+        env:
+          KOGWISTAR_IMPL_MODE: python
+          LLM_WIKI_AUTH_MODE: disabled
+          LLM_WIKI_OTEL_ENABLED: "false"
+          KOGWISTAR_LOG_LEVEL: WARNING
+          LOG_LEVEL: WARNING
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$CPYTHON313" scripts/run_same_host_benchmarks.py \
+            --runtime "cpython313|$CPYTHON313|0" \
+            --runtime "cpython314|$CPYTHON314|0" \
+            --runtime "pypy311|$PYPY311|1000" \
+            --count 1000 --count 10000 \
+            --output-dir test-results/slots-benchmark-same-host
+
+      - name: Upload same-host benchmark manifest
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: slots-benchmark-same-host
+          path: test-results/slots-benchmark-same-host/
+          if-no-files-found: warn

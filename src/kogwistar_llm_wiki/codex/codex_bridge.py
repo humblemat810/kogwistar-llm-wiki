@@ -22,6 +22,8 @@ _MAX_SCHEMA_CHARS = 64_000
 
 
 class CodexBridgeState:
+    __slots__ = ("lock", "runner", "settings", "token")
+
     def __init__(self, *, token: str, settings: CodexCliSettings) -> None:
         if not token:
             raise ValueError("Codex bridge token must not be empty")

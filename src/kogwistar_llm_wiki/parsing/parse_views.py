@@ -368,6 +368,7 @@ class ParseViewStore:
     as a CAS token; it is not a global application ordering.
     """
 
+    __slots__ = ("metadata", "workspace_id")
     schema_version = 1
 
     def __init__(self, metadata: NamedProjectionStore, *, workspace_id: str) -> None:
@@ -517,6 +518,8 @@ class ParseViewResolver:
     not mutate that legacy state; callers may use the returned fallback
     revision for read-only compatibility while new ParseViews are committed.
     """
+
+    __slots__ = ("store", "workspace_id")
 
     def __init__(self, metadata: NamedProjectionStore, *, workspace_id: str) -> None:
         self.workspace_id = workspace_id

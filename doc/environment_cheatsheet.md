@@ -3,7 +3,7 @@
 ## 1. Repo Status
 
 - `kogwistar-llm-wiki` application package plus docs and tests
-- Python target range: 3.13+
+- Python target range: 3.12+ (production Docker remains CPython 3.13)
 - Runtime bundle includes `kogwistar`, `kg-doc-parser`, and `kogwistar-obsidian-sink`
 - Local editable bootstrap is the recommended repo-local setup path
 - `uv` can prefer local sibling checkouts via `[tool.uv.sources]`

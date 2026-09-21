@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+pytest_plugins = ("tests._helpers.resource_report",)
+
 import logging
 import os
 import re

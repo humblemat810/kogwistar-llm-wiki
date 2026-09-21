@@ -17,21 +17,37 @@ concurrency:
 env:
   # The application imports these sibling repositories at runtime. Keep CI
   # aligned with the revisions used by publish-dockerhub.yml.
-  KOGWISTAR_REVISION: fd47df2894ea020ef4199d9a8e1d089242467df4
-  KG_DOC_PARSER_REVISION: 4c4748ad5eeb47addafda59cd0ac90d70177f298
-  OBSIDIAN_SINK_REVISION: 73541e0f7cfe160639f324d84a181faeb0801835
+  KOGWISTAR_REVISION: 479f218c421198d8a117ced41a11513d33247352
+  KG_DOC_PARSER_REVISION: 7a4f215d546ef55c67f2bc790429f843a31bb8d1
+  OBSIDIAN_SINK_REVISION: 30e64d30f04f5b175f9ea3b537c18e0523017398
 
 jobs:
   python-tests:
-    name: Provider-free Python tests
+    name: Provider-free Python tests (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: cpython312
+            python-version: "3.12"
+            is_pypy: false
+          - label: cpython313
+            python-version: "3.13"
+            is_pypy: false
+          - label: cpython314
+            python-version: "3.14"
+            is_pypy: false
+          - label: pypy311
+            python-version: pypy-3.11-v7.3.20
+            is_pypy: true
     steps:
       - name: Checkout application
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout pinned Kogwistar
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kogwistar
           ref: ${{ env.KOGWISTAR_REVISION }}
@@ -39,7 +55,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout pinned parser
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kg-doc-parser
           ref: ${{ env.KG_DOC_PARSER_REVISION }}
@@ -47,7 +63,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout pinned Obsidian sink
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kogwistar-obsidian-sink
           ref: ${{ env.OBSIDIAN_SINK_REVISION }}
@@ -55,17 +71,19 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Set up Rust for the local Kogwistar package
+        if: matrix.is_pypy == false
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.91.1
 
-      - name: Install local packages and provider-free test dependencies
+      - name: Install CPython packages and provider-free test dependencies
+        if: matrix.is_pypy == false
         shell: bash
         run: |
           set -euo pipefail
@@ -76,7 +94,7 @@ jobs:
           python -m pip install -e ".[test,otel,agent]" --no-deps
           python -m pip install \
             "chromadb>=0.6" \
-            "fastmcp==3.0.0" \
+            "mcp>=1.27,<2" \
             "langchain-openai>=0.3" \
             "langchain-ollama>=0.3" \
             "sqlalchemy>=2.0" \
@@ -86,7 +104,22 @@ jobs:
             "pytest>=8" \
             "pytest-anyio"
 
-      - name: Run provider-free CI marker
+      - name: Install PyPy 3.11 Python-authority profile
+        if: matrix.is_pypy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c 'import sys; assert sys.implementation.name == "pypy"; assert sys.version_info[:2] == (3, 11); print(sys.implementation); print(sys.version)'
+          {
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src"
+            echo "KOGWISTAR_IMPL_MODE=python"
+          } >> "$GITHUB_ENV"
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps --ignore-requires-python -e .
+          python -m pip install -r requirements/pypy-3.11-experimental.txt
+
+      - name: Run CPython provider-free CI marker
+        if: matrix.is_pypy == false
         env:
           LLM_WIKI_AUTH_MODE: disabled
           LLM_WIKI_OTEL_ENABLED: "false"
@@ -94,8 +127,46 @@ jobs:
           LOG_LEVEL: WARNING
         shell: bash
         run: >-
-          python -m pytest -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama" tests -q
-          --durations=25 --durations-min=0 -p no:cacheprovider
+          python -m pytest -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" tests -q
+          --durations=25 --durations-min=0 --resource-report
+          --resource-report-json "test-results/resource-report-${{ matrix.label }}.json"
+          -p no:cacheprovider
+
+      - name: Run PyPy 3.11 provider-free CI profile
+        if: matrix.is_pypy
+        env:
+          LLM_WIKI_AUTH_MODE: disabled
+          LLM_WIKI_OTEL_ENABLED: "false"
+          KOGWISTAR_LOG_LEVEL: WARNING
+          LOG_LEVEL: WARNING
+        shell: bash
+        run: python scripts/run_pypy311_ci.py --skip-install --results-dir test-results/${{ matrix.label }}
+
+      - name: Upload per-runtime resource report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: resource-report-${{ matrix.label }}
+          path: |
+            test-results/resource-report-${{ matrix.label }}.json
+            test-results/${{ matrix.label }}/resource-report-pypy311.json
+          if-no-files-found: warn
+
+      - name: Publish resource summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="test-results/resource-report-${{ matrix.label }}.json"
+          if [ "${{ matrix.is_pypy }}" = "true" ]; then
+            report="test-results/${{ matrix.label }}/resource-report-pypy311.json"
+          fi
+          if test -f "$report"; then
+            python scripts/summarize_resource_report.py "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Resource Report" >> "$GITHUB_STEP_SUMMARY"
+            echo "Resource report was not produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   python-lint:
     name: Python lint
@@ -103,10 +174,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout application
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout pinned Kogwistar
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kogwistar
           ref: ${{ env.KOGWISTAR_REVISION }}
@@ -114,7 +185,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout pinned parser
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kg-doc-parser
           ref: ${{ env.KG_DOC_PARSER_REVISION }}
@@ -122,7 +193,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout pinned Obsidian sink
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kogwistar-obsidian-sink
           ref: ${{ env.OBSIDIAN_SINK_REVISION }}
@@ -130,7 +201,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -149,16 +220,61 @@ jobs:
         working-directory: kogwistar
         run: python -m ruff check .
 
+  resource-comparison:
+    name: Compare Python resource reports
+    needs: python-tests
+    if: always()
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v7
+
+      - name: Set up Python for report rendering
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Download per-runtime resource reports
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: resource-report-cpython-*
+          path: test-results/resource-reports
+          merge-multiple: true
+
+      - name: Publish cross-runtime resource comparison
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cpython312="test-results/resource-reports/resource-report-cpython312.json"
+          cpython313="test-results/resource-reports/resource-report-cpython313.json"
+          cpython314="test-results/resource-reports/resource-report-cpython314.json"
+          pypy311="test-results/resource-reports/resource-report-pypy311.json"
+          if test -f "$cpython312" && test -f "$cpython313" && test -f "$cpython314" && test -f "$pypy311"; then
+            python scripts/compare_resource_reports.py \
+              --report "cpython312=$cpython312" \
+              --report "cpython313=$cpython313" \
+              --report "cpython314=$cpython314" \
+              --report "pypy311=$pypy311" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Resource Report Comparison" >> "$GITHUB_STEP_SUMMARY"
+            echo "All four runtime resource reports were not available." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   rust:
     name: Kogwistar Rust checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Checkout application
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout pinned Kogwistar
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: humblemat810/kogwistar
           ref: ${{ env.KOGWISTAR_REVISION }}

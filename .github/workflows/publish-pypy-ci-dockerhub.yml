@@ -1,0 +1,112 @@
+name: Publish experimental PyPy CI image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Immutable image tag, for example pypy3.12-beta-171509
+        required: true
+        type: string
+      pypy_url:
+        description: Versioned PyPy Linux x86_64 archive URL; do not use a moving latest URL
+        required: true
+        default: https://buildbot.pypy.org/pypy/pypy3.12-v8.0.0-linux64.tar.gz
+        type: string
+      pypy_sha256:
+        description: SHA-256 of the exact PyPy archive
+        required: true
+        default: a1b4851459c2b3dffccab71cb08989534fab0839deddd34f0e6bf18add256fd7
+        type: string
+      confirm:
+        description: I understand this publishes an experimental, non-production CI image
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: inputs.confirm == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-pypy-ci
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check out application metadata
+        uses: actions/checkout@v7
+
+      - name: Validate immutable artifact inputs
+        shell: bash
+        env:
+          PYPY_URL: ${{ inputs.pypy_url }}
+          PYPY_SHA256: ${{ inputs.pypy_sha256 }}
+        run: |
+          set -euo pipefail
+          case "$PYPY_URL" in
+            *latest*) echo 'pypy_url must identify a versioned archive, not latest' >&2; exit 1 ;;
+          esac
+          [[ "$PYPY_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+            echo 'pypy_sha256 must be exactly 64 hexadecimal characters' >&2
+            exit 1
+          }
+          [[ "$TAG" =~ ^pypy3\.12-beta-[A-Za-z0-9._-]+$ ]] || {
+            echo 'tag must use pypy3.12-beta-<build>' >&2
+            exit 1
+          }
+
+      - name: Verify Docker Hub credentials
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$DOCKERHUB_USERNAME"
+          test -n "$DOCKERHUB_TOKEN"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Reject an existing experimental tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${IMAGE}:${TAG}"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "Docker tag already exists: $image" >&2
+            exit 1
+          fi
+
+      - name: Build and smoke-test the PyPy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.pypy-ci
+          build-args: |
+            PYPY_URL=${{ inputs.pypy_url }}
+            PYPY_SHA256=${{ inputs.pypy_sha256 }}
+            PYPY_VERSION=3.12
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          cache-from: type=gha,scope=pypy-ci
+          cache-to: type=gha,mode=max,scope=pypy-ci
+
+      - name: Verify interpreter and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm "${IMAGE}:${TAG}" --version
+          docker run --rm --entrypoint pypy3 "${IMAGE}:${TAG}" -c \
+            'import sys; assert sys.version_info[:2] == (3, 12); print(sys.implementation)'
+          docker run --rm --entrypoint rustc "${IMAGE}:${TAG}" --version
+
+      - name: Push after smoke test
+        shell: bash
+        run: docker push "${IMAGE}:${TAG}"
