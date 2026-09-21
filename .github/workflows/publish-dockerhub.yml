@@ -24,7 +24,7 @@ jobs:
       # Keep the application image reproducible even though these packages are
       # maintained as sibling repositories rather than Git submodules.
       KOGWISTAR_REVISION: 3bddf97f402d549c3cf1f34f38c99fcf42bcd02f
-      KG_DOC_PARSER_REVISION: d99c9cfe2537610cd5c00512e2539c6e65d0dfbe
+      KG_DOC_PARSER_REVISION: 97e6bcc8252415554001fe6f022306d74d28d096
       OBSIDIAN_SINK_REVISION: 30e64d30f04f5b175f9ea3b537c18e0523017398
     steps:
       - uses: actions/checkout@v7

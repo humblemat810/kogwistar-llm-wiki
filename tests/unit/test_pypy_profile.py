@@ -189,7 +189,7 @@ def test_windows_pywin32_gap_does_not_block_the_linux_pypy_profile() -> None:
     requirements = (root / "requirements" / "pypy-3.11-experimental.txt").read_text(
         encoding="utf-8"
     ).lower()
-    workflow = (root / ".github" / "workflows" / "pypy-311-experimental.yml").read_text(
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
     docs = (root / "doc" / "pypy_3_12_support_action_plan.md").read_text(
@@ -309,47 +309,22 @@ def test_pypy312_archive_defaults_are_real_and_consistent() -> None:
 
 
 @pytest.mark.ci
-def test_pypy_311_workflow_is_pinned_nonblocking_and_python_authority_only() -> None:
-    workflow_path = Path(__file__).parents[2] / ".github" / "workflows" / "pypy-311-experimental.yml"
-    workflow = workflow_path.read_text(encoding="utf-8")
+def test_pypy_311_is_a_required_normal_ci_matrix_leg() -> None:
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
     runner = (Path(__file__).parents[2] / "scripts" / "run_pypy311_ci.py").read_text(
         encoding="utf-8"
     )
 
-    assert "continue-on-error: true" in workflow
+    assert "continue-on-error: ${{ matrix.is_pypy }}" not in workflow
+    assert "label: pypy311" in workflow
     assert "uses: actions/setup-python@v7" in workflow
     assert "python-version: pypy-3.11-v7.3.20" in workflow
     assert "cache: pip" in workflow
-    assert "Install official PyPy 3.11 release" not in workflow
-    assert "pypy_url" not in workflow
-    assert "pypy_sha256" not in workflow
     assert '"--expected-python"' in runner
     assert '"3.11"' in runner
     assert 'env.setdefault("KOGWISTAR_IMPL_MODE", "python")' in runner
-    assert "pypy-3.11-experimental.txt" in workflow
-    assert '"mcp.server.lowlevel"' in runner
-    assert "pypy-profile-pypy311.json" in workflow
-    assert "pip-freeze-pypy311.txt" in workflow
-    assert "pip-resolver-status-pypy311.txt" in workflow
-    assert "pip_check_exit_code" in workflow
-    assert "source-profile metadata gaps" in workflow
-    assert "Upload PyPy 3.11 profile evidence" in workflow
-    assert "does not publish an image" in workflow
-
-
-@pytest.mark.ci
-def test_pypy_311_workflow_publishes_failed_pytest_diagnostics() -> None:
-    workflow_path = Path(__file__).parents[2] / ".github" / "workflows" / "pypy-311-experimental.yml"
-    workflow = workflow_path.read_text(encoding="utf-8")
-    runner = (Path(__file__).parents[2] / "scripts" / "run_pypy311_ci.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert 'pytest_log = results / "pytest-pypy311.log"' in runner
-    assert "log_path.open" in runner
-    assert "pytest-log-pypy311" in workflow
-    assert "::error title=PyPy 3.11 compatibility profile failure::" in workflow
-    assert "provider-sdk-status-pypy311.txt" in workflow
 
 
 @pytest.mark.ci
@@ -364,13 +339,10 @@ def test_pypy_311_base_requirements_use_the_official_mcp_sdk() -> None:
 
 
 @pytest.mark.ci
-def test_pypy_311_workflow_probes_the_official_mcp_sdk() -> None:
-    workflow = (
-        Path(__file__).parents[2]
-        / ".github"
-        / "workflows"
-        / "pypy-311-experimental.yml"
-    ).read_text(encoding="utf-8")
+def test_pypy_311_normal_ci_runs_the_official_mcp_sdk_profile() -> None:
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
     runner = (Path(__file__).parents[2] / "scripts" / "run_pypy311_ci.py").read_text(
         encoding="utf-8"
     )
