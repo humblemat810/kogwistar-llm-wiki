@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+
+# Stable PyPy native-extension validation image. This is intentionally separate
+# from the production application image: it proves that the Kogwistar Rust
+# wheel can be built and imported by PyPy 3.11.
+FROM pypy:3.11
+
+ARG RUST_VERSION=1.91.1
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYO3_PYTHON=/opt/pypy/bin/pypy3.11 \
+    PATH=/root/.cargo/bin:$PATH
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        build-essential \
+        ca-certificates \
+        curl \
+        libssl-dev \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --fail --silent --show-error https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}" \
+    && rustc --version \
+    && pypy3 -m pip install --no-cache-dir "maturin>=1.8,<2"
+
+WORKDIR /build
+COPY requirements/pypy-3.11-experimental.txt /build/requirements-pypy311.txt
+COPY kogwistar /build/kogwistar
+
+WORKDIR /build/kogwistar
+
+# abi3-py312 is a CPython 3.12 ABI target. PyPy needs a native, interpreter-
+# specific extension, so the image build removes only that feature in its
+# isolated copy and keeps the repository's locked dependency versions.
+RUN sed -i 's/, "abi3-py312"//' rust/Cargo.toml \
+    && pypy3 -m pip install --no-cache-dir -r /build/requirements-pypy311.txt \
+    && PYO3_PYTHON=/opt/pypy/bin/pypy3.11 pypy3 -m maturin build \
+        --release --locked --interpreter /opt/pypy/bin/pypy3.11 --out /wheelhouse \
+    && pypy3 -m pip install --no-cache-dir --ignore-requires-python \
+        --no-deps /wheelhouse/*.whl \
+    && cd / \
+    && pypy3 -c 'import kogwistar; from kogwistar import _rust; assert _rust.CONTRACT_VERSION == "1.0.0"; print(_rust.__file__)' \
+    && rm -rf /build /wheelhouse
+
+WORKDIR /
+ENTRYPOINT ["pypy3"]
+CMD ["-c", "import sys; import kogwistar._rust as rust; print(sys.implementation); print(rust.__file__)"]
