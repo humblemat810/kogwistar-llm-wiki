@@ -31,8 +31,8 @@ permissions:
 env:
   # Keep the experimental profile aligned with the revisions tested by CI.
   KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
-  KG_DOC_PARSER_REVISION: 8ff9ccbfaad6e34bf11455aef962eff3de434b6b
-  OBSIDIAN_SINK_REVISION: 6db5495a30f1b0960933599eb23cd59a4d2eb3ef
+  KG_DOC_PARSER_REVISION: a80b9d846452bb0232f5569c3def08f916810fe8
+  OBSIDIAN_SINK_REVISION: 333561afdaac8d69c84dddb5bbe5770ba82ae623
 
 jobs:
   pypy-beta-probe:
