@@ -23,9 +23,9 @@ jobs:
     env:
       # Keep the application image reproducible even though these packages are
       # maintained as sibling repositories rather than Git submodules.
-      KOGWISTAR_REVISION: 894549db6255273c49ec2b502f04ee67191502f3
-      KG_DOC_PARSER_REVISION: 4322761d70d8f5571ea9627a73b0a70b21390eb5
-      OBSIDIAN_SINK_REVISION: cb7ccf1247ac3875356d2cb9f1849b1796484c08
+      KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
+      KG_DOC_PARSER_REVISION: 8ff9ccbfaad6e34bf11455aef962eff3de434b6b
+      OBSIDIAN_SINK_REVISION: 6db5495a30f1b0960933599eb23cd59a4d2eb3ef
     steps:
       - uses: actions/checkout@v7
       - name: Check out pinned sibling packages
