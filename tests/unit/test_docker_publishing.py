@@ -29,6 +29,16 @@ def test_release_publish_is_gated_by_all_adapters_validation() -> None:
     assert "push: true" in workflow
 
 
+def test_all_adapter_publisher_defines_the_revisions_used_by_its_build() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "publish-dockerhub.yml").read_text(encoding="utf-8")
+    publisher = workflow.split("  publish-all-adapters:\n", 1)[1]
+
+    assert "PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c" in publisher
+    assert "QDRANT_REVISION: af16f6864c1839add7e74f87d29b0d5503d626fc" in publisher
+    assert "LLM_WIKI_PINECONE_REVISION=${{ env.PINECONE_REVISION }}" in publisher
+    assert "LLM_WIKI_QDRANT_REVISION=${{ env.QDRANT_REVISION }}" in publisher
+
+
 def test_embedding_release_workflow_is_manual_and_explicit() -> None:
     workflow = (ROOT / ".github" / "workflows" / "publish-embedding-dockerhub.yml").read_text(
         encoding="utf-8"
