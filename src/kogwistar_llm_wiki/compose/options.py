@@ -44,8 +44,8 @@ def validate_options(options: ComposeOptions) -> list[str]:
         errors.append("embedding_backend is only valid for cpu or gpu multimodal modes")
     if options.mode == "cpu" and options.embedding_backend == "vllm":
         errors.append("vllm embedding_backend is GPU-only; use transformers for CPU")
-    if options.backend not in {"postgres", "chroma"}:
-        errors.append("backend must be postgres or chroma")
+    if options.backend not in {"postgres", "chroma", "pinecone", "qdrant"}:
+        errors.append("backend must be postgres, chroma, pinecone, or qdrant")
     elif options.backend == "chroma":
         errors.append(
             "embedded Chroma cannot be generated for the multi-process Compose bundle; "

@@ -1,8 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+ARG LLM_WIKI_VECTOR_EXTRAS=none
+ARG LLM_WIKI_PINECONE_REVISION=
+ARG LLM_WIKI_QDRANT_REVISION=
 
 FROM ${PYTHON_IMAGE} AS app-builder
+
+ARG LLM_WIKI_VECTOR_EXTRAS=none
+ARG LLM_WIKI_PINECONE_REVISION=
+ARG LLM_WIKI_QDRANT_REVISION=
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -63,6 +70,38 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --no-build-isolation --no-deps \
     --constraint /app/docker/container-constraints.txt ".[agent]"
+
+# Optional external adapters are installed only for an explicitly requested
+# image variant. The default image remains free of Pinecone/Qdrant SDKs.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ "$LLM_WIKI_VECTOR_EXTRAS" = "vector-pinecone" ]; then \
+      if [ -n "$LLM_WIKI_PINECONE_REVISION" ]; then \
+        python -m pip install --constraint /app/docker/container-constraints.txt \
+          "git+https://github.com/humblemat810/kogwistar-pinecone.git@$LLM_WIKI_PINECONE_REVISION"; \
+      else \
+        python -m pip install --constraint /app/docker/container-constraints.txt \
+          "kogwistar-pinecone>=0.5,<0.6"; \
+      fi; \
+    elif [ "$LLM_WIKI_VECTOR_EXTRAS" = "vector-qdrant" ]; then \
+      if [ -n "$LLM_WIKI_QDRANT_REVISION" ]; then \
+        python -m pip install --constraint /app/docker/container-constraints.txt \
+          "git+https://github.com/humblemat810/kogwistar-qdrant.git@$LLM_WIKI_QDRANT_REVISION"; \
+      else \
+        python -m pip install --constraint /app/docker/container-constraints.txt \
+          "kogwistar-qdrant>=0.5,<0.6"; \
+      fi; \
+    elif [ "$LLM_WIKI_VECTOR_EXTRAS" = "vector-all" ]; then \
+      if [ -n "$LLM_WIKI_PINECONE_REVISION" ] && [ -n "$LLM_WIKI_QDRANT_REVISION" ]; then \
+        python -m pip install --constraint /app/docker/container-constraints.txt \
+          "git+https://github.com/humblemat810/kogwistar-pinecone.git@$LLM_WIKI_PINECONE_REVISION" \
+          "git+https://github.com/humblemat810/kogwistar-qdrant.git@$LLM_WIKI_QDRANT_REVISION"; \
+      else \
+        python -m pip install --constraint /app/docker/container-constraints.txt \
+          "kogwistar-pinecone>=0.5,<0.6" "kogwistar-qdrant>=0.5,<0.6"; \
+      fi; \
+    elif [ "$LLM_WIKI_VECTOR_EXTRAS" != "none" ]; then \
+      echo "Unknown LLM_WIKI_VECTOR_EXTRAS=$LLM_WIKI_VECTOR_EXTRAS" >&2; exit 2; \
+    fi
 
 # Do not carry packaging/build tools into the runtime artifact. pip remains
 # available for diagnostics, but no compiler, Rust toolchain, or build backend

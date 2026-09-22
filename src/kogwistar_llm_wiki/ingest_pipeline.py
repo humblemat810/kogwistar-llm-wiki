@@ -205,6 +205,7 @@ def build_persistent_namespace_engines(
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
+    vector_backend: str = "chroma",
 ) -> NamespaceEngines:
     """Build a persistent namespace bundle through the shared builder module."""
     return _build_persistent_namespace_engines(
@@ -221,6 +222,7 @@ def build_persistent_namespace_engines(
         embedding_functions=embedding_functions,
         embedding_configs=embedding_configs,
         embedding_profile_mode=embedding_profile_mode,
+        vector_backend=vector_backend,
         embedding_resolver=_resolve_embedding_functions,
         profile_resolver=_embedding_profile,
     )

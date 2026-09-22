@@ -15,6 +15,20 @@ def test_application_release_workflow_does_not_publish_embedding_images() -> Non
     assert "cache-from: type=gha,scope=llm-wiki" in workflow
 
 
+def test_release_publish_is_gated_by_all_adapters_validation() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "publish-dockerhub.yml").read_text(encoding="utf-8")
+
+    assert "validate-all-adapters:" in workflow
+    assert "LLM_WIKI_VECTOR_EXTRAS=vector-all" in workflow
+    assert "import kogwistar_pinecone" in workflow
+    assert "import kogwistar_qdrant" in workflow
+    assert "needs: validate-all-adapters" in workflow
+    assert "publish-all-adapters:" in workflow
+    assert "all-v{{version}}" in workflow
+    assert "kogwistar-llm-wiki-all" not in workflow
+    assert "push: true" in workflow
+
+
 def test_embedding_release_workflow_is_manual_and_explicit() -> None:
     workflow = (ROOT / ".github" / "workflows" / "publish-embedding-dockerhub.yml").read_text(
         encoding="utf-8"
@@ -108,7 +122,7 @@ def test_local_publishers_default_to_application_and_offer_explicit_targets() ->
 def test_release_verifier_matches_package_version_and_rejects_mismatch() -> None:
     script = ROOT / "scripts" / "verify_release_version.py"
     matching = subprocess.run(
-        [sys.executable, str(script), "--tag", "v0.5.0"],
+        [sys.executable, str(script), "--tag", "v0.5.1"],
         cwd=ROOT,
         check=False,
         capture_output=True,

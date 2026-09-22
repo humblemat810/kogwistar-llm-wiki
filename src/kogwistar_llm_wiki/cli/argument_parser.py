@@ -15,9 +15,9 @@ def build_argument_parser(handlers: Mapping[str, CommandHandler]) -> argparse.Ar
     parser.add_argument("--data-dir", default=None, help="Path to persistent data directory")
     parser.add_argument(
         "--backend",
-        choices=["chroma", "postgres"],
-        default="chroma",
-        help="Backend to use under --data-dir (default: chroma)",
+        choices=["chroma", "postgres", "pinecone", "qdrant"],
+        default=os.environ.get("KOGWISTAR_VECTOR_BACKEND", "chroma"),
+        help="Backend to use under --data-dir (default: chroma); optional providers are lazy-loaded",
     )
     parser.add_argument(
         "--dsn",
@@ -151,9 +151,9 @@ def build_argument_parser(handlers: Mapping[str, CommandHandler]) -> argparse.Ar
     report_p.add_argument("--data-dir", required=True, help="Path to persistent data directory")
     report_p.add_argument(
         "--backend",
-        choices=["chroma", "postgres"],
-        default="chroma",
-        help="Backend to use under --data-dir (default: chroma)",
+        choices=["chroma", "postgres", "pinecone", "qdrant"],
+        default=os.environ.get("KOGWISTAR_VECTOR_BACKEND", "chroma"),
+        help="Backend to use under --data-dir (default: chroma); optional providers are lazy-loaded",
     )
     report_p.add_argument(
         "--dsn",
@@ -396,7 +396,7 @@ def build_argument_parser(handlers: Mapping[str, CommandHandler]) -> argparse.Ar
     compose_generate_p = compose_sub.add_parser("generate", help="Generate a self-contained Compose configuration")
     compose_generate_p.add_argument("--output", required=True, help="Output YAML path")
     compose_generate_p.add_argument("--workspace", default="default")
-    compose_generate_p.add_argument("--backend", choices=["postgres", "chroma"], default="postgres")
+    compose_generate_p.add_argument("--backend", choices=["postgres", "chroma", "pinecone", "qdrant"], default="postgres")
     compose_generate_p.add_argument("--project-name", default="llm-wiki")
     compose_generate_p.add_argument("--mode", choices=["gpu", "cpu", "text-only"], default="gpu")
     compose_generate_p.add_argument(
@@ -446,4 +446,3 @@ def build_argument_parser(handlers: Mapping[str, CommandHandler]) -> argparse.Ar
     control_p.add_argument("--runtime-only", action="store_true", help="Do not persist the requested state")
     control_p.set_defaults(func=handlers["maintenance_control"])
     return parser
-

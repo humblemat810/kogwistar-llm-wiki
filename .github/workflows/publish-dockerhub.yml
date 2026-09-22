@@ -16,8 +16,82 @@ permissions:
   contents: read
 
 jobs:
+  validate-all-adapters:
+    name: Validate all-adapters release image
+    if: github.event_name == 'push' || inputs.confirm == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # Keep this validation aligned with the exact source revisions used by
+      # the release image. The adapter source revisions are immutable merged
+      # main commits and are installed directly by the release build.
+      KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
+      KG_DOC_PARSER_REVISION: a80b9d846452bb0232f5569c3def08f916810fe8
+      OBSIDIAN_SINK_REVISION: bb9cec922c156465af8395e0dfb3b3cf76748f5f
+      PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
+      QDRANT_REVISION: af16f6864c1839add7e74f87d29b0d5503d626fc
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check out pinned sibling packages
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+      - name: Verify all-adapters package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f kogwistar/pyproject.toml
+          test -f kg-doc-parser/pyproject.toml
+          test -f kogwistar-obsidian-sink/pyproject.toml
+          test -f pyproject.toml
+      - name: Verify package version matches release tag
+        if: github.event_name == 'push'
+        shell: bash
+        run: python scripts/verify_release_version.py --tag "${GITHUB_REF_NAME}"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build all-adapters image without publishing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            LLM_WIKI_VECTOR_EXTRAS=vector-all
+            LLM_WIKI_PINECONE_REVISION=${{ env.PINECONE_REVISION }}
+            LLM_WIKI_QDRANT_REVISION=${{ env.QDRANT_REVISION }}
+          load: true
+          tags: kogwistar-llm-wiki:release-all-adapters
+          cache-from: type=gha,scope=llm-wiki-release-all-adapters
+          cache-to: type=gha,mode=max,scope=llm-wiki-release-all-adapters
+      - name: Smoke test all adapter imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python kogwistar-llm-wiki:release-all-adapters -c '
+          import kogwistar_pinecone
+          import kogwistar_qdrant
+          from kogwistar_llm_wiki.backends import SUPPORTED_BACKENDS
+          assert {"pinecone", "qdrant"}.issubset(SUPPORTED_BACKENDS)
+          print("all-adapters import gate passed")
+          '
+
   publish-app:
     if: github.event_name == 'push' || inputs.confirm == true
+    needs: validate-all-adapters
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -26,6 +100,8 @@ jobs:
       KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
       KG_DOC_PARSER_REVISION: a80b9d846452bb0232f5569c3def08f916810fe8
       OBSIDIAN_SINK_REVISION: bb9cec922c156465af8395e0dfb3b3cf76748f5f
+      PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
+      QDRANT_REVISION: af16f6864c1839add7e74f87d29b0d5503d626fc
     steps:
       - uses: actions/checkout@v7
       - name: Check out pinned sibling packages
@@ -90,3 +166,71 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=llm-wiki
           cache-to: type=gha,mode=max,scope=llm-wiki
+
+  publish-all-adapters:
+    name: Publish all-adapters release image
+    if: github.event_name == 'push' || inputs.confirm == true
+    needs: validate-all-adapters
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
+      KG_DOC_PARSER_REVISION: a80b9d846452bb0232f5569c3def08f916810fe8
+      OBSIDIAN_SINK_REVISION: bb9cec922c156465af8395e0dfb3b3cf76748f5f
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check out pinned sibling packages
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Reject an existing all-adapters release tag
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki:all-${GITHUB_REF_NAME}"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "Docker all-adapters release tag already exists: $image" >&2
+            exit 1
+          fi
+      - id: meta-all
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki
+          tags: |
+            type=semver,pattern=all-v{{version}}
+            type=semver,pattern=all-v{{major}}.{{minor}}
+            type=raw,value=all
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            LLM_WIKI_VECTOR_EXTRAS=vector-all
+            LLM_WIKI_PINECONE_REVISION=${{ env.PINECONE_REVISION }}
+            LLM_WIKI_QDRANT_REVISION=${{ env.QDRANT_REVISION }}
+          push: true
+          tags: ${{ steps.meta-all.outputs.tags }}
+          labels: ${{ steps.meta-all.outputs.labels }}
+          cache-from: type=gha,scope=llm-wiki-release-all-adapters
+          cache-to: type=gha,mode=max,scope=llm-wiki-release-all-adapters
