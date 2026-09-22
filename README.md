@@ -480,6 +480,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/python_slots_memory_layout_plan.md](doc/python_slots_memory_layout_plan.md) | Measured Python object-layout optimization plan and benchmark protocol |
 | [doc/pypy_slots_validation_report.md](doc/pypy_slots_validation_report.md) | Current Python 3.12, PyPy, and slots validation evidence |
 | [doc/release_0.4.1.md](doc/release_0.4.1.md) | Version 0.4.1 release notes, dependency pins, and verified CI gates |
+| [doc/release_0.5.0.md](doc/release_0.5.0.md) | Version 0.5.0 MCP 2.x release notes, pins, and image targets |
 | [doc/mcp_v2_migration.md](doc/mcp_v2_migration.md) | MCP V2 migration, compatibility, and upgrade order |
 | [doc/glossary.md](doc/glossary.md) | Term definitions |
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
