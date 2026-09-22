@@ -32,7 +32,7 @@ After tagging the merged commit as `v0.5.0`, the publish workflows produce:
 ```text
 profchan/kogwistar-llm-wiki:v0.5.0
 profchan/kogwistar-llm-wiki:latest
-profchan/kogwistar-llm-wiki-pypy311-native:pypy3.11-v0.5.0
+profchan/kogwistar-llm-wiki:pypy3.11-v0.5.0
 ```
 
 The standard application image is Torch-free. Multimodal embedding inference

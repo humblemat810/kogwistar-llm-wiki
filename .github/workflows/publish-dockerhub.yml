@@ -208,7 +208,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-all:${GITHUB_REF_NAME}"
+          image="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki:all-${GITHUB_REF_NAME}"
           if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
             echo "Docker all-adapters release tag already exists: $image" >&2
             exit 1
@@ -216,11 +216,11 @@ jobs:
       - id: meta-all
         uses: docker/metadata-action@v5
         with:
-          images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-all
+          images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=raw,value=latest
+            type=semver,pattern=all-v{{version}}
+            type=semver,pattern=all-v{{major}}.{{minor}}
+            type=raw,value=all
       - uses: docker/build-push-action@v6
         with:
           context: .

@@ -24,7 +24,8 @@ def test_release_publish_is_gated_by_all_adapters_validation() -> None:
     assert "import kogwistar_qdrant" in workflow
     assert "needs: validate-all-adapters" in workflow
     assert "publish-all-adapters:" in workflow
-    assert "kogwistar-llm-wiki-all" in workflow
+    assert "all-v{{version}}" in workflow
+    assert "kogwistar-llm-wiki-all" not in workflow
     assert "push: true" in workflow
 
 
