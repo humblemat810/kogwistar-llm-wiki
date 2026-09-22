@@ -15,6 +15,19 @@ def test_application_release_workflow_does_not_publish_embedding_images() -> Non
     assert "cache-from: type=gha,scope=llm-wiki" in workflow
 
 
+def test_release_publish_is_gated_by_all_adapters_validation() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "publish-dockerhub.yml").read_text(encoding="utf-8")
+
+    assert "validate-all-adapters:" in workflow
+    assert "LLM_WIKI_VECTOR_EXTRAS=vector-all" in workflow
+    assert "import kogwistar_pinecone" in workflow
+    assert "import kogwistar_qdrant" in workflow
+    assert "needs: validate-all-adapters" in workflow
+    assert "publish-all-adapters:" in workflow
+    assert "kogwistar-llm-wiki-all" in workflow
+    assert "push: true" in workflow
+
+
 def test_embedding_release_workflow_is_manual_and_explicit() -> None:
     workflow = (ROOT / ".github" / "workflows" / "publish-embedding-dockerhub.yml").read_text(
         encoding="utf-8"

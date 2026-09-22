@@ -15,6 +15,7 @@ def render_compose(options: ComposeOptions) -> str:
         else ("vllm" if options.mode == "gpu" else "transformers")
     )
     auth = options.auth_mode
+    uses_postgres = options.backend == "postgres"
     embedding_url = (
         "http://embedding:8000"
         if options.mode == "gpu" and embedding_backend == "vllm"
@@ -25,6 +26,7 @@ def render_compose(options: ComposeOptions) -> str:
     lines = [
         f"name: {options.project_name}",
         "services:",
+        *([
         "  postgres:",
         "    image: pgvector/pgvector:pg17",
         "    mem_limit: ${LLM_WIKI_POSTGRES_MEMORY_LIMIT:-512m}",
@@ -40,6 +42,7 @@ def render_compose(options: ComposeOptions) -> str:
         "      interval: 5s",
         "      timeout: 5s",
         "      retries: 12",
+        ] if uses_postgres else []),
         "  app-data-init:",
         "    build:",
         "      context: .",
@@ -66,13 +69,21 @@ def render_compose(options: ComposeOptions) -> str:
         "    mem_limit: ${LLM_WIKI_APP_MEMORY_LIMIT:-384m}",
         "    cpus: ${LLM_WIKI_APP_CPU_LIMIT:-0.15}",
         "    depends_on:",
+        *([
         "      postgres:",
         "        condition: service_healthy",
+        ] if uses_postgres else []),
         "      app-data-init:",
         "        condition: service_completed_successfully",
         "    environment:",
         "      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki",
-        "      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki",
+        *(["      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki"] if uses_postgres else []),
+        f"      KOGWISTAR_VECTOR_BACKEND: {options.backend}",
+        "      KOGWISTAR_VECTOR_PREFIX: ${KOGWISTAR_VECTOR_PREFIX:-kogwistar}",
+        "      PINECONE_INDEX_HOST: ${PINECONE_INDEX_HOST:-}",
+        "      PINECONE_API_KEY: ${PINECONE_API_KEY:-}",
+        "      QDRANT_URL: ${QDRANT_URL:-}",
+        "      QDRANT_PATH: ${QDRANT_PATH:-/var/lib/llm-wiki/qdrant}",
         f"      LLM_WIKI_WORKSPACE: {options.workspace}",
         f"      LLM_WIKI_AUTH_MODE: \"{auth}\"",
         f"      LLM_WIKI_AUTH_REQUIRED: \"${{LLM_WIKI_AUTH_REQUIRED:-{'true' if options.auth_mode != 'disabled' else 'false'}}}\"",
@@ -112,13 +123,21 @@ def render_compose(options: ComposeOptions) -> str:
         "    mem_limit: ${LLM_WIKI_APP_MEMORY_LIMIT:-384m}",
         "    cpus: ${LLM_WIKI_APP_CPU_LIMIT:-0.15}",
         "    depends_on:",
+        *([
         "      postgres:",
         "        condition: service_healthy",
+        ] if uses_postgres else []),
         "      app-data-init:",
         "        condition: service_completed_successfully",
         "    environment:",
         "      KOGWISTAR_DATA_DIR: /var/lib/llm-wiki",
-        "      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki",
+        *(["      KOGWISTAR_POSTGRES_DSN: postgresql+psycopg://llm_wiki:${POSTGRES_PASSWORD}@postgres:5432/llm_wiki"] if uses_postgres else []),
+        f"      KOGWISTAR_VECTOR_BACKEND: {options.backend}",
+        "      KOGWISTAR_VECTOR_PREFIX: ${KOGWISTAR_VECTOR_PREFIX:-kogwistar}",
+        "      PINECONE_INDEX_HOST: ${PINECONE_INDEX_HOST:-}",
+        "      PINECONE_API_KEY: ${PINECONE_API_KEY:-}",
+        "      QDRANT_URL: ${QDRANT_URL:-}",
+        "      QDRANT_PATH: ${QDRANT_PATH:-/var/lib/llm-wiki/qdrant}",
         f"      LLM_WIKI_OTEL_ENABLED: \"${{LLM_WIKI_OTEL_ENABLED:-{'true' if options.with_otel else 'false'}}}\"",
         "      OTEL_EXPORTER_OTLP_ENDPOINT: \"${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4318}\"",
         f"      LLM_WIKI_AUTH_MODE: \"{auth}\"",
@@ -252,7 +271,5 @@ def render_compose(options: ComposeOptions) -> str:
     if options.mode == "gpu" and embedding_backend == "vllm":
         lines.append("  embedding_vllm_hf_cache:")
     return "\n".join(lines) + "\n"
-
-
 
 

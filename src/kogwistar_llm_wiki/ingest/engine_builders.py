@@ -17,6 +17,7 @@ from kogwistar.engine_core.embedding_profile import EmbeddingProfile
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
 
+from ..backends import VectorBackendSettings, build_backend_factory
 from ..embeddings.embedding_config_resolver import (
     EMBEDDING_SPACES,
     validate_shared_postgres_embedding_profile,
@@ -94,6 +95,7 @@ def build_persistent_namespace_engines(
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     embedding_resolver: EmbeddingResolver,
     profile_resolver: ProfileResolver,
+    vector_backend: str = "chroma",
 ) -> NamespaceEngines:
     root = Path(base_dir)
     embeddings, resolved_embedding_configs = embedding_resolver(
@@ -107,19 +109,36 @@ def build_persistent_namespace_engines(
         embedding_base_url=embedding_base_url,
         embedding_api_key_env=embedding_api_key_env,
     )
-    derived_engine = _build_persistent_engine(root / "derived_knowledge", kg_graph_type="derived_knowledge", embedding_function=embeddings["knowledge"], embedding_profile=profile_resolver(resolved_embedding_configs["knowledge"]), embedding_profile_mode=embedding_profile_mode) if split_derived_knowledge else None
-    return NamespaceEngines(
-        conversation=_build_persistent_engine(
-            root / "conversation",
-            kg_graph_type="conversation",
-            embedding_function=embeddings["conversation"],
-            embedding_profile=profile_resolver(resolved_embedding_configs["conversation"]),
+    def build_space(space: str, graph_type: str, *, persistence_mode: Literal["single_stage", "two_stage"] = "single_stage") -> GraphKnowledgeEngine:
+        profile = profile_resolver(resolved_embedding_configs[space])
+        if vector_backend in {"chroma", "postgres"}:
+            return _build_persistent_engine(
+                root / graph_type,
+                kg_graph_type=graph_type,
+                embedding_function=embeddings[space],
+                embedding_profile=profile,
+                embedding_profile_mode=embedding_profile_mode,
+                persistence_mode=persistence_mode,
+            )
+        settings = VectorBackendSettings.from_env(
+            vector_backend, dimension=resolved_embedding_configs[space].dimension
+        )
+        return _build_external_engine(
+            root / graph_type,
+            kg_graph_type=graph_type,
+            embedding_function=embeddings[space],
+            embedding_profile=profile,
             embedding_profile_mode=embedding_profile_mode,
-            persistence_mode=conversation_persistence_mode,
-        ),
-        workflow=_build_persistent_engine(root / "workflow", kg_graph_type="workflow", embedding_function=embeddings["workflow"], embedding_profile=profile_resolver(resolved_embedding_configs["workflow"]), embedding_profile_mode=embedding_profile_mode),
-        kg=_build_persistent_engine(root / "kg", kg_graph_type="knowledge", embedding_function=embeddings["knowledge"], embedding_profile=profile_resolver(resolved_embedding_configs["knowledge"]), embedding_profile_mode=embedding_profile_mode),
-        wisdom=_build_persistent_engine(root / "wisdom", kg_graph_type="wisdom", embedding_function=embeddings["wisdom"], embedding_profile=profile_resolver(resolved_embedding_configs["wisdom"]), embedding_profile_mode=embedding_profile_mode),
+            persistence_mode=persistence_mode,
+            backend_factory=build_backend_factory(settings),
+        )
+
+    derived_engine = build_space("knowledge", "derived_knowledge") if split_derived_knowledge else None
+    return NamespaceEngines(
+        conversation=build_space("conversation", "conversation", persistence_mode=conversation_persistence_mode),
+        workflow=build_space("workflow", "workflow"),
+        kg=build_space("knowledge", "knowledge"),
+        wisdom=build_space("wisdom", "wisdom"),
         derived_knowledge=derived_engine,
     )
 
@@ -266,6 +285,31 @@ def _build_persistent_engine(
         embedding_function=embedding_function,
         embedding_profile=embedding_profile,
         embedding_profile_mode=embedding_profile_mode,
+        namespace=kg_graph_type,
+        persistence_mode=persistence_mode,
+    )
+
+
+def _build_external_engine(
+    persist_directory: Path,
+    *,
+    kg_graph_type: str,
+    embedding_function: EmbeddingFunctionLike,
+    embedding_profile: EmbeddingProfile | None,
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"],
+    persistence_mode: Literal["single_stage", "two_stage"],
+    backend_factory: Callable[[GraphKnowledgeEngine], object] | None,
+) -> GraphKnowledgeEngine:
+    if backend_factory is None:
+        raise ValueError("An external vector backend requires a backend factory")
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    return GraphKnowledgeEngine(
+        persist_directory=str(persist_directory),
+        kg_graph_type=kg_graph_type,
+        embedding_function=embedding_function,
+        embedding_profile=embedding_profile,
+        embedding_profile_mode=embedding_profile_mode,
+        backend_factory=backend_factory,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
     )

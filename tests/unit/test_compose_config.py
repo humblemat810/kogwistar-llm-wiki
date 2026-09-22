@@ -74,6 +74,15 @@ def test_chroma_compose_is_rejected_even_for_full_qwen_dimension() -> None:
         )
 
 
+@pytest.mark.parametrize("backend", ["pinecone", "qdrant"])
+def test_external_backend_compose_omits_postgres_and_passes_provider_settings(backend: str) -> None:
+    text = render_compose(ComposeOptions(backend=backend, mode="text-only"))
+    assert "postgres:" not in text
+    assert f"KOGWISTAR_VECTOR_BACKEND: {backend}" in text
+    assert "PINECONE_API_KEY" in text
+    assert "QDRANT_URL" in text
+
+
 def test_disabled_auth_is_explicitly_disabled() -> None:
     text = render_compose(ComposeOptions(mode="text-only"))
     assert 'LLM_WIKI_AUTH_MODE: "disabled"' in text
