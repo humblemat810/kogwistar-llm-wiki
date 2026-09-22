@@ -263,20 +263,20 @@ For prebuilt public images and the release workflow, see
 ### Use a published application image
 
 The GitHub repository includes the Compose files, but it does not require a
-local application build. For release `v0.4.1`, pull the published Torch-free
+local application build. For release `v0.5.0`, pull the published Torch-free
 LLM-Wiki image and point both application services at it:
 
 ```bash
-docker pull profchan/kogwistar-llm-wiki:v0.4.1
-LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.4.1 \
+docker pull profchan/kogwistar-llm-wiki:v0.5.0
+LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.5.0 \
   docker compose up -d
 ```
 
 PowerShell:
 
 ```powershell
-docker pull profchan/kogwistar-llm-wiki:v0.4.1
-$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.4.1"
+docker pull profchan/kogwistar-llm-wiki:v0.5.0
+$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.5.0"
 docker compose up -d
 ```
 
@@ -480,6 +480,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/python_slots_memory_layout_plan.md](doc/python_slots_memory_layout_plan.md) | Measured Python object-layout optimization plan and benchmark protocol |
 | [doc/pypy_slots_validation_report.md](doc/pypy_slots_validation_report.md) | Current Python 3.12, PyPy, and slots validation evidence |
 | [doc/release_0.4.1.md](doc/release_0.4.1.md) | Version 0.4.1 release notes, dependency pins, and verified CI gates |
+| [doc/mcp_v2_migration.md](doc/mcp_v2_migration.md) | MCP V2 migration, compatibility, and upgrade order |
 | [doc/glossary.md](doc/glossary.md) | Term definitions |
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
 | [STATUS.md](STATUS.md) | Implementation status |

@@ -17,9 +17,9 @@ concurrency:
 env:
   # The application imports these sibling repositories at runtime. Keep CI
   # aligned with the revisions used by publish-dockerhub.yml.
-  KOGWISTAR_REVISION: 519f69de352f61e12ab316b300818e1564650650
-  KG_DOC_PARSER_REVISION: c82a9e59217a7292d78fdce51300b17010112327
-  OBSIDIAN_SINK_REVISION: cb7ccf1247ac3875356d2cb9f1849b1796484c08
+  KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
+  KG_DOC_PARSER_REVISION: a80b9d846452bb0232f5569c3def08f916810fe8
+  OBSIDIAN_SINK_REVISION: bb9cec922c156465af8395e0dfb3b3cf76748f5f
 
 jobs:
   python-tests:
@@ -94,7 +94,7 @@ jobs:
           python -m pip install -e ".[test,otel,agent]" --no-deps
           python -m pip install \
             "chromadb>=0.6" \
-            "mcp>=1.27,<2" \
+            "mcp>=2.2.0,<3" \
             "langchain-openai>=0.3" \
             "langchain-ollama>=0.3" \
             "sqlalchemy>=2.0" \

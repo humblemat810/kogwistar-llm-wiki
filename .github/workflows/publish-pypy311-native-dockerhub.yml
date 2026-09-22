@@ -1,0 +1,98 @@
+name: Publish PyPy 3.11 native image
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Publish the verified PyPy 3.11 native image to Docker Hub
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.confirm == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-pypy311-native
+      KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
+      KG_DOC_PARSER_REVISION: a80b9d846452bb0232f5569c3def08f916810fe8
+      OBSIDIAN_SINK_REVISION: bb9cec922c156465af8395e0dfb3b3cf76748f5f
+    steps:
+      - name: Check out tested application commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Check out pinned Kogwistar source
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Check out pinned parser and sink sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/humblemat810/kg-doc-parser.git kg-doc-parser
+          git -C kg-doc-parser checkout --detach "$KG_DOC_PARSER_REVISION"
+          git clone --no-checkout https://github.com/humblemat810/kogwistar-obsidian-sink.git kogwistar-obsidian-sink
+          git -C kogwistar-obsidian-sink checkout --detach "$OBSIDIAN_SINK_REVISION"
+
+      - name: Verify Docker Hub credentials
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$DOCKERHUB_USERNAME"
+          test -n "$DOCKERHUB_TOKEN"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Read package version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build and smoke-test native PyPy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.pypy311-native
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:pypy3.11-v${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=pypy311-native
+          cache-to: type=gha,mode=max,scope=pypy311-native
+
+      - name: Verify native extension in image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm "${IMAGE}:pypy3.11-v${{ steps.version.outputs.version }}"
+
+      - name: Push verified image
+        shell: bash
+        run: docker push "${IMAGE}:pypy3.11-v${{ steps.version.outputs.version }}"

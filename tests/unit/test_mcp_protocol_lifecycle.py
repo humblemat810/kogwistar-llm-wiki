@@ -3,12 +3,10 @@ from __future__ import annotations
 import anyio
 import httpx
 import pytest
-from mcp.client.session import ClientSession
+from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from kogwistar_llm_wiki.agent.mcp_server import AgentMcpServer
-
 
 pytestmark = pytest.mark.ci
 
@@ -31,17 +29,16 @@ def test_official_mcp_server_completes_real_session_lifecycle() -> None:
     server = AgentMcpServer(gateway)
 
     async def exercise() -> None:
-        async with create_connected_server_and_client_session(server.server) as client:
-            initialized = await client.initialize()
-            assert initialized.serverInfo.name == "llm-wiki"
-
+        async with Client(server.server) as client:
+            assert client.server_info is not None
+            assert client.server_info.name == "llm-wiki"
             tools = await client.list_tools()
             names = {tool.name for tool in tools.tools}
             assert {"status", "maintain", "memory_recall"}.issubset(names)
 
             result = await client.call_tool("status", {"workspace_id": "demo"})
-            assert result.isError is False
-            assert result.structuredContent == {
+            assert result.is_error is False
+            assert result.structured_content == {
                 "tool": "status",
                 "workspace_id": "demo",
                 "ok": True,
@@ -60,34 +57,32 @@ def test_official_mcp_streamable_http_round_trip(monkeypatch: pytest.MonkeyPatch
     app = server._streamable_http_app("/mcp")
 
     async def exercise() -> None:
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
-                headers={"Authorization": "Bearer test-token"},
-                follow_redirects=True,
-                transport=httpx.ASGITransport(app=app),
-            ) as http_client:
-                async with streamable_http_client(
-                    "http://testserver/mcp",
-                    http_client=http_client,
-                ) as (read_stream, write_stream, _get_session_id):
-                    async with ClientSession(read_stream, write_stream) as client:
-                        await client.initialize()
-                        result = await client.call_tool("status", {"workspace_id": "http-demo"})
-                        assert result.isError is False
-                        assert result.structuredContent == {
-                            "tool": "status",
-                            "workspace_id": "http-demo",
-                            "ok": True,
-                        }
-                        write_result = await client.call_tool(
-                            "maintain", {"workspace_id": "http-demo", "topic": "mcp"}
-                        )
-                        assert write_result.isError is False
-                        assert write_result.structuredContent == {
-                            "tool": "maintain",
-                            "workspace_id": "http-demo",
-                            "ok": True,
-                        }
+        async with app.router.lifespan_context(app), httpx.AsyncClient(
+            headers={"Authorization": "Bearer test-token"},
+            follow_redirects=True,
+            transport=httpx.ASGITransport(app=app),
+        ) as http_client, Client(
+            streamable_http_client(
+                "http://testserver/mcp",
+                http_client=http_client,
+            )
+        ) as client:
+            result = await client.call_tool("status", {"workspace_id": "http-demo"})
+            assert result.is_error is False
+            assert result.structured_content == {
+                "tool": "status",
+                "workspace_id": "http-demo",
+                "ok": True,
+            }
+            write_result = await client.call_tool(
+                "maintain", {"workspace_id": "http-demo", "topic": "mcp"}
+            )
+            assert write_result.is_error is False
+            assert write_result.structured_content == {
+                "tool": "maintain",
+                "workspace_id": "http-demo",
+                "ok": True,
+            }
 
     anyio.run(exercise)
     assert gateway.calls == [
