@@ -28,6 +28,17 @@ from math import sqrt
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from kogwistar.engine_core import (
+    EmbeddingProfile as CoreEmbeddingProfile,
+    EmbeddingReference,
+    LegacyLocator,
+    MultimodalSpan,
+    SpatialRegionLocator,
+    TemporalIntervalLocator,
+    TextRangeLocator,
+    VideoRegionTrackLocator,
+)
+
 from llm_wiki_embedding_contract import (
     EmbeddingProfile as MultimodalEmbeddingProfile,
 )
@@ -75,11 +86,14 @@ class MultimodalSourceUnit:
     text: str | None = None
     asset_sha256: str | None = None
     metadata: Mapping[str, object] = field(default_factory=dict)
+    embedding_reference: EmbeddingReference | None = None
 
     def __post_init__(self) -> None:
         if not self.view_id or not self.workspace_id or not self.source_id or not self.source_revision_id:
             raise ValueError("multimodal source units require stable identity fields")
-        if self.modality not in {"text", "image", "pdf_page", "table", "chart", "webpage", "video_frame"}:
+        if self.modality not in {
+            "text", "image", "audio", "video", "pdf_page", "table", "chart", "webpage", "video_frame"
+        }:
             raise ValueError(f"unsupported source modality {self.modality!r}")
         if not self.content_ref and not self.text:
             raise ValueError("a source unit requires content_ref or text")
@@ -96,7 +110,74 @@ class MultimodalSourceUnit:
             "text": self.text,
             "asset_sha256": self.asset_sha256,
             "metadata": dict(self.metadata),
+            "embedding_reference": (
+                self.embedding_reference.model_dump(mode="json")
+                if self.embedding_reference is not None
+                else None
+            ),
         }
+
+    def to_multimodal_span(self) -> MultimodalSpan:
+        """Convert a legacy source-unit locator into the core evidence contract."""
+
+        locator = dict(self.locator)
+        kind = str(locator.get("kind", "legacy"))
+        if kind in {"legacy", "text_span", "text_range"} and "start_char" in locator and "end_char" in locator:
+            typed_locator = TextRangeLocator(
+                start_char=int(locator["start_char"]),
+                end_char=int(locator["end_char"]),
+                page_number=(int(locator["page_number"]) if locator.get("page_number") else None),
+            )
+        elif kind in {"whole_image", "image_region", "dom_image"}:
+            typed_locator = SpatialRegionLocator(
+                x=float(locator.get("x", 0.0)),
+                y=float(locator.get("y", 0.0)),
+                width=float(locator.get("width", 1.0)),
+                height=float(locator.get("height", 1.0)),
+                coordinate_system=str(locator.get("coordinate_system", "normalized_0_1")),  # type: ignore[arg-type]
+                page_number=(int(locator["page_number"]) if locator.get("page_number") else None),
+                frame_index=(int(locator["frame_index"]) if locator.get("frame_index") is not None else None),
+                timestamp_ms=(int(locator["timestamp_ms"]) if locator.get("timestamp_ms") is not None else None),
+            )
+        elif kind in {"audio_interval", "video_interval", "temporal_interval"}:
+            typed_locator = TemporalIntervalLocator(
+                start_ms=int(locator["start_ms"]),
+                end_ms=int(locator["end_ms"]),
+            )
+        elif kind == "video_region_track":
+            typed_locator = VideoRegionTrackLocator(
+                start_ms=int(locator["start_ms"]),
+                end_ms=int(locator["end_ms"]),
+                track_manifest_ref=str(locator["track_manifest_ref"]),
+                track_manifest_sha256=str(locator["track_manifest_sha256"]),
+                manifest_schema_version=int(locator.get("manifest_schema_version", 1)),
+            )
+        elif self.modality in {"text", "webpage", "pdf_page", "table"} and self.text:
+            # Historical text/table units often carried only a semantic locator
+            # label. Their immutable source text still gives us a safe bounded
+            # whole-unit range for new indexing.
+            typed_locator = TextRangeLocator(
+                start_char=0,
+                end_char=len(self.text),
+                page_number=(int(locator["page_number"]) if locator.get("page_number") else None),
+            )
+        else:
+            typed_locator = LegacyLocator(payload=locator)
+
+        import hashlib
+
+        source_digest = self.asset_sha256 or hashlib.sha256(
+            (self.text or self.content_ref or self.view_id).encode("utf-8")
+        ).hexdigest()
+        modality = "video" if self.modality == "video_frame" else self.modality
+        return MultimodalSpan(
+            source_namespace=self.workspace_id,
+            resource_id=self.source_id,
+            resource_revision_id=self.source_revision_id,
+            content_sha256=source_digest,
+            modality=modality,  # type: ignore[arg-type]
+            locator=typed_locator,
+        )
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, object]) -> MultimodalSourceUnit:
@@ -111,6 +192,11 @@ class MultimodalSourceUnit:
             text=str(payload["text"]) if payload.get("text") else None,
             asset_sha256=str(payload["asset_sha256"]) if payload.get("asset_sha256") else None,
             metadata=dict(payload.get("metadata") or {}),
+            embedding_reference=(
+                EmbeddingReference.model_validate(payload["embedding_reference"])
+                if payload.get("embedding_reference")
+                else None
+            ),
         )
 
 
@@ -123,6 +209,28 @@ class MultimodalSearchHit:
     modality: str
     locator: dict[str, object]
     metadata: dict[str, object]
+    multimodal_span: MultimodalSpan | None = None
+    embedding_reference_id: str | None = None
+    dereference_status: str = "unresolved"
+
+
+def to_core_embedding_profile(profile: MultimodalEmbeddingProfile) -> CoreEmbeddingProfile:
+    """Adapt the dependency-light wire profile to the core semantic-space profile."""
+
+    return CoreEmbeddingProfile(
+        provider=profile.provider,
+        model=profile.model,
+        dimension=profile.dimension,
+        similarity_metric="ip" if profile.metric == "dot" else profile.metric,
+        max_sequence_length=profile.max_sequence_length,
+        crop_token_budget=profile.crop_token_budget,
+        tokenizer_fingerprint=profile.tokenizer_fingerprint,
+        crop_policy=profile.crop_policy,
+        embedding_kind=profile.embedding,
+        model_revision=profile.model_revision,
+        preprocessing_fingerprint=profile.preprocessing_fingerprint,
+        max_image_patches=profile.max_image_patches,
+    )
 
 
 @runtime_checkable
@@ -262,6 +370,12 @@ class InMemoryMultimodalProjectionStore:
         self._units: dict[str, MultimodalSourceUnit] = {}
         self._embeddings: dict[str, EmbeddingSet] = {}
 
+    @property
+    def projection_scope(self) -> str:
+        """Physical projection identity, including the complete semantic profile."""
+
+        return f"{self.scope}:profile:{self.profile.fingerprint}"
+
     def _check_profile(self, profile: MultimodalEmbeddingProfile) -> None:
         if profile.fingerprint != self.profile.fingerprint:
             raise EmbeddingProfileMismatch(
@@ -270,6 +384,15 @@ class InMemoryMultimodalProjectionStore:
             )
 
     def capture(self, unit: MultimodalSourceUnit) -> None:
+        if unit.embedding_reference is not None:
+            if unit.embedding_reference.profile_fingerprint != self.profile.fingerprint:
+                raise EmbeddingProfileMismatch(
+                    "embedding reference profile does not match projection profile"
+                )
+            if unit.embedding_reference.span.evidence_key != unit.to_multimodal_span().evidence_key:
+                raise ProjectionIntegrityError(
+                    "embedding reference evidence does not match source unit"
+                )
         existing = self._units.get(unit.view_id)
         if existing is not None and existing.to_payload() != unit.to_payload():
             raise ProjectionIntegrityError(f"source view {unit.view_id!r} was changed in place")
@@ -277,6 +400,10 @@ class InMemoryMultimodalProjectionStore:
 
     def upsert_embedding(self, unit: MultimodalSourceUnit, vectors: object, *, profile: MultimodalEmbeddingProfile) -> None:
         self._check_profile(profile)
+        if isinstance(unit.to_multimodal_span().locator, LegacyLocator):
+            raise ProjectionIntegrityError(
+                "legacy multimodal locators are readable but must be converted before indexing"
+            )
         normalised = _normalise_embedding_set(vectors, dimension=profile.dimension)
         if profile.embedding == "single_vector" and len(normalised) != 1:
             raise ProjectionIntegrityError("single_vector profiles require exactly one vector per view")
@@ -307,6 +434,15 @@ class InMemoryMultimodalProjectionStore:
                 modality=unit.modality,
                 locator=dict(unit.locator),
                 metadata=dict(unit.metadata),
+                multimodal_span=unit.to_multimodal_span(),
+                embedding_reference_id=(
+                    unit.embedding_reference.reference_id
+                    if unit.embedding_reference is not None
+                    else None
+                ),
+                dereference_status=(
+                    "available" if unit.embedding_reference is not None else "unresolved"
+                ),
             )
             for score, unit in scored[: max(0, int(limit))]
         ]
@@ -382,6 +518,10 @@ class SQLiteMultimodalProjectionStore(InMemoryMultimodalProjectionStore):
 
     def upsert_embedding(self, unit: MultimodalSourceUnit, vectors: object, *, profile: MultimodalEmbeddingProfile) -> None:
         self._check_profile(profile)
+        if isinstance(unit.to_multimodal_span().locator, LegacyLocator):
+            raise ProjectionIntegrityError(
+                "legacy multimodal locators are readable but must be converted before indexing"
+            )
         normalised = _normalise_embedding_set(vectors, dimension=profile.dimension)
         if profile.embedding == "single_vector" and len(normalised) != 1:
             raise ProjectionIntegrityError("single_vector profiles require exactly one vector per view")
@@ -429,7 +569,8 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         state_path = self.persist_directory / ".kogwistar-multimodal-state.sqlite3"
         super().__init__(state_path, scope=scope, profile=profile)
         self._client = chromadb.PersistentClient(path=str(self.persist_directory))
-        name = collection_name or f"mm_{sha256(str(scope).encode('utf-8')).hexdigest()[:24]}"
+        collection_basis = collection_name or self.scope
+        name = f"mm_{sha256(f'{collection_basis}:profile:{self.profile.fingerprint}'.encode('utf-8')).hexdigest()[:24]}"
         self._collection = self._client.get_or_create_collection(name=name)
         self._validate_physical_rows()
 
@@ -526,6 +667,15 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
                 modality=unit.modality,
                 locator=dict(unit.locator),
                 metadata=dict(unit.metadata),
+                multimodal_span=unit.to_multimodal_span(),
+                embedding_reference_id=(
+                    unit.embedding_reference.reference_id
+                    if unit.embedding_reference is not None
+                    else None
+                ),
+                dereference_status=(
+                    "available" if unit.embedding_reference is not None else "unresolved"
+                ),
             )
             for score, unit in scored[: max(0, int(limit))]
         ]
@@ -1355,4 +1505,5 @@ __all__ = [
     "build_configured_multimodal_encoder",
     "embed_pending",
     "score_embedding_sets",
+    "to_core_embedding_profile",
 ]

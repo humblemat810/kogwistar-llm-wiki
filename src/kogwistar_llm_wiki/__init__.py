@@ -54,6 +54,12 @@ from .embeddings.multimodal_grounding import (
     ResolvedEntityGrounding,
     SourceEvidenceRef,
 )
+from .embeddings.multimodal_dereference import (
+    DereferenceStatus,
+    EmbeddingDereferenceResult,
+    EmbeddingReferenceDereferencer,
+    EmbeddingReferenceResolver,
+)
 from .embeddings.multimodal_projection import (
     DEFAULT_COLQWEN_MODEL,
     DEFAULT_COLQWEN_REVISION,
@@ -74,6 +80,7 @@ from .embeddings.multimodal_projection import (
     SQLiteMultimodalProjectionStore,
     embed_pending,
     score_embedding_sets,
+    to_core_embedding_profile,
 )
 from .embeddings.multimodal_remote import (
     EmbeddingProtocolError,
@@ -90,6 +97,9 @@ from .embeddings.multimodal_sources import (
     manifest_units,
     pdf_manifest_units,
     split_text_units,
+    audio_interval_unit,
+    video_interval_unit,
+    video_region_track_unit,
     webpage_units,
 )
 from .embeddings.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
@@ -172,6 +182,10 @@ __all__ = [
     "DisambiguationReviewSelection",
     "DisambiguationReviewService",
     "DisambiguationService",
+    "DereferenceStatus",
+    "EmbeddingDereferenceResult",
+    "EmbeddingReferenceDereferencer",
+    "EmbeddingReferenceResolver",
     "EmbeddingProfileMismatch",
     "EmbeddingProtocolError",
     "EmbeddingServiceError",
@@ -217,6 +231,10 @@ __all__ = [
     "MultimodalSearchHit",
     "MultimodalSourceBundle",
     "MultimodalSourceUnit",
+    "to_core_embedding_profile",
+    "audio_interval_unit",
+    "video_interval_unit",
+    "video_region_track_unit",
     "NamespaceEngines",
     "ObsidianBuildResult",
     "PinnedEntityRef",

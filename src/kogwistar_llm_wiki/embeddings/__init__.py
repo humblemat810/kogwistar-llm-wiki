@@ -25,6 +25,12 @@ from .multimodal_grounding import (
     ResolvedEntityGrounding,
     SourceEvidenceRef,
 )
+from .multimodal_dereference import (
+    DereferenceStatus,
+    EmbeddingDereferenceResult,
+    EmbeddingReferenceDereferencer,
+    EmbeddingReferenceResolver,
+)
 from .multimodal_projection import (
     AssetResolver,
     ChromaMultimodalProjectionStore,
@@ -43,6 +49,7 @@ from .multimodal_projection import (
     SQLiteMultimodalProjectionStore,
     embed_pending,
     score_embedding_sets,
+    to_core_embedding_profile,
 )
 from .multimodal_remote import (
     EmbeddingProtocolError,
@@ -60,6 +67,9 @@ from .multimodal_sources import (
     pdf_manifest_units,
     split_text_units,
     webpage_units,
+    audio_interval_unit,
+    video_interval_unit,
+    video_region_track_unit,
 )
 from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 
@@ -69,6 +79,10 @@ __all__ = [
     "ChromaMultimodalProjectionStore",
     "ColQwenNativeEncoder",
     "EmbeddingProfileMismatch",
+    "DereferenceStatus",
+    "EmbeddingDereferenceResult",
+    "EmbeddingReferenceDereferencer",
+    "EmbeddingReferenceResolver",
     "EmbeddingProtocolError",
     "EmbeddingServiceError",
     "EmbeddingServiceSettings",
@@ -109,6 +123,10 @@ __all__ = [
     "resolve_embedding_function",
     "resolve_embedding_functions",
     "score_embedding_sets",
+    "to_core_embedding_profile",
+    "audio_interval_unit",
+    "video_interval_unit",
+    "video_region_track_unit",
     "split_text_units",
     "validate_shared_postgres_embedding_profile",
     "webpage_units",
