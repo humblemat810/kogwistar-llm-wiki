@@ -104,7 +104,9 @@ The application now contains a provider-free reference implementation in
   Stage-1 progress across restart;
 - `ChromaMultimodalProjectionStore` adds an optional persistent adapter that
   stores one token/patch row per view in an isolated Chroma collection and
-  keeps profile/Stage-1 state in a colocated SQLite sidecar. Its reference
+  keeps profile/Stage-1 state in a profile-scoped SQLite sidecar. Existing
+  single-sidecar installations are read when their binding matches; a second
+  profile gets a new sidecar. Its reference
   search performs exact grouped MaxSim only within a configured vector-count
   bound and fails closed above that bound instead of attempting an unbounded
   read; production-scale ANN candidate retrieval remains a follow-up;
@@ -147,6 +149,37 @@ but the existing core `Grounding` model and all existing text persistence
 paths remain unchanged until that additive contract is adopted at their
 boundary. The existing text ingestion path remains unchanged unless callers
 opt into this multimodal plane.
+
+### Profile isolation across vector backends
+
+An embedding dimension is not a semantic-space identity. The complete core
+profile fingerprint determines the projection boundary, including model,
+revision, preprocessing, metric, and embedding kind. The same logical source
+view may therefore appear in several projections, but each projection has an
+independent physical identity.
+
+The default PostgreSQL layout remains `shared` and rejects mixed profiles
+before backend initialization because its graph-space tables share one schema.
+Callers that intentionally use different profiles may select
+`postgres_embedding_layout="profile_isolated"`; LLM-Wiki then derives a stable
+schema from the complete profile fingerprint. This allows real pgvector
+tables with dimensions such as 2 and 3 to coexist without changing either
+table's dimension. It does not migrate existing vectors or silently move a
+shared deployment.
+
+The CLI/runtime setting is `KOGWISTAR_POSTGRES_EMBEDDING_LAYOUT`; leave it as
+`shared` for the existing deployment, or set it to `profile_isolated` only
+after provisioning and validating the derived schemas.
+
+The profile-isolation smoke coverage is split deliberately:
+
+- in-memory two-profile coverage runs in ordinary unit CI;
+- Chroma two-profile coverage runs when the optional Chroma dependency is
+  installed and uses the same persistent directory;
+- live pgvector two-profile coverage is marked `integration`, `ci_full`, and
+  `slow`, and runs when `LLM_WIKI_TEST_PG_DSN` points to a real pgvector
+  service. Without that service it reports an explicit skip, never a fake
+  success.
 
 ### Qwen3-VL profile and legacy ColQwen comparison
 

@@ -246,6 +246,7 @@ def build_postgres_namespace_engines(
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
+    postgres_embedding_layout: Literal["shared", "profile_isolated"] = "shared",
 ) -> NamespaceEngines:
     """Build a PostgreSQL namespace bundle through the shared builder module."""
     return _build_postgres_namespace_engines(
@@ -265,6 +266,7 @@ def build_postgres_namespace_engines(
         embedding_functions=embedding_functions,
         embedding_configs=embedding_configs,
         embedding_profile_mode=embedding_profile_mode,
+        postgres_embedding_layout=postgres_embedding_layout,
         embedding_resolver=_resolve_embedding_functions,
         profile_resolver=_embedding_profile,
         engine_builder=_build_postgres_engine,

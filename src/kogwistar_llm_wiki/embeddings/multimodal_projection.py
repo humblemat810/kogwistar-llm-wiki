@@ -11,8 +11,10 @@ dimensions never make late-interaction and dense spaces interchangeable.
 
 Stage 1 stores only source-unit metadata and references. Stage 2 adds the
 embedding set after the source reference has been captured and validated.
-SQLite is deliberately a small portable reference store; a production Chroma
-or pgvector adapter can implement the same protocol later.
+SQLite is deliberately a small portable reference store. PostgreSQL graph
+projections use profile-derived schemas, while Chroma uses profile-derived
+collections and sidecars; no physical vector table or collection mixes
+profiles.
 """
 
 from __future__ import annotations
@@ -566,7 +568,20 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
             raise ValueError("max_search_vectors must be positive")
         self.max_search_vectors = int(max_search_vectors)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
-        state_path = self.persist_directory / ".kogwistar-multimodal-state.sqlite3"
+        # Chroma collections are profile-scoped, so the durable sidecar must
+        # be profile-scoped too.  A shared sidecar keyed only by ``scope``
+        # would make a second dimension collide on the stable view_id primary
+        # key even though its Chroma collection is isolated.
+        profile_key = sha256(profile.fingerprint.encode("utf-8")).hexdigest()[:32]
+        state_path = self.persist_directory / f".kogwistar-multimodal-state-{profile_key}.sqlite3"
+        legacy_state_path = self.persist_directory / ".kogwistar-multimodal-state.sqlite3"
+        if not state_path.exists() and legacy_state_path.exists() and _legacy_sidecar_matches(
+            legacy_state_path, scope=scope, fingerprint=profile.fingerprint
+        ):
+            # Existing installations used one sidecar before profile isolation
+            # was enforced. Reuse it only when its binding is this profile;
+            # otherwise a new profile-scoped sidecar is required.
+            state_path = legacy_state_path
         super().__init__(state_path, scope=scope, profile=profile)
         self._client = chromadb.PersistentClient(path=str(self.persist_directory))
         collection_basis = collection_name or self.scope
@@ -682,6 +697,25 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
 
     def close(self) -> None:
         SQLiteMultimodalProjectionStore.close(self)
+
+
+def _legacy_sidecar_matches(path: Path, *, scope: str, fingerprint: str) -> bool:
+    """Check an old Chroma sidecar without opening it through the new store."""
+
+    try:
+        connection = sqlite3.connect(path)
+        rows = connection.execute(
+            "SELECT fingerprint FROM multimodal_projection_profile WHERE scope = ?",
+            (str(scope),),
+        ).fetchall()
+    except sqlite3.Error:
+        return False
+    finally:
+        try:
+            connection.close()
+        except (NameError, sqlite3.Error):
+            pass
+    return not rows or all(str(row[0]) == fingerprint for row in rows)
 
 
 @dataclass(frozen=True, slots=True)

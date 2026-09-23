@@ -270,6 +270,54 @@ def test_postgres_reuses_one_profile_for_each_shared_graph_space(
     }
 
 
+def test_postgres_profile_isolated_layout_uses_distinct_physical_schemas(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, tuple[int, str]] = {}
+
+    def fake_postgres_engine(*args: object, **kwargs: object) -> object:
+        captured[str(kwargs["kg_graph_type"])] = (
+            int(kwargs["embedding_dim"]),
+            str(kwargs["schema"]),
+        )
+        return object()
+
+    monkeypatch.setattr(ingest_pipeline, "_build_postgres_engine", fake_postgres_engine)
+    ingest_pipeline.build_postgres_namespace_engines(
+        base_dir=tmp_path / "isolated-profiles",
+        dsn="postgresql://localhost/example",
+        schema="llm_wiki",
+        postgres_embedding_layout="profile_isolated",
+        embedding_configs={
+            "conversation": EmbeddingProviderConfig(provider="fake", model="conversation", dimension=2),
+            "workflow": EmbeddingProviderConfig(provider="fake", model="workflow", dimension=3),
+            "knowledge": EmbeddingProviderConfig(provider="fake", model="knowledge", dimension=4),
+            "wisdom": EmbeddingProviderConfig(provider="fake", model="wisdom", dimension=5),
+        },
+    )
+
+    assert {dimension for dimension, _ in captured.values()} == {2, 3, 4, 5}
+    schemas = {schema for _, schema in captured.values()}
+    assert len(schemas) == 4
+    assert all(schema.startswith("kw_") for schema in schemas)
+
+
+def test_postgres_profile_isolated_schema_is_stable_for_same_profile() -> None:
+    config = EmbeddingProviderConfig(provider="fake", model="stable", dimension=7)
+    profile = ingest_pipeline._embedding_profile(config)
+    from kogwistar_llm_wiki.ingest.engine_builders import profile_isolated_postgres_schema
+
+    assert profile_isolated_postgres_schema("llm_wiki", profile) == profile_isolated_postgres_schema(
+        "llm_wiki", profile
+    )
+    assert profile_isolated_postgres_schema(
+        "llm_wiki", profile
+    ) != profile_isolated_postgres_schema("llm_wiki", ingest_pipeline._embedding_profile(
+        EmbeddingProviderConfig(provider="fake", model="other", dimension=7)
+    ))
+
+
 def test_postgres_engine_passes_dimension_to_backend(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

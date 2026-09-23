@@ -125,6 +125,25 @@ def test_profile_mismatch_fails_before_projection_write() -> None:
     assert store.stage_counts() == {"stage1": 1, "stage2": 0, "pending_stage2": 1}
 
 
+def test_in_memory_profiles_with_different_dimensions_are_isolated() -> None:
+    """Different semantic spaces may share a process, never a projection."""
+
+    profile_2d = _profile(model="space-2d", dimension=2)
+    profile_3d = _profile(model="space-3d", dimension=3)
+    store_2d = InMemoryMultimodalProjectionStore(scope="workspace:media", profile=profile_2d)
+    store_3d = InMemoryMultimodalProjectionStore(scope="workspace:media", profile=profile_3d)
+    unit = _unit("same-logical-view", "same source view")
+
+    store_2d.upsert_embedding(unit, ((1.0, 0.0),), profile=profile_2d)
+    store_3d.upsert_embedding(unit, ((1.0, 0.0, 0.0),), profile=profile_3d)
+
+    assert store_2d.projection_scope != store_3d.projection_scope
+    assert store_2d.search(((1.0, 0.0),), profile=profile_2d, limit=1)[0].view_id == unit.view_id
+    assert store_3d.search(((1.0, 0.0, 0.0),), profile=profile_3d, limit=1)[0].view_id == unit.view_id
+    with pytest.raises(EmbeddingProfileMismatch):
+        store_2d.search(((1.0, 0.0, 0.0),), profile=profile_3d)
+
+
 def test_single_vector_rejects_multiple_vectors() -> None:
     profile = _profile(embedding="single_vector")
     store = InMemoryMultimodalProjectionStore(scope="demo:pooled", profile=profile)
@@ -182,6 +201,32 @@ def test_chroma_projection_persists_stage_two_late_interaction(tmp_path) -> None
     with pytest.raises(ProjectionIntegrityError, match="exceeds configured bound"):
         reopened.search(encoder.encode_queries(["visual chart"])[0], profile=profile, limit=1)
     reopened.close()
+
+
+def test_chroma_profiles_with_different_dimensions_share_directory_safely(tmp_path) -> None:
+    if importlib.util.find_spec("chromadb") is None:
+        pytest.skip("chromadb is not installed")
+    profile_2d = _profile(model="space-2d", dimension=2)
+    profile_3d = _profile(model="space-3d", dimension=3)
+    root = tmp_path / "chroma"
+    store_2d = ChromaMultimodalProjectionStore(root, scope="workspace:media", profile=profile_2d)
+    store_3d = ChromaMultimodalProjectionStore(root, scope="workspace:media", profile=profile_3d)
+    unit = _unit("same-logical-view", "same source view")
+
+    store_2d.upsert_embedding(unit, ((1.0, 0.0),), profile=profile_2d)
+    store_3d.upsert_embedding(unit, ((1.0, 0.0, 0.0),), profile=profile_3d)
+
+    assert store_2d.search(((1.0, 0.0),), profile=profile_2d, limit=1)[0].view_id == unit.view_id
+    assert store_3d.search(((1.0, 0.0, 0.0),), profile=profile_3d, limit=1)[0].view_id == unit.view_id
+    store_2d.close()
+    store_3d.close()
+
+    reopened_2d = ChromaMultimodalProjectionStore(root, scope="workspace:media", profile=profile_2d)
+    reopened_3d = ChromaMultimodalProjectionStore(root, scope="workspace:media", profile=profile_3d)
+    assert reopened_2d.stage_counts()["stage2"] == 1
+    assert reopened_3d.stage_counts()["stage2"] == 1
+    reopened_2d.close()
+    reopened_3d.close()
 
 
 def test_embedding_output_count_must_match_captured_units() -> None:

@@ -86,6 +86,11 @@ def build_engines(
     if selected_backend == "postgres":
         if not dsn:
             raise ValueError("--dsn is required when --backend postgres is selected")
+        postgres_layout = os.environ.get(
+            "KOGWISTAR_POSTGRES_EMBEDDING_LAYOUT", "shared"
+        ).strip().lower()
+        if postgres_layout != "shared":
+            builder_kwargs["postgres_embedding_layout"] = postgres_layout
         return build_postgres_namespace_engines(
             base_dir=effective_data_dir,
             dsn=dsn,
