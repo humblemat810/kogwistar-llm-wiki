@@ -482,6 +482,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/release_0.4.1.md](doc/release_0.4.1.md) | Version 0.4.1 release notes, dependency pins, and verified CI gates |
 | [doc/release_0.5.0.md](doc/release_0.5.0.md) | Version 0.5.0 MCP 2.x release notes, pins, and image targets |
 | [doc/release_0.5.1.md](doc/release_0.5.1.md) | Version 0.5.1 maintenance release and unified image targets |
+| [doc/release_0.5.2.md](doc/release_0.5.2.md) | Version 0.5.2 multimodal evidence and profile-isolated projections |
 | [doc/mcp_v2_migration.md](doc/mcp_v2_migration.md) | MCP V2 migration, compatibility, and upgrade order |
 | [doc/glossary.md](doc/glossary.md) | Term definitions |
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
