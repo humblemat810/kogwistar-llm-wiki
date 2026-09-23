@@ -168,6 +168,92 @@ def split_text_units(
     return tuple(units)
 
 
+def audio_interval_unit(
+    *,
+    workspace_id: str,
+    source_id: str,
+    revision_id: str,
+    start_ms: int,
+    end_ms: int,
+    content_ref: str,
+    asset_sha256: str | None = None,
+) -> MultimodalSourceUnit:
+    """Create one immutable audio interval retrieval unit."""
+
+    if end_ms <= start_ms:
+        raise ValueError("audio interval end_ms must be greater than start_ms")
+    return _unit(
+        workspace_id=workspace_id,
+        source_id=source_id,
+        revision_id=revision_id,
+        modality="audio",
+        ordinal=start_ms,
+        locator={"kind": "audio_interval", "start_ms": start_ms, "end_ms": end_ms},
+        content_ref=content_ref,
+        asset_sha256=asset_sha256,
+    )
+
+
+def video_interval_unit(
+    *,
+    workspace_id: str,
+    source_id: str,
+    revision_id: str,
+    start_ms: int,
+    end_ms: int,
+    content_ref: str,
+    asset_sha256: str | None = None,
+) -> MultimodalSourceUnit:
+    """Create one temporal video retrieval unit."""
+
+    if end_ms <= start_ms:
+        raise ValueError("video interval end_ms must be greater than start_ms")
+    return _unit(
+        workspace_id=workspace_id,
+        source_id=source_id,
+        revision_id=revision_id,
+        modality="video",
+        ordinal=start_ms,
+        locator={"kind": "video_interval", "start_ms": start_ms, "end_ms": end_ms},
+        content_ref=content_ref,
+        asset_sha256=asset_sha256,
+    )
+
+
+def video_region_track_unit(
+    *,
+    workspace_id: str,
+    source_id: str,
+    revision_id: str,
+    start_ms: int,
+    end_ms: int,
+    track_manifest_ref: str,
+    track_manifest_sha256: str,
+    content_ref: str,
+    asset_sha256: str | None = None,
+) -> MultimodalSourceUnit:
+    """Create a video unit whose per-frame regions live in an immutable manifest."""
+
+    if end_ms <= start_ms:
+        raise ValueError("video track end_ms must be greater than start_ms")
+    return _unit(
+        workspace_id=workspace_id,
+        source_id=source_id,
+        revision_id=revision_id,
+        modality="video",
+        ordinal=start_ms,
+        locator={
+            "kind": "video_region_track",
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "track_manifest_ref": track_manifest_ref,
+            "track_manifest_sha256": track_manifest_sha256,
+        },
+        content_ref=content_ref,
+        asset_sha256=asset_sha256,
+    )
+
+
 class _VisibleHtmlCollector(HTMLParser):
     """Collect visible text and asset occurrences without fetching anything."""
 
@@ -311,7 +397,9 @@ def _manifest_unit(
     ordinal: int,
 ) -> MultimodalSourceUnit:
     modality = str(item.get("modality", "text"))
-    if modality not in {"text", "image", "pdf_page", "table", "chart", "webpage", "video_frame"}:
+    if modality not in {
+        "text", "image", "audio", "video", "pdf_page", "table", "chart", "webpage", "video_frame"
+    }:
         raise ValueError(f"unsupported multimodal manifest modality {modality!r}")
     locator = dict(item.get("locator") or {})
     if not locator:

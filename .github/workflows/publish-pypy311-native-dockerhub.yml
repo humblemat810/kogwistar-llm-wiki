@@ -26,8 +26,8 @@ jobs:
     timeout-minutes: 90
     env:
       IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki
-      KOGWISTAR_REVISION: 05a474474a83e7d8ca1b4720afd6ef6fa190c2a0
-      KG_DOC_PARSER_REVISION: a80b9d846452bb0232f5569c3def08f916810fe8
+      KOGWISTAR_REVISION: 82bcd0544fa878a4082e40aba070b5f266c122e2
+      KG_DOC_PARSER_REVISION: e7e42760e5578cce7d362b5b0e00996527e2ecbf
       OBSIDIAN_SINK_REVISION: bb9cec922c156465af8395e0dfb3b3cf76748f5f
     steps:
       - name: Check out tested application commit

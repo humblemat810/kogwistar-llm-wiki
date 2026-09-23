@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Callable, Mapping
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +27,22 @@ from ..models import NamespaceEngines
 
 EmbeddingResolver = Callable[..., tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]]
 ProfileResolver = Callable[[EmbeddingProviderConfig], EmbeddingProfile | None]
+
+
+def profile_isolated_postgres_schema(base_schema: str, profile: EmbeddingProfile) -> str:
+    """Return a deterministic physical schema for one complete profile.
+
+    PostgreSQL vector columns have a fixed dimension.  The full core profile
+    fingerprint, rather than dimension alone, is therefore part of the
+    physical projection identity.  The digest also avoids putting provider or
+    model text into an SQL identifier.
+    """
+
+    base = str(base_schema).strip()
+    if not base:
+        raise ValueError("PostgreSQL schema must not be empty")
+    digest = sha256(f"{base}\0{profile.fingerprint}".encode("utf-8")).hexdigest()[:40]
+    return f"kw_{digest}"
 
 def build_in_memory_namespace_engines(
     base_dir: str | Path | None = None,
@@ -161,6 +178,7 @@ def build_postgres_namespace_engines(
     embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
+    postgres_embedding_layout: Literal["shared", "profile_isolated"] = "shared",
     embedding_resolver: EmbeddingResolver,
     profile_resolver: ProfileResolver,
     engine_builder: Callable[..., GraphKnowledgeEngine] | None = None,
@@ -188,7 +206,22 @@ def build_postgres_namespace_engines(
         )
         for space in EMBEDDING_SPACES
     }
-    validate_shared_postgres_embedding_profile(resolved_embedding_configs)
+    if postgres_embedding_layout not in {"shared", "profile_isolated"}:
+        raise ValueError(
+            "postgres_embedding_layout must be 'shared' or 'profile_isolated'"
+        )
+    if postgres_embedding_layout == "shared":
+        validate_shared_postgres_embedding_profile(resolved_embedding_configs)
+    physical_schemas = {
+        space: (
+            schema
+            if postgres_embedding_layout == "shared"
+            else profile_isolated_postgres_schema(
+                schema, profile_resolver(resolved_embedding_configs[space])
+            )
+        )
+        for space in EMBEDDING_SPACES
+    }
     root.mkdir(parents=True, exist_ok=True)
     engine_builder = engine_builder or _build_postgres_engine
     derived_engine = engine_builder(
@@ -197,7 +230,7 @@ def build_postgres_namespace_engines(
         embedding_function=embeddings["knowledge"],
         dsn=dsn,
         embedding_dim=embedding_dimensions["knowledge"],
-        schema=schema,
+        schema=physical_schemas["knowledge"],
         embedding_profile=profile_resolver(resolved_embedding_configs["knowledge"]),
         embedding_profile_mode=embedding_profile_mode,
     ) if split_derived_knowledge else None
@@ -208,7 +241,7 @@ def build_postgres_namespace_engines(
             embedding_function=embeddings["conversation"],
             dsn=dsn,
             embedding_dim=embedding_dimensions["conversation"],
-            schema=schema,
+            schema=physical_schemas["conversation"],
             embedding_profile=profile_resolver(resolved_embedding_configs["conversation"]),
             embedding_profile_mode=embedding_profile_mode,
             persistence_mode=conversation_persistence_mode,
@@ -219,7 +252,7 @@ def build_postgres_namespace_engines(
             embedding_function=embeddings["workflow"],
             dsn=dsn,
             embedding_dim=embedding_dimensions["workflow"],
-            schema=schema,
+            schema=physical_schemas["workflow"],
             embedding_profile=profile_resolver(resolved_embedding_configs["workflow"]),
             embedding_profile_mode=embedding_profile_mode,
         ),
@@ -229,7 +262,7 @@ def build_postgres_namespace_engines(
             embedding_function=embeddings["knowledge"],
             dsn=dsn,
             embedding_dim=embedding_dimensions["knowledge"],
-            schema=schema,
+            schema=physical_schemas["knowledge"],
             embedding_profile=profile_resolver(resolved_embedding_configs["knowledge"]),
             embedding_profile_mode=embedding_profile_mode,
         ),
@@ -239,7 +272,7 @@ def build_postgres_namespace_engines(
             embedding_function=embeddings["wisdom"],
             dsn=dsn,
             embedding_dim=embedding_dimensions["wisdom"],
-            schema=schema,
+            schema=physical_schemas["wisdom"],
             embedding_profile=profile_resolver(resolved_embedding_configs["wisdom"]),
             embedding_profile_mode=embedding_profile_mode,
         ),

@@ -11,7 +11,17 @@ from typing import Literal
 
 EmbeddingKind = Literal["single_vector", "dense", "late_interaction"]
 SimilarityMetric = Literal["dot", "cosine"]
-SourceModality = Literal["text", "image", "pdf_page", "table", "chart", "webpage", "video_frame"]
+SourceModality = Literal[
+    "text",
+    "image",
+    "audio",
+    "video",
+    "pdf_page",
+    "table",
+    "chart",
+    "webpage",
+    "video_frame",
+]
 EmbeddingSet = tuple[tuple[float, ...], ...]
 
 

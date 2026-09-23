@@ -104,7 +104,9 @@ The application now contains a provider-free reference implementation in
   Stage-1 progress across restart;
 - `ChromaMultimodalProjectionStore` adds an optional persistent adapter that
   stores one token/patch row per view in an isolated Chroma collection and
-  keeps profile/Stage-1 state in a colocated SQLite sidecar. Its reference
+  keeps profile/Stage-1 state in a profile-scoped SQLite sidecar. Existing
+  single-sidecar installations are read when their binding matches; a second
+  profile gets a new sidecar. Its reference
   search performs exact grouped MaxSim only within a configured vector-count
   bound and fails closed above that bound instead of attempting an unbounded
   read; production-scale ANN candidate retrieval remains a follow-up;
@@ -138,8 +140,7 @@ The application now contains a provider-free reference implementation in
 - `IngestPipeline` exposes opt-in capture, Stage-2 promotion, and multimodal
   query methods without changing the default text ingestion flow.
 
-The source adapter does not fetch URLs or parse/OCR PDF bytes, and the
-late-interaction adapter does not yet claim pgvector persistence. URL retrieval,
+The source adapter does not fetch URLs or parse/OCR PDF bytes. URL retrieval,
 content-addressed asset storage, and PDF/OCR remain service/parser work; the
 adapter consumes their validated references and normalized manifests. The
 higher-order validator is ready for app-level proposal/persistence adapters,
@@ -147,6 +148,48 @@ but the existing core `Grounding` model and all existing text persistence
 paths remain unchanged until that additive contract is adopted at their
 boundary. The existing text ingestion path remains unchanged unless callers
 opt into this multimodal plane.
+
+### Profile isolation across vector backends
+
+An embedding dimension is not a semantic-space identity. The complete core
+profile fingerprint determines the projection boundary, including model,
+revision, preprocessing, metric, and embedding kind. The same logical source
+view may therefore appear in several projections, but each projection has an
+independent physical identity.
+
+The default PostgreSQL layout remains `shared` and rejects mixed profiles
+before backend initialization because its graph-space tables share one schema.
+Callers that intentionally use different profiles may select
+`postgres_embedding_layout="profile_isolated"`; LLM-Wiki then derives a stable
+schema from the complete profile fingerprint. This allows real pgvector
+tables with dimensions such as 2 and 3 to coexist without changing either
+table's dimension. It does not migrate existing vectors or silently move a
+shared deployment.
+
+The CLI/runtime setting is `KOGWISTAR_POSTGRES_EMBEDDING_LAYOUT`; leave it as
+`shared` for the existing deployment, or set it to `profile_isolated` only
+after provisioning and validating the derived schemas.
+
+The profile-isolation smoke coverage is split deliberately:
+
+- in-memory two-profile coverage runs in ordinary unit CI;
+- Chroma two-profile coverage runs when the optional Chroma dependency is
+  installed and uses the same persistent directory;
+- live pgvector two-profile coverage is marked `integration`, `ci_full`, and
+  `slow`, and runs when `LLM_WIKI_TEST_PG_DSN` points to a real pgvector
+  service. Without that service it reports an explicit skip, never a fake
+  success. The `PgVectorMultimodalProjectionStore` uses dedicated tables whose
+  names include the complete profile fingerprint, so two dimensions can share
+  one PostgreSQL database without sharing vector rows.
+
+All three adapters expose the same lifecycle and retrieval contract:
+`capture`, `pending_units`, `upsert_embedding`, `stage_counts`, `get`,
+profile-checked `search`, `projection_scope`, and `close`. PostgreSQL uses the
+same exact grouped scoring operator as the memory and Chroma reference stores;
+it intentionally performs a bounded scan rather than pretending that a
+single-vector ANN query is equivalent to late interaction. It stores no vector
+per canonical graph node, and a profile mismatch fails before reading or
+writing projection data.
 
 ### Qwen3-VL profile and legacy ColQwen comparison
 
@@ -983,12 +1026,12 @@ late-interaction score.
 The application reference now supports text queries, direct image queries,
 and deterministic weighted fusion of bounded independent query results. This
 makes ColQwen-style models usable without forcing their storage cost on
-pooled-model deployments. Provider-free execution and the Chroma adapter are
-covered. `scripts/benchmark_multimodal.py` measures the five source-encoding
-shapes in deterministic fake mode and can measure a local ColQwen checkpoint;
-the fake numbers are API/batching overhead, not GPU performance. ANN candidate
-retrieval, pgvector child-table persistence, and production-scale benchmark
-coverage remain follow-up work.
+pooled-model deployments. Provider-free execution, Chroma, and the dedicated
+pgvector child-table adapter are covered. `scripts/benchmark_multimodal.py`
+measures the five source-encoding shapes in deterministic fake mode and can
+measure a local ColQwen checkpoint; the fake numbers are API/batching
+overhead, not GPU performance. ANN candidate retrieval and
+production-scale benchmark coverage remain follow-up work.
 
 ## API And Agent Surface
 
@@ -1167,10 +1210,9 @@ compatibility release can deserialize all old payloads unchanged.
 
 - Benchmark quality, latency, storage, and cost against text-only retrieval.
 - Add blue-green profile migration and archive/restore coverage.
-- The reference Chroma adapter now provides exact grouped MaxSim under a
-  configured scan bound. Add ANN candidate retrieval and a pgvector child-table
-  adapter only after measured corpus scale justifies their storage and query
-  complexity.
+- The reference Chroma and pgvector adapters provide exact grouped MaxSim under
+  configured scan bounds. Add ANN candidate retrieval only after measured
+  corpus scale justifies its storage and query complexity.
 
 ## Acceptance Criteria
 
