@@ -318,6 +318,45 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     assert "source_document_id" in reingest.input_schema["properties"]
 
 
+def test_native_mcp_memory_capture_publishes_record_contract():
+    mcp = build_agent_mcp(AgentGateway(FakeApi()))
+    tools = asyncio.run(mcp.list_tools())
+    memory_capture = next(tool for tool in tools if tool.name == "memory_capture")
+    schema = memory_capture.input_schema
+
+    record = schema["properties"]["record"]
+    record_schema = next(item for item in record["anyOf"] if item.get("type") == "object")
+    assert set(record_schema["required"]) >= {
+        "workspace_id",
+        "session_id",
+        "kind",
+        "statement",
+        "confidence",
+        "evidence",
+    }
+    assert record_schema["properties"]["kind"]["enum"] == [
+        "decision",
+        "constraint",
+        "convention",
+        "finding",
+        "task_outcome",
+    ]
+    assert record_schema["properties"]["confidence"]["enum"] == [
+        "verified",
+        "inferred",
+    ]
+    evidence = record_schema["properties"]["evidence"]
+    assert evidence["minItems"] == 1
+    assert evidence["items"]["$ref"] == "#/$defs/MemoryEvidence"
+    assert "MemoryEvidence" in schema["$defs"]
+
+    records = schema["properties"]["records"]
+    records_schema = next(item for item in records["anyOf"] if item.get("type") == "array")
+    assert records_schema["items"] == record_schema
+    assert records_schema["minItems"] == 1
+    assert records_schema["maxItems"] == 32
+
+
 def test_native_mcp_streamable_http_preserves_wire_contract():
     async def exercise() -> None:
         mcp = build_agent_mcp(AgentGateway(FakeApi()))

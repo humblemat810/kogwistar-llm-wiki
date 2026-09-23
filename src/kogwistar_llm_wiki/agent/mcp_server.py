@@ -19,6 +19,7 @@ from typing import Any
 from mcp import types
 from mcp.server.lowlevel import Server
 
+from ..codex.codex_memory import CodexMemoryRecord
 from ..configuration.identity import (
     LlmWikiIdentity,
     auth_mode,
@@ -77,6 +78,24 @@ def _object_schema(
     }
 
 
+def _memory_record_schema() -> dict[str, object]:
+    """Expose the same nested contract used by memory persistence.
+
+    The MCP SDK publishes this schema to clients, but the gateway still
+    validates the payload with ``CodexMemoryRecord`` before persistence.  Keep
+    Pydantic's definitions at the tool-schema root so nested ``$ref`` values
+    resolve correctly for MCP clients.
+    """
+
+    schema = CodexMemoryRecord.model_json_schema()
+    definitions = schema.pop("$defs", None)
+    if not isinstance(definitions, dict):
+        definitions = {}
+    schema.pop("title", None)
+    schema["$defs"] = definitions
+    return schema
+
+
 def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
     """Return the frozen input contracts emitted by the previous adapter."""
 
@@ -91,6 +110,16 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
     }
     nullable_integer = {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None}
     nullable_number = {"anyOf": [{"type": "number"}, {"type": "null"}], "default": None}
+    memory_record = _memory_record_schema()
+    memory_definitions = memory_record.pop("$defs", {})
+    memory_record_nullable = {"anyOf": [memory_record, {"type": "null"}], "default": None}
+    memory_records = {
+        "anyOf": [
+            {"items": memory_record, "maxItems": 32, "minItems": 1, "type": "array"},
+            {"type": "null"},
+        ],
+        "default": None,
+    }
 
     return (
         (
@@ -234,13 +263,11 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
             "Capture structured, evidence-backed project memory when enabled.",
             _object_schema(
                 {
-                    "record": nullable_object,
-                    "records": {
-                        "anyOf": [{"items": object_value, "type": "array"}, {"type": "null"}],
-                        "default": None,
-                    },
+                    "record": memory_record_nullable,
+                    "records": memory_records,
                 }
-            ),
+            )
+            | {"$defs": memory_definitions},
         ),
         (
             "memory_review",
