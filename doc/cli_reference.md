@@ -184,7 +184,7 @@ python -m kogwistar_llm_wiki --help
 | `KOGWISTAR_MAINTENANCE_MODEL` | daemon maintenance | Explicit maintenance model or Azure deployment name |
 | `KOGWISTAR_MAINTENANCE_BASE_URL` | daemon maintenance | Maintenance endpoint URL |
 | `KOGWISTAR_MAINTENANCE_API_KEY_ENV` | daemon maintenance | Env var name that holds the maintenance API key |
-| `LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS` | maintenance requests | Default maximum rounds per request when `max_rounds` is omitted; defaults to `2`, valid range `1`-`100` |
+| `LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS` | maintenance requests | Total rounds per request when `max_rounds` is omitted; defaults to `2` (one initial round plus one follow-up), valid range `1`-`100` |
 | `KOGWISTAR_MAINTENANCE_CODEX_BASE_URL` | daemon maintenance | Host bridge URL, normally `http://host.docker.internal:8791` |
 | `KOGWISTAR_MAINTENANCE_CODEX_API_KEY_ENV` | daemon maintenance | Container environment variable containing the bridge token name |
 | `LLM_WIKI_CODEX_BRIDGE_TOKEN` | Docker/host bridge | Shared bearer token; never a Codex credential and never logged |
@@ -273,6 +273,45 @@ python -m pytest tests/integration/test_codex_bridge_manual.py -m "manual and sl
 The test checks bridge health and one bounded structured response. It does not
 write graph data, create maintenance jobs, call MCP tools, or store the Codex
 session.
+
+### Codex bridge troubleshooting
+
+`/healthz` only proves that the bridge process is listening. A structured
+request also requires the host Codex CLI to reach the signed-in Codex service
+over HTTPS and, where available, WebSockets. Start the bridge from a normal
+host terminal or its user-scoped service, not from a restricted Codex sandbox
+or another process whose outbound network policy is limited. A child Codex CLI
+process inherits the operating-system and sandbox network restrictions of the
+process that launched it; signing in does not grant a denied network capability.
+
+The bridge is intentionally a bounded host-to-Docker adapter. It does not
+perform memory retrieval, PostgreSQL work, maintenance rounds, MCP calls, or
+graph mutations during the one-request smoke test. Therefore a response such
+as:
+
+```json
+{"error":"bridge_failure","message":"Codex CLI provider error: Reconnecting... waiting for network (...)"}
+```
+
+indicates host Codex connectivity or sandbox policy, not a memory-worker
+timeout. The bridge now reports that provider diagnostic immediately. A real
+`504` means the Codex turn remained active until the configured timeout; it
+should be investigated only after the host network check passes.
+
+Use this order when diagnosing a failure:
+
+1. Confirm `GET http://127.0.0.1:8791/healthz` returns `{"ok":true,"provider":"codex"}`.
+2. Run the bridge and the smoke test from the same ordinary host user session.
+3. Confirm the host Codex CLI can complete a simple read-only request outside
+   the Docker or Codex sandbox.
+4. Check that outbound HTTPS to the Codex service is allowed and that a local
+   proxy or TLS inspection certificate is trusted by the host CLI.
+5. Only then investigate model/profile names, structured schemas, or memory
+   maintenance budgets.
+
+Do not solve this failure by increasing the bridge timeout indefinitely. The
+bridge must fail closed and return the provider error so the maintenance
+provider chain can apply its configured availability-only fallback.
 
 ### Compose-managed Codex worker
 

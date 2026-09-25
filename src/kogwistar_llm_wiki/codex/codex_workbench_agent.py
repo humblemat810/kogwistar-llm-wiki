@@ -151,7 +151,11 @@ class CodexProcessRunner:
                 trace_tail: deque[str] = deque(maxlen=8)
                 while not output_finished:
                     if time.monotonic() >= deadline:
-                        raise TimeoutError(f"Codex workbench turn exceeded {settings.timeout_seconds}s")
+                        detail = " | ".join(trace_tail)
+                        suffix = f"; last output: {detail}" if detail else ""
+                        raise TimeoutError(
+                            f"Codex workbench turn exceeded {settings.timeout_seconds}s{suffix}"
+                        )
                     try:
                         line = lines.get(timeout=0.5)
                     except queue.Empty:
@@ -165,6 +169,9 @@ class CodexProcessRunner:
                         progress()
                         if trace_line is not None:
                             trace_line(line)
+                        terminal_error = _codex_terminal_error(line)
+                        if terminal_error is not None:
+                            raise RuntimeError(f"Codex CLI provider error: {terminal_error}")
                 return_code = process.wait(timeout=5)
                 reader.join(timeout=2)
                 if return_code != 0:
@@ -597,6 +604,28 @@ def _command_for_executable(executable: str, args: Sequence[str]) -> list[str]:
         shell = os.environ.get("COMSPEC", "cmd.exe")
         return [shell, "/d", "/s", "/c", subprocess.list2cmdline([executable, *args])]
     return [executable, *args]
+
+
+def _codex_terminal_error(line: str) -> str | None:
+    """Extract provider failures that cannot recover within this turn.
+
+    Codex emits transient reconnect notices as JSONL events.  Those must not
+    abort a turn, but an explicit wait-for-network state is terminal for a
+    bounded bridge request and should be reported immediately.
+    """
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event, dict) or event.get("type") != "error":
+        return None
+    message = event.get("message")
+    if not isinstance(message, str) or not message:
+        return None
+    normalized = message.casefold()
+    if "waiting for network" in normalized:
+        return message
+    return None
 
 
 def _build_prompt(request: SemanticLensRequest, snapshot: SemanticLensSnapshot) -> str:

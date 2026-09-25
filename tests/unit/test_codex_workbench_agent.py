@@ -164,6 +164,39 @@ def test_process_runner_passes_the_typed_output_schema(monkeypatch):
     assert captured["schema"]["additionalProperties"] is False
 
 
+def test_process_runner_reports_terminal_provider_network_error(monkeypatch):
+    class FakeProcess:
+        def __init__(self, _command, **_kwargs):
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO(
+                json.dumps(
+                    {"type": "error", "message": "Reconnecting... waiting for network"}
+                )
+                + "\n"
+            )
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            return None
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr("kogwistar_llm_wiki.codex.codex_workbench_agent.subprocess.Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match=r"provider error: Reconnecting\.\.\. waiting for network"):
+        CodexProcessRunner().run(
+            settings=CodexCliSettings(executable="codex"),
+            prompt="hello",
+            progress=lambda: None,
+        )
+
+
 def test_app_server_runner_handshakes_streams_and_closes(monkeypatch):
     captured: dict[str, object] = {"messages": []}
 

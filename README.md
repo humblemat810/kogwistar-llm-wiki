@@ -52,6 +52,13 @@ restart only the maintenance service. Codex credentials stay on the host; the
 bridge is not a REST or MCP login endpoint, and it rejects tools, filesystem
 access, network access, recursive jobs, oversized context, and invalid output.
 
+Run the host bridge from a normal host terminal or user service. If it is
+launched by a restricted Codex sandbox, its child Codex CLI inherits that
+sandbox's network policy and may be unable to reach the Codex service even
+though the bridge `/healthz` endpoint is healthy. The bridge reports this as a
+provider connectivity error instead of waiting for the full turn timeout; see
+the troubleshooting steps in `doc/cli_reference.md`.
+
 For a Compose-managed Codex worker, use the opt-in `compose.codex.yml` service
 instead of the host bridge. It can run by itself, or be wired into the memory
 stack with `compose.codex-memory.yml`. Set `KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN=codex` (or
