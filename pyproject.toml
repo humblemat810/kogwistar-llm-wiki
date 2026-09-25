@@ -31,16 +31,16 @@ dependencies = [
 
 [project.optional-dependencies]
 chromadb = ["chromadb>=0.6"]
-vector-pinecone = ["kogwistar-pinecone>=0.5,<0.6"]
-vector-qdrant = ["kogwistar-qdrant>=0.5,<0.6"]
+vector-pinecone = ["kogwistar-pinecone>=0.6,<0.7"]
+vector-qdrant = ["kogwistar-qdrant>=0.6,<0.7"]
 vector-postgres = [
     "sqlalchemy>=2.0",
     "pgvector>=0.3.6",
     "psycopg[binary]>=3.1",
 ]
 vector-all = [
-    "kogwistar-pinecone>=0.5,<0.6",
-    "kogwistar-qdrant>=0.5,<0.6",
+    "kogwistar-pinecone>=0.6,<0.7",
+    "kogwistar-qdrant>=0.6,<0.7",
 ]
 otel = [
     "opentelemetry-api>=1.25",

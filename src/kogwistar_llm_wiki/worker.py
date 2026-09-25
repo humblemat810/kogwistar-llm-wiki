@@ -36,6 +36,7 @@ from .maintenance.worker_parse import DurableParseMaintenanceWorkerMixin
 from .maintenance.worker_runtime import MaintenanceRuntimeWorkerMixin
 from .maintenance.worker_selection import MaintenanceSelectionWorkerMixin
 from .models import NamespaceEngines
+from .otel import LlmWikiTelemetry
 from .parsing.parse_views import (
     ParseFrontierItem,
     ParseSessionState,
@@ -132,6 +133,7 @@ class MaintenanceWorker(
         # immutable source evidence. Deployments can still inject a richer
         # layered parser, but absence must never be treated as completion.
         self.layered_parser = layered_parser or self._expand_durable_parse_frontier
+        self.telemetry = LlmWikiTelemetry.from_environment()
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()
         self.resolver.register("distill")(self._step_distill)
@@ -145,7 +147,14 @@ class MaintenanceWorker(
             conversation_engine=self.engines.conversation,
             step_resolver=self.resolver,
             predicate_registry={},
+            otel_enabled=self.telemetry.enabled,
         )
+
+    def close(self) -> None:
+        """Close runtime observers before the owning engine bundle is closed."""
+        close_runtime = getattr(self.runtime, "close", None)
+        if callable(close_runtime):
+            close_runtime()
 
     def process_pending_jobs(self, workspace_id: str) -> None:
         """
