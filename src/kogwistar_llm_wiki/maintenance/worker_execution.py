@@ -12,6 +12,7 @@ from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.models import RunSuccess
 
 from ..configuration.workspace import WorkspaceNamespaces
+from ..configuration.identity import runtime_authority_context
 from ..maintenance import (
     MaintenanceJobExecutionContext,
     workflow_id_for_maintenance_kind,
@@ -702,6 +703,12 @@ class MaintenanceExecutionWorkerMixin:
                             workflow_id=workflow_id,
                             conversation_id=ns.conv_bg,
                             turn_node_id=ctx.request_node_id,
+                            _parent_authority_context=runtime_authority_context(
+                                ctx.payload.get("authority_claims")
+                                if isinstance(ctx.payload.get("authority_claims"), Mapping)
+                                else None,
+                                workspace_id=ctx.workspace_id,
+                            ),
                         )
                     else:
                         result = self.runtime.run(
@@ -723,6 +730,12 @@ class MaintenanceExecutionWorkerMixin:
                             },
                             conversation_id=ns.conv_bg,
                             turn_node_id=ctx.request_node_id,
+                            _authority_context=runtime_authority_context(
+                                ctx.payload.get("authority_claims")
+                                if isinstance(ctx.payload.get("authority_claims"), Mapping)
+                                else None,
+                                workspace_id=ctx.workspace_id,
+                            ),
                         )
                     status: str = result.status if hasattr(result, "status") else "finished"
                     runtime_errors = [

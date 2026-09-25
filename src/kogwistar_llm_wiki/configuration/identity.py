@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from kogwistar.server.auth_middleware import (
+    claims_ctx,
     reset_claims_ctx,
     set_claims_ctx,
     verify_jwt,
@@ -221,6 +222,97 @@ def authorize(
         raise IdentityError("forbidden: identity is not a member of this workspace", status=403)
 
 
+_DURABLE_CLAIM_KEYS = frozenset(
+    {
+        "sub",
+        "client_id",
+        "agent_id",
+        "role",
+        "scope",
+        "scp",
+        "security_scope",
+        "tenant",
+        "groups",
+        "group",
+        "roles",
+        "principal_groups",
+        "workspaces",
+        "workspace_ids",
+        "allowed_workspaces",
+        "storage_ns",
+        "capabilities",
+    }
+)
+
+
+def durable_claims_snapshot() -> dict[str, object] | None:
+    """Return the bounded claims needed to continue an authorized job.
+
+    Queue payloads must never contain the bearer token or arbitrary JWT claims.
+    The snapshot is evidence of the caller that created the job; workspace
+    authorization is still evaluated again when the job executes.
+    """
+
+    claims = claims_ctx.get()
+    if not isinstance(claims, Mapping):
+        return None
+    snapshot = {
+        key: claims[key]
+        for key in _DURABLE_CLAIM_KEYS
+        if key in claims and claims[key] is not None
+    }
+    return snapshot or None
+
+
+@contextmanager
+def durable_claims_context(claims: Mapping[str, object] | None) -> Iterator[None]:
+    """Restore a sanitized job creator identity for one worker execution."""
+
+    if not isinstance(claims, Mapping):
+        yield
+        return
+    token = set_claims_ctx(
+        {key: claims[key] for key in _DURABLE_CLAIM_KEYS if key in claims}
+    )
+    try:
+        yield
+    finally:
+        reset_claims_ctx(token)
+
+
+def runtime_authority_context(
+    claims: Mapping[str, object] | None,
+    *,
+    workspace_id: str,
+) -> dict[str, object]:
+    """Build a non-escalating Kogwistar runtime authority carrier."""
+
+    source = claims if isinstance(claims, Mapping) else {}
+    capabilities = source.get("capabilities", ())
+    if isinstance(capabilities, str):
+        capabilities = tuple(item for item in capabilities.split() if item)
+    elif isinstance(capabilities, (list, tuple, set, frozenset)):
+        capabilities = tuple(str(item) for item in capabilities if str(item).strip())
+    else:
+        capabilities = ()
+    principal = str(
+        source.get("agent_id")
+        or source.get("sub")
+        or source.get("client_id")
+        or "system"
+    ).strip()
+    security_scope = str(
+        source.get("security_scope") or source.get("tenant") or ""
+    ).strip().lower() or None
+    return {
+        "principal_id": principal,
+        "tenant_id": security_scope,
+        "project_id": workspace_id,
+        "security_scope": security_scope,
+        "effective_capabilities": capabilities,
+    }
+
+
 @contextmanager
 def claims_context(identity: LlmWikiIdentity | None) -> Iterator[None]:
     if identity is None:
@@ -240,4 +332,7 @@ __all__ = [
     "authenticate_bearer",
     "authorize",
     "claims_context",
+    "durable_claims_snapshot",
+    "durable_claims_context",
+    "runtime_authority_context",
 ]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Mapping
 
 from kogwistar.engine_core.jobs import JobQueueItem
 
@@ -14,6 +15,7 @@ from ..maintenance import (
     is_execution_wisdom_kind,
 )
 from ..maintenance.maintenance_context import maintenance_execution_context
+from ..configuration.identity import durable_claims_context
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,12 @@ class MaintenanceJobDispatchMixin:
     """Dispatch claimed jobs through the selected bounded strategy."""
 
     def _handle_job(self, workspace_id: str, job: JobQueueItem) -> None:
+        payload = getattr(job, "payload", {})
+        claims = payload.get("authority_claims") if isinstance(payload, Mapping) else None
+        with durable_claims_context(claims):
+            self._handle_job_with_authority(workspace_id, job)
+
+    def _handle_job_with_authority(self, workspace_id: str, job: JobQueueItem) -> None:
         job = self.engines.conversation.jobs.coerce(job)
         job_id = str(job.job_id)
         payload = dict(job.payload)

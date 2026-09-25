@@ -11,6 +11,9 @@ from kogwistar_llm_wiki.configuration.identity import (
     authenticate_bearer,
     authorize,
     claims_context,
+    durable_claims_context,
+    durable_claims_snapshot,
+    runtime_authority_context,
 )
 
 
@@ -94,3 +97,51 @@ def test_workspace_authorization_does_not_change_case(monkeypatch: pytest.Monkey
     authorize(identity, workspace_id="Team-A", scope="read")
     with pytest.raises(IdentityError, match="not a member"):
         authorize(identity, workspace_id="team-a", scope="read")
+
+
+def test_durable_claims_snapshot_excludes_credentials_and_unknown_claims() -> None:
+    claims = {
+        "sub": "alice",
+        "scope": "read write",
+        "security_scope": "tenant-a",
+        "capabilities": ["knowledge.graph.read"],
+        "access_token": "must-not-persist",
+    }
+    token = claims_ctx.set(claims)
+    try:
+        snapshot = durable_claims_snapshot()
+    finally:
+        claims_ctx.reset(token)
+
+    assert snapshot == {
+        "sub": "alice",
+        "scope": "read write",
+        "security_scope": "tenant-a",
+        "capabilities": ["knowledge.graph.read"],
+    }
+
+
+def test_durable_claims_context_restores_and_resets_claims() -> None:
+    with durable_claims_context(
+        {
+            "sub": "alice",
+            "security_scope": "tenant-a",
+            "access_token": "must-not-enter-context",
+        }
+    ):
+        assert durable_claims_snapshot() == {
+            "sub": "alice",
+            "security_scope": "tenant-a",
+        }
+    assert durable_claims_snapshot() is None
+
+
+def test_runtime_authority_context_never_invents_capabilities() -> None:
+    context = runtime_authority_context(
+        {"sub": "alice", "security_scope": "tenant-a", "scope": "read write"},
+        workspace_id="team-a",
+    )
+    assert context["principal_id"] == "alice"
+    assert context["project_id"] == "team-a"
+    assert context["security_scope"] == "tenant-a"
+    assert context["effective_capabilities"] == ()
