@@ -27,7 +27,7 @@ def test_gpu_auto_selects_vllm_and_cpu_keeps_reference_service() -> None:
     cpu = render_compose(ComposeOptions(mode="cpu", model_revision="abc123"))
     assert "LLM_WIKI_MULTIMODAL_BACKEND: \"${LLM_WIKI_MULTIMODAL_BACKEND:-vllm}\"" in gpu
     assert "LLM_WIKI_EMBEDDING_VLLM_URL: \"${LLM_WIKI_EMBEDDING_VLLM_URL:-http://embedding:8000}\"" in gpu
-    assert "vllm/vllm-openai@sha256" in gpu
+    assert "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm" in gpu
     assert "Dockerfile.embedding-service" not in gpu
     assert "LLM_WIKI_MULTIMODAL_BACKEND: \"${LLM_WIKI_MULTIMODAL_BACKEND:-transformers}\"" in cpu
     assert "Dockerfile.embedding-service" in cpu
@@ -149,9 +149,9 @@ def test_vllm_overlay_is_gpu_only_and_requires_pinned_identity() -> None:
         encoding="utf-8"
     )
     assert "EXPERIMENTAL GPU OVERLAY ONLY" in text
-    assert "vllm/vllm-openai@sha256" in text
-    assert "LLM_WIKI_EMBEDDING_VLLM_IMAGE:?" in text
-    assert "LLM_WIKI_MULTIMODAL_MODEL_REVISION:?" in text
+    assert "profchan/kogwistar-llm-wiki-embedding@sha256:" in text
+    assert "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm" in text
+    assert "LLM_WIKI_MULTIMODAL_MODEL_REVISION:-029cdb0d548d809c8cd161c14f5232da1f23ec0f" in text
     assert "--runner" in text and "pooling" in text
     assert "driver: nvidia" in text
     assert "expose:" in text

@@ -371,19 +371,20 @@ that the application has completed its startup and profile validation.
 
 ### Experimental vLLM backend
 
-The experimental vLLM route is GPU-only and is not combined with the
-Transformers Embedding Service overlay. It calls vLLM's Qwen3-VL Chat
-Embeddings API directly from LLM-Wiki, while the application retains the
-Stage 1/Stage 2 profile and asset-safety checks. vLLM is a separate vector
-space because its Qwen3-VL image preprocessing differs from the Transformers
-path.
+The vLLM route is GPU-only and is not combined with the Transformers Embedding
+Service overlay. The default GPU profile calls the validated Ovis Omni
+Embedding 3B 8-bit checkpoint through vLLM's pooling embeddings API, while the
+application retains the Stage 1/Stage 2 profile and asset-safety checks. vLLM
+is a separate vector space because its model and preprocessing differ from the
+Transformers path.
 
 Set an immutable model revision, private vLLM token, and pinned image digest:
 
 ```bash
-export LLM_WIKI_MULTIMODAL_MODEL_REVISION='<immutable-model-commit-sha>'
+export LLM_WIKI_EMBEDDING_MODEL='pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm'
+export LLM_WIKI_MULTIMODAL_MODEL_REVISION='029cdb0d548d809c8cd161c14f5232da1f23ec0f'
 export LLM_WIKI_EMBEDDING_VLLM_TOKEN='<private-token>'
-export LLM_WIKI_EMBEDDING_VLLM_IMAGE='vllm/vllm-openai@sha256:<64-hex-digest>'
+export LLM_WIKI_EMBEDDING_VLLM_IMAGE='profchan/kogwistar-llm-wiki-embedding@sha256:fb391acdf8e4dccdb4af597485188119bc5ffe7b545fb0d8d254abc41897999d'
 docker compose -f compose.yml -f compose.embedding-vllm.yml up -d
 ```
 
@@ -397,7 +398,7 @@ contract, GPU, and labeled retrieval comparison results.
 ## OpenTelemetry And Grafana
 
 For a complete local memory-agent example combining PostgreSQL, the private
-Qwen3-VL embedding service, OTel, and Grafana, use
+Ovis vLLM embedding service, OTel, and Grafana, use
 [`compose.memory-agent.yml`](../compose.memory-agent.yml) as the final Compose
 overlay. The same overlay contains a commented Keycloak example; see the
 [cookbook recipe](cookbook.md#recipe-11-multimodal-memory-agent-with-otel) for

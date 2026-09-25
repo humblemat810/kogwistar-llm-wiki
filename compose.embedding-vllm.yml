@@ -1,29 +1,33 @@
 # EXPERIMENTAL GPU OVERLAY ONLY.
 # Compose this with compose.yml. Do not combine it with compose.multimodal.yml.
-# The current Transformers Embedding Service remains the reference backend.
+# The current Transformers Embedding Service remains the Qwen reference backend.
+# This overlay defaults to the validated Ovis Omni 8-bit vLLM image.
 #
 # Example:
 #   docker compose -f compose.yml -f compose.embedding-vllm.yml up -d
 services:
   embedding:
-    image: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE to a pinned vllm/vllm-openai@sha256 digest}
+    image: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:-profchan/kogwistar-llm-wiki-embedding@sha256:fb391acdf8e4dccdb4af597485188119bc5ffe7b545fb0d8d254abc41897999d}
     # Host RAM/CPU, not GPU VRAM. vLLM needs room while loading weights.
     mem_limit: ${LLM_WIKI_EMBEDDING_MEMORY_LIMIT:-8g}
     cpus: ${LLM_WIKI_EMBEDDING_CPU_LIMIT:-2.0}
+    entrypoint: ["vllm", "serve"]
     command:
-      - ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      - ${LLM_WIKI_EMBEDDING_MODEL:-pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm}
       - --served-model-name
-      - ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      - ${LLM_WIKI_EMBEDDING_MODEL:-pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm}
       - --revision
-      - ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION to an immutable Hugging Face revision}
+      - ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:-029cdb0d548d809c8cd161c14f5232da1f23ec0f}
       - --runner
       - pooling
       - --convert
       - embed
+      - --pooler-config
+      - '{"dimensions":1024}'
       - --max-model-len
-      - ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-8192}
+      - ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-512}
       - --gpu-memory-utilization
-      - ${LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION:-0.86}
+      - ${LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION:-0.80}
       - --enforce-eager
       - --max-num-seqs
       - ${LLM_WIKI_EMBEDDING_VLLM_MAX_NUM_SEQS:-1}
@@ -59,13 +63,13 @@ services:
       LLM_WIKI_MULTIMODAL_BACKEND: vllm
       LLM_WIKI_EMBEDDING_VLLM_URL: http://embedding:8000
       LLM_WIKI_EMBEDDING_VLLM_TOKEN: ${LLM_WIKI_EMBEDDING_VLLM_TOKEN:?Set LLM_WIKI_EMBEDDING_VLLM_TOKEN}
-      LLM_WIKI_EMBEDDING_VLLM_IMAGE: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE}
+      LLM_WIKI_EMBEDDING_VLLM_IMAGE: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:-profchan/kogwistar-llm-wiki-embedding@sha256:fb391acdf8e4dccdb4af597485188119bc5ffe7b545fb0d8d254abc41897999d}
       LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS: embedding
-      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm}
       LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
-      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION}
-      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-8192}
-      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: ${LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-7680}
+      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:-029cdb0d548d809c8cd161c14f5232da1f23ec0f}
+      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-512}
+      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: ${LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-480}
 
   mcp:
     depends_on:
@@ -75,13 +79,13 @@ services:
       LLM_WIKI_MULTIMODAL_BACKEND: vllm
       LLM_WIKI_EMBEDDING_VLLM_URL: http://embedding:8000
       LLM_WIKI_EMBEDDING_VLLM_TOKEN: ${LLM_WIKI_EMBEDDING_VLLM_TOKEN:?Set LLM_WIKI_EMBEDDING_VLLM_TOKEN}
-      LLM_WIKI_EMBEDDING_VLLM_IMAGE: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE}
+      LLM_WIKI_EMBEDDING_VLLM_IMAGE: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:-profchan/kogwistar-llm-wiki-embedding@sha256:fb391acdf8e4dccdb4af597485188119bc5ffe7b545fb0d8d254abc41897999d}
       LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS: embedding
-      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_MULTIMODAL_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm}
       LLM_WIKI_MULTIMODAL_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
-      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION}
-      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-8192}
-      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: ${LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-7680}
+      LLM_WIKI_MULTIMODAL_MODEL_REVISION: ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:-029cdb0d548d809c8cd161c14f5232da1f23ec0f}
+      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: ${LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-512}
+      LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET: ${LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET:-480}
 
 volumes:
   embedding_vllm_hf_cache:

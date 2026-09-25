@@ -1,4 +1,4 @@
-"""Direct, experimental adapter for vLLM's Qwen3-VL chat embeddings API.
+"""Direct adapter for vLLM multimodal chat embeddings APIs.
 
 The adapter keeps LLM-Wiki responsible for source resolution, asset hashing,
 profile identity, and projection persistence. vLLM only performs inference.
@@ -37,12 +37,21 @@ from .multimodal_remote import (
 )
 
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-fA-F]{64}$")
-DEFAULT_VLLM_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
+DEFAULT_VLLM_MODEL = "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm"
+LEGACY_VLLM_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
+SUPPORTED_VLLM_MODELS = (DEFAULT_VLLM_MODEL, LEGACY_VLLM_MODEL)
 DEFAULT_VLLM_DIMENSION = 1024
 MIN_VLLM_DIMENSION = 64
 MAX_VLLM_DIMENSION = 2048
 DEFAULT_VLLM_MAX_MODEL_LEN = 8192
 DEFAULT_VLLM_CROP_TOKEN_BUDGET = 7680
+
+
+def _model_family(model: str) -> str:
+    """Keep profile fingerprints explicit when serving different model families."""
+    if model == DEFAULT_VLLM_MODEL:
+        return "ovis-omni"
+    return "qwen3-vl"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +81,9 @@ class VllmEmbeddingSettings:
             raise ValueError("vLLM URL must use HTTP(S) with a hostname")
         if not self.token:
             raise ValueError("vLLM token is required")
-        if self.model != DEFAULT_VLLM_MODEL:
-            raise ValueError(f"experimental vLLM backend supports only {DEFAULT_VLLM_MODEL}")
+        if self.model not in SUPPORTED_VLLM_MODELS:
+            supported = ", ".join(SUPPORTED_VLLM_MODELS)
+            raise ValueError(f"vLLM backend supports only {supported}")
         if not self.model_revision or not self.model_revision.strip():
             raise ValueError("vLLM model revision is required")
         if not _DIGEST_RE.search(self.image_digest.strip()):
@@ -111,7 +121,7 @@ class VllmEmbeddingSettings:
             dimension=self.dimension,
             metric="dot",
             preprocessing_fingerprint=(
-                f"qwen3-vl:vllm:{self.image_digest}:pooling:embed:"
+                f"{_model_family(self.model)}:vllm:{self.image_digest}:pooling:embed:"
                 f"{instruction_fingerprint}:{self.dimension}:context={self.max_model_len}:"
                 f"crop={self.crop_token_budget}:eager={int(self.enforce_eager)}:"
                 f"seqs={self.max_num_seqs}"
@@ -327,15 +337,24 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
         return best
 
     def _request_unchecked(self, messages: list[dict[str, object]]) -> EmbeddingSet:
-        payload = {
+        payload: dict[str, object] = {
             "model": self.settings.model,
-            "messages": messages,
             "encoding_format": "float",
             "dimensions": self.profile.dimension,
-            "continue_final_message": True,
-            "add_generation_prompt": False,
-            "add_special_tokens": True,
         }
+        if self.settings.model == DEFAULT_VLLM_MODEL:
+            # Ovis uses vLLM's pooling embeddings contract, whose multimodal
+            # input is a single OpenAI-style user message.
+            payload["input"] = [messages[1]]
+        else:
+            payload.update(
+                {
+                    "messages": messages,
+                    "continue_final_message": True,
+                    "add_generation_prompt": False,
+                    "add_special_tokens": True,
+                }
+            )
         result = self._post_json("/v1/embeddings", payload)
         if result.get("model") != self.settings.model:
             raise EmbeddingProtocolError("vLLM returned an unexpected model identity")
@@ -435,8 +454,10 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
 __all__ = [
     "DEFAULT_VLLM_DIMENSION",
     "DEFAULT_VLLM_MODEL",
+    "LEGACY_VLLM_MODEL",
     "MAX_VLLM_DIMENSION",
     "MIN_VLLM_DIMENSION",
+    "SUPPORTED_VLLM_MODELS",
     "VllmEmbeddingSettings",
     "VllmMultimodalEncoder",
 ]

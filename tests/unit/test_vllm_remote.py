@@ -13,6 +13,7 @@ from kogwistar_llm_wiki.embeddings.multimodal_projection import (
 )
 from kogwistar_llm_wiki.embeddings.multimodal_remote import EmbeddingProtocolError
 from kogwistar_llm_wiki.embeddings.vllm_remote import (
+    DEFAULT_VLLM_MODEL,
     VllmEmbeddingSettings,
     VllmMultimodalEncoder,
 )
@@ -45,6 +46,11 @@ def _settings() -> VllmEmbeddingSettings:
         model_revision="qwen-revision",
         allowed_hosts=("embedding",),
     )
+
+
+def test_vllm_defaults_to_validated_ovis_profile() -> None:
+    assert _settings().model == DEFAULT_VLLM_MODEL
+    assert _settings().model == "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm"
 
 
 def test_vllm_profile_is_distinct_from_transformers_profile() -> None:
@@ -100,7 +106,7 @@ def test_vllm_adapter_uses_chat_embeddings_and_preserves_request_identity() -> N
             return _Response({"count": 26, "tokens": list(range(26))})
         vector = [0.0] * 1024
         vector[0] = 1.0
-        return _Response({"model": "Qwen/Qwen3-VL-Embedding-2B", "data": [{"index": 0, "embedding": vector}]})
+        return _Response({"model": _settings().model, "data": [{"index": 0, "embedding": vector}]})
 
     encoder = VllmMultimodalEncoder(_settings(), opener=opener)
     unit = MultimodalSourceUnit(
@@ -122,12 +128,12 @@ def test_vllm_adapter_uses_chat_embeddings_and_preserves_request_identity() -> N
     assert len(result[0][0]) == 1024
     embedding_requests = [request for request in requests if "dimensions" in request]
     assert embedding_requests[-1]["dimensions"] == 1024
-    messages = embedding_requests[-1]["messages"]
-    assert isinstance(messages, list)
+    assert "messages" not in embedding_requests[-1]
+    input_messages = embedding_requests[-1]["input"]
+    assert isinstance(input_messages, list)
     assert "secret://image" not in json.dumps(embedding_requests[-1])
     assert "a test image" in json.dumps(embedding_requests[-1])
-    assert embedding_requests[-1]["continue_final_message"] is True
-    assert embedding_requests[-1]["add_generation_prompt"] is False
+    assert input_messages[0]["role"] == "user"
 
 
 def test_vllm_adapter_uses_configured_dimension() -> None:
@@ -143,7 +149,7 @@ def test_vllm_adapter_uses_configured_dimension() -> None:
         vector[0] = 1.0
         return _Response(
             {
-                "model": "Qwen/Qwen3-VL-Embedding-2B",
+                "model": _settings().model,
                 "data": [{"index": 0, "embedding": vector}],
             }
         )
@@ -170,7 +176,10 @@ def test_vllm_adapter_tokenizes_and_crops_long_text() -> None:
             count = 20 + len(text)
             return _Response({"count": count, "tokens": list(range(count))})
         return _Response(
-            {"model": "Qwen/Qwen3-VL-Embedding-2B", "data": [{"index": 0, "embedding": [1.0] + [0.0] * 1023}]}
+            {
+                "model": _settings().model,
+                "data": [{"index": 0, "embedding": [1.0] + [0.0] * 1023}],
+            }
         )
 
     settings = replace(_settings(), crop_token_budget=40)
@@ -221,7 +230,7 @@ def test_vllm_readiness_probes_health_and_authenticated_model() -> None:
         paths.append(request.full_url)
         if request.full_url.endswith("/health"):
             return _Response({})
-        return _Response({"data": [{"id": "Qwen/Qwen3-VL-Embedding-2B"}]})
+        return _Response({"data": [{"id": _settings().model}]})
 
     result = VllmMultimodalEncoder(_settings(), opener=opener).readiness()
 
