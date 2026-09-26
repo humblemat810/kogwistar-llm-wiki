@@ -6,12 +6,12 @@ import sys
 import time
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
+from types import ModuleType
 
 import pytest
 from jose import jwt
-from kogwistar.ontology import OntologyPackage
+from kogwistar.ontology import OntologyClassDescriptor, OntologyPackage
 
 from kogwistar_llm_wiki import (
     IngestPipeline,
@@ -26,15 +26,60 @@ from kogwistar_llm_wiki.email import (
     InMemoryEmailEvidenceStore,
 )
 
-EMAIL_PLUGIN_SRC = Path(__file__).parents[2] / "kogwistar-email-plugin" / "src"
-if str(EMAIL_PLUGIN_SRC) not in sys.path:
-    sys.path.insert(0, str(EMAIL_PLUGIN_SRC))
 
+def _install_fake_email_plugin(monkeypatch) -> ModuleType:
+    """Exercise the host boundary without installing the private plugin repo."""
+    package = OntologyPackage.create(
+        ontology_id="email",
+        version="1.0.0",
+        title="Fake email ontology",
+        descriptors=[
+            OntologyClassDescriptor(
+                descriptor_id="Attachment",
+                name="Attachment",
+                aliases=("attachment",),
+                summary="A fake plugin descriptor for host contract tests.",
+            )
+        ],
+    )
+    plugin = ModuleType("kogwistar_email_plugin")
+    plugin.render_email_viewer_plugin = lambda: (
+        '<main><h1>Email plugin</h1><p id="status"></p>'
+        '<script>document.getElementById("status").textContent = "ready"; '
+        'fetch("/api/email/view"); fetch("/api/email/accept", '
+        '{body: JSON.stringify({confirmed: true})}); '
+        'fetch("/api/email/memory/promote"); '
+        'const structural_proposals = {}; </script></main>'
+    )
 
-def _email_package() -> OntologyPackage:
-    plugin = pytest.importorskip("kogwistar_email_plugin")
+    class FakeEmailViewer:
+        def __init__(self, store, *, authorize_stream, review_store=None) -> None:
+            self.store = store
+            self.authorize_stream = authorize_stream
 
-    return OntologyPackage.model_validate(plugin.email_ontology_json())
+        def get(self, *, workspace_id, stream_id, source_revision_id):
+            if not self.authorize_stream(workspace_id, stream_id):
+                raise PermissionError("email stream is not authorized")
+            record = self.store.get(
+                workspace_id=workspace_id,
+                source_revision_id=source_revision_id,
+            )
+            if record is None or record.stream_id != stream_id:
+                return {"status": "not_found"}
+            parsed = record.parsed_payload
+            plain_text = parsed.get("text_plain", [])
+            body_text = "\n\n".join(str(item) for item in plain_text)
+            return {
+                "status": "ok",
+                "mapping_id": record.mapping_payload.get("mapping_id"),
+                "body_text": body_text,
+                "structural_proposals": dict(record.mapping_payload),
+            }
+
+    plugin.EmailViewer = FakeEmailViewer
+    plugin.email_ontology_json = lambda: package.model_dump(mode="json")
+    monkeypatch.setitem(sys.modules, "kogwistar_email_plugin", plugin)
+    return plugin
 
 
 @pytest.fixture(autouse=True)
@@ -121,7 +166,8 @@ def test_workbench_http_exposes_container_health_endpoint():
         engines.close()
 
 
-def test_workbench_http_serves_safe_email_viewer_plugin() -> None:
+def test_workbench_http_serves_safe_email_viewer_plugin(monkeypatch) -> None:
+    _install_fake_email_plugin(monkeypatch)
     engines = build_in_memory_namespace_engines()
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0),
@@ -154,7 +200,8 @@ def test_workbench_http_serves_safe_email_viewer_plugin() -> None:
         engines.close()
 
 
-def test_workbench_http_exposes_acl_checked_email_viewer() -> None:
+def test_workbench_http_exposes_acl_checked_email_viewer(monkeypatch) -> None:
+    _install_fake_email_plugin(monkeypatch)
     engines = build_in_memory_namespace_engines()
     store = InMemoryEmailEvidenceStore()
     content_sha256 = hashlib.sha256(b"raw email").hexdigest()
@@ -214,13 +261,14 @@ def test_workbench_http_exposes_acl_checked_email_viewer() -> None:
         engines.close()
 
 
-def test_workbench_http_exposes_email_ontology_search() -> None:
+def test_workbench_http_exposes_email_ontology_search(monkeypatch) -> None:
+    plugin = _install_fake_email_plugin(monkeypatch)
     engines = build_in_memory_namespace_engines()
     api = WorkbenchApi(
         IngestPipeline(engines),
         email_ontology_catalog_factory=lambda workspace_id: EmailOntologyCatalog(
             workspace_id=workspace_id,
-            packages=(_email_package(),),
+            packages=(OntologyPackage.model_validate(plugin.email_ontology_json()),),
         ),
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
