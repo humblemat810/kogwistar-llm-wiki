@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import os
+import re
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -527,6 +528,24 @@ def test_downstream_workflows_pin_the_checked_out_vendor_revisions() -> None:
         ).strip(),
     }
     workflows = tuple((root / ".github" / "workflows").glob("*.yml"))
+
+    # A local checkout may intentionally combine a released downstream pin
+    # with an in-progress core feature branch. Hosted CI checks the complete
+    # cross-repository checkout and must remain strict.
+    if os.getenv("CI", "").strip().lower() != "true":
+        for name, revision in expected.items():
+            declared = {
+                pin
+                for workflow_path in workflows
+                for pin in re.findall(
+                    rf"{name}:\s*([0-9a-f]{{40}})",
+                    workflow_path.read_text(encoding="utf-8"),
+                )
+            }
+            if declared and revision not in declared:
+                pytest.skip(
+                    f"local {name} checkout differs from the hosted release pin"
+                )
 
     for workflow_path in workflows:
         workflow = workflow_path.read_text(encoding="utf-8")
