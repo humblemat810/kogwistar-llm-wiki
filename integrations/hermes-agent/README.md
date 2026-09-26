@@ -3,6 +3,17 @@
 For the complete article ingestion, maintenance, recovery, and agent-serving
 runbook, see the [LLM-Wiki Cookbook](../../doc/cookbook.md).
 
+```mermaid
+flowchart LR
+    HERMES[Hermes Agent] --> STDIO[Plugin stdio MCP]
+    HERMES --> HTTP[Optional Streamable HTTP]
+    STDIO --> SERVER[LLM-Wiki MCP server]
+    HTTP --> SERVER
+    SERVER --> AUTH[Bearer auth or explicit disabled mode]
+    AUTH --> WORKSPACE[Selected workspace]
+    WORKSPACE --> TOOLS[Grounded tools and review fence]
+```
+
 This directory follows Hermes Agent Plugins v1 portable layout. Install it
 from a repository containing this directory, then enable it:
 

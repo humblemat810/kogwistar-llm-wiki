@@ -7,6 +7,7 @@ This document defines the explicit boundaries, dependency rules, and contract su
 - `kogwistar`
 - `kg-doc-parser`
 - `kogwistar-obsidian-sink`
+- `kogwistar-email-plugin`
 - `kogwistar-llm-wiki`
 
 For the implementation-port release gate that keeps these consumer contracts
@@ -32,6 +33,18 @@ The system is:
 - consumer-view aware
 
 Canonical truth lives in Kogwistar. Consumer-facing contracts should prefer `Model[...]` views over ad hoc DTO duplication where possible.
+
+```mermaid
+flowchart LR
+    CORE[Kogwistar canonical contracts] --> PARSER[KG Doc Parser derivations]
+    CORE --> SINK[Obsidian projection]
+    CORE --> EMAIL[Email plugin contracts]
+    CORE --> APP[LLM-Wiki policy and orchestration]
+    PARSER --> APP
+    EMAIL --> APP
+    SINK -. rebuildable view .-> CORE
+    APP -. commands through core fences .-> CORE
+```
 
 ---
 
@@ -101,6 +114,22 @@ Owns:
 - promotion policy
 - UI / app orchestration
 
+### 3.5 `kogwistar-email-plugin`
+
+Owns:
+
+- mailbox, Maildir, mbox, and RFC822 source adapters
+- deterministic MIME parsing and attachment manifests
+- the versioned email ontology package
+- plugin-local parser and mapping fixtures
+
+Does not own:
+
+- workspace or mailbox ACL authority
+- canonical graph writes
+- memory promotion or review policy
+- credentials in graph, evidence, or job payloads
+
 ---
 
 ## 4. Dependency Shape
@@ -108,6 +137,8 @@ Owns:
 - `kogwistar` ← bottom
 - `kg-doc-parser` depends on `kogwistar`
 - `kogwistar-obsidian-sink` depends on `kogwistar`
+- `kogwistar-email-plugin` depends on `kogwistar` contracts and optional
+  transport libraries
 - `kogwistar-llm-wiki` composes all others
 
 ---

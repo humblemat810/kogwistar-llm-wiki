@@ -4,6 +4,14 @@
 - Date: 2026-07-10
 - Scope: `kogwistar` runtime envelope and `kogwistar-llm-wiki` projections
 
+```mermaid
+flowchart LR
+    CALL[Provider call] --> USAGE[Immutable usage event]
+    USAGE --> COST[Cost and budget projection]
+    USAGE --> TRACE[Trace and audit projection]
+    COST --> REPORT[Operator report]
+```
+
 ## Context
 
 LLM-Wiki needs reliable usage views at several scopes: source document,

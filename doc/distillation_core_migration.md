@@ -16,6 +16,17 @@ The current `kogwistar-llm-wiki` repository implements two background capabiliti
 
 These are implemented as application-layer code (`worker.py`, `projection_worker.py`, `daemon.py`). Some of this logic is generic enough that it belongs in the Kogwistar engine core, just as `WorkflowRuntime` and `IndexingSubsystem` are engine-native rather than app-specific.
 
+```mermaid
+flowchart LR
+    EVENTS[Workflow and graph events] --> JOBS[Durable generic jobs]
+    JOBS --> WORKER[LLM-Wiki maintenance worker]
+    WORKER --> DERIVE[Derived knowledge and wisdom]
+    DERIVE --> ACCEPT[Policy and provenance checks]
+    ACCEPT --> GRAPH[Canonical graph artifacts]
+    CORE[Kogwistar core] -. owns mechanics .-> JOBS
+    APP[LLM-Wiki] -. owns meaning .-> WORKER
+```
+
 ---
 
 ## What should move to `kogwistar` core

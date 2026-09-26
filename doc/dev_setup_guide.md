@@ -1,5 +1,13 @@
 # Dev Setup Guide
 
+```mermaid
+flowchart LR
+    CHECKOUT[Checkout repositories] --> ENV[Create local environment]
+    ENV --> DEP[Install pinned dependencies]
+    DEP --> TEST[Run marked CI tests]
+    TEST --> SERVICES[Start optional services only when needed]
+```
+
 ## 1. What This Repo Is
 
 This repository contains the `kogwistar-llm-wiki` application package plus the

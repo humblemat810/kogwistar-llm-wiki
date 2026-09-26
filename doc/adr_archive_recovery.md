@@ -1,5 +1,13 @@
 # ADR: Portable Archive, Recovery, And Chroma Snapshots
 
+```mermaid
+flowchart LR
+    GRAPH[Canonical graph and events] --> ARCHIVE[Verified archive]
+    ARCHIVE --> CHECK[Manifest and chain checks]
+    CHECK -->|valid isolated target| RESTORE[Restore projection]
+    CHECK -->|invalid| HOLD[Reject without mutation]
+```
+
 ## Status
 
 Accepted. The archive implementation is operator-only and does not change the

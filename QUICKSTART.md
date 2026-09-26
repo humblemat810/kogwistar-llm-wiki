@@ -22,6 +22,15 @@ embeddings, archives, Docker, and Codex, see the [LLM-Wiki Cookbook](doc/cookboo
 
 ---
 
+```mermaid
+flowchart LR
+    DEMO[One-process demo] --> INGEST[Ingest source]
+    INGEST --> MAINT[Run bounded maintenance]
+    MAINT --> PROJECT[Project Obsidian vault]
+    PROJECT --> EXIT[Inspect output and exit]
+    SHARED[Optional shared backend] -. later deployment .-> INGEST
+```
+
 ## Prerequisites
 
 - Python >= 3.11

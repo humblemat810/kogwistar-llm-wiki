@@ -29,6 +29,17 @@ an additional runtime profile. It does not replace CPython and does not imply
 that GPU inference, vLLM, Torch, or every optional parser dependency runs in
 the PyPy process.
 
+```mermaid
+flowchart LR
+    CPYTHON[CPython 3.12-3.14] --> REQUIRED[Required CI and production path]
+    PYPY11[PyPy 3.11] --> EXPERIMENTAL[Supported experimental profile]
+    PYPY12[PyPy 3.12 beta] --> PROBE[Optional ABI probe]
+    REQUIRED --> GATE[Shared correctness and resource gates]
+    EXPERIMENTAL --> GATE
+    PROBE --> GATE
+    GATE --> PROMOTE[Promote only after dependency and extension checks]
+```
+
 The first supported PyPy profile should cover:
 
 - provider-free unit and contract tests;

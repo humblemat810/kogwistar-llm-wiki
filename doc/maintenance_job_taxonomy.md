@@ -37,6 +37,23 @@ The maintenance subsystem is divided into these families:
 - wisdom maintenance
 - projection-request maintenance
 
+```mermaid
+flowchart TB
+    REQUEST[Maintenance request] --> CLASSIFY[Job family classification]
+    CLASSIFY --> INGEST[Ingest follow-up]
+    CLASSIFY --> LINKS[Links and entities]
+    CLASSIFY --> EVIDENCE[Evidence and contradictions]
+    CLASSIFY --> PROMOTE[Promotion and synthesis]
+    CLASSIFY --> WISDOM[Wisdom maintenance]
+    CLASSIFY --> PROJECTION[Projection request]
+    INGEST --> FENCE[Budget, scope, provenance, acceptance fences]
+    LINKS --> FENCE
+    EVIDENCE --> FENCE
+    PROMOTE --> FENCE
+    WISDOM --> FENCE
+    PROJECTION --> FENCE
+```
+
 ---
 
 ## 4. Job Catalog

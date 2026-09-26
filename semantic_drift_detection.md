@@ -1,5 +1,14 @@
 Status: Updated after fix pass
 
+```mermaid
+flowchart LR
+    SOURCE[Source identity] --> JOBS[Durable jobs and leases]
+    JOBS --> PROJECTION[Named projection manifest]
+    PROJECTION --> VIEW[Materialized view]
+    TRACE[Audit trace] -. evidence only .-> JOBS
+    TRACE -. never schedules work .-> PROJECTION
+```
+
 The main semantic-drift issues identified in this extension have been fixed and covered by tests. The remaining differences are now mostly intentional design choices rather than violations of core Kogwistar semantics.
 
 Resolved Drift

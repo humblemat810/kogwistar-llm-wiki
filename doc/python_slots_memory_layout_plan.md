@@ -36,6 +36,18 @@ break tests, plugins, Pydantic, pickling, or multiple inheritance.
 8. Do not change serialized fields, stable IDs, equality, hashing, or graph
    contracts as part of a layout optimization.
 
+```mermaid
+flowchart LR
+    CANDIDATE[High-cardinality value class] --> AUDIT[Frequency and mutability audit]
+    AUDIT -->|safe| SLOTS[Strict slots]
+    AUDIT -->|extension points| DICT[Slots plus dict]
+    AUDIT -->|framework-owned| KEEP[Leave layout unchanged]
+    SLOTS --> BENCH[Before and after benchmark]
+    DICT --> BENCH
+    KEEP --> BENCH
+    BENCH --> DECIDE[Adopt only with measured benefit]
+```
+
 ## Current State
 
 Most application-owned dataclass value objects already use

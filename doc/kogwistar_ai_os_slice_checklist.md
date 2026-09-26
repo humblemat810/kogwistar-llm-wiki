@@ -13,6 +13,20 @@ Scope: `kogwistar-llm-wiki` integration against the stable `kogwistar` OS contra
 - [x] request message projection is visible in the worker inbox
 - [x] reply message projection is visible in the foreground inbox
 
+```mermaid
+sequenceDiagram
+    participant F as Foreground lane
+    participant C as Core message API
+    participant B as Background lane
+    participant P as Projection
+
+    F->>C: send request message
+    C->>B: durable lane message
+    B->>C: reply or status update
+    C->>P: project current state
+    P-->>F: visible request/reply history
+```
+
 ## Regression guardrails
 
 - [x] request / reply flow pinned for the current maintenance path

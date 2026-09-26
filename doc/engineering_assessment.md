@@ -5,6 +5,16 @@
 
 ---
 
+```mermaid
+flowchart LR
+    EVIDENCE[Implementation evidence] --> CONTRACTS[Contracts and invariants]
+    EVIDENCE --> TESTS[Test and CI evidence]
+    EVIDENCE --> OPERATIONS[Operational evidence]
+    CONTRACTS --> VERDICT[Engineering assessment]
+    TESTS --> VERDICT
+    OPERATIONS --> VERDICT
+```
+
 ## Summary Verdict
 
 **Upper Staff / Principal-potential architect.** Not a developer who learned ML — an engineer who built a substrate that serves as the common foundation beneath five qualitatively different product types: governed agent execution (cloistar), document ingestion (kg-doc-parser), knowledge projection (obsidian-sink), chat interface (kogwistar-chat), and continuously-learning wiki (kogwistar-llm-wiki). That is principal-level thinking: finding the invariants that all systems share and building the layer once, correctly, at the bottom.

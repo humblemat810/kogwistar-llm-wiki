@@ -1,5 +1,14 @@
 # ADR: Knowledge Management Policy Defaults And Specialization Boundary
 
+```mermaid
+flowchart LR
+    INGEST[Ingest evidence] --> WORKING[Working memory]
+    WORKING --> REVIEW[Maintenance and review]
+    REVIEW --> KNOWLEDGE[Promoted knowledge]
+    KNOWLEDGE --> WISDOM[Derived wisdom]
+    WISDOM -. guidance only .-> WORKING
+```
+
 ## Status
 
 Accepted

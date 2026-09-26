@@ -9,6 +9,16 @@ Use the llm-wiki gateway or MCP tools to manage and query a scoped knowledge
 graph. Always identify the workspace and preserve the session when continuing
 a conversation.
 
+```mermaid
+flowchart TB
+    TASK[Knowledge task] --> RECALL[Recall scoped context]
+    RECALL --> EVIDENCE[Inspect provenance and history]
+    EVIDENCE --> PROPOSAL[Validate proposal]
+    PROPOSAL --> DECISION{Explicit confirmation?}
+    DECISION -->|No| ANSWER[Answer with evidence or explain gap]
+    DECISION -->|Yes| MUTATE[Apply canonical mutation]
+```
+
 ## Workflow
 
 1. Use `query` for a grounded answer or `search` for bounded retrieval.

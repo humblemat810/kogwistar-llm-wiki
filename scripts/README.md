@@ -11,6 +11,20 @@ names as stable entrypoints; future additions should use these families:
 | Models | Hugging Face model pullers |
 | Benchmarks | multimodal and conversation benchmarks |
 
+```mermaid
+flowchart LR
+    OP[Operator] --> FAMILY{Script family}
+    FAMILY --> DEV[Development]
+    FAMILY --> DOCKER[Docker and release]
+    FAMILY --> CODEX[Codex and bridge]
+    FAMILY --> MODEL[Model setup]
+    FAMILY --> BENCH[Benchmarks]
+    DOCKER --> SAFE[No credentials in image or tracked config]
+    CODEX --> SAFE
+    MODEL --> ENV[Document environment and resource limits]
+    BENCH --> REPORT[Record reproducible results]
+```
+
 Scripts must not write credentials into images, Compose files, or tracked
 configuration. Document required environment variables and whether a command
 is safe for CI, slow, or manual.

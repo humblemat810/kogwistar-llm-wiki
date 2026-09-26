@@ -3,6 +3,16 @@
 This guide captures local test-running pitfalls that have already cost time.
 Please update it when a failure mode repeats.
 
+```mermaid
+flowchart LR
+    MATRIX[CPython and PyPy matrix] --> UNIT[Fast CI unit tests]
+    MATRIX --> FULL[Full and integration suites]
+    MATRIX --> MANUAL[Manual provider and Docker tests]
+    UNIT --> REPORT[Durations and resource reports]
+    FULL --> REPORT
+    REPORT --> REVIEW[Human review; non-gating timing evidence]
+```
+
 ## Pytest Cache On Windows
 
 If a pytest command reaches `100% passed` and then hangs until the command

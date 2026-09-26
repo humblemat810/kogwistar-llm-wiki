@@ -11,6 +11,16 @@ raw sources → kg-doc-parser → conversation graph → promote → knowledge g
 
 ---
 
+```mermaid
+flowchart LR
+    RAW[Raw source] --> PARSER[kg-doc-parser]
+    PARSER --> CONV[Conversation graph]
+    CONV --> REVIEW[Maintenance and review]
+    REVIEW --> KG[Knowledge graph]
+    KG --> WISDOM[Wisdom graph]
+    KG --> OBS[Obsidian projection]
+```
+
 ## What it is
 
 Maintenance currently has two distinct outputs:

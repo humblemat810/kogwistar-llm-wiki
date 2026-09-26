@@ -23,6 +23,17 @@ The intended experience is different from opening a whole graph:
 5. The person can inspect every displayed claim, relationship, provenance,
    confidence, and revision state without treating the UI as graph truth.
 
+```mermaid
+flowchart LR
+    USER[User question] --> WORKBENCH[Interactive workbench]
+    WORKBENCH --> QUERY[Bounded graph query]
+    QUERY --> AUTH[Workspace and namespace ACL]
+    AUTH --> VIEW[Explainable projection]
+    VIEW --> USER
+    USER -->|explicit proposal| REVIEW[Review and acceptance]
+    REVIEW -->|accepted command| GRAPH[Canonical graph]
+```
+
 This must remain compatible with the Rust Kogwistar migration. Existing
 Kogwistar contracts are an external dependency for this implementation. This
 ADR does not authorize changes to the Kogwistar core, Rust crates, core Python

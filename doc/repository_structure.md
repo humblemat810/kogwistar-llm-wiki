@@ -27,10 +27,24 @@ must not silently modify those repositories.
 | Daemon support | `src/kogwistar_llm_wiki/daemons/` | Projection and maintenance lifecycle loops plus shared service-health, startup-recovery, budget, profile-ladder, and background-selection plumbing |
 | Workbench domain | `src/kogwistar_llm_wiki/workbench/` | Grounded workbench, graph queries, semantic lens, review, and HTTP/background adapters |
 | Embedding service | `src/llm_wiki_embedding_service/` | Isolated model-serving process |
+| Email source plugin | `kogwistar-email-plugin/` | Optional mailbox adapters, RFC822 parsing, and email ontology |
 | Application tests | `tests/` | Root product behavior and integration contracts |
 | Product documentation | `doc/` | ADRs, operator procedures, architecture, and testing guidance |
 | Operational tooling | `scripts/` | Release, Docker, Codex, model, and benchmark commands |
 | Frontend | `frontend/` | Workbench UI and browser tests |
+
+```mermaid
+flowchart TB
+    CORE[Vendored Kogwistar] --> PARSER[Vendored KG Doc Parser]
+    CORE --> SINK[Vendored Obsidian sink]
+    CORE --> EMAIL[Optional email plugin]
+    CORE --> APP[LLM-Wiki product]
+    PARSER --> APP
+    EMAIL --> APP
+    SINK --> APP
+    APP --> DOCS[Product docs and operator tooling]
+    APP --> TESTS[Application and integration tests]
+```
 
 Workspace namespace ownership lives in `configuration/workspace.py`, while
 provider model discovery lives in `providers/model_catalog.py`. Root-level

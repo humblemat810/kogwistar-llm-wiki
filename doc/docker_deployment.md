@@ -9,6 +9,18 @@ For copy-paste workflows from local article ingestion through agent serving,
 health checks, embedding validation, and archive recovery, see the
 [LLM-Wiki Cookbook](cookbook.md).
 
+```mermaid
+flowchart LR
+    REST[REST/workbench] --> DB[(Postgres and pgvector)]
+    MCP[MCP server] --> DB
+    MAINT[Maintenance worker] --> DB
+    EMBED[Optional vLLM embedding service] --> REST
+    EMBED --> MCP
+    DATA[(Application-data volume)] --> REST
+    DATA --> MCP
+    DATA --> MAINT
+```
+
 ## Start
 
 Set a development password first, then build and start the stack:

@@ -24,6 +24,17 @@ Hosting tradeoff for `derived_knowledge`:
 - Split-engine mode isolates storage and indexing cost, but cross-surface search must query two engines deliberately.
 - The semantic contract is the same in both layouts: `derived_knowledge` never lives in the raw curated_kg namespace.
 
+```mermaid
+flowchart LR
+    CLI[llm-wiki CLI] --> CONFIG[Validated configuration]
+    CONFIG --> DAEMON[Daemons and workers]
+    CONFIG --> WORKBENCH[REST and MCP workbench]
+    CONFIG --> EMBEDDINGS[Profile-scoped embeddings]
+    WORKBENCH --> GRAPH[Canonical graph]
+    DAEMON --> GRAPH
+    EMBEDDINGS -. rebuildable projection .-> GRAPH
+```
+
 ## `llm-wiki daemon`
 
 Both daemons poll on a configurable interval, treat `Ctrl-C` / `SIGTERM` as

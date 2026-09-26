@@ -2,11 +2,12 @@
 
 ## 1. Purpose
 
-This document defines the **architectural decomposition and responsibility boundaries** across the four-repository system:
+This document defines the **architectural decomposition and responsibility boundaries** across the five-repository system:
 
 * `kogwistar` (substrate / engine / authoritative seam)
 * `kg-doc-parser` (ingestion / parsing)
 * `kogwistar-obsidian-sink` (projection)
+* `kogwistar-email-plugin` (email source adapter and ontology)
 * `kogwistar-llm-wiki` (product / orchestration / composition)
 
 The goal is to:
@@ -78,6 +79,18 @@ This avoids conflating:
 * execution outcomes
 
 ---
+
+```mermaid
+flowchart TB
+    K[Kogwistar\ncanonical substrate] --> P[KG Doc Parser\ningestion derivations]
+    K --> O[Obsidian sink\nrebuildable projection]
+    K --> E[Email plugin\nsource adapter + ontology]
+    K --> L[LLM-Wiki\nproduct policy]
+    P --> L
+    E --> L
+    L -->|accepted commands| K
+    O -. reads CDC .-> K
+```
 
 ## 3. Repository Roles
 

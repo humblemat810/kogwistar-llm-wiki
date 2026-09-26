@@ -24,6 +24,19 @@ HTTP request. Tool visibility and argument validation remain enforced at the
 application registry boundary; MCP V2 low-level handlers do not replace those
 checks.
 
+```mermaid
+flowchart LR
+    CLIENT[Existing MCP client] --> TRANSPORT{Transport}
+    TRANSPORT --> STDIO[stdio]
+    TRANSPORT --> HTTP[/mcp Streamable HTTP]
+    TRANSPORT --> SSE[/sse and /messages legacy SSE]
+    STDIO --> AUTH[Request-scoped auth and ACL]
+    HTTP --> AUTH
+    SSE --> AUTH
+    AUTH --> REGISTRY[Application registry validation]
+    REGISTRY --> TOOLS[Same tool handlers]
+```
+
 ## Upgrade Order
 
 1. Upgrade and merge Kogwistar core 0.5.0.

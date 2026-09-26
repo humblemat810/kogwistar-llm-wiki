@@ -1,5 +1,15 @@
 # Long-Run Workflow Crash-Continuation Checklist
 
+```mermaid
+flowchart LR
+    RUN[Long-run workflow] --> CHECKPOINT[Durable checkpoint]
+    CHECKPOINT --> CRASH{Process stops?}
+    CRASH -->|no| COMPLETE[Complete and record result]
+    CRASH -->|yes| RESTART[Startup recovery]
+    RESTART --> RESUME[Resume bounded continuation]
+    RESUME --> COMPLETE
+```
+
 ## Goal
 
 Align the long-run workflow test with the existing `kogwistar` crash-continuation semantics instead of inventing a separate harness-level resume system. The parser child now has an explicit inner workflow run and recovery handoff in addition to the outer document manifest.

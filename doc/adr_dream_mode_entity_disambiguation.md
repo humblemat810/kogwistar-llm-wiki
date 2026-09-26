@@ -1,5 +1,14 @@
 # ADR: Dream Mode Entity Disambiguation
 
+```mermaid
+flowchart LR
+    IDLE[Idle background window] --> SELECT[Bounded candidate selection]
+    SELECT --> PROPOSE[Disambiguation proposal]
+    PROPOSE --> REVIEW[Explicit review]
+    REVIEW -->|accepted| PATCH[Scoped graph patch]
+    REVIEW -->|rejected| RETAIN[Retain original evidence]
+```
+
 ## Status
 
 Proposed
@@ -361,4 +370,3 @@ proposal/apply path where possible.
 No core schema change is required for the first implementation. Core changes
 should be considered only if repeated app behavior reveals a genuinely reusable
 primitive.
-

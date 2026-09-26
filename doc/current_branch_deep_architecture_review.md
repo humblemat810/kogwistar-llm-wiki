@@ -29,6 +29,19 @@ The main architecture risks are:
 - Package metadata and bootstrap behavior do not match the actual runtime imports and Python version requirements.
 - Several docs still describe broad agent/capability registries that conflict with the newer semantic-conservation direction.
 
+```mermaid
+flowchart TB
+    CORE[Kogwistar core mechanics] --> APP[LLM-Wiki policy and orchestration]
+    APP --> UI[Workbench, MCP, REST, and Codex]
+    CORE --> RECOVERY[Recovery and replay]
+    APP --> PROPOSALS[Proposals and acceptance fences]
+    PROPOSALS --> GRAPH[Canonical graph state]
+    UI -. projections only .-> GRAPH
+    REVIEW[Architecture review] --> RISKS[Boundary, idempotency, and test risks]
+    RISKS --> CORE
+    RISKS --> APP
+```
+
 ## Method
 
 I inspected:

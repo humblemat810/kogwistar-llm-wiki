@@ -7,6 +7,17 @@ The Codex executable stays on the host. Run llm-wiki in Docker and connect
 Codex to its native MCP endpoint or REST gateway; do not install Codex inside
 the llm-wiki image.
 
+```mermaid
+flowchart LR
+    CODEX[Host Codex] --> MCP[LLM-Wiki /mcp]
+    CODEX --> REST[Optional REST gateway]
+    MCP --> AUTH[Auth and workspace scope]
+    REST --> AUTH
+    AUTH --> MEMORY[Recall and capture boundary]
+    MEMORY --> REVIEW[Proposal and explicit confirmation]
+    REVIEW --> GRAPH[Canonical graph]
+```
+
 For an MCP-capable Codex client, configure this remote server:
 
 ```text

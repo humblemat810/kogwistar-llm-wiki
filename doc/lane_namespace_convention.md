@@ -33,6 +33,19 @@ Suggested patterns, refer to kogwistar style first, if not, below is a possible 
 - `WISDOM`:
   - `ws:{workspace_id}:wisdom`
 
+```mermaid
+flowchart TB
+    WS[workspace_id] --> FG[ws:id:conv:fg]
+    WS --> BG[ws:id:conv:bg]
+    WS --> SOURCE[ws:id:g:source]
+    WS --> MAINT[ws:id:wf:maintenance]
+    WS --> CURATED[ws:id:g:curated_kg]
+    WS --> BASE[ws:id:g:base_kg]
+    WS --> WISDOM[ws:id:wisdom]
+    BG -. proposals only .-> CURATED
+    SOURCE -. provenance .-> CURATED
+```
+
 ---
 
 ## 3. Required Metadata

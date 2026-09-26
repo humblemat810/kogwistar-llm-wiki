@@ -1,5 +1,14 @@
 # Persistent Embedding Migrations
 
+```mermaid
+flowchart LR
+    OLD[Old embedding profile] --> BACKFILL[Profile-scoped backfill]
+    NEW[New embedding profile] --> BACKFILL
+    BACKFILL --> VERIFY[Dimension and fingerprint verification]
+    VERIFY --> SWITCH[Atomic active-profile switch]
+    SWITCH --> QUERY[Queries use one compatible profile]
+```
+
 ## Why a migration is required
 
 PostgreSQL pgvector columns have a physical type such as `vector(2)` or

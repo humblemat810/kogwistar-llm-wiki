@@ -7,6 +7,20 @@ The llm-wiki MCP server is intended to run as a separate service from Claude
 Code. Start the container with `LLM_WIKI_AGENT_API_ENABLED=true` if REST agent
 routes are also needed, and configure a token for remote MCP:
 
+```mermaid
+sequenceDiagram
+    participant Claude as Claude Code
+    participant Gateway as LLM-Wiki gateway
+    participant ACL as Auth, workspace, provenance
+    participant Graph as Canonical graph
+    Claude->>Gateway: MCP request with bearer token
+    Gateway->>ACL: Authenticate and scope request
+    ACL-->>Gateway: Allow or reject
+    Gateway->>Graph: Query or proposal operation
+    Graph-->>Gateway: Grounded result
+    Gateway-->>Claude: Result; writes remain confirmation-gated
+```
+
 ```powershell
 $env:LLM_WIKI_MCP_AUTH_REQUIRED = "true"
 $env:LLM_WIKI_MCP_TOKEN = "replace-with-a-secret"

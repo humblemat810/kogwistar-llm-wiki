@@ -1,5 +1,14 @@
 # Long-Run Workflow Review Findings Checklist
 
+```mermaid
+flowchart LR
+    RUN[Long-run run] --> OBSERVE[Trace and resource report]
+    OBSERVE --> FINDING[Review finding]
+    FINDING --> FIX[Targeted fix]
+    FIX --> REPEAT[Repeat representative run]
+    REPEAT -->|verified| CLOSE[Close finding]
+```
+
 ## Summary
 
 This checklist records the current review findings for

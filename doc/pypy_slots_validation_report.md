@@ -6,6 +6,14 @@ This report records the current validation evidence for the Python 3.12/PyPy
 compatibility work and the first measured `__slots__` migration. It is an
 engineering checkpoint, not a production-support declaration.
 
+```mermaid
+flowchart LR
+    RUNTIME[CPython or PyPy] --> SUITE[Representative test suite]
+    SUITE --> RESOURCE[Wall time, CPU, RSS]
+    RESOURCE --> COMPARE[Before and after comparison]
+    COMPARE --> DECISION[Promote, defer, or reject optimization]
+```
+
 ## Test Evidence
 
 ### LLM-Wiki

@@ -38,9 +38,9 @@ flowchart TB
     FENCE --> REVIEW["needs_review on failure"]
 ```
 
-The remaining milestones below are deliberately still unchecked where the
-corresponding durable connector registry, descriptor search integration, or
-intelligence-memory promotion is not yet implemented.
+The remaining milestones below stay unchecked where durable mapping proposals,
+accepted-fact materialization, or dependent-memory invalidation is not yet
+implemented.
 
 Delivered in the current branch:
 
@@ -49,6 +49,33 @@ Delivered in the current branch:
 - [x] Durable review status with SQLite and in-memory implementations.
 - [x] Explicit proposal/acceptance through the existing maintenance fence.
 - [x] Browser email evidence panel and acceptance regression coverage.
+- [x] Immutable workspace-scoped source-document binding persisted with email
+  evidence, including legacy SQLite migration and mismatch rejection.
+- [x] ACL-first ontology descriptor search through Kogwistar's catalog, with
+  exact/alias, BM25, and profile-scoped semantic projection modes.
+- [x] Profile-scoped ontology descriptor embeddings use Kogwistar's durable
+  named-projection contract; the complete profile fingerprint isolates equal-
+  dimension models and ACL filtering remains before semantic ranking.
+- [x] Mapping proposals persist structural evidence, bounded descriptor scores,
+  pinned ontology identity, and optional composed-view/plugin/model fingerprints
+  through in-memory or SQLite app-owned stores.
+- [x] Explicit accepted-mapping memory proposal and promotion through the
+  existing evidence-backed Codex memory service; repeated promotion converges.
+- [x] Durable connector bindings persist only opaque credential references and
+  use revision CAS for updates.
+- [x] Per-connector synchronization leases prevent concurrent workers from
+  reading the same mailbox binding.
+- [x] Mailbox events are persisted idempotently before the cursor snapshot is
+  committed.
+- [x] Bounded secret-free synchronization jobs use the shared Kogwistar queue,
+  deterministic cycle IDs, leases, retry/fail handling, and an HTTP enqueue
+  boundary.
+- [x] An injectable `EmailSyncDaemon` drains that queue with bounded polling;
+  credential resolution remains inside the caller-provided adapter factory.
+- [x] Local end-to-end coverage flows from the plugin parser through the
+  viewer, accepted mapping, and memory promotion.
+- [x] A standalone `/email/viewer` browser plugin shell uses the existing
+  ACL-checked JSON route and safe text rendering without embedding mail HTML.
 
 ## Current Capability Audit
 
@@ -190,34 +217,36 @@ provider.
 
 - [ ] Add plugin discovery and configuration for ontology packages and source
   connectors without importing optional plugins at base-package import time.
-- [ ] Persist connector bindings and secret references separately from source
-  evidence.
+- [x] Persist connector bindings and opaque secret references separately from
+  source evidence.
 - [ ] Derive workspace namespaces and ACLs from the connector binding, never
   from message headers.
-- [ ] Add durable synchronization jobs, leases, cursor CAS, retries, budgets,
-  and idempotency keys.
-- [ ] Store mailbox events in workflow/event state and raw RFC822 bytes as
-  immutable source revisions.
+- [x] Add durable synchronization jobs, leases, cursor snapshot commit
+  ordering, bounded queue processing, and retry/fail handling. Adapter
+  credential resolution remains outside the queue payload.
+- [x] Store mailbox events idempotently and raw RFC822 bytes as immutable
+  source revisions.
 - [ ] Store parser output as versioned derivation evidence.
 - [ ] Select an authorized composed ontology view per binding/source.
-- [ ] Search descriptors through exact/alias, shape compatibility, BM25, and
-  one embedding-profile projection.
-- [ ] Persist ontology mapping proposals with evidence, scores, package/view
+- [x] Search descriptors through exact/alias and BM25, with ACL filtering before
+  ranking and an optional semantic-ranker boundary.
+- [x] Add one profile-scoped semantic projection for ontology descriptors.
+- [x] Persist ontology mapping proposals with evidence, scores, package/view
   fingerprints, and plugin/model versions.
 - [ ] Reuse maintenance proposal/acceptance fences for semantic facts.
 - [ ] Materialize accepted facts using existing nodes and multi-endpoint edges.
 - [ ] Schedule only affected projections and memories after acceptance.
 - [ ] Keep ontology upgrades opt-in and targeted; no automatic corpus-wide
   remapping.
-- [ ] Return explicit degraded status when an ontology package, semantic index,
+- [x] Return explicit degraded status when an ontology package, semantic index,
   or parser capability is unavailable.
 
 Tests:
 
 - [ ] Two addresses in one authorized mailbox do not create two ACL streams.
 - [ ] The same address in two connector bindings remains in two ACL scopes.
-- [ ] ACL filtering occurs before ontology candidate ranking.
-- [ ] Same-dimension embedding profiles cannot read each other's ontology
+- [x] ACL filtering occurs before ontology candidate ranking.
+- [x] Same-dimension embedding profiles cannot read each other's ontology
   projections or compare scores.
 - [ ] Raw source and mailbox event history remain unchanged after remapping.
 - [ ] Duplicate delivery before and after commit remains idempotent.
@@ -234,6 +263,10 @@ GreenMail tests pass in their dedicated job.
 
 ## Milestone 5: Intelligence Memory
 
+- [x] Add an explicit accepted-email-mapping memory proposal/promotion path;
+  ingestion and structural mapping never auto-promote memory.
+- [x] Require the authoritative stored source document and content digest in
+  every promoted email memory evidence record.
 - [ ] Define email memory proposal kinds separately from ontology descriptors.
 - [ ] Require pinned source evidence and composed-view descriptor references.
 - [ ] Derive memory ACL as the intersection/authorized derivation of every

@@ -5,6 +5,15 @@ commonly confused concepts and establishes clear boundaries.
 
 ---
 
+```mermaid
+flowchart LR
+    SOURCE[Source evidence] --> DERIVED[Derived artifact]
+    DERIVED --> CURATED[Curated knowledge]
+    CURATED --> WISDOM[Wisdom]
+    CURATED --> PROJECTION[Projection]
+    PROJECTION -. rebuildable .-> CURATED
+```
+
 ## 1. Core Concepts
 
 ### Graph

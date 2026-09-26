@@ -1,5 +1,15 @@
 # LLM Structured Output Policy
 
+```mermaid
+flowchart LR
+    REQUEST[LLM request] --> SCHEMA[Closed JSON schema]
+    SCHEMA --> PROVIDER{Provider capability}
+    PROVIDER -->|json_schema| OUTPUT[Structured output]
+    PROVIDER -->|function_calling| OUTPUT
+    OUTPUT --> VALIDATE[Deterministic local validation]
+    VALIDATE --> DISPATCH[Bounded application dispatch]
+```
+
 For production parsing paths, use provider-controlled `json_schema` first.
 
 If the provider or model rejects the schema, fall back to `function_calling`.
@@ -18,4 +28,3 @@ Current repo convention:
 - `json_schema` first for parsing seams
 - `function_calling` fallback for provider compatibility
 - deterministic local validation after parse
-

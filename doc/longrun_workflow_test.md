@@ -1,5 +1,14 @@
 # Long-Run Workflow Test
 
+```mermaid
+flowchart LR
+    DOCS[Document batch] --> SLICE[Fair maintenance slice]
+    SLICE --> CHECKPOINT[Persist frontier and budgets]
+    CHECKPOINT -->|unfinished| QUEUE[Requeue at durable tail]
+    QUEUE --> SLICE
+    CHECKPOINT -->|finished| ASSERT[Assert graph and provenance]
+```
+
 ## Fair Maintenance-First Slices
 
 The `Longrun: PgVector Fair Maintenance First (3 docs)` launch profile runs

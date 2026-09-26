@@ -2,6 +2,75 @@
 
 ---
 
+## Documentation Map
+
+The product documentation uses diagrams for architecture, ownership, data
+flow, lifecycle, and operator boundaries. This map is the shortest route from
+the cross-repository contract to the implemented email slice:
+
+```mermaid
+flowchart TB
+    CORE["Kogwistar core\nontology + graph primitives"]
+    PARSER["KG Doc Parser\nsource parsing contracts"]
+    PLUGIN["kogwistar-email-plugin\nmail adapters + RFC822 parser"]
+    WIKI["LLM-Wiki\nACL binding + review + memory"]
+    VIEWER["Email viewer\nread-only browser projection"]
+    GRAPH["Canonical graph\naccepted facts only"]
+    DOCS["Architecture and operator docs"]
+
+    CORE --> PARSER
+    CORE --> WIKI
+    PLUGIN --> WIKI
+    PARSER --> WIKI
+    WIKI --> VIEWER
+    WIKI --> GRAPH
+    CORE -. contracts described by .-> DOCS
+    PLUGIN -. boundaries described by .-> DOCS
+    WIKI -. operations described by .-> DOCS
+```
+
+Every user-facing Markdown document is checked for at least one Mermaid,
+Graphviz, or PlantUML diagram. `AGENTS.md` is intentionally excluded because
+it is an internal instruction file, not product documentation. The diagrams
+below are the detailed views; feature documents should link back here when an
+operator needs broader system context.
+
+## Current Email Slice
+
+This sequence is the canonical implementation order. It makes the immutable
+evidence boundary and the explicit acceptance boundary visible in one place:
+
+```mermaid
+sequenceDiagram
+    participant S as Mail stream
+    participant P as Email plugin
+    participant E as Evidence store
+    participant O as Ontology catalog
+    participant W as Workbench API
+    participant R as Review store
+    participant G as Kogwistar graph
+    participant M as Memory projection
+
+    S->>P: fetch bounded message bytes
+    P->>E: persist raw bytes + immutable revision
+    P->>E: persist deterministic parse derivation
+    W->>E: read authorized revision
+    W->>O: search authorized composed descriptors
+    O-->>W: exact, BM25, or profile-scoped candidates
+    W->>R: persist pending mapping proposal
+    R-->>W: pending / accepted / needs_review
+    W->>G: apply accepted typed patch
+    W->>M: promote only accepted evidence-backed memory
+    G-->>W: authoritative graph revision
+    E-->>W: raw source remains unchanged
+```
+
+No similarity result, parser derivation, mailbox header, or viewer action
+mutates canonical truth without the existing ACL, provenance, proposal, and
+acceptance fences.
+
+---
+
 ## Composable Ontology And Email Intelligence
 
 These diagrams describe the optional email source path. The email plugin owns

@@ -1,5 +1,14 @@
 # Happy Path Use Cases
 
+```mermaid
+flowchart LR
+    USER[User] --> SOURCE[Add source]
+    SOURCE --> PARSE[Parse and ground]
+    PARSE --> REVIEW[Maintenance review]
+    REVIEW --> KNOWLEDGE[Accepted knowledge]
+    KNOWLEDGE --> VIEW[Obsidian and workbench views]
+```
+
 ## 1. Purpose
 
 Map main product use cases directly to node and edge behavior, graph kind usage, namespace placement, and pathway explanation.

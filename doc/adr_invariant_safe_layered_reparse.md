@@ -1,5 +1,14 @@
 # ADR: Invariant-Safe Layered Reparse
 
+```mermaid
+flowchart LR
+    BYTES[Immutable source revision] --> GENERATION[Immutable parse generation]
+    GENERATION --> VIEW[Per-source ParseView CAS pointer]
+    VIEW --> ACTIVE[Active interpretation]
+    GENERATION -. historical read .-> BYTES
+    CLEANUP[Deferred physical cleanup] -. never selects truth .-> VIEW
+```
+
 ## Decision
 
 Source bytes and parser derivations are immutable evidence. A logical

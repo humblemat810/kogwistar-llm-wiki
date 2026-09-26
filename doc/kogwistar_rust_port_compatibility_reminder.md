@@ -1,5 +1,14 @@
 # Kogwistar Rust Port: Consumer Compatibility Reminder
 
+```mermaid
+flowchart LR
+    PYTHON[Python public contract] --> FACADE[Compatibility facade]
+    FACADE --> RUST[Rust implementation]
+    RUST --> STORE[Backend store]
+    TEST[Parity tests] --> FACADE
+    TEST --> RUST
+```
+
 ## Purpose
 
 This is a planning and release gate for porting `kogwistar` core

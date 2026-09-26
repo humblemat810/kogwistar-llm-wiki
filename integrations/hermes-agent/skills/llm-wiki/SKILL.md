@@ -8,6 +8,16 @@ description: Manage and query a Kogwistar llm-wiki graph through grounded lenses
 Use the llm-wiki MCP server for graph questions. Always provide the configured
 workspace ID and preserve the current session ID when continuing an inquiry.
 
+```mermaid
+flowchart TB
+    REQUEST[User request] --> READ[Search or query grounded lens]
+    READ --> INSPECT[Inspect evidence, scope, and history]
+    INSPECT --> PROPOSE[Validate proposal]
+    PROPOSE --> CONFIRM{Explicit confirmation?}
+    CONFIRM -->|No| REPORT[Report or request more evidence]
+    CONFIRM -->|Yes| WRITE[Apply canonical change]
+```
+
 ## Required sequence
 
 1. Search or ask for a bounded lens.

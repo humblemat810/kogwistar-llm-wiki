@@ -4,6 +4,14 @@ LLM-Wiki `0.5.1` is a maintenance release for the MCP 2.x application and
 unified adapter-image publishing path. The foundational dependency versions
 remain independently versioned and are not changed by this release.
 
+```mermaid
+flowchart LR
+    FIXES[Compatibility and adapter fixes] --> CI[Full CI matrix]
+    CI --> TAG[v0.5.1]
+    TAG --> IMAGES[Standard and gated image variants]
+    IMAGES --> SMOKE[Pull and runtime smoke]
+```
+
 ## Release scope
 
 - Bumps the LLM-Wiki package and application image version to `0.5.1`.

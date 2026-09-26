@@ -1,5 +1,13 @@
 # Slots Frequency Audit
 
+```mermaid
+flowchart LR
+    TESTS[Test and runtime construction counts] --> RANK[Frequency ranking]
+    RANK --> CANDIDATES[High-cardinality candidates]
+    CANDIDATES --> BENCH[Slots benchmark]
+    BENCH --> DECISION[Adopt only with measured process benefit]
+```
+
 ## Purpose
 
 This audit checks whether the remaining `__slots__` work is likely to reduce

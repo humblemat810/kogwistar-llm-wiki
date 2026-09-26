@@ -4,6 +4,14 @@ This release records the merged PyPy and cross-repository CI work on the
 LLM-Wiki `main` branch. It updates the application package version to `0.4.1`.
 Creating `v0.4.1` and publishing Docker images remain separate release actions.
 
+```mermaid
+flowchart LR
+    MERGE[Merged dependency revisions] --> CI[CPython and PyPy CI]
+    CI --> TAG[Version tag]
+    TAG --> IMAGE[Application image]
+    IMAGE --> VERIFY[Pull and smoke verification]
+```
+
 ## Tested Dependency Pins
 
 The application workflows check out these immutable sibling revisions:

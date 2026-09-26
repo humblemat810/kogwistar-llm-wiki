@@ -1,5 +1,15 @@
 # ADR: Iterative Maintenance Graph Construction Mode
 
+```mermaid
+flowchart LR
+    REQUEST[Maintenance request] --> ROUND[Bounded maintenance round]
+    ROUND --> PROPOSAL[Proposals with provenance]
+    PROPOSAL --> ACCEPT[Acceptance fence]
+    ACCEPT --> NEXT{Budget remaining?}
+    NEXT -->|yes| ROUND
+    NEXT -->|no| DONE[Stop and persist counters]
+```
+
 ## Status
 
 Proposed
