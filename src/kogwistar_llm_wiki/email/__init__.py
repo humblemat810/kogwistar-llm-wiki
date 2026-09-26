@@ -19,6 +19,7 @@ from .sync import (
     InMemoryEmailSyncStateStore,
     SQLiteEmailSyncStateStore,
 )
+from .ontology import EmailOntologyBinding
 
 __all__ = [
     "EmailEvidenceRecord",
@@ -32,6 +33,7 @@ __all__ = [
     "EmailSyncResult",
     "EmailSyncService",
     "EmailSyncStateStore",
+    "EmailOntologyBinding",
     "InMemoryEmailEvidenceStore",
     "InMemoryEmailSyncStateStore",
     "SQLiteEmailEvidenceStore",

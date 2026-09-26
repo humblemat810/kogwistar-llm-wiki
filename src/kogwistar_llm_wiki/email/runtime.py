@@ -20,6 +20,7 @@ from typing import Any, Protocol
 from ..ingest_pipeline import IngestPipeline
 from ..models import IngestPipelineRequest
 from ..utils import _temporary_namespace
+from .ontology import EmailOntologyBinding
 
 
 class EmailPluginUnavailable(RuntimeError):
@@ -213,17 +214,20 @@ class EmailRuntime:
         pipeline: IngestPipeline,
         store: EmailEvidenceStore | None = None,
         plugin: _EmailPlugin | None = None,
+        ontology: EmailOntologyBinding | None = None,
         authorize_stream: Callable[[str, str], bool] | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.store = store or InMemoryEmailEvidenceStore()
         self.plugin = plugin
+        self.ontology = ontology
         self.authorize_stream = authorize_stream or (lambda _workspace_id, _stream_id: True)
 
     def ingest(self, request: EmailIngestRequest) -> EmailIngestResult:
         if not self.authorize_stream(request.workspace_id, request.stream_id):
             raise PermissionError("email stream is not authorized for workspace")
         plugin = self.plugin or load_email_plugin()
+        ontology = self.ontology or EmailOntologyBinding.from_plugin(plugin)
         parsed = plugin.parse_rfc822(
             request.raw_bytes,
             source_revision_id=request.source_revision_id,
@@ -238,6 +242,8 @@ class EmailRuntime:
         if not mapping_id:
             raise ValueError("email mapping did not provide a deterministic mapping_id")
         mapping_payload["mapping_id"] = mapping_id
+        ontology.validate_mapping(mapping_payload)
+        mapping_payload["ontology"] = ontology.identity
         record = EmailEvidenceRecord(
             workspace_id=request.workspace_id,
             stream_id=request.stream_id,
@@ -294,6 +300,7 @@ class EmailRuntime:
                 "email_content_sha256": content_sha256,
                 "email_blob_ref": f"sha256:{content_sha256}",
                 "mapping_id": mapping_id,
+                "ontology": ontology.identity,
                 "mapping": mapping_payload,
                 "parsed_email": parsed_payload,
                 "acceptance_status": "pending",
