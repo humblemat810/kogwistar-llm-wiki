@@ -3,6 +3,7 @@ import { MultiDirectedGraph } from "graphology";
 import Sigma from "sigma";
 import type { LensNode, LensSnapshot, SettingsSnapshot, WorkbenchAskResponse, WorkbenchInteraction } from "./contracts";
 import { sampleLens, sampleSettings } from "./contracts";
+import { EmailViewerPanel } from "./EmailViewer";
 
 type Mode = "deterministic" | "codex";
 
@@ -490,6 +491,7 @@ export function App() {
           <option value="deterministic">Deterministic workflow</option><option value="codex">Codex cockpit (review-first)</option>
         </select>
       </section>
+      <EmailViewerPanel workspaceId={workspaceId} apiFetch={apiFetch} />
       {answer && <section className="answer-panel" aria-live="polite">
         <p className="eyebrow">Investigation response</p>
         <p>{answer.text}</p>
