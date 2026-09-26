@@ -8,12 +8,14 @@ from html import escape
 from typing import Any
 
 from .runtime import EmailEvidenceStore
+from .review import EmailReviewStateStore, review_state_payload
 
 
 @dataclass(frozen=True, slots=True)
 class EmailViewer:
     store: EmailEvidenceStore
     authorize_stream: Callable[[str, str], bool]
+    review_store: EmailReviewStateStore | None = None
 
     def get(self, *, workspace_id: str, stream_id: str, source_revision_id: str) -> dict[str, object]:
         if not self.authorize_stream(workspace_id, stream_id):
@@ -26,6 +28,16 @@ class EmailViewer:
             return {"status": "not_found"}
         parsed = record.parsed_payload
         mapping = record.mapping_payload
+        mapping_id = str(mapping.get("mapping_id") or _mapping_id(mapping))
+        review = (
+            self.review_store.get(
+                workspace_id=workspace_id,
+                source_revision_id=source_revision_id,
+                mapping_id=mapping_id,
+            )
+            if self.review_store is not None and mapping_id
+            else None
+        )
         plain_values = parsed.get("text_plain")
         body = "\n\n".join(str(item) for item in plain_values) if isinstance(plain_values, list) else ""
         subject = str(parsed.get("subject") or "")
@@ -43,8 +55,9 @@ class EmailViewer:
             "body_text": body,
             "safe_html_preview": f"<h1>{escape(subject)}</h1><pre>{escape(body)}</pre>",
             "attachments": parsed.get("attachments", []),
-            "mapping_id": mapping.get("mapping_id") or _mapping_id(mapping),
-            "mapping_status": "pending",
+            "mapping_id": mapping_id,
+            "mapping_status": review_state_payload(review)["status"],
+            "review": review_state_payload(review),
             "structural_proposals": mapping,
         }
 

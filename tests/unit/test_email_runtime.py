@@ -10,7 +10,10 @@ from kogwistar_llm_wiki.email import (
     EmailRuntime,
     EmailViewer,
     InMemoryEmailEvidenceStore,
+    InMemoryEmailReviewStateStore,
+    SQLiteEmailReviewStateStore,
 )
+from kogwistar_llm_wiki.email.review import EmailReviewState
 
 
 EMAIL_PLUGIN_SRC = Path(__file__).parents[2] / "kogwistar-email-plugin" / "src"
@@ -70,7 +73,12 @@ def test_email_viewer_checks_workspace_stream_scope_and_escapes_html(pipeline) -
         source_revision_id="rfc822:revision-2",
     )
     runtime.ingest(request)
-    viewer = EmailViewer(store, authorize_stream=lambda workspace, stream: workspace == "viewer-workspace")
+    review_store = InMemoryEmailReviewStateStore()
+    viewer = EmailViewer(
+        store,
+        authorize_stream=lambda workspace, stream: workspace == "viewer-workspace",
+        review_store=review_store,
+    )
 
     result = viewer.get(
         workspace_id=request.workspace_id,
@@ -81,6 +89,26 @@ def test_email_viewer_checks_workspace_stream_scope_and_escapes_html(pipeline) -
     assert result["status"] == "ok"
     assert "&lt;unsafe&gt;" in str(result["safe_html_preview"])
     assert result["mapping_status"] == "pending"
+    review_store.put(
+        EmailReviewState(
+            workspace_id=request.workspace_id,
+            stream_id=request.stream_id,
+            source_revision_id=request.source_revision_id,
+            mapping_id=str(result["mapping_id"]),
+            source_document_id="email-source:1",
+            status="accepted",
+            patch_id="email-patch:1",
+            result={"status": "applied"},
+            updated_at_ms=1,
+        )
+    )
+    accepted = viewer.get(
+        workspace_id=request.workspace_id,
+        stream_id=request.stream_id,
+        source_revision_id=request.source_revision_id,
+    )
+    assert accepted["mapping_status"] == "accepted"
+    assert accepted["review"]["patch_id"] == "email-patch:1"
     with pytest.raises(PermissionError, match="not authorized"):
         viewer.get(
             workspace_id="other-workspace",
@@ -108,3 +136,32 @@ def test_email_runtime_rejects_unauthorized_stream_without_parsing(pipeline) -> 
                 source_revision_id="rfc822:revision-3",
             )
         )
+
+
+def test_email_review_state_stores_are_durable_and_consistent(tmp_path) -> None:
+    state = EmailReviewState(
+        workspace_id="w",
+        stream_id="stream-a",
+        source_revision_id="revision-1",
+        mapping_id="mapping-1",
+        source_document_id="email-source:1",
+        status="accepted",
+        patch_id="email-patch:mapping-1",
+        result={"status": "applied", "applied_count": 2},
+        updated_at_ms=123,
+    )
+    store = SQLiteEmailReviewStateStore(tmp_path / "review.sqlite")
+    store.put(state)
+    assert store.get(
+        workspace_id="w",
+        source_revision_id="revision-1",
+        mapping_id="mapping-1",
+    ) == state
+
+    memory_store = InMemoryEmailReviewStateStore()
+    memory_store.put(state)
+    assert memory_store.get(
+        workspace_id="w",
+        source_revision_id="revision-1",
+        mapping_id="mapping-1",
+    ) == state

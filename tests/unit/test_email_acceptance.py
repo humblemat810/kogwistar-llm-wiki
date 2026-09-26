@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from kogwistar_llm_wiki.email import EmailEvidenceRecord, EmailProposalMaterializer
+from kogwistar_llm_wiki.email import (
+    EmailEvidenceRecord,
+    EmailIngestRequest,
+    EmailProposalMaterializer,
+    InMemoryEmailEvidenceStore,
+)
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 
 
 def _record() -> EmailEvidenceRecord:
@@ -74,3 +80,47 @@ def test_email_mapping_acceptance_uses_existing_scoped_patch_fence() -> None:
             assert len(engines.kg.read.get_edges()) == 1
     finally:
         engines.close()
+
+
+def test_workbench_email_acceptance_is_explicit_and_idempotent(pipeline) -> None:
+    store = InMemoryEmailEvidenceStore()
+    record = _record()
+    request = EmailIngestRequest(
+        workspace_id=record.workspace_id,
+        stream_id=record.stream_id,
+        source_key=record.source_key,
+        raw_bytes=b"immutable email bytes",
+        source_revision_id=record.source_revision_id,
+    )
+    store.put(request, record)
+    api = WorkbenchApi(
+        pipeline,
+        email_evidence_store=store,
+        email_authorize_stream=lambda _workspace, _stream: True,
+    )
+    proposed = api.accept_email_mapping(
+        workspace_id="w",
+        stream_id="stream-a",
+        source_revision_id="revision-1",
+        source_document_id="email-source:1",
+        confirmed=False,
+    )
+    assert proposed["status"] == "confirmation_required"
+
+    accepted = api.accept_email_mapping(
+        workspace_id="w",
+        stream_id="stream-a",
+        source_revision_id="revision-1",
+        source_document_id="email-source:1",
+        confirmed=True,
+    )
+    assert accepted["status"] == "applied"
+    repeated = api.accept_email_mapping(
+        workspace_id="w",
+        stream_id="stream-a",
+        source_revision_id="revision-1",
+        source_document_id="email-source:1",
+        confirmed=True,
+    )
+    assert repeated["status"] == "accepted"
+    assert repeated["idempotent"] is True

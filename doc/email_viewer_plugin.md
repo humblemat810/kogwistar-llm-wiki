@@ -34,15 +34,20 @@ It never creates accepted knowledge, memories, or graph relations.
 Use `WorkbenchApi.view_email(...)` or the read-only MCP `email_view` tool to
 render an authorized message. The viewer checks workspace and stream scope,
 returns a structured text projection, escapes its HTML preview, and labels
-structural proposals as pending. Email headers are evidence claims, not ACL
-authority. The viewer does not return raw bytes or execute HTML.
+structural proposals with their review state (`pending`, `accepted`, or
+`needs_review`). Review state is mutable app-owned state and is kept separate
+from immutable evidence. Email headers are evidence claims, not ACL authority.
+The viewer does not return raw bytes or execute HTML.
 
 Use `WorkbenchApi.propose_email_mapping(...)`, the read-only `email_propose`
 tool, or `GET /api/email/proposal` to inspect the deterministic maintenance
 patch. Applying it requires the explicit `email_accept`/`POST /api/email/accept`
 confirmation. The existing maintenance patch validator enforces workspace
 scope, provenance, idempotent IDs, and the invariant that raw source facts are
-never rewritten.
+never rewritten. An accepted mapping is recorded by
+`InMemoryEmailReviewStateStore` by default, or by
+`SQLiteEmailReviewStateStore` for restart-safe operation. Repeating an
+accepted request returns the stored result without applying the patch again.
 
 For production, configure `SQLiteEmailEvidenceStore` (or another implementation
 of `EmailEvidenceStore`) rather than the default in-memory store.
@@ -53,5 +58,4 @@ and commits the next snapshot only after the whole batch succeeds. Failures
 leave the prior snapshot in place so the batch can be replayed idempotently.
 Use `SQLiteEmailSyncStateStore` with the plugin's snapshot class for
 restart-safe local operation. Connector binding policy, ontology composition,
-proposal acceptance, semantic search, and intelligence-memory promotion remain
-later slices.
+semantic search, and intelligence-memory promotion remain later slices.

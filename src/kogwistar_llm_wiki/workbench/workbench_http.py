@@ -299,6 +299,9 @@ def build_workbench_handler(
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 self._write_json({"error": "invalid_request", "detail": str(exc)}, status=400)
                 return
+            except PermissionError as exc:
+                self._write_json({"error": "forbidden", "detail": str(exc)}, status=403)
+                return
             except RuntimeError as exc:
                 self._write_json({"error": "service_unavailable", "detail": str(exc)}, status=503)
                 return

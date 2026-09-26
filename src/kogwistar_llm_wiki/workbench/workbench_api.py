@@ -26,7 +26,10 @@ from ..email import (
     EmailIngestRequest,
     EmailProposalMaterializer,
     EmailRuntime,
+    EmailReviewState,
+    EmailReviewStateStore,
     EmailViewer,
+    InMemoryEmailReviewStateStore,
 )
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
@@ -69,6 +72,7 @@ class WorkbenchApi:
         settings_path: str | None = None,
         email_evidence_store: EmailEvidenceStore | None = None,
         email_authorize_stream: Callable[[str, str], bool] | None = None,
+        email_review_store: EmailReviewStateStore | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = CodexMemoryService(pipeline.engines)
@@ -84,9 +88,11 @@ class WorkbenchApi:
             store=email_evidence_store,
             authorize_stream=email_authorize_stream,
         )
+        self.email_review_store = email_review_store or InMemoryEmailReviewStateStore()
         self.email_viewer = EmailViewer(
             self.email_runtime.store,
             authorize_stream=email_authorize_stream or (lambda _workspace_id, _stream_id: True),
+            review_store=self.email_review_store,
         )
         self.email_materializer = EmailProposalMaterializer()
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
@@ -168,8 +174,18 @@ class WorkbenchApi:
 
     def ingest_email(self, request: EmailIngestRequest) -> dict[str, object]:
         """Ingest one authorized immutable RFC822 message through the plugin."""
-
-        return asdict(self.email_runtime.ingest(request))
+        result = self.email_runtime.ingest(request)
+        self.email_review_store.put(
+            EmailReviewState(
+                workspace_id=result.workspace_id,
+                stream_id=result.stream_id,
+                source_revision_id=result.source_revision_id,
+                mapping_id=result.mapping_id,
+                source_document_id=result.source_document_id,
+                updated_at_ms=int(time.time() * 1000),
+            )
+        )
+        return asdict(result)
 
     def view_email(
         self,
@@ -208,6 +224,19 @@ class WorkbenchApi:
             source_document_id=source_document_id,
             confidence=confidence,
         )
+        state = self.email_review_store.get(
+            workspace_id=workspace_id,
+            source_revision_id=source_revision_id,
+            mapping_id=proposal.mapping_id,
+        )
+        if state is not None and state.status == "accepted":
+            return {
+                "status": "accepted",
+                "idempotent": True,
+                "mapping_id": proposal.mapping_id,
+                "patch_id": state.patch_id,
+                "result": dict(state.result or {}),
+            }
         return {
             "status": "proposed",
             "workspace_id": workspace_id,
@@ -240,7 +269,30 @@ class WorkbenchApi:
             source_document_id=source_document_id,
             confidence=confidence,
         )
+        state = self.email_review_store.get(
+            workspace_id=workspace_id,
+            source_revision_id=source_revision_id,
+            mapping_id=proposal.mapping_id,
+        )
+        if state is not None and state.status == "accepted":
+            return {
+                "status": "accepted",
+                "idempotent": True,
+                "mapping_id": proposal.mapping_id,
+                "patch_id": state.patch_id,
+                "result": dict(state.result or {}),
+            }
         if not confirmed:
+            self.email_review_store.put(
+                EmailReviewState(
+                    workspace_id=workspace_id,
+                    stream_id=stream_id,
+                    source_revision_id=source_revision_id,
+                    mapping_id=proposal.mapping_id,
+                    source_document_id=source_document_id,
+                    updated_at_ms=int(time.time() * 1000),
+                )
+            )
             return {
                 "status": "confirmation_required",
                 "mapping_id": proposal.mapping_id,
@@ -252,7 +304,7 @@ class WorkbenchApi:
             confirmed=True,
         )
         assert result is not None
-        return {
+        result_payload = {
             "status": result.status.value,
             "mapping_id": proposal.mapping_id,
             "patch_id": result.patch_id,
@@ -260,6 +312,20 @@ class WorkbenchApi:
             "applied_count": result.applied_count,
             "failed_count": result.failed_count,
         }
+        self.email_review_store.put(
+            EmailReviewState(
+                workspace_id=workspace_id,
+                stream_id=stream_id,
+                source_revision_id=source_revision_id,
+                mapping_id=proposal.mapping_id,
+                source_document_id=source_document_id,
+                status="accepted" if result.status.value == "applied" else "needs_review",
+                patch_id=result.patch_id,
+                result=result_payload,
+                updated_at_ms=int(time.time() * 1000),
+            )
+        )
+        return result_payload
 
     def review_memory(
         self,

@@ -21,6 +21,12 @@ from .sync import (
 )
 from .ontology import EmailOntologyBinding
 from .acceptance import EmailProposalMaterializer, EmailProposalPatch
+from .review import (
+    EmailReviewState,
+    EmailReviewStateStore,
+    InMemoryEmailReviewStateStore,
+    SQLiteEmailReviewStateStore,
+)
 
 __all__ = [
     "EmailEvidenceRecord",
@@ -37,8 +43,12 @@ __all__ = [
     "EmailOntologyBinding",
     "EmailProposalMaterializer",
     "EmailProposalPatch",
+    "EmailReviewState",
+    "EmailReviewStateStore",
     "InMemoryEmailEvidenceStore",
     "InMemoryEmailSyncStateStore",
     "SQLiteEmailEvidenceStore",
     "SQLiteEmailSyncStateStore",
+    "InMemoryEmailReviewStateStore",
+    "SQLiteEmailReviewStateStore",
 ]
