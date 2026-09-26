@@ -6,7 +6,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Literal
 
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
@@ -129,6 +129,7 @@ class CodexMemoryRecord(BaseModel):
     capture_policy_version: str = Field(default="1", min_length=1, max_length=40)
     lifecycle_status: Literal["candidate", "reviewed", "superseded", "retired"] = "candidate"
     created_at_ms: int = Field(default_factory=lambda: int(time.time() * 1000), ge=0)
+    metadata: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("workspace_id", "session_id", "statement", "rationale")
     @classmethod
@@ -150,6 +151,24 @@ class CodexMemoryRecord(BaseModel):
         if any(not value for value in cleaned):
             raise CodexMemoryError("memory relationship IDs must be non-empty")
         return cleaned
+
+    @field_validator("metadata")
+    @classmethod
+    def _bounded_json_metadata(cls, value: dict[str, object]) -> dict[str, object]:
+        try:
+            encoded = json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            decoded = json.loads(encoded)
+        except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+            raise CodexMemoryError("memory metadata must be JSON-serializable") from exc
+        if not isinstance(decoded, dict) or len(encoded) > 16_000:
+            raise CodexMemoryError("memory metadata must be a bounded JSON object")
+        return decoded
 
     @model_validator(mode="after")
     def _require_grounding(self) -> CodexMemoryRecord:
@@ -235,10 +254,15 @@ class CodexMemoryService:
         query_text: str = "",
         include_inferred: bool = True,
         limit: int | None = None,
+        authorized_stream_ids: Collection[str] | None = None,
     ) -> dict[str, object]:
         if not workspace_id.strip():
             raise CodexMemoryError("memory recall requires workspace_id")
-        records = self._read_records(workspace_id)
+        records = [
+            record
+            for record in self._read_records(workspace_id)
+            if _memory_acl_allows(record, authorized_stream_ids)
+        ]
         if not include_inferred:
             records = [item for item in records if item.confidence != "inferred"]
         query_words = {word.lower() for word in _WORD.findall(query_text)}
@@ -269,6 +293,7 @@ class CodexMemoryService:
         confidence: str | None = None,
         lifecycle_status: str | None = None,
         limit: int = 50,
+        authorized_stream_ids: Collection[str] | None = None,
     ) -> dict[str, object]:
         if not workspace_id.strip():
             raise CodexMemoryError("memory review requires workspace_id")
@@ -278,7 +303,11 @@ class CodexMemoryService:
             raise CodexMemoryError("memory review confidence is invalid")
         if lifecycle_status is not None and lifecycle_status not in {"candidate", "reviewed", "superseded", "retired"}:
             raise CodexMemoryError("memory review lifecycle_status is invalid")
-        records = self._read_records(workspace_id)
+        records = [
+            record
+            for record in self._read_records(workspace_id)
+            if _memory_acl_allows(record, authorized_stream_ids)
+        ]
         filters = {"kind": kind, "confidence": confidence, "lifecycle_status": lifecycle_status}
         records = [
             record
@@ -302,6 +331,23 @@ class CodexMemoryService:
         namespace = WorkspaceNamespaces(record.workspace_id).conv_fg
         with _temporary_namespace(self.engines.conversation, namespace):
             existing = self.engines.conversation.read.get_nodes(ids=[memory_id], limit=1)
+            if existing:
+                stored_payload = (getattr(existing[0], "metadata", {}) or {}).get(
+                    "memory_payload_json"
+                )
+                if not isinstance(stored_payload, str):
+                    raise CodexMemoryError("existing memory is missing its durable payload")
+                try:
+                    stored = CodexMemoryRecord.model_validate(json.loads(stored_payload))
+                except (json.JSONDecodeError, ValueError) as exc:
+                    raise CodexMemoryError("existing memory has an invalid durable payload") from exc
+                stored_payload = stored.model_dump(mode="json", exclude={"created_at_ms"})
+                incoming_payload = record.model_dump(mode="json", exclude={"created_at_ms"})
+                if stored_payload != incoming_payload:
+                    raise CodexMemoryError(
+                        "memory ID already exists with a different validated payload"
+                    )
+                return self._record_payload(stored, persisted=False)
             if not existing:
                 linked_ids = (
                     *record.related_memory_ids,
@@ -395,6 +441,24 @@ def _memory_node(record: CodexMemoryRecord, memory_id: str) -> Node:
             "memory_lifecycle_status": record.lifecycle_status,
         },
     )
+
+
+def _memory_acl_allows(
+    record: CodexMemoryRecord,
+    authorized_stream_ids: Collection[str] | None,
+) -> bool:
+    """Hide scoped memories unless the caller proves every source stream."""
+
+    if "acl" not in record.metadata:
+        return True
+    acl = record.metadata.get("acl")
+    if not isinstance(acl, Mapping) or acl.get("workspace_id") != record.workspace_id:
+        return False
+    stream_ids = acl.get("stream_ids")
+    if not isinstance(stream_ids, (list, tuple)) or not stream_ids:
+        return False
+    authorized = {str(stream_id) for stream_id in (authorized_stream_ids or ())}
+    return all(str(stream_id) in authorized for stream_id in stream_ids)
 
 
 def _evidence_node(record: CodexMemoryRecord, evidence: MemoryEvidence, evidence_id: str) -> Node:

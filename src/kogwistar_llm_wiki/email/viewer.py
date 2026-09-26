@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from html import escape
 from typing import Any
 
-from .runtime import EmailEvidenceStore
 from .review import EmailReviewStateStore, review_state_payload
+from .runtime import EmailEvidenceStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +24,11 @@ class EmailViewer:
             workspace_id=workspace_id,
             source_revision_id=source_revision_id,
         )
-        if record is None or record.stream_id != stream_id:
+        if (
+            record is None
+            or record.workspace_id != workspace_id
+            or record.stream_id != stream_id
+        ):
             return {"status": "not_found"}
         parsed = record.parsed_payload
         mapping = record.mapping_payload
@@ -46,6 +50,7 @@ class EmailViewer:
             "workspace_id": workspace_id,
             "stream_id": stream_id,
             "source_revision_id": record.source_revision_id,
+            "source_document_id": record.source_document_id,
             "content_sha256": record.content_sha256,
             "subject": subject,
             "date": parsed.get("date_header"),

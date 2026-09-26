@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import hashlib
+
+import pytest
+
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.email import (
     EmailEvidenceRecord,
     EmailIngestRequest,
     EmailProposalMaterializer,
     InMemoryEmailEvidenceStore,
 )
-from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
+
+RAW_ACCEPTANCE_EMAIL = b"immutable email bytes"
 
 
 def _record() -> EmailEvidenceRecord:
@@ -18,10 +24,16 @@ def _record() -> EmailEvidenceRecord:
         stream_id="stream-a",
         source_key="uid:1",
         source_revision_id="revision-1",
-        content_sha256="a" * 64,
+        content_sha256=hashlib.sha256(RAW_ACCEPTANCE_EMAIL).hexdigest(),
         parsed_payload={},
         mapping_payload={
             "mapping_id": "mapping-1",
+            "ontology": {
+                "ontology_id": "email",
+                "version": "1.0.0",
+                "content_sha256": "b" * 64,
+                "schema_version": 1,
+            },
             "entities": [
                 {"entity_id": "message", "class_id": "EmailMessage", "properties": {"subject": ["Hello"]}},
                 {"entity_id": "person", "class_id": "EmailAddress", "properties": {"address": ["a@example.test"]}},
@@ -35,7 +47,8 @@ def _record() -> EmailEvidenceRecord:
                 }
             ],
         },
-        blob_ref="sha256:" + "a" * 64,
+        blob_ref="sha256:" + hashlib.sha256(RAW_ACCEPTANCE_EMAIL).hexdigest(),
+        source_document_id="email-source:1",
     )
 
 
@@ -89,7 +102,7 @@ def test_workbench_email_acceptance_is_explicit_and_idempotent(pipeline) -> None
         workspace_id=record.workspace_id,
         stream_id=record.stream_id,
         source_key=record.source_key,
-        raw_bytes=b"immutable email bytes",
+            raw_bytes=RAW_ACCEPTANCE_EMAIL,
         source_revision_id=record.source_revision_id,
     )
     store.put(request, record)
@@ -124,3 +137,30 @@ def test_workbench_email_acceptance_is_explicit_and_idempotent(pipeline) -> None
     )
     assert repeated["status"] == "accepted"
     assert repeated["idempotent"] is True
+
+
+def test_email_acceptance_rejects_source_document_mismatch_before_mutation(pipeline) -> None:
+    store = InMemoryEmailEvidenceStore()
+    record = _record()
+    request = EmailIngestRequest(
+        workspace_id=record.workspace_id,
+        stream_id=record.stream_id,
+        source_key=record.source_key,
+            raw_bytes=RAW_ACCEPTANCE_EMAIL,
+        source_revision_id=record.source_revision_id,
+    )
+    store.put(request, record)
+    api = WorkbenchApi(
+        pipeline,
+        email_evidence_store=store,
+        email_authorize_stream=lambda _workspace, _stream: True,
+    )
+
+    with pytest.raises(ValueError, match="does not match immutable email evidence"):
+        api.accept_email_mapping(
+            workspace_id="w",
+            stream_id="stream-a",
+            source_revision_id="revision-1",
+            source_document_id="attacker-selected-document",
+            confirmed=True,
+        )

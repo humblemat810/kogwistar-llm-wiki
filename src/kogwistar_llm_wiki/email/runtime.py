@@ -8,13 +8,13 @@ as workspace or ACL authority.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 import hashlib
 import importlib
 import json
-from pathlib import Path
 import sqlite3
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from ..ingest_pipeline import IngestPipeline
@@ -55,6 +55,7 @@ class EmailEvidenceRecord:
     parsed_payload: Mapping[str, object]
     mapping_payload: Mapping[str, object]
     blob_ref: str
+    source_document_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +85,7 @@ class InMemoryEmailEvidenceStore:
         self._raw: dict[tuple[str, str], bytes] = {}
 
     def put(self, request: EmailIngestRequest, record: EmailEvidenceRecord) -> None:
+        _validate_evidence_write(request, record)
         key = (request.workspace_id, request.source_revision_id)
         existing = self._records.get(key)
         if existing is not None and existing != record:
@@ -116,10 +118,19 @@ class SQLiteEmailEvidenceStore:
                     parsed_json TEXT NOT NULL,
                     mapping_json TEXT NOT NULL,
                     blob_ref TEXT NOT NULL,
+                    source_document_id TEXT,
                     PRIMARY KEY (workspace_id, source_revision_id)
                 )
                 """
             )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(email_evidence)").fetchall()
+            }
+            if "source_document_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE email_evidence ADD COLUMN source_document_id TEXT"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
@@ -127,9 +138,11 @@ class SQLiteEmailEvidenceStore:
         return connection
 
     def put(self, request: EmailIngestRequest, record: EmailEvidenceRecord) -> None:
+        _validate_evidence_write(request, record)
         with self._connect() as connection:
             existing = connection.execute(
-                "SELECT content_sha256, parsed_json, mapping_json FROM email_evidence "
+                "SELECT content_sha256, parsed_json, mapping_json, source_document_id "
+                "FROM email_evidence "
                 "WHERE workspace_id = ? AND source_revision_id = ?",
                 (request.workspace_id, request.source_revision_id),
             ).fetchone()
@@ -138,12 +151,17 @@ class SQLiteEmailEvidenceStore:
                     record.content_sha256,
                     json.dumps(record.parsed_payload, sort_keys=True, separators=(",", ":")),
                     json.dumps(record.mapping_payload, sort_keys=True, separators=(",", ":")),
+                    record.source_document_id,
                 )
                 if tuple(existing) != expected:
                     raise ValueError("email source revision already exists with different evidence")
                 return
             connection.execute(
-                "INSERT INTO email_evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO email_evidence ("
+                "workspace_id, stream_id, source_key, source_revision_id, "
+                "content_sha256, raw_bytes, parsed_json, mapping_json, "
+                "blob_ref, source_document_id"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     request.workspace_id,
                     request.stream_id,
@@ -154,6 +172,7 @@ class SQLiteEmailEvidenceStore:
                     json.dumps(record.parsed_payload, sort_keys=True, separators=(",", ":")),
                     json.dumps(record.mapping_payload, sort_keys=True, separators=(",", ":")),
                     record.blob_ref,
+                    record.source_document_id,
                 ),
             )
 
@@ -174,6 +193,11 @@ class SQLiteEmailEvidenceStore:
             parsed_payload=json.loads(str(row["parsed_json"])),
             mapping_payload=json.loads(str(row["mapping_json"])),
             blob_ref=str(row["blob_ref"]),
+            source_document_id=(
+                str(row["source_document_id"])
+                if row["source_document_id"] is not None
+                else None
+            ),
         )
 
     def raw_bytes(self, *, workspace_id: str, source_revision_id: str) -> bytes | None:
@@ -244,6 +268,11 @@ class EmailRuntime:
         mapping_payload["mapping_id"] = mapping_id
         ontology.validate_mapping(mapping_payload)
         mapping_payload["ontology"] = ontology.identity
+        source_document_id = _source_document_id(
+            request.workspace_id,
+            request.stream_id,
+            request.source_key,
+        )
         record = EmailEvidenceRecord(
             workspace_id=request.workspace_id,
             stream_id=request.stream_id,
@@ -253,11 +282,11 @@ class EmailRuntime:
             parsed_payload=parsed_payload,
             mapping_payload=mapping_payload,
             blob_ref=f"sha256:{content_sha256}",
+            source_document_id=source_document_id,
         )
         self.store.put(request, record)
 
         text = _display_text(parsed_payload)
-        source_document_id = _source_document_id(request.stream_id, request.source_key)
         pipeline_request = IngestPipelineRequest(
             workspace_id=request.workspace_id,
             source_uri=f"email://{request.stream_id}/{request.source_key}",
@@ -325,6 +354,25 @@ class EmailRuntime:
         )
 
 
+def _validate_evidence_write(
+    request: EmailIngestRequest,
+    record: EmailEvidenceRecord,
+) -> None:
+    """Keep immutable evidence identity and bytes bound at the storage edge."""
+    if (
+        record.workspace_id != request.workspace_id
+        or record.stream_id != request.stream_id
+        or record.source_key != request.source_key
+        or record.source_revision_id != request.source_revision_id
+    ):
+        raise ValueError("email evidence identity does not match ingest request")
+    content_sha256 = hashlib.sha256(request.raw_bytes).hexdigest()
+    if record.content_sha256 != content_sha256:
+        raise ValueError("email evidence content digest does not match immutable bytes")
+    if record.blob_ref != f"sha256:{content_sha256}":
+        raise ValueError("email evidence blob_ref does not match content digest")
+
+
 def _payload(value: Any) -> dict[str, object]:
     method = getattr(value, "to_payload", None)
     if not callable(method):
@@ -344,15 +392,15 @@ def _display_text(payload: Mapping[str, object]) -> str:
     return result or "Email message has no displayable text"
 
 
-def _source_document_id(stream_id: str, source_key: str) -> str:
-    digest = hashlib.sha256(f"{stream_id}\0{source_key}".encode("utf-8")).hexdigest()
+def _source_document_id(workspace_id: str, stream_id: str, source_key: str) -> str:
+    digest = hashlib.sha256(
+        f"{workspace_id}\0{stream_id}\0{source_key}".encode()
+    ).hexdigest()
     return f"email-source:{digest}"
 
 
 def _derivation_id(request: EmailIngestRequest, mapping_id: str) -> str:
     digest = hashlib.sha256(
-        f"{request.workspace_id}\0{request.stream_id}\0{request.source_revision_id}\0{mapping_id}".encode(
-            "utf-8"
-        )
+        f"{request.workspace_id}\0{request.stream_id}\0{request.source_revision_id}\0{mapping_id}".encode()
     ).hexdigest()
     return f"email-derivation:{digest}"

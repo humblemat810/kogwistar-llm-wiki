@@ -10,7 +10,7 @@ import inspect
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from typing import Any, cast
 
@@ -20,17 +20,25 @@ from ..compose.rendering import render_compose
 from ..compose.validation import check_compose_text
 from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
-from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
 from ..email import (
+    EmailEvidenceRecord,
     EmailEvidenceStore,
     EmailIngestRequest,
+    EmailMappingProposal,
+    EmailMappingProposalStore,
+    EmailMemoryPromotionService,
+    EmailOntologyCatalog,
     EmailProposalMaterializer,
-    EmailRuntime,
     EmailReviewState,
     EmailReviewStateStore,
+    EmailRuntime,
+    EmailSyncJobRequest,
+    EmailSyncJobScheduler,
     EmailViewer,
+    InMemoryEmailMappingProposalStore,
     InMemoryEmailReviewStateStore,
 )
+from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from ..maintenance.maintenance_patches import MaintenancePatch
@@ -73,6 +81,9 @@ class WorkbenchApi:
         email_evidence_store: EmailEvidenceStore | None = None,
         email_authorize_stream: Callable[[str, str], bool] | None = None,
         email_review_store: EmailReviewStateStore | None = None,
+        email_mapping_proposal_store: EmailMappingProposalStore | None = None,
+        email_ontology_catalog_factory: Callable[[str], EmailOntologyCatalog] | None = None,
+        email_sync_scheduler: EmailSyncJobScheduler | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = CodexMemoryService(pipeline.engines)
@@ -89,12 +100,25 @@ class WorkbenchApi:
             authorize_stream=email_authorize_stream,
         )
         self.email_review_store = email_review_store or InMemoryEmailReviewStateStore()
+        self.email_mapping_proposal_store = (
+            email_mapping_proposal_store or InMemoryEmailMappingProposalStore()
+        )
         self.email_viewer = EmailViewer(
             self.email_runtime.store,
             authorize_stream=email_authorize_stream or (lambda _workspace_id, _stream_id: True),
             review_store=self.email_review_store,
         )
         self.email_materializer = EmailProposalMaterializer()
+        email_authorizer = email_authorize_stream or (lambda _workspace_id, _stream_id: True)
+        self.email_memory_promoter = EmailMemoryPromotionService(
+            evidence_store=self.email_runtime.store,
+            review_store=self.email_review_store,
+            memory_service=self.codex_memory,
+            authorize_stream=email_authorizer,
+        )
+        self._email_ontology_catalog_factory = email_ontology_catalog_factory
+        self._email_ontology_catalogs: dict[str, EmailOntologyCatalog] = {}
+        self._email_sync_scheduler = email_sync_scheduler
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
         self._confirmation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._confirmation_locks_guard = threading.Lock()
@@ -159,12 +183,14 @@ class WorkbenchApi:
         query_text: str = "",
         include_inferred: bool = True,
         limit: int | None = None,
+        authorized_stream_ids: Sequence[str] | None = None,
     ) -> dict[str, object]:
         return self.codex_memory.recall(
             workspace_id=workspace_id,
             query_text=query_text,
             include_inferred=include_inferred,
             limit=limit,
+            authorized_stream_ids=authorized_stream_ids,
         )
 
     def capture_memory(
@@ -186,6 +212,43 @@ class WorkbenchApi:
             )
         )
         return asdict(result)
+
+    def enqueue_email_sync(
+        self,
+        *,
+        workspace_id: str,
+        connector_id: str,
+        cycle_id: str,
+        owner_id: str,
+        title_prefix: str = "Email",
+        lease_duration_ms: int = 60_000,
+        max_retries: int = 5,
+    ) -> dict[str, object]:
+        """Queue one bounded email sync without accepting credential material."""
+
+        scheduler = self._email_sync_scheduler
+        if scheduler is None:
+            return {
+                "status": "unavailable",
+                "reason": "email synchronization scheduler is not configured",
+            }
+        request = EmailSyncJobRequest(
+            workspace_id=workspace_id,
+            connector_id=connector_id,
+            cycle_id=cycle_id,
+            owner_id=owner_id,
+            title_prefix=title_prefix,
+            lease_duration_ms=lease_duration_ms,
+            max_retries=max_retries,
+        )
+        job_id = scheduler.enqueue(request)
+        return {
+            "status": "queued",
+            "workspace_id": workspace_id,
+            "connector_id": connector_id,
+            "cycle_id": cycle_id,
+            "job_id": job_id,
+        }
 
     def view_email(
         self,
@@ -224,6 +287,7 @@ class WorkbenchApi:
             source_document_id=source_document_id,
             confidence=confidence,
         )
+        persisted_proposal = self._persist_email_mapping_proposal(record, confidence=confidence)
         state = self.email_review_store.get(
             workspace_id=workspace_id,
             source_revision_id=source_revision_id,
@@ -244,7 +308,37 @@ class WorkbenchApi:
             "source_revision_id": source_revision_id,
             "mapping_id": proposal.mapping_id,
             "patch": proposal.patch.model_dump(mode="json"),
+            "proposal": persisted_proposal.payload(),
         }
+
+    def _persist_email_mapping_proposal(
+        self,
+        record: EmailEvidenceRecord,
+        *,
+        confidence: float,
+    ) -> EmailMappingProposal:
+        mapping_id = str(record.mapping_payload.get("mapping_id") or "")
+        existing = self.email_mapping_proposal_store.get(
+            workspace_id=record.workspace_id,
+            source_revision_id=record.source_revision_id,
+            mapping_id=mapping_id,
+        )
+        if existing is not None:
+            if existing.source_document_id != record.source_document_id:
+                raise ValueError("stored email proposal is not bound to immutable evidence")
+            return existing
+        catalog = self._email_ontology_catalogs.get(record.workspace_id)
+        parsed_profile = record.parsed_payload.get("parser_profile")
+        model_revision = record.mapping_payload.get("model_revision")
+        proposal = EmailMappingProposal.from_record(
+            record,
+            confidence=confidence,
+            composition_sha256=(catalog.view.composition_sha256 if catalog is not None else None),
+            plugin_version=str(parsed_profile) if parsed_profile else None,
+            model_revision=str(model_revision) if model_revision else None,
+        )
+        self.email_mapping_proposal_store.put(proposal)
+        return proposal
 
     def accept_email_mapping(
         self,
@@ -269,6 +363,7 @@ class WorkbenchApi:
             source_document_id=source_document_id,
             confidence=confidence,
         )
+        persisted_proposal = self._persist_email_mapping_proposal(record, confidence=confidence)
         state = self.email_review_store.get(
             workspace_id=workspace_id,
             source_revision_id=source_revision_id,
@@ -281,6 +376,7 @@ class WorkbenchApi:
                 "mapping_id": proposal.mapping_id,
                 "patch_id": state.patch_id,
                 "result": dict(state.result or {}),
+                "proposal": persisted_proposal.payload(),
             }
         if not confirmed:
             self.email_review_store.put(
@@ -297,6 +393,7 @@ class WorkbenchApi:
                 "status": "confirmation_required",
                 "mapping_id": proposal.mapping_id,
                 "patch": proposal.patch.model_dump(mode="json"),
+                "proposal": persisted_proposal.payload(),
             }
         result = self.email_materializer.accept(
             self.pipeline.engines,
@@ -311,6 +408,7 @@ class WorkbenchApi:
             "validation": result.validation.model_dump(mode="json"),
             "applied_count": result.applied_count,
             "failed_count": result.failed_count,
+            "proposal": persisted_proposal.payload(),
         }
         self.email_review_store.put(
             EmailReviewState(
@@ -327,6 +425,147 @@ class WorkbenchApi:
         )
         return result_payload
 
+    def search_email_ontology(
+        self,
+        *,
+        workspace_id: str,
+        query: str,
+        principal: str = "system",
+        mode: str = "bm25",
+        limit: int = 20,
+    ) -> dict[str, object]:
+        """Search ontology descriptors without mutating graph or email evidence."""
+        if not workspace_id.strip():
+            raise ValueError("workspace_id must not be empty")
+        if not query.strip():
+            raise ValueError("query must not be empty")
+        catalog = self._email_ontology_catalogs.get(workspace_id)
+        if catalog is None:
+            if self._email_ontology_catalog_factory is None:
+                return {
+                    "status": "unavailable",
+                    "reason": "email ontology catalog is not configured",
+                }
+            catalog = self._email_ontology_catalog_factory(workspace_id)
+            if catalog.workspace_id != workspace_id:
+                raise ValueError("email ontology catalog workspace mismatch")
+            self._email_ontology_catalogs[workspace_id] = catalog
+        hits = catalog.search(
+            query,
+            principal=principal,
+            mode=mode,
+            limit=limit,
+        )
+        return {
+            "status": "ok",
+            "workspace_id": workspace_id,
+            "mode": mode,
+            "semantic": catalog.semantic_status,
+            "composition_sha256": catalog.view.composition_sha256,
+            "package_identities": [
+                item.model_dump(mode="json") for item in catalog.view.package_identities
+            ],
+            "results": [hit.payload() for hit in hits],
+        }
+
+    def propose_email_memory(
+        self,
+        *,
+        workspace_id: str,
+        stream_id: str,
+        source_revision_id: str,
+        stream_ids: Sequence[str] | None = None,
+        source_revision_ids: Sequence[str] | None = None,
+        statement: str,
+        kind: str = "finding",
+        confidence: str = "inferred",
+        session_id: str | None = None,
+        rationale: str = "",
+    ) -> dict[str, object]:
+        normalized_stream_ids, normalized_revision_ids = _email_memory_sources(
+            stream_id=stream_id,
+            source_revision_id=source_revision_id,
+            stream_ids=stream_ids,
+            source_revision_ids=source_revision_ids,
+        )
+        promotion = self.email_memory_promoter.build_from_revisions(
+            workspace_id=workspace_id,
+            expected_stream_ids=normalized_stream_ids,
+            source_revision_ids=normalized_revision_ids,
+            statement=statement,
+            kind=kind,
+            confidence=confidence,
+            session_id=session_id,
+            rationale=rationale,
+        )
+        return {
+            "status": "proposed",
+            "workspace_id": workspace_id,
+            "stream_id": stream_id,
+            "source_revision_id": source_revision_id,
+            "stream_ids": list(promotion.source_stream_ids),
+            "source_revision_ids": list(normalized_revision_ids),
+            "mapping_id": promotion.mapping_id,
+            "source_document_id": promotion.source_document_id,
+            "source_document_ids": list(promotion.source_document_ids),
+            "memory": dict(promotion.payload),
+        }
+
+    def promote_email_memory(
+        self,
+        *,
+        workspace_id: str,
+        stream_id: str,
+        source_revision_id: str,
+        stream_ids: Sequence[str] | None = None,
+        source_revision_ids: Sequence[str] | None = None,
+        statement: str,
+        confirmed: bool,
+        kind: str = "finding",
+        confidence: str = "inferred",
+        session_id: str | None = None,
+        rationale: str = "",
+    ) -> dict[str, object]:
+        normalized_stream_ids, normalized_revision_ids = _email_memory_sources(
+            stream_id=stream_id,
+            source_revision_id=source_revision_id,
+            stream_ids=stream_ids,
+            source_revision_ids=source_revision_ids,
+        )
+        promotion = self.email_memory_promoter.build_from_revisions(
+            workspace_id=workspace_id,
+            expected_stream_ids=normalized_stream_ids,
+            source_revision_ids=normalized_revision_ids,
+            statement=statement,
+            kind=kind,
+            confidence=confidence,
+            session_id=session_id,
+            rationale=rationale,
+        )
+        if not confirmed:
+            return {
+                "status": "confirmation_required",
+                "workspace_id": workspace_id,
+                "stream_ids": list(promotion.source_stream_ids),
+                "source_revision_ids": list(normalized_revision_ids),
+                "mapping_id": promotion.mapping_id,
+                "source_document_id": promotion.source_document_id,
+                "source_document_ids": list(promotion.source_document_ids),
+                "memory": dict(promotion.payload),
+            }
+        result = self.email_memory_promoter.promote(promotion, confirmed=True)
+        assert result is not None
+        return {
+            "status": "captured",
+            "workspace_id": workspace_id,
+            "stream_ids": list(promotion.source_stream_ids),
+            "source_revision_ids": list(normalized_revision_ids),
+            "mapping_id": promotion.mapping_id,
+            "source_document_id": promotion.source_document_id,
+            "source_document_ids": list(promotion.source_document_ids),
+            "result": result,
+        }
+
     def review_memory(
         self,
         *,
@@ -335,6 +574,7 @@ class WorkbenchApi:
         confidence: str | None = None,
         lifecycle_status: str | None = None,
         limit: int = 50,
+        authorized_stream_ids: Sequence[str] | None = None,
     ) -> dict[str, object]:
         return self.codex_memory.review(
             workspace_id=workspace_id,
@@ -342,6 +582,7 @@ class WorkbenchApi:
             confidence=confidence,
             lifecycle_status=lifecycle_status,
             limit=limit,
+            authorized_stream_ids=authorized_stream_ids,
         )
 
     def compose_preview(self, payload: Mapping[str, Any]) -> dict[str, object]:
@@ -840,6 +1081,31 @@ def _invoke_agent_responder(
 
 def _ignore_progress() -> None:
     return
+
+
+def _email_memory_sources(
+    *,
+    stream_id: str,
+    source_revision_id: str,
+    stream_ids: Sequence[str] | None,
+    source_revision_ids: Sequence[str] | None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Normalize legacy single-source and explicit multi-source requests."""
+    normalized_stream_ids = tuple(
+        str(value).strip() for value in (stream_ids or (stream_id,))
+    )
+    normalized_revision_ids = tuple(
+        str(value).strip() for value in (source_revision_ids or (source_revision_id,))
+    )
+    if not normalized_stream_ids or any(not value for value in normalized_stream_ids):
+        raise ValueError("stream_ids must contain at least one non-empty value")
+    if not normalized_revision_ids or any(not value for value in normalized_revision_ids):
+        raise ValueError("source_revision_ids must contain at least one non-empty value")
+    if len(normalized_stream_ids) != len(normalized_revision_ids):
+        raise ValueError("stream_ids and source_revision_ids must align")
+    if normalized_stream_ids[0] != stream_id or normalized_revision_ids[0] != source_revision_id:
+        raise ValueError("legacy stream_id/source_revision_id must match the first source")
+    return normalized_stream_ids, normalized_revision_ids
 
 
 __all__ = ["WorkbenchApi"]

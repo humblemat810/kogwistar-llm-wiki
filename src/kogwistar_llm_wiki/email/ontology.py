@@ -15,10 +15,10 @@ class EmailOntologyBinding:
     package: OntologyPackage
 
     @classmethod
-    def from_plugin(cls, plugin: object) -> "EmailOntologyBinding":
+    def from_plugin(cls, plugin: object) -> EmailOntologyBinding:
         loader = getattr(plugin, "email_ontology_json", None)
         if not callable(loader):
-            raise ValueError("email plugin does not expose its declarative ontology")
+            raise TypeError("email plugin does not expose its declarative ontology")
         package = OntologyPackage.model_validate(loader())
         if package.identity.ontology_id != "email":
             raise ValueError("email plugin ontology must have ontology_id=email")

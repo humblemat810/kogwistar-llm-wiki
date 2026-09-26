@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
-import hashlib
 
 from ..maintenance.maintenance_patch_apply import (
     MaintenancePatchApplyResult,
@@ -36,19 +36,22 @@ class EmailProposalMaterializer:
         self,
         *,
         record: EmailEvidenceRecord,
-        source_document_id: str,
+        source_document_id: str | None = None,
         confidence: float = 0.75,
     ) -> EmailProposalPatch:
         mapping = record.mapping_payload
-        if not source_document_id.strip():
-            raise ValueError("source_document_id must not be empty")
+        authoritative_source_document_id = record.source_document_id
+        if not authoritative_source_document_id or not authoritative_source_document_id.strip():
+            raise ValueError("email evidence lacks authoritative source_document_id")
+        if source_document_id is not None and source_document_id != authoritative_source_document_id:
+            raise ValueError("source_document_id does not match immutable email evidence")
         mapping_id = str(mapping.get("mapping_id") or "")
         if not mapping_id:
             raise ValueError("email mapping must have a deterministic mapping_id")
         entities = mapping.get("entities")
         relations = mapping.get("relations")
         if not isinstance(entities, list) or not isinstance(relations, list):
-            raise ValueError("email mapping entities and relations must be arrays")
+            raise TypeError("email mapping entities and relations must be arrays")
         namespace = f"email:{_digest(record.stream_id)}:"
         entity_ids: dict[str, str] = {}
         operations: list[MaintenancePatchOperation] = []
@@ -56,14 +59,14 @@ class EmailProposalMaterializer:
 
         def provenance(operation_id: str) -> MaintenanceProvenance:
             return MaintenanceProvenance(
-                source_document_id=source_document_id,
+                source_document_id=authoritative_source_document_id,
                 maintenance_run_id=f"{run_id}:{operation_id}",
                 confidence=confidence,
             )
 
         for entity in entities:
             if not isinstance(entity, Mapping):
-                raise ValueError("email mapping entity must be an object")
+                raise TypeError("email mapping entity must be an object")
             candidate_id = str(entity.get("entity_id") or "").strip()
             class_id = str(entity.get("class_id") or "").strip()
             if not candidate_id or not class_id:
@@ -74,7 +77,7 @@ class EmailProposalMaterializer:
             entity_ids[candidate_id] = graph_id
             properties = entity.get("properties")
             if not isinstance(properties, Mapping):
-                raise ValueError("email entity properties must be an object")
+                raise TypeError("email entity properties must be an object")
             flattened = {
                 "email_entity_id": candidate_id,
                 "ontology_class": class_id,
@@ -101,7 +104,7 @@ class EmailProposalMaterializer:
 
         for index, relation in enumerate(relations):
             if not isinstance(relation, Mapping):
-                raise ValueError("email mapping relation must be an object")
+                raise TypeError("email mapping relation must be an object")
             relation_id = str(relation.get("relation_id") or "").strip()
             subject_id = str(relation.get("subject_id") or "").strip()
             targets = relation.get("target_ids")
@@ -136,7 +139,7 @@ class EmailProposalMaterializer:
         )
         return EmailProposalPatch(
             patch=patch,
-            source_document_id=source_document_id,
+            source_document_id=authoritative_source_document_id,
             mapping_id=mapping_id,
         )
 

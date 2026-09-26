@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import sys
 import time
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 
 import pytest
 from jose import jwt
+from kogwistar.ontology import OntologyPackage
 
 from kogwistar_llm_wiki import (
     IngestPipeline,
@@ -19,8 +22,19 @@ from kogwistar_llm_wiki import (
 from kogwistar_llm_wiki.email import (
     EmailEvidenceRecord,
     EmailIngestRequest,
+    EmailOntologyCatalog,
     InMemoryEmailEvidenceStore,
 )
+
+EMAIL_PLUGIN_SRC = Path(__file__).parents[2] / "kogwistar-email-plugin" / "src"
+if str(EMAIL_PLUGIN_SRC) not in sys.path:
+    sys.path.insert(0, str(EMAIL_PLUGIN_SRC))
+
+
+def _email_package() -> OntologyPackage:
+    plugin = pytest.importorskip("kogwistar_email_plugin")
+
+    return OntologyPackage.model_validate(plugin.email_ontology_json())
 
 
 @pytest.fixture(autouse=True)
@@ -107,6 +121,39 @@ def test_workbench_http_exposes_container_health_endpoint():
         engines.close()
 
 
+def test_workbench_http_serves_safe_email_viewer_plugin() -> None:
+    engines = build_in_memory_namespace_engines()
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        build_workbench_handler(WorkbenchApi(IngestPipeline(engines))),
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/email/viewer")
+        response = connection.getresponse()
+        body = response.read().decode("utf-8")
+        assert response.status == 200
+        assert response.getheader("content-type") == "text/html; charset=utf-8"
+        assert "content-security-policy" in {
+            key.lower(): value for key, value in response.getheaders()
+        }
+        assert "textContent" in body
+        assert "innerHTML" not in body
+        assert "/api/email/view" in body
+        assert "structural_proposals" in body
+        assert "payload.proposals" not in body
+        assert "/api/email/accept" in body
+        assert "/api/email/memory/promote" in body
+        assert "confirmed: true" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        engines.close()
+
+
 def test_workbench_http_exposes_acl_checked_email_viewer() -> None:
     engines = build_in_memory_namespace_engines()
     store = InMemoryEmailEvidenceStore()
@@ -154,6 +201,96 @@ def test_workbench_http_exposes_acl_checked_email_viewer() -> None:
         assert payload["status"] == "ok"
         assert payload["mapping_id"] == "mapping-1"
         assert payload["body_text"] == "viewer body"
+        assert payload["structural_proposals"] == {
+            "mapping_id": "mapping-1",
+            "entities": [],
+            "relations": [],
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        api.close()
+        engines.close()
+
+
+def test_workbench_http_exposes_email_ontology_search() -> None:
+    engines = build_in_memory_namespace_engines()
+    api = WorkbenchApi(
+        IngestPipeline(engines),
+        email_ontology_catalog_factory=lambda workspace_id: EmailOntologyCatalog(
+            workspace_id=workspace_id,
+            packages=(_email_package(),),
+        ),
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "GET",
+            "/api/email/ontology/search?workspace_id=email-http&query=attachment",
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["status"] == "ok"
+        assert any(item["descriptor_id"] == "Attachment" for item in payload["results"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        api.close()
+        engines.close()
+
+
+def test_workbench_http_enqueues_email_sync_without_credentials() -> None:
+    class FakeScheduler:
+        def __init__(self) -> None:
+            self.request = None
+
+        def enqueue(self, request):
+            self.request = request
+            return "email-job-1"
+
+    engines = build_in_memory_namespace_engines()
+    scheduler = FakeScheduler()
+    api = WorkbenchApi(
+        IngestPipeline(engines),
+        email_sync_scheduler=scheduler,
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        body = json.dumps(
+            {
+                "workspace_id": "email-http",
+                "connector_id": "connector-1",
+                "cycle_id": "cycle-1",
+                "owner_id": "worker-1",
+            }
+        ).encode()
+        connection.request(
+            "POST",
+            "/api/email/sync/enqueue",
+            body=body,
+            headers={"content-type": "application/json", "content-length": str(len(body))},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 202
+        assert payload == {
+            "status": "queued",
+            "workspace_id": "email-http",
+            "connector_id": "connector-1",
+            "cycle_id": "cycle-1",
+            "job_id": "email-job-1",
+        }
+        assert scheduler.request is not None
+        assert not hasattr(scheduler.request, "credential")
     finally:
         server.shutdown()
         server.server_close()

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import asdict, dataclass
 import json
-from pathlib import Path
 import sqlite3
 import time
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Protocol
 
 
