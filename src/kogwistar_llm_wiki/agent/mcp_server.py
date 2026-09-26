@@ -43,6 +43,7 @@ READ_TOOL_NAMES = frozenset(
         "history",
         "memory_recall",
         "memory_review",
+        "email_view",
     }
 )
 
@@ -281,6 +282,18 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "limit": {"default": 50, "type": "integer"},
                 },
                 required=("workspace_id",),
+            ),
+        ),
+        (
+            "email_view",
+            "View an authorized parsed email and its pending structural proposals.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "stream_id": string(),
+                    "source_revision_id": string(),
+                },
+                required=("workspace_id", "stream_id", "source_revision_id"),
             ),
         ),
         (

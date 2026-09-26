@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import asdict
 from typing import Any, cast
 
 from ..codex.codex_memory import CodexMemoryService
@@ -20,6 +21,7 @@ from ..compose.validation import check_compose_text
 from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
+from ..email import EmailEvidenceStore, EmailIngestRequest, EmailRuntime, EmailViewer
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from ..maintenance.maintenance_patches import MaintenancePatch
@@ -59,6 +61,8 @@ class WorkbenchApi:
         codex_worker_count: int = 0,
         trace_sink: Callable[[dict[str, object]], None] | None = None,
         settings_path: str | None = None,
+        email_evidence_store: EmailEvidenceStore | None = None,
+        email_authorize_stream: Callable[[str, str], bool] | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = CodexMemoryService(pipeline.engines)
@@ -69,6 +73,15 @@ class WorkbenchApi:
         )
         self.agent_responder = agent_responder
         self.cockpit_responder = cockpit_responder
+        self.email_runtime = EmailRuntime(
+            pipeline=pipeline,
+            store=email_evidence_store,
+            authorize_stream=email_authorize_stream,
+        )
+        self.email_viewer = EmailViewer(
+            self.email_runtime.store,
+            authorize_stream=email_authorize_stream or (lambda _workspace_id, _stream_id: True),
+        )
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
         self._confirmation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._confirmation_locks_guard = threading.Lock()
@@ -145,6 +158,26 @@ class WorkbenchApi:
         self, payload: Mapping[str, object] | list[Mapping[str, object]]
     ) -> dict[str, object]:
         return self.codex_memory.capture(payload)
+
+    def ingest_email(self, request: EmailIngestRequest) -> dict[str, object]:
+        """Ingest one authorized immutable RFC822 message through the plugin."""
+
+        return asdict(self.email_runtime.ingest(request))
+
+    def view_email(
+        self,
+        *,
+        workspace_id: str,
+        stream_id: str,
+        source_revision_id: str,
+    ) -> dict[str, object]:
+        """Return an ACL-checked, non-mutating email viewer projection."""
+
+        return self.email_viewer.get(
+            workspace_id=workspace_id,
+            stream_id=stream_id,
+            source_revision_id=source_revision_id,
+        )
 
     def review_memory(
         self,

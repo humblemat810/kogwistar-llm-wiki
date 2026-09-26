@@ -55,6 +55,13 @@ class AgentReadToolsMixin:
             limit=int(arguments.get("limit") or 50),
         )
 
+    def email_view(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.view_email(
+            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            stream_id=str(arguments.get("stream_id") or "").strip(),
+            source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
+        )
+
     def hypergraph_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         payload = _bounded_lens_arguments(arguments)
         payload.setdefault("max_hyperedges", 12)

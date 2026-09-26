@@ -21,6 +21,7 @@ class AgentToolCatalogMixin:
             "memory_recall",
             "memory_capture",
             "memory_review",
+            "email_view",
             "propose",
             "confirm",
         )
@@ -39,6 +40,7 @@ class AgentToolCatalogMixin:
             "memory_recall": "Recall bounded, evidence-backed project memory for relevant work.",
             "memory_capture": "Capture a structured, evidence-backed project memory record.",
             "memory_review": "Review project memory records, evidence, lifecycle, and conflicts.",
+            "email_view": "View an authorized parsed email and its pending structural proposals.",
             "propose": "Validate a candidate durable knowledge change without applying it.",
             "confirm": "Explicitly approve and apply a previously validated knowledge change.",
         }
@@ -58,6 +60,7 @@ class AgentToolCatalogMixin:
                 "memory_recall": self.memory_recall,
                 "memory_capture": self.memory_capture,
                 "memory_review": self.memory_review,
+                "email_view": self.email_view,
                 "propose": self.propose,
                 "confirm": self.confirm,
             }
