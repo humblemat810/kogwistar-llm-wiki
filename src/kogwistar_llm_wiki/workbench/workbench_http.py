@@ -142,10 +142,27 @@ def build_workbench_handler(
                     if body is None:
                         self._write_json({"error": "not_found"}, status=404)
                         return
+                elif parsed.path == "/api/email/view":
+                    workspace_id = _first(query, "workspace_id", "")
+                    stream_id = _first(query, "stream_id", "")
+                    source_revision_id = _first(query, "source_revision_id", "")
+                    if not workspace_id or not stream_id or not source_revision_id:
+                        raise ValueError(
+                            "workspace_id, stream_id, and source_revision_id are required"
+                        )
+                    self._require_scope("read", workspace_id)
+                    body = api.view_email(
+                        workspace_id=workspace_id,
+                        stream_id=stream_id,
+                        source_revision_id=source_revision_id,
+                    )
                 else:
                     self._write_json({"error": "not_found"}, status=404)
                     return
             except _RouteHandled:
+                return
+            except PermissionError as exc:
+                self._write_json({"error": "forbidden", "detail": str(exc)}, status=403)
                 return
             except (KeyError, TypeError, ValueError) as exc:
                 self._write_json({"error": "invalid_request", "detail": str(exc)}, status=400)

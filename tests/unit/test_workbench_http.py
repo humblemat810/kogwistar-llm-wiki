@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -14,6 +15,11 @@ from kogwistar_llm_wiki import (
     WorkbenchApi,
     build_in_memory_namespace_engines,
     build_workbench_handler,
+)
+from kogwistar_llm_wiki.email import (
+    EmailEvidenceRecord,
+    EmailIngestRequest,
+    InMemoryEmailEvidenceStore,
 )
 
 
@@ -98,6 +104,61 @@ def test_workbench_http_exposes_container_health_endpoint():
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+        engines.close()
+
+
+def test_workbench_http_exposes_acl_checked_email_viewer() -> None:
+    engines = build_in_memory_namespace_engines()
+    store = InMemoryEmailEvidenceStore()
+    content_sha256 = hashlib.sha256(b"raw email").hexdigest()
+    store.put(
+        EmailIngestRequest(
+            workspace_id="email-http",
+            stream_id="stream-1",
+            source_key="uid:1",
+            source_revision_id="revision-1",
+            raw_bytes=b"raw email",
+        ),
+        EmailEvidenceRecord(
+        workspace_id="email-http",
+        stream_id="stream-1",
+        source_key="uid:1",
+        source_revision_id="revision-1",
+        content_sha256=content_sha256,
+        parsed_payload={
+            "subject": "HTTP email",
+            "date_header": None,
+            "sender": [],
+            "to": [],
+            "cc": [],
+            "text_plain": ["viewer body"],
+            "attachments": [],
+        },
+        mapping_payload={"mapping_id": "mapping-1", "entities": [], "relations": []},
+        blob_ref="sha256:" + content_sha256,
+        ),
+    )
+    api = WorkbenchApi(IngestPipeline(engines), email_evidence_store=store)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "GET",
+            "/api/email/view?workspace_id=email-http&stream_id=stream-1&source_revision_id=revision-1",
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["status"] == "ok"
+        assert payload["mapping_id"] == "mapping-1"
+        assert payload["body_text"] == "viewer body"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        api.close()
         engines.close()
 
 
