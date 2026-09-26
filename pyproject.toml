@@ -167,7 +167,6 @@ markers = [
     "e2e: end-to-end tests spanning multiple running services",
     "requires_ollama: tests that require a local Ollama service",
     "requires_chroma: tests that require the optional Chroma package",
-    "requires_email_plugin: tests that require the optional email plugin",
 ]
 
 [tool.ruff]

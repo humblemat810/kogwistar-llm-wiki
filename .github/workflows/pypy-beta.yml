@@ -189,7 +189,7 @@ jobs:
           LOG_LEVEL: WARNING
         run: >-
           python -m pytest
-          -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_email_plugin"
+          -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama"
           tests -q --durations=25 --durations-min=0 --resource-report
           --resource-report-json "test-results/resource-report-pypy312.json"
           -p no:cacheprovider

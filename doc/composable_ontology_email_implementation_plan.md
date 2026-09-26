@@ -103,7 +103,7 @@ Delivered in the current branch:
 - [ ] Open one issue per milestone with explicit repository ownership.
 - [ ] Create a fresh Kogwistar feature branch from merged `main` only when the
   minimal core contract is approved.
-- [ ] Create the email plugin repository with independent CI, release, and
+- [x] Create the email plugin repository with independent CI, release, and
   dependency policy.
 - [ ] Create a fresh LLM-Wiki feature branch from merged dependency revisions.
 - [ ] Add sanitized synthetic RFC822 fixtures for plain text, HTML alternative,

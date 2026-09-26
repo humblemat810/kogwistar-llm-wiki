@@ -16,8 +16,7 @@ from pathlib import Path
 
 PYTEST_MARKERS = (
     "ci and not ci_full and not slow and not manual and not llm_real and "
-    "not longrun and not requires_ollama and not requires_chroma and "
-    "not requires_email_plugin"
+    "not longrun and not requires_ollama and not requires_chroma"
 )
 
 

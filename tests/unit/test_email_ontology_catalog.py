@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 from kogwistar.engine_core.embedding_profile import EmbeddingProfile
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
@@ -13,16 +10,11 @@ from kogwistar_llm_wiki.email import (
     EmailOntologySemanticProjection,
 )
 from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
-
-EMAIL_PLUGIN_SRC = Path(__file__).parents[2] / "kogwistar-email-plugin" / "src"
-if str(EMAIL_PLUGIN_SRC) not in sys.path:
-    sys.path.insert(0, str(EMAIL_PLUGIN_SRC))
+from tests._helpers.fake_email_plugin import email_ontology_json
 
 
 def _email_package() -> OntologyPackage:
-    plugin = pytest.importorskip("kogwistar_email_plugin")
-
-    return OntologyPackage.model_validate(plugin.email_ontology_json())
+    return OntologyPackage.model_validate(email_ontology_json())
 
 
 def test_email_ontology_catalog_composes_and_searches_descriptors() -> None:

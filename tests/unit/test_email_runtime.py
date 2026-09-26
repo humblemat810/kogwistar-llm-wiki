@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,11 +20,6 @@ from kogwistar_llm_wiki.email import (
 )
 from kogwistar_llm_wiki.email.review import EmailReviewState
 
-EMAIL_PLUGIN_SRC = Path(__file__).parents[2] / "kogwistar-email-plugin" / "src"
-if str(EMAIL_PLUGIN_SRC) not in sys.path:
-    sys.path.insert(0, str(EMAIL_PLUGIN_SRC))
-
-
 RAW_EMAIL = (
     b"From: Alice <alice@example.test>\r\n"
     b"To: Bob <bob@example.test>\r\n"
@@ -38,12 +32,7 @@ RAW_EMAIL = (
 )
 
 
-def _require_email_plugin() -> object:
-    return pytest.importorskip("kogwistar_email_plugin")
-
-
 def test_email_runtime_persists_immutable_evidence_and_pending_mapping(pipeline) -> None:
-    _require_email_plugin()
     store = InMemoryEmailEvidenceStore()
     runtime = EmailRuntime(pipeline=pipeline, store=store)
     request = EmailIngestRequest(
@@ -73,7 +62,6 @@ def test_email_runtime_persists_immutable_evidence_and_pending_mapping(pipeline)
 
 
 def test_email_viewer_checks_workspace_stream_scope_and_escapes_html(pipeline) -> None:
-    _require_email_plugin()
     store = InMemoryEmailEvidenceStore()
     runtime = EmailRuntime(pipeline=pipeline, store=store)
     request = EmailIngestRequest(
@@ -129,7 +117,6 @@ def test_email_viewer_checks_workspace_stream_scope_and_escapes_html(pipeline) -
 
 
 def test_email_evidence_store_rejects_identity_or_digest_mismatch(pipeline) -> None:
-    _require_email_plugin()
     store = InMemoryEmailEvidenceStore()
     runtime = EmailRuntime(pipeline=pipeline, store=store)
     request = EmailIngestRequest(

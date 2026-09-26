@@ -11,9 +11,11 @@ python -m pip install -e .\kogwistar-email-plugin[core]
 ```
 
 The plugin is intentionally not bundled into the base LLM-Wiki image. Root
-unit tests that exercise the cross-repository parser path skip when the
-optional package is absent; the plugin repository owns the parser, adapter,
-GreenMail, and runtime-matrix CI for that package.
+unit tests use a small fake implementation of the published parser, mapping,
+ontology, and viewer contracts, so the host suite does not install or import
+the optional package. The plugin repository owns tests of the real parser,
+adapters, ontology bundle, viewer, GreenMail integration, and its runtime
+matrix CI.
 
 ## Runtime Boundaries
 

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
-from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,19 +16,7 @@ from kogwistar_llm_wiki.email import (
     InMemoryEmailSyncLeaseStore,
 )
 from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
-
-EMAIL_PLUGIN_SRC = Path(__file__).parents[2] / "kogwistar-email-plugin" / "src"
-if str(EMAIL_PLUGIN_SRC) not in sys.path:
-    sys.path.insert(0, str(EMAIL_PLUGIN_SRC))
-
-_email_plugin = pytest.importorskip("kogwistar_email_plugin")
-
-from kogwistar_email_plugin import (  # noqa: E402
-    FileSourceEvent,
-    FileSourceSnapshot,
-    MailConnectorBinding,
-    Rfc822SourceAdapter,
-)
+from tests._helpers.fake_email_plugin import FakeRfc822SourceAdapter
 
 RAW_EMAIL = (
     b"From: Alice <alice@example.test>\r\n"
@@ -43,7 +30,7 @@ RAW_EMAIL = (
 
 @dataclass(frozen=True)
 class OneBatchAdapter:
-    source: Rfc822SourceAdapter
+    source: FakeRfc822SourceAdapter
     raw_bytes: bytes
 
     def sync(self, snapshot: object | None = None) -> object:
@@ -54,7 +41,7 @@ class OneBatchAdapter:
             {
                 "messages": (message,) if snapshot is None else (),
                 "events": (
-                    FileSourceEvent(
+                    SimpleNamespace(
                         kind="message_discovered",
                         stream_id=message.stream_id,
                         source_key=message.source_key,
@@ -64,7 +51,7 @@ class OneBatchAdapter:
                 )
                 if snapshot is None
                 else (),
-                "snapshot": FileSourceSnapshot(
+                "snapshot": SimpleNamespace(
                     stream_id=message.stream_id,
                     source_kind="rfc822",
                     known_keys=(message.source_key,),
@@ -100,15 +87,8 @@ def test_email_plugin_to_viewer_and_memory_end_to_end(pipeline, monkeypatch) -> 
             credential_ref="local/no-secret",
         )
     )
-    plugin_binding = MailConnectorBinding(
-        tenant_id=binding.tenant_id,
-        workspace_id=binding.workspace_id,
-        connector_id=binding.connector_id,
-        account_principal_id=binding.account_principal_id,
-        mailbox_id=binding.mailbox_id,
-    )
     plugin_adapter = OneBatchAdapter(
-        source=Rfc822SourceAdapter(plugin_binding, source_key="uid:1"),
+        source=FakeRfc822SourceAdapter(binding, source_key="uid:1"),
         raw_bytes=RAW_EMAIL,
     )
     sync = EmailSyncService(

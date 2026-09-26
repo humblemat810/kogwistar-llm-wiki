@@ -134,7 +134,7 @@ jobs:
           grep -F -- '--resource-report' "test-results/pytest-help-${{ matrix.label }}.txt" || true
           set +e
           python -m pytest \
-            -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma and not requires_email_plugin" \
+            -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" \
             tests -q --maxfail=1 --tb=long --show-capture=all \
             --durations=25 --durations-min=0 --resource-report \
             --resource-report-json "test-results/resource-report-${{ matrix.label }}.json" \
