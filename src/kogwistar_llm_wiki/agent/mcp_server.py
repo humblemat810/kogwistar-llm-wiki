@@ -19,7 +19,7 @@ from typing import Any
 from mcp import types
 from mcp.server.lowlevel import Server
 
-from ..codex.codex_memory import CodexMemoryRecord
+from ..memory import MemoryRecord
 from ..configuration.identity import (
     LlmWikiIdentity,
     auth_mode,
@@ -89,7 +89,7 @@ def _memory_record_schema() -> dict[str, object]:
     resolve correctly for MCP clients.
     """
 
-    schema = CodexMemoryRecord.model_json_schema()
+    schema = MemoryRecord.model_json_schema()
     definitions = schema.pop("$defs", None)
     if not isinstance(definitions, dict):
         definitions = {}

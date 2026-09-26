@@ -29,7 +29,7 @@ from kogwistar.messaging.models import (
 
 from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
-from kogwistar_llm_wiki.codex.codex_memory import CodexMemoryService
+from kogwistar_llm_wiki.memory import MemoryService
 from kogwistar_llm_wiki.codex.codex_workbench_agent import (
     CodexCliSettings,
     CodexProcessRunner,
@@ -350,8 +350,8 @@ def run(
         },
     }
     fixed_states = {
-        CodexMemoryService.__name__: (
-            _factory_with_kwargs(CodexMemoryService, object(), enabled=False),
+        MemoryService.__name__: (
+            _factory_with_kwargs(MemoryService, object(), enabled=False),
             _factory(_legacy_fixed_state_type({"engines": object(), "enabled": False, "max_records_per_capture": 8, "max_recall_records": 12}), ()),
         ),
         SemanticLensService.__name__: (

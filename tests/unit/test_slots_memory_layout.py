@@ -8,7 +8,7 @@ import pytest
 
 from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
-from kogwistar_llm_wiki.codex.codex_memory import CodexMemoryService
+from kogwistar_llm_wiki.memory import MemoryService
 from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings
 from kogwistar_llm_wiki.compose.options import ComposeOptions
 from kogwistar_llm_wiki.configuration.identity import LlmWikiIdentity
@@ -109,7 +109,7 @@ def test_fixed_state_services_use_strict_slots(tmp_path) -> None:
         EvidenceClosureValidator(object()),
         SettingsService(object()),
         CodexBridgeState(token="secret", settings=CodexCliSettings()),
-        CodexMemoryService(object(), enabled=False),
+        MemoryService(object(), enabled=False),
         SemanticLensService(object(), query_service=object()),
         ReviewQueryService(object()),
         WorkbenchInteractionStore(object()),

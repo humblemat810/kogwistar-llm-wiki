@@ -29,15 +29,18 @@ falls back to the checked-in fixture and visibly remains bounded/offline.
 `POST /api/proposal/validate` validates a proposal against the current lens;
 it does not mutate the graph or bypass confirmation.
 
-The workbench also includes an **Email evidence** panel for the optional
-`kogwistar-email-plugin`. Enter the authorized stream ID and immutable source
-revision ID to load the ACL-checked projection. The panel renders the returned
-body as text, shows mapping review state, and sends `confirmed: true` only when
-the operator explicitly chooses **Accept mapping**.
+The workbench mounts the **Email evidence** route from the optional
+`kogwistar-email-plugin` in a generic plugin frame. The plugin owns the
+email-specific controls and rendering. Enter the authorized stream ID and
+immutable source revision ID to load the ACL-checked projection. The plugin
+renders the returned body as text, shows mapping review state, and sends
+`confirmed: true` only when the operator explicitly chooses **Accept mapping**.
+This is an email-topology viewer, not a generic wiki graph viewer.
 
 ```mermaid
 flowchart LR
-    FORM["Email evidence panel"] --> VIEW["GET /api/email/view"]
+    HOST["LLM-Wiki plugin frame"] --> PLUGIN["email plugin viewer"]
+    PLUGIN --> VIEW["GET /api/email/view"]
     VIEW --> TEXT["safe text projection"]
     TEXT -->|pending| ACCEPT["explicit Accept mapping"]
     ACCEPT --> POST["POST /api/email/accept"]

@@ -226,33 +226,17 @@ test("a live Codex lens failure stays visible instead of replacing the graph wit
   await expect(page.getByText("Verifier").first()).toBeVisible();
 });
 
-test("email viewer loads escaped evidence and requires explicit mapping acceptance", async ({ page }) => {
-  let accepted = false;
-  await page.route("**/api/email/view**", async (route) => {
-    await route.fulfill({ json: {
-      status: "ok", subject: "<unsafe subject>", date: "Tue, 22 Sep 2026 10:00:00 +0000",
-      from: [{ display_name: "Alice", address: "alice@example.test" }],
-      to: [{ display_name: "Bob", address: "bob@example.test" }],
-      body_text: "<script>should remain text</script>", mapping_id: "mapping-1",
-      mapping_status: accepted ? "accepted" : "pending",
-      review: { status: accepted ? "accepted" : "pending", source_document_id: "email-source:1" },
-    } });
-  });
-  await page.route("**/api/email/accept", async (route) => {
-    accepted = true;
-    await route.fulfill({ json: { status: "applied", mapping_id: "mapping-1", patch_id: "patch-1" } });
+test("workbench mounts the email plugin viewer route", async ({ page }) => {
+  await page.route("**/email/viewer**", async (route) => {
+    await route.fulfill({
+      contentType: "text/html",
+      body: "<!doctype html><html><body><h1>Email evidence plugin viewer</h1><p>Email topology route.</p></body></html>",
+    });
   });
   await page.goto("/?workspace_id=team-alpha");
-  await page.getByLabel("Email stream ID").fill("mail-stream-a");
-  await page.getByLabel("Email source revision ID").fill("revision-1");
-  await page.getByLabel("Email source document ID").fill("email-source:1");
-  await page.getByRole("button", { name: "Load email" }).click();
-  await expect(page.getByText("<unsafe subject>")).toBeVisible();
-  await expect(page.getByText("<script>should remain text</script>")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Accept mapping" })).toBeVisible();
-  await page.getByRole("button", { name: "Accept mapping" }).click();
-  await expect(page.getByText("Mapping applied.")).toBeVisible();
-  await expect(page.getByText("accepted", { exact: true }).first()).toBeVisible();
+  const emailViewer = page.frameLocator('iframe[title="Email evidence plugin viewer"]');
+  await expect(emailViewer.getByRole("heading", { name: "Email evidence plugin viewer" })).toBeVisible();
+  await expect(emailViewer.getByText("Email topology route.")).toBeVisible();
 });
 
 test("a newer Codex query cancels stale polling and owns the visible answer", async ({ page }) => {

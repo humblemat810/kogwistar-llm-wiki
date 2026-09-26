@@ -10,7 +10,7 @@ one pull request.
 ```mermaid
 flowchart LR
     CORE["Kogwistar\nontology contracts"] --> PLUGIN["Email plugin\nparser + ontology"]
-    PLUGIN --> RUNTIME["LLM-Wiki\nsource runtime + viewer"]
+    PLUGIN --> RUNTIME["LLM-Wiki\nsource runtime + host frame"]
     RUNTIME --> MEMORY["intelligence memory\nproposal/promotion"]
     PLUGIN --> GREENMAIL["GreenMail\nslow integration profile"]
     GREENMAIL --> RUNTIME
@@ -29,7 +29,7 @@ The first runtime slices are now present on the LLM-Wiki feature branch:
 ```mermaid
 flowchart TB
     PARSE["plugin parse_rfc822"] --> STORE["immutable evidence"]
-    STORE --> VIEW["ACL-checked REST/MCP/browser viewer"]
+    STORE --> VIEW["ACL-checked REST/MCP + plugin browser viewer"]
     STORE --> MAP["structural mapping proposal"]
     MAP --> CONFIRM{"explicit confirmation?"}
     CONFIRM -->|no| PENDING["review state: pending"]
@@ -48,7 +48,7 @@ Delivered in the current branch:
 - [x] ACL-checked REST/MCP email viewer projection with escaped text output.
 - [x] Durable review status with SQLite and in-memory implementations.
 - [x] Explicit proposal/acceptance through the existing maintenance fence.
-- [x] Browser email evidence panel and acceptance regression coverage.
+- [x] Email plugin browser viewer and host-frame acceptance regression coverage.
 - [x] Immutable workspace-scoped source-document binding persisted with email
   evidence, including legacy SQLite migration and mismatch rejection.
 - [x] ACL-first ontology descriptor search through Kogwistar's catalog, with
@@ -75,7 +75,8 @@ Delivered in the current branch:
 - [x] Local end-to-end coverage flows from the plugin parser through the
   viewer, accepted mapping, and memory promotion.
 - [x] A standalone `/email/viewer` browser plugin shell uses the existing
-  ACL-checked JSON route and safe text rendering without embedding mail HTML.
+  ACL-checked JSON route and safe text rendering without embedding mail HTML;
+  LLM-Wiki only mounts the plugin route and does not implement email UI.
 
 ## Current Capability Audit
 

@@ -1,13 +1,14 @@
-"""Public facade for Codex integration and project-memory boundaries."""
+"""Public facade for Codex integration and backward-compatible memory names."""
 
 from .codex_bridge import bridge_settings_from_environment, serve_codex_bridge
-from .codex_memory import (
-    CodexMemoryError,
-    CodexMemoryRecord,
-    CodexMemoryService,
+from ..memory import (
     MemoryDisabledError,
     MemoryEvidence,
+    MemoryRecord,
+    MemoryService,
+    MemoryValidationError,
 )
+
 from .codex_workbench_agent import (
     CodexAppServerRunner,
     CodexCliCockpitResponder,
@@ -16,6 +17,11 @@ from .codex_workbench_agent import (
     HostCockpitResponder,
 )
 
+CodexMemoryError = MemoryValidationError
+CodexMemoryRecord = MemoryRecord
+CodexMemoryService = MemoryService
+
+# Keep these names available to callers of the original Codex-facing facade.
 __all__ = [
     "CodexAppServerRunner",
     "CodexCliCockpitResponder",
@@ -27,6 +33,9 @@ __all__ = [
     "HostCockpitResponder",
     "MemoryDisabledError",
     "MemoryEvidence",
+    "MemoryRecord",
+    "MemoryService",
+    "MemoryValidationError",
     "bridge_settings_from_environment",
     "serve_codex_bridge",
 ]

@@ -6,7 +6,7 @@ import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
-from ..codex.codex_memory import CodexMemoryService
+from ..memory import MemoryService
 from .review import EmailReviewStateStore
 from .runtime import EmailEvidenceRecord, EmailEvidenceStore
 
@@ -33,7 +33,7 @@ class EmailMemoryPromotionService:
         *,
         evidence_store: EmailEvidenceStore,
         review_store: EmailReviewStateStore,
-        memory_service: CodexMemoryService,
+        memory_service: MemoryService,
         authorize_stream: Callable[[str, str], bool],
     ) -> None:
         self.evidence_store = evidence_store

@@ -14,12 +14,12 @@ from .archiving.validation import (
     inspect_archive,
     verify_archive,
 )
-from .codex.codex_memory import (
-    CodexMemoryError,
-    CodexMemoryRecord,
-    CodexMemoryService,
+from .memory import (
     MemoryDisabledError,
     MemoryEvidence,
+    MemoryRecord,
+    MemoryService,
+    MemoryValidationError,
 )
 from .codex.codex_workbench_agent import (
     CodexAppServerRunner,
@@ -158,6 +158,10 @@ from .workbench.workbench_background import (
 )
 from .workbench.workbench_http import build_workbench_handler, serve_workbench
 
+CodexMemoryError = MemoryValidationError
+CodexMemoryRecord = MemoryRecord
+CodexMemoryService = MemoryService
+
 __all__ = [
     "ARCHIVE_FORMAT_VERSION",
     "DEFAULT_COLQWEN_MODEL",
@@ -225,6 +229,9 @@ __all__ = [
     "MappingAssetResolver",
     "MemoryDisabledError",
     "MemoryEvidence",
+    "MemoryRecord",
+    "MemoryService",
+    "MemoryValidationError",
     "MultimodalEmbeddingProfile",
     "MultimodalEncoder",
     "MultimodalImageQueryEncoder",

@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from kogwistar_llm_wiki.codex.codex_memory import CodexMemoryService
+from kogwistar_llm_wiki.memory import MemoryService
 from kogwistar_llm_wiki.email import (
     EmailEvidenceRecord,
     EmailIngestRequest,
@@ -73,7 +73,7 @@ def _service(namespace_engines):
     return EmailMemoryPromotionService(
         evidence_store=evidence,
         review_store=reviews,
-        memory_service=CodexMemoryService(namespace_engines, enabled=True),
+        memory_service=MemoryService(namespace_engines, enabled=True),
         authorize_stream=lambda _workspace, _stream: True,
     )
 

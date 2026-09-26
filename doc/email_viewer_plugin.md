@@ -73,15 +73,19 @@ structural proposals with their review state (`pending`, `accepted`, or
 from immutable evidence. Email headers are evidence claims, not ACL authority.
 The viewer does not return raw bytes or execute HTML.
 
-The browser workbench exposes the same projection through the **Email evidence**
-panel. It accepts `workspace_id` from the active workspace and asks the user
-for the stream and immutable source revision. The panel renders the returned
-`body_text` as text, never with `dangerouslySetInnerHTML`, and only enables
-acceptance after a source document ID is supplied.
+The email plugin owns the browser viewer implementation. LLM-Wiki only mounts
+the installed plugin route inside a generic plugin frame and supplies the
+active workspace as route context. This keeps the viewer specific to the email
+plugin's stream, evidence, review, and graph topology rather than turning it
+into a generic wiki graph viewer. The plugin asks for the stream and immutable
+source revision, renders returned `body_text` as text, never with
+`dangerouslySetInnerHTML`, and only enables acceptance after a source document
+ID is supplied.
 
-The standalone browser shell is available at `GET /email/viewer`. It contains
-no message data, uses same-origin fetches to `/api/email/view`, and renders all
-returned values with DOM `textContent`. The response sets a restrictive CSP,
+The standalone plugin browser shell is available at `GET /email/viewer` when
+`kogwistar-email-plugin` is installed. It contains no message data, uses
+same-origin fetches to `/api/email/view`, and renders all returned values with
+DOM `textContent`. The response sets a restrictive CSP,
 `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`; mailbox
 authorization remains enforced by the JSON endpoint for every lookup.
 

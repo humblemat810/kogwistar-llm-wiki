@@ -49,7 +49,7 @@ flowchart LR
     MAIL["mailbox event stream"] --> PLUGIN["email plugin\nparse + ontology mapping"]
     PLUGIN --> RAW["immutable source revision"]
     PLUGIN --> DERIVED["mapping derivation\npending"]
-    RAW --> VIEW["email viewer\nACL-checked projection"]
+    RAW --> VIEW["email plugin viewer\nACL-checked projection"]
     DERIVED --> REVIEW["review state"]
     REVIEW -->|confirmed| PATCH["maintenance patch fence"]
     PATCH --> KG["curated_kg\nexisting nodes + edges"]
