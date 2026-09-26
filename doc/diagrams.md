@@ -2,6 +2,53 @@
 
 ---
 
+## Composable Ontology And Email Intelligence
+
+These diagrams describe the optional email source path. The email plugin owns
+parsing and declarative vocabulary; Kogwistar owns reusable ontology/catalog
+mechanics; LLM-Wiki owns ACL binding, review, acceptance, and memory policy.
+
+```mermaid
+flowchart LR
+    MAIL["mailbox / RFC822 bytes"] --> PLUGIN["kogwistar-email-plugin"]
+    PLUGIN --> EVIDENCE["immutable source evidence"]
+    PLUGIN --> ONTOLOGY["email ontology package"]
+    ONTOLOGY --> CORE["Kogwistar composition + catalog"]
+    EVIDENCE --> WIKI["LLM-Wiki mapping proposal"]
+    CORE --> WIKI
+    WIKI --> REVIEW["review state"]
+    REVIEW -->|confirmed| FENCE["maintenance patch fence"]
+    FENCE --> GRAPH["curated graph / memory"]
+    FENCE -. prohibited .-> EVIDENCE
+```
+
+```mermaid
+sequenceDiagram
+    participant Browser as Email viewer
+    participant API as Workbench REST/MCP
+    participant Evidence as Evidence store
+    participant Review as Review store
+    participant Patch as Maintenance fence
+
+    Browser->>API: view(workspace, stream, revision)
+    API->>Evidence: read exact revision + derivation
+    API->>Review: read mapping status
+    API-->>Browser: escaped message + proposal status
+    Browser->>API: accept(confirmed=false)
+    API->>Review: persist pending
+    API-->>Browser: confirmation_required
+    Browser->>API: accept(confirmed=true)
+    API->>Patch: validate ACL, provenance, raw-fact fence
+    Patch-->>API: applied / needs_review
+    API->>Review: persist final state
+```
+
+The browser never receives executable HTML, credentials, or authority derived
+from message headers. Repeating an accepted request returns the stored result
+instead of applying a second graph patch.
+
+---
+
 ## CLI Spider Map
 
 > Read from the centre outward. Each arm is a path through the CLI.
