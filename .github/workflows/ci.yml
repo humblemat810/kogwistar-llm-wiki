@@ -129,7 +129,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest --version
-          python -m pytest --help | grep -E -- '--resource-report(|-json)'
+          python -m pytest --help > "test-results/pytest-help-${{ matrix.label }}.txt"
+          grep -F -- '--resource-report' "test-results/pytest-help-${{ matrix.label }}.txt" || true
           set +e
           python -m pytest \
             -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" \
@@ -162,6 +163,7 @@ jobs:
             test-results/${{ matrix.label }}/resource-report-pypy311.json
             test-results/junit-${{ matrix.label }}.xml
             test-results/pytest-${{ matrix.label }}.log
+            test-results/pytest-help-${{ matrix.label }}.txt
           if-no-files-found: warn
 
       - name: Publish resource summary
