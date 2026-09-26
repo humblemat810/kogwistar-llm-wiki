@@ -99,7 +99,16 @@ def main() -> int:
     results = (root / args.results_dir).resolve()
     results.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    source_paths = [root / name for name in ("kogwistar", "kg-doc-parser", "kogwistar-obsidian-sink", "src")]
+    source_paths = [
+        root / name
+        for name in (
+            "kogwistar",
+            "kg-doc-parser",
+            "kogwistar-obsidian-sink",
+            "kogwistar-email-plugin/src",
+            "src",
+        )
+    ]
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = os.pathsep.join(str(path) for path in source_paths) + (
         os.pathsep + existing_pythonpath if existing_pythonpath else ""
