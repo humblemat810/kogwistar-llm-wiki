@@ -17,7 +17,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_control import (
 )
 
 
-def test_default_request_rounds_are_two_and_configurable(monkeypatch) -> None:
+def test_default_request_rounds_allow_one_follow_up_and_are_configurable(monkeypatch) -> None:
     monkeypatch.delenv("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", raising=False)
     assert configured_default_request_max_rounds() == 2
     monkeypatch.setenv("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "4")

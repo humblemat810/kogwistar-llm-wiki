@@ -22,9 +22,11 @@ class ComposeOptions:
     auth_mode: str = "disabled"
     model_revision: str = ""
     embedding_dimension: int = 1024
-    embedding_max_model_len: int = 8192
-    embedding_crop_token_budget: int = 7680
-    embedding_gpu_memory_utilization: float = 0.86
+    # Defaults match the validated Ovis Omni vLLM profile. Operators selecting
+    # another model must provide its tested context and memory settings.
+    embedding_max_model_len: int = 512
+    embedding_crop_token_budget: int = 480
+    embedding_gpu_memory_utilization: float = 0.80
     embedding_vllm_enforce_eager: bool = True
     embedding_vllm_max_num_seqs: int = 1
     postgres_password: str = "change-this-development-password"

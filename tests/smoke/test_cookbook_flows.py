@@ -16,6 +16,9 @@ from kogwistar_llm_wiki.agent.gateway import AgentGateway
 from kogwistar_llm_wiki.archiving.operations import create_archive, restore_archive
 from kogwistar_llm_wiki.archiving.validation import verify_archive
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.maintenance.maintenance_planner import (
+    decide_next_maintenance_phase,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -97,6 +100,29 @@ def test_cookbook_gateway_source_query_maintenance_and_revision_flow() -> None:
                 "max_steps": 1,
             }
         )
+        maintenance_jobs = pipeline.engines.conversation.jobs.list(
+            namespace=WorkspaceNamespaces("cookbook-kb").maintenance_jobs,
+            limit=10,
+        )
+        request_job = next(
+            job for job in maintenance_jobs if str(job.job_id) in maintenance["job_ids"]
+        )
+        request_payload = request_job.payload
+        assert request_payload["maintenance_max_rounds"] == 2
+        first_follow_up = decide_next_maintenance_phase(
+            request_payload,
+            completed_kind=str(request_payload["maintenance_kind"]),
+        )
+        assert first_follow_up.should_continue is True
+        second_round_payload = {
+            **request_payload,
+            "maintenance_round": 1,
+            "maintenance_phase_index": first_follow_up.next_index,
+        }
+        assert decide_next_maintenance_phase(
+            second_round_payload,
+            completed_kind=str(first_follow_up.next_kind),
+        ).reason == "max_rounds_reached"
         status = gateway.status({"workspace_id": "cookbook-kb"})
 
         assert search["workspace_id"] == "cookbook-kb"

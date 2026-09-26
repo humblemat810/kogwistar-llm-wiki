@@ -80,7 +80,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
           "git+https://github.com/humblemat810/kogwistar-pinecone.git@$LLM_WIKI_PINECONE_REVISION"; \
       else \
         python -m pip install --constraint /app/docker/container-constraints.txt \
-          "kogwistar-pinecone>=0.5,<0.6"; \
+          "kogwistar-pinecone>=0.6,<0.7"; \
       fi; \
     elif [ "$LLM_WIKI_VECTOR_EXTRAS" = "vector-qdrant" ]; then \
       if [ -n "$LLM_WIKI_QDRANT_REVISION" ]; then \
@@ -88,7 +88,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
           "git+https://github.com/humblemat810/kogwistar-qdrant.git@$LLM_WIKI_QDRANT_REVISION"; \
       else \
         python -m pip install --constraint /app/docker/container-constraints.txt \
-          "kogwistar-qdrant>=0.5,<0.6"; \
+          "kogwistar-qdrant>=0.6,<0.7"; \
       fi; \
     elif [ "$LLM_WIKI_VECTOR_EXTRAS" = "vector-all" ]; then \
       if [ -n "$LLM_WIKI_PINECONE_REVISION" ] && [ -n "$LLM_WIKI_QDRANT_REVISION" ]; then \
@@ -97,7 +97,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
           "git+https://github.com/humblemat810/kogwistar-qdrant.git@$LLM_WIKI_QDRANT_REVISION"; \
       else \
         python -m pip install --constraint /app/docker/container-constraints.txt \
-          "kogwistar-pinecone>=0.5,<0.6" "kogwistar-qdrant>=0.5,<0.6"; \
+          "kogwistar-pinecone>=0.6,<0.7" "kogwistar-qdrant>=0.6,<0.7"; \
       fi; \
     elif [ "$LLM_WIKI_VECTOR_EXTRAS" != "none" ]; then \
       echo "Unknown LLM_WIKI_VECTOR_EXTRAS=$LLM_WIKI_VECTOR_EXTRAS" >&2; exit 2; \

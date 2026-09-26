@@ -65,6 +65,18 @@ Thumbs.db
 # Optional local multimodal model checkpoints; never commit model weights.
 /data/models/
 
+# Ovis benchmarks and local model-build outputs.
+/results/
+/.cdc_debug/
+/auth.sqlite
+/collected_tests.json
+/debug.log
+/kogwistar.zip
+
+# Never stage an accidentally exported root-level certificate bundle.
+/*.pem
+/*.crt
+
 #tmp files
 /.tmp-pypy311-mcp
 .tmp-pypy311-fastmcp

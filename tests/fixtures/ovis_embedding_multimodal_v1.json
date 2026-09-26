@@ -1,0 +1,30 @@
+{
+  "version": "ovis_embedding_multimodal_v1",
+  "purpose": "Small optional multimodal smoke subset; not mixed into text-only Recall metrics.",
+  "records": [
+    {
+      "id": "image-00",
+      "modality": "image",
+      "media_path": "tests/fixtures/ovis_multimodal_media/sample_diagram.png",
+      "query_text": "A diagram showing a query connected by an arrow to a result.",
+      "positive_text": "The image contains two labeled boxes, query and result, connected from left to right.",
+      "negative_text": "A photograph of a mountain landscape with a cloudy sky."
+    },
+    {
+      "id": "audio-00",
+      "modality": "audio",
+      "media_path": "tests/fixtures/ovis_multimodal_media/sample_tone.wav",
+      "query_text": "A short mono audio tone.",
+      "positive_text": "The clip is a short steady single-frequency tone.",
+      "negative_text": "A spoken conversation between two people."
+    },
+    {
+      "id": "video-00",
+      "modality": "video",
+      "media_path": "tests/fixtures/ovis_multimodal_media/sample_clip.mp4",
+      "query_text": "A short solid-color video clip.",
+      "positive_text": "The video is a brief static navy-colored frame sequence.",
+      "negative_text": "A fast sports video with multiple moving players."
+    }
+  ]
+}

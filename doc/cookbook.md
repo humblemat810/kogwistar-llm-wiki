@@ -248,8 +248,8 @@ driver, hardware, and service transport affect results.
 
 ### Experimental vLLM comparison
 
-Use vLLM only as a separate GPU comparison target. It requires a pinned image
-digest, an immutable Qwen revision, and a private allowlisted endpoint:
+Use the Ovis vLLM profile as the GPU embedding target. It requires a pinned
+image digest, an immutable model revision, and a private allowlisted endpoint:
 
 ```bash
 python scripts/benchmark_multimodal.py \

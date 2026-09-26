@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 from kogwistar.id_provider import stable_id
+from kogwistar.server.auth_middleware import claims_ctx
 
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 
@@ -53,6 +54,33 @@ def test_pipeline_enqueues_maintenance_job_in_durable_store(pipeline, ingest_req
     assert payload["workspace_id"] == workspace_id
     assert payload["request_node_id"] == _job_field(job, "job_id")
     assert payload["source_document_id"] == pipeline._source_document_id(ingest_request)
+
+
+def test_maintenance_job_carries_only_sanitized_authority_claims(pipeline, ingest_request):
+    token = claims_ctx.set(
+        {
+            "sub": "alice",
+            "security_scope": "tenant-a",
+            "capabilities": ["knowledge.graph.read"],
+            "access_token": "must-not-be-queued",
+            "untrusted_extra": "must-not-be-queued",
+        }
+    )
+    try:
+        pipeline.run(ingest_request)
+    finally:
+        claims_ctx.reset(token)
+
+    jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
+        namespace=WorkspaceNamespaces(ingest_request.workspace_id).maintenance_jobs,
+        limit=10,
+    )
+    authority_claims = _job_payload(jobs[0])["authority_claims"]
+    assert authority_claims == {
+        "sub": "alice",
+        "security_scope": "tenant-a",
+        "capabilities": ["knowledge.graph.read"],
+    }
 
 
 def test_pipeline_enqueues_projection_job_only_for_sync_promotion(pipeline, ingest_request):

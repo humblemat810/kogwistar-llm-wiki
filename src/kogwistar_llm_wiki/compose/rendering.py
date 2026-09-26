@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from .options import ComposeConfigurationError, ComposeOptions, validate_options
 
+OVIS_VLLM_MODEL = "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm"
+OVIS_VLLM_IMAGE = "profchan/kogwistar-llm-wiki-embedding@sha256:fb391acdf8e4dccdb4af597485188119bc5ffe7b545fb0d8d254abc41897999d"
+
 
 def render_compose(options: ComposeOptions) -> str:
     errors = validate_options(options)
@@ -105,7 +108,7 @@ def render_compose(options: ComposeOptions) -> str:
         "      LLM_WIKI_EMBEDDING_VLLM_TOKEN: \"${LLM_WIKI_EMBEDDING_VLLM_TOKEN:-}\"",
         "      LLM_WIKI_EMBEDDING_VLLM_IMAGE: \"${LLM_WIKI_EMBEDDING_VLLM_IMAGE:-}\"",
         f"      LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS: \"${{LLM_WIKI_EMBEDDING_VLLM_ALLOWED_HOSTS:-{'embedding' if embedding_backend == 'vllm' else ''}}}\"",
-        f"      LLM_WIKI_MULTIMODAL_MODEL: \"${{LLM_WIKI_MULTIMODAL_MODEL:-{'Qwen/Qwen3-VL-Embedding-2B' if embedding_url else ''}}}\"",
+        f"      LLM_WIKI_MULTIMODAL_MODEL: \"${{LLM_WIKI_MULTIMODAL_MODEL:-{OVIS_VLLM_MODEL if embedding_backend == 'vllm' else 'Qwen/Qwen3-VL-Embedding-2B' if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_DIMENSION: \"${{LLM_WIKI_MULTIMODAL_DIMENSION:-{options.embedding_dimension if embedding_url else ''}}}\"",
         f"      LLM_WIKI_MULTIMODAL_MODEL_REVISION: \"${{LLM_WIKI_MULTIMODAL_MODEL_REVISION:-{options.model_revision if embedding_url else ''}}}\"",
         f"      LLM_WIKI_EMBEDDING_MAX_MODEL_LEN: \"${{LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-{options.embedding_max_model_len if embedding_url else ''}}}\"",
@@ -194,21 +197,22 @@ def render_compose(options: ComposeOptions) -> str:
     elif options.mode == "gpu" and embedding_backend == "vllm":
         lines.extend([
             "  embedding:",
-            "    image: ${LLM_WIKI_EMBEDDING_VLLM_IMAGE:?Set LLM_WIKI_EMBEDDING_VLLM_IMAGE to a pinned vllm/vllm-openai@sha256 digest}",
+            f"    image: ${{LLM_WIKI_EMBEDDING_VLLM_IMAGE:-{OVIS_VLLM_IMAGE}}}",
             "    mem_limit: ${LLM_WIKI_EMBEDDING_MEMORY_LIMIT:-8g}",
             "    cpus: ${LLM_WIKI_EMBEDDING_CPU_LIMIT:-2.0}",
+            "    entrypoint: [vllm, serve]",
             "    command:",
-            "      - vllm",
-            "      - serve",
-            "      - Qwen/Qwen3-VL-Embedding-2B",
+            f"      - ${{LLM_WIKI_EMBEDDING_MODEL:-{OVIS_VLLM_MODEL}}}",
             "      - --served-model-name",
-            "      - Qwen/Qwen3-VL-Embedding-2B",
+            f"      - ${{LLM_WIKI_EMBEDDING_MODEL:-{OVIS_VLLM_MODEL}}}",
             "      - --revision",
             "      - ${LLM_WIKI_MULTIMODAL_MODEL_REVISION:?Set LLM_WIKI_MULTIMODAL_MODEL_REVISION}",
             "      - --runner",
             "      - pooling",
             "      - --convert",
             "      - embed",
+            '      - --pooler-config',
+            "      - '{\"dimensions\":1024}'",
             "      - --max-model-len",
             f"      - ${{LLM_WIKI_EMBEDDING_MAX_MODEL_LEN:-{options.embedding_max_model_len}}}",
             "      - --gpu-memory-utilization",
@@ -271,5 +275,3 @@ def render_compose(options: ComposeOptions) -> str:
     if options.mode == "gpu" and embedding_backend == "vllm":
         lines.append("  embedding_vllm_hf_cache:")
     return "\n".join(lines) + "\n"
-
-

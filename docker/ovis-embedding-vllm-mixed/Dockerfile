@@ -1,0 +1,15 @@
+FROM vllm/vllm-openai:latest
+
+ARG MODEL_ID=pt810/Ovis-Omni-Embedding-3B-mixed-w2-w4-w8-ct
+ARG MAX_MODEL_LEN=256
+ARG GPU_MEMORY_UTILIZATION=0.75
+ARG EXTRA_VLLM_ARGS=
+ENV MODEL_ID=${MODEL_ID}
+ENV VLLM_RUNNER=pooling
+ENV VLLM_CONVERT=embed
+ENV VLLM_MAX_MODEL_LEN=${MAX_MODEL_LEN}
+ENV VLLM_GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}
+ENV EXTRA_VLLM_ARGS=${EXTRA_VLLM_ARGS}
+
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["vllm serve ${MODEL_PATH:-$MODEL_ID} --runner ${VLLM_RUNNER} --convert ${VLLM_CONVERT} --pooler-config '{\"dimensions\":1024}' --max-model-len ${VLLM_MAX_MODEL_LEN} --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION} --enforce-eager ${EXTRA_VLLM_ARGS}"]

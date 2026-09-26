@@ -21,6 +21,7 @@ from ..maintenance.maintenance_guards import (
     required_stage_for_maintenance,
 )
 from ..maintenance.maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
+from ..configuration.identity import durable_claims_snapshot
 from ..models import (
     IngestPipelineRequest,
 )
@@ -830,6 +831,7 @@ class MaintenanceRequestMixin:
             "durable_layered_parse": bool(
                 request.parser_lane == "workflow_layered" or parse_target is not None
             ),
+            "authority_claims": durable_claims_snapshot(),
         }
         if request.operation_mode == "maintenance_first" and maintenance_kind == "document_seed_graph":
             payload.update(

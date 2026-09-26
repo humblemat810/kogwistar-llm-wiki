@@ -12,8 +12,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from itertools import pairwise
-from typing import Any, Protocol
+from typing import Any
 
+from kogwistar.engine_core import NamedProjectionStore
 from kogwistar.id_provider import stable_id
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -240,18 +241,6 @@ class ParseView(BaseModel):
             if current.region.start_char < previous.region.end_char:
                 raise ValueError("ParseView selections must not overlap")
         return self
-
-
-class NamedProjectionStore(Protocol):
-    def get_named_projection(self, namespace: str, key: str) -> dict[str, Any] | None: ...
-
-    def compare_and_swap_named_projection(
-        self,
-        namespace: str,
-        key: str,
-        payload: dict[str, Any],
-        **values: Any,
-    ) -> bool: ...
 
 
 def generation_id(

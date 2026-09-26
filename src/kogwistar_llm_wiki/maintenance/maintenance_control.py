@@ -23,7 +23,10 @@ from .maintenance_profiles import (
     normalize_profile_ladder,
 )
 
-DEFAULT_REQUEST_MAX_ROUNDS = 2
+# A request gets one initial maintenance round and at most one durable
+# continuation. The stored round counter counts total attempts, not follow-ups.
+DEFAULT_REQUEST_FOLLOW_UPS = 1
+DEFAULT_REQUEST_MAX_ROUNDS = DEFAULT_REQUEST_FOLLOW_UPS + 1
 REQUEST_MAX_ROUNDS_ENV = "LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS"
 REQUEST_ENABLED_ENV = "LLM_WIKI_MAINTENANCE_REQUEST_ENABLED"
 BACKGROUND_ENABLED_ENV = "LLM_WIKI_MAINTENANCE_BACKGROUND_ENABLED"
@@ -313,6 +316,7 @@ def send_control_command(data_dir: str | os.PathLike[str], **command: object) ->
 
 
 __all__ = [
+    "DEFAULT_REQUEST_FOLLOW_UPS",
     "DEFAULT_REQUEST_MAX_ROUNDS",
     "REQUEST_MAX_ROUNDS_ENV",
     "MaintenanceControl",

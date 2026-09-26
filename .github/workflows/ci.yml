@@ -17,9 +17,9 @@ concurrency:
 env:
   # The application imports these sibling repositories at runtime. Keep CI
   # aligned with the revisions used by publish-dockerhub.yml.
-  KOGWISTAR_REVISION: 82bcd0544fa878a4082e40aba070b5f266c122e2
-  KG_DOC_PARSER_REVISION: e7e42760e5578cce7d362b5b0e00996527e2ecbf
-  OBSIDIAN_SINK_REVISION: bb9cec922c156465af8395e0dfb3b3cf76748f5f
+  KOGWISTAR_REVISION: ae24e1663a66deb0e65d6e2bf74a2e5ef317e1ea
+  KG_DOC_PARSER_REVISION: 9a6ad09d779782466808b084396bdd16e3a4ca95
+  OBSIDIAN_SINK_REVISION: 8724c36c5d6fec89db4902baae0610e0ac77e4b8
 
 jobs:
   python-tests:
@@ -126,11 +126,23 @@ jobs:
           KOGWISTAR_LOG_LEVEL: WARNING
           LOG_LEVEL: WARNING
         shell: bash
-        run: >-
-          python -m pytest -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" tests -q
-          --durations=25 --durations-min=0 --resource-report
-          --resource-report-json "test-results/resource-report-${{ matrix.label }}.json"
-          -p no:cacheprovider
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          python -m pytest --version
+          python -m pytest --help > "test-results/pytest-help-${{ matrix.label }}.txt"
+          grep -F -- '--resource-report' "test-results/pytest-help-${{ matrix.label }}.txt" || true
+          set +e
+          python -m pytest \
+            -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" \
+            tests -q --maxfail=1 --tb=long --show-capture=all \
+            --durations=25 --durations-min=0 --resource-report \
+            --resource-report-json "test-results/resource-report-${{ matrix.label }}.json" \
+            --junitxml "test-results/junit-${{ matrix.label }}.xml" \
+            -p no:cacheprovider 2>&1 | tee "test-results/pytest-${{ matrix.label }}.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
 
       - name: Run PyPy 3.11 provider-free CI profile
         if: matrix.is_pypy
@@ -150,6 +162,9 @@ jobs:
           path: |
             test-results/resource-report-${{ matrix.label }}.json
             test-results/${{ matrix.label }}/resource-report-pypy311.json
+            test-results/junit-${{ matrix.label }}.xml
+            test-results/pytest-${{ matrix.label }}.log
+            test-results/pytest-help-${{ matrix.label }}.txt
           if-no-files-found: warn
 
       - name: Publish resource summary

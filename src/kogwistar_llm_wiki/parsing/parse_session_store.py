@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from kogwistar.engine_core import NamedProjectionStore
 
 from .parse_views import ParseFrontierItem, ParseSessionState
 
@@ -11,25 +11,13 @@ class ParseSessionStoreConflict(RuntimeError):
     """Another worker committed this session first."""
 
 
-class _MetadataStore(Protocol):
-    def get_named_projection(self, namespace: str, key: str) -> dict[str, Any] | None: ...
-
-    def compare_and_swap_named_projection(
-        self,
-        namespace: str,
-        key: str,
-        payload: dict[str, Any],
-        **values: Any,
-    ) -> bool: ...
-
-
 class ParseSessionStore:
     """Persist session/frontier state independently from parser temp files."""
 
     __slots__ = ("metadata", "namespace", "workspace_id")
     schema_version = 1
 
-    def __init__(self, metadata: _MetadataStore, *, workspace_id: str) -> None:
+    def __init__(self, metadata: NamedProjectionStore, *, workspace_id: str) -> None:
         self.metadata = metadata
         self.workspace_id = workspace_id
         self.namespace = f"ws:{workspace_id}:projection_state"
