@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from typing import Any, cast
 
-from ..codex.codex_memory import CodexMemoryService
+from ..memory import MemoryService
 from ..compose.options import ComposeOptions, validate_options
 from ..compose.rendering import render_compose
 from ..compose.validation import check_compose_text
@@ -86,7 +86,7 @@ class WorkbenchApi:
         email_sync_scheduler: EmailSyncJobScheduler | None = None,
     ) -> None:
         self.pipeline = pipeline
-        self.codex_memory = CodexMemoryService(pipeline.engines)
+        self.codex_memory = MemoryService(pipeline.engines)
         self.settings = SettingsService(
             pipeline,
             path=settings_path,
