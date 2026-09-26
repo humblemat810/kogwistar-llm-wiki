@@ -126,11 +126,16 @@ jobs:
           KOGWISTAR_LOG_LEVEL: WARNING
           LOG_LEVEL: WARNING
         shell: bash
-        run: >-
-          python -m pytest -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" tests -q
-          --durations=25 --durations-min=0 --resource-report
-          --resource-report-json "test-results/resource-report-${{ matrix.label }}.json"
-          -p no:cacheprovider
+        run: |
+          set -euo pipefail
+          python -m pytest --version
+          python -m pytest --help | grep -E -- '--resource-report(|-json)'
+          python -m pytest \
+            -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" \
+            tests -q --maxfail=1 --tb=long --show-capture=all \
+            --durations=25 --durations-min=0 --resource-report \
+            --resource-report-json "test-results/resource-report-${{ matrix.label }}.json" \
+            -p no:cacheprovider
 
       - name: Run PyPy 3.11 provider-free CI profile
         if: matrix.is_pypy
