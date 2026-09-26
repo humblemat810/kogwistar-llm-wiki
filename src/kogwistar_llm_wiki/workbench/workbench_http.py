@@ -156,6 +156,23 @@ def build_workbench_handler(
                         stream_id=stream_id,
                         source_revision_id=source_revision_id,
                     )
+                elif parsed.path == "/api/email/proposal":
+                    workspace_id = _first(query, "workspace_id", "")
+                    stream_id = _first(query, "stream_id", "")
+                    source_revision_id = _first(query, "source_revision_id", "")
+                    source_document_id = _first(query, "source_document_id", "")
+                    if not all((workspace_id, stream_id, source_revision_id, source_document_id)):
+                        raise ValueError(
+                            "workspace_id, stream_id, source_revision_id, and source_document_id are required"
+                        )
+                    self._require_scope("read", workspace_id)
+                    body = api.propose_email_mapping(
+                        workspace_id=workspace_id,
+                        stream_id=stream_id,
+                        source_revision_id=source_revision_id,
+                        source_document_id=source_document_id,
+                        confidence=float(_first(query, "confidence", "0.75")),
+                    )
                 else:
                     self._write_json({"error": "not_found"}, status=404)
                     return
@@ -172,7 +189,7 @@ def build_workbench_handler(
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
-            if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
+            if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/email/accept", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -241,6 +258,16 @@ def build_workbench_handler(
                 elif parsed.path == "/api/interactions":
                     body = api.submit_interaction(payload)
                     status = 202
+                elif parsed.path == "/api/email/accept":
+                    body = api.accept_email_mapping(
+                        workspace_id=str(workspace_id or ""),
+                        stream_id=str(payload.get("stream_id") or ""),
+                        source_revision_id=str(payload.get("source_revision_id") or ""),
+                        source_document_id=str(payload.get("source_document_id") or ""),
+                        confirmed=bool(payload.get("confirmed", False)),
+                        confidence=float(payload.get("confidence", 0.75)),
+                    )
+                    status = 200
                 elif parsed.path == "/api/proposal/confirm":
                     body = api.confirm_cockpit_proposal(payload)
                     status = 200

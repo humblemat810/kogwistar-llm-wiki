@@ -62,6 +62,15 @@ class AgentReadToolsMixin:
             source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
         )
 
+    def email_propose(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.propose_email_mapping(
+            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            stream_id=str(arguments.get("stream_id") or "").strip(),
+            source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
+            source_document_id=str(arguments.get("source_document_id") or "").strip(),
+            confidence=float(arguments.get("confidence", 0.75)),
+        )
+
     def hypergraph_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         payload = _bounded_lens_arguments(arguments)
         payload.setdefault("max_hyperedges", 12)

@@ -44,6 +44,7 @@ READ_TOOL_NAMES = frozenset(
         "memory_recall",
         "memory_review",
         "email_view",
+        "email_propose",
     }
 )
 
@@ -294,6 +295,41 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "source_revision_id": string(),
                 },
                 required=("workspace_id", "stream_id", "source_revision_id"),
+            ),
+        ),
+        (
+            "email_propose",
+            "Build a grounded email mapping patch without applying it.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "stream_id": string(),
+                    "source_revision_id": string(),
+                    "source_document_id": string(),
+                    "confidence": {"default": 0.75, "type": "number"},
+                },
+                required=("workspace_id", "stream_id", "source_revision_id", "source_document_id"),
+            ),
+        ),
+        (
+            "email_accept",
+            "Explicitly accept a grounded email mapping patch.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "stream_id": string(),
+                    "source_revision_id": string(),
+                    "source_document_id": string(),
+                    "confirmed": {"type": "boolean"},
+                    "confidence": {"default": 0.75, "type": "number"},
+                },
+                required=(
+                    "workspace_id",
+                    "stream_id",
+                    "source_revision_id",
+                    "source_document_id",
+                    "confirmed",
+                ),
             ),
         ),
         (

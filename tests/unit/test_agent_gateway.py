@@ -141,7 +141,7 @@ def test_public_discovery_and_readiness_endpoints(monkeypatch):
         assert capabilities["mcp_tools"] == [
             "query", "search", "ingest", "source", "reingest", "maintain",
             "status", "hypergraph_search", "history", "memory_recall",
-            "memory_capture", "memory_review", "email_view", "propose", "confirm",
+            "memory_capture", "memory_review", "email_view", "email_propose", "email_accept", "propose", "confirm",
         ]
     finally:
         server.shutdown()
@@ -309,7 +309,7 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     assert [tool.name for tool in tools] == [
         "query", "search", "ingest", "source", "reingest", "maintain",
         "status", "hypergraph_search", "history", "memory_recall",
-        "memory_capture", "memory_review", "email_view", "propose", "confirm",
+        "memory_capture", "memory_review", "email_view", "email_propose", "email_accept", "propose", "confirm",
     ]
     assert all(tool.description for tool in tools)
     query = next(tool for tool in tools if tool.name == "query")
@@ -386,6 +386,8 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                     "memory_capture",
                     "memory_review",
                     "email_view",
+                    "email_propose",
+                    "email_accept",
                     "propose",
                     "confirm",
                 }
@@ -457,7 +459,7 @@ def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):
         assert {tool["name"] for tool in json.loads(response.read())["tools"]} == {
             "query", "search", "ingest", "source", "reingest", "maintain",
             "status", "hypergraph_search", "history", "memory_recall",
-            "memory_capture", "memory_review", "email_view", "propose", "confirm",
+            "memory_capture", "memory_review", "email_view", "email_propose", "email_accept", "propose", "confirm",
         }
 
         encoded = json.dumps({"message": {"parts": [{"text": "hello"}]}, "workspace_id": "w", "background": False}).encode()

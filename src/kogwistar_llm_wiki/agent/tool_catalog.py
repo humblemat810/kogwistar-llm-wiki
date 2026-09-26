@@ -22,6 +22,8 @@ class AgentToolCatalogMixin:
             "memory_capture",
             "memory_review",
             "email_view",
+            "email_propose",
+            "email_accept",
             "propose",
             "confirm",
         )
@@ -41,6 +43,8 @@ class AgentToolCatalogMixin:
             "memory_capture": "Capture a structured, evidence-backed project memory record.",
             "memory_review": "Review project memory records, evidence, lifecycle, and conflicts.",
             "email_view": "View an authorized parsed email and its pending structural proposals.",
+            "email_propose": "Build a grounded email mapping patch without applying it.",
+            "email_accept": "Explicitly accept a grounded email mapping patch.",
             "propose": "Validate a candidate durable knowledge change without applying it.",
             "confirm": "Explicitly approve and apply a previously validated knowledge change.",
         }
@@ -61,6 +65,8 @@ class AgentToolCatalogMixin:
                 "memory_capture": self.memory_capture,
                 "memory_review": self.memory_review,
                 "email_view": self.email_view,
+                "email_propose": self.email_propose,
+                "email_accept": self.email_accept,
                 "propose": self.propose,
                 "confirm": self.confirm,
             }

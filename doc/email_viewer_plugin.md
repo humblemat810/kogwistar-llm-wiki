@@ -37,6 +37,13 @@ returns a structured text projection, escapes its HTML preview, and labels
 structural proposals as pending. Email headers are evidence claims, not ACL
 authority. The viewer does not return raw bytes or execute HTML.
 
+Use `WorkbenchApi.propose_email_mapping(...)`, the read-only `email_propose`
+tool, or `GET /api/email/proposal` to inspect the deterministic maintenance
+patch. Applying it requires the explicit `email_accept`/`POST /api/email/accept`
+confirmation. The existing maintenance patch validator enforces workspace
+scope, provenance, idempotent IDs, and the invariant that raw source facts are
+never rewritten.
+
 For production, configure `SQLiteEmailEvidenceStore` (or another implementation
 of `EmailEvidenceStore`) rather than the default in-memory store.
 

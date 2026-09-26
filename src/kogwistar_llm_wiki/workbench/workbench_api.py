@@ -21,7 +21,13 @@ from ..compose.validation import check_compose_text
 from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
-from ..email import EmailEvidenceStore, EmailIngestRequest, EmailRuntime, EmailViewer
+from ..email import (
+    EmailEvidenceStore,
+    EmailIngestRequest,
+    EmailProposalMaterializer,
+    EmailRuntime,
+    EmailViewer,
+)
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from ..maintenance.maintenance_patches import MaintenancePatch
@@ -82,6 +88,7 @@ class WorkbenchApi:
             self.email_runtime.store,
             authorize_stream=email_authorize_stream or (lambda _workspace_id, _stream_id: True),
         )
+        self.email_materializer = EmailProposalMaterializer()
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
         self._confirmation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._confirmation_locks_guard = threading.Lock()
@@ -178,6 +185,81 @@ class WorkbenchApi:
             stream_id=stream_id,
             source_revision_id=source_revision_id,
         )
+
+    def propose_email_mapping(
+        self,
+        *,
+        workspace_id: str,
+        stream_id: str,
+        source_revision_id: str,
+        source_document_id: str,
+        confidence: float = 0.75,
+    ) -> dict[str, object]:
+        if not self.email_runtime.authorize_stream(workspace_id, stream_id):
+            raise PermissionError("email stream is not authorized for workspace")
+        record = self.email_runtime.store.get(
+            workspace_id=workspace_id,
+            source_revision_id=source_revision_id,
+        )
+        if record is None or record.stream_id != stream_id:
+            return {"status": "not_found"}
+        proposal = self.email_materializer.build_patch(
+            record=record,
+            source_document_id=source_document_id,
+            confidence=confidence,
+        )
+        return {
+            "status": "proposed",
+            "workspace_id": workspace_id,
+            "stream_id": stream_id,
+            "source_revision_id": source_revision_id,
+            "mapping_id": proposal.mapping_id,
+            "patch": proposal.patch.model_dump(mode="json"),
+        }
+
+    def accept_email_mapping(
+        self,
+        *,
+        workspace_id: str,
+        stream_id: str,
+        source_revision_id: str,
+        source_document_id: str,
+        confirmed: bool,
+        confidence: float = 0.75,
+    ) -> dict[str, object]:
+        if not self.email_runtime.authorize_stream(workspace_id, stream_id):
+            raise PermissionError("email stream is not authorized for workspace")
+        record = self.email_runtime.store.get(
+            workspace_id=workspace_id,
+            source_revision_id=source_revision_id,
+        )
+        if record is None or record.stream_id != stream_id:
+            return {"status": "not_found"}
+        proposal = self.email_materializer.build_patch(
+            record=record,
+            source_document_id=source_document_id,
+            confidence=confidence,
+        )
+        if not confirmed:
+            return {
+                "status": "confirmation_required",
+                "mapping_id": proposal.mapping_id,
+                "patch": proposal.patch.model_dump(mode="json"),
+            }
+        result = self.email_materializer.accept(
+            self.pipeline.engines,
+            proposal,
+            confirmed=True,
+        )
+        assert result is not None
+        return {
+            "status": result.status.value,
+            "mapping_id": proposal.mapping_id,
+            "patch_id": result.patch_id,
+            "validation": result.validation.model_dump(mode="json"),
+            "applied_count": result.applied_count,
+            "failed_count": result.failed_count,
+        }
 
     def review_memory(
         self,

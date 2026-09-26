@@ -20,6 +20,7 @@ from .sync import (
     SQLiteEmailSyncStateStore,
 )
 from .ontology import EmailOntologyBinding
+from .acceptance import EmailProposalMaterializer, EmailProposalPatch
 
 __all__ = [
     "EmailEvidenceRecord",
@@ -34,6 +35,8 @@ __all__ = [
     "EmailSyncService",
     "EmailSyncStateStore",
     "EmailOntologyBinding",
+    "EmailProposalMaterializer",
+    "EmailProposalPatch",
     "InMemoryEmailEvidenceStore",
     "InMemoryEmailSyncStateStore",
     "SQLiteEmailEvidenceStore",
