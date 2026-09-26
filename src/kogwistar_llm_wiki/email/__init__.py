@@ -11,6 +11,14 @@ from .runtime import (
     SQLiteEmailEvidenceStore,
 )
 from .viewer import EmailViewer
+from .sync import (
+    EmailSourceAdapter,
+    EmailSyncResult,
+    EmailSyncService,
+    EmailSyncStateStore,
+    InMemoryEmailSyncStateStore,
+    SQLiteEmailSyncStateStore,
+)
 
 __all__ = [
     "EmailEvidenceRecord",
@@ -20,6 +28,12 @@ __all__ = [
     "EmailPluginUnavailable",
     "EmailRuntime",
     "EmailViewer",
+    "EmailSourceAdapter",
+    "EmailSyncResult",
+    "EmailSyncService",
+    "EmailSyncStateStore",
     "InMemoryEmailEvidenceStore",
+    "InMemoryEmailSyncStateStore",
     "SQLiteEmailEvidenceStore",
+    "SQLiteEmailSyncStateStore",
 ]

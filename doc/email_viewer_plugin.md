@@ -38,6 +38,13 @@ structural proposals as pending. Email headers are evidence claims, not ACL
 authority. The viewer does not return raw bytes or execute HTML.
 
 For production, configure `SQLiteEmailEvidenceStore` (or another implementation
-of `EmailEvidenceStore`) rather than the default in-memory store. Connector
-bindings, cursor/lease management, ontology composition, proposal acceptance,
-semantic search, and intelligence-memory promotion remain later slices.
+of `EmailEvidenceStore`) rather than the default in-memory store.
+
+`EmailSyncService` provides bounded cursor synchronization. It calls a plugin
+source adapter with the last snapshot, ingests all returned immutable messages,
+and commits the next snapshot only after the whole batch succeeds. Failures
+leave the prior snapshot in place so the batch can be replayed idempotently.
+Use `SQLiteEmailSyncStateStore` with the plugin's snapshot class for
+restart-safe local operation. Connector binding policy, ontology composition,
+proposal acceptance, semantic search, and intelligence-memory promotion remain
+later slices.
