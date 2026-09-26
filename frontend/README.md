@@ -29,6 +29,25 @@ falls back to the checked-in fixture and visibly remains bounded/offline.
 `POST /api/proposal/validate` validates a proposal against the current lens;
 it does not mutate the graph or bypass confirmation.
 
+The workbench also includes an **Email evidence** panel for the optional
+`kogwistar-email-plugin`. Enter the authorized stream ID and immutable source
+revision ID to load the ACL-checked projection. The panel renders the returned
+body as text, shows mapping review state, and sends `confirmed: true` only when
+the operator explicitly chooses **Accept mapping**.
+
+```mermaid
+flowchart LR
+    FORM["Email evidence panel"] --> VIEW["GET /api/email/view"]
+    VIEW --> TEXT["safe text projection"]
+    TEXT -->|pending| ACCEPT["explicit Accept mapping"]
+    ACCEPT --> POST["POST /api/email/accept"]
+    POST --> REFRESH["refresh status"]
+    REFRESH -->|accepted retry| IDEMP["no duplicate patch"]
+```
+
+The browser never treats message headers as ACL authority and never injects
+the server's HTML preview into the DOM.
+
 The **Settings** button opens the operating console. It reads `/api/settings`
 and `/api/settings/health`, showing effective values, staged desired values,
 per-space embedding profiles, local Chroma text retrieval, and the optional
