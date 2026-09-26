@@ -128,6 +128,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p test-results
           python -m pytest --version
           python -m pytest --help > "test-results/pytest-help-${{ matrix.label }}.txt"
           grep -F -- '--resource-report' "test-results/pytest-help-${{ matrix.label }}.txt" || true
