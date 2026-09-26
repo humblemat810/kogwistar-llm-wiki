@@ -23,6 +23,9 @@ EMAIL_PLUGIN_SRC = Path(__file__).parents[2] / "kogwistar-email-plugin" / "src"
 if str(EMAIL_PLUGIN_SRC) not in sys.path:
     sys.path.insert(0, str(EMAIL_PLUGIN_SRC))
 
+pytestmark = pytest.mark.requires_email_plugin
+pytest.importorskip("kogwistar_email_plugin")
+
 
 RAW_EMAIL = (
     b"From: Alice <alice@example.test>\r\n"

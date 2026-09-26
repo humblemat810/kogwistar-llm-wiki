@@ -20,7 +20,6 @@ env:
   KOGWISTAR_REVISION: 14ca3c3f012f6bbb0b28980fbfa39f0705e2a855
   KG_DOC_PARSER_REVISION: 4f16efce0c2af2bb2198e6b90a33f4ae1b2004bf
   OBSIDIAN_SINK_REVISION: 8724c36c5d6fec89db4902baae0610e0ac77e4b8
-  EMAIL_PLUGIN_REVISION: ea202bb6241aaaf5b0244277c5b45081bc0f202b
 
 jobs:
   python-tests:
@@ -71,14 +70,6 @@ jobs:
           path: kogwistar-obsidian-sink
           persist-credentials: false
 
-      - name: Checkout pinned email plugin
-        uses: actions/checkout@v7
-        with:
-          repository: humblemat810/kogwistar-email-plugin
-          ref: ${{ env.EMAIL_PLUGIN_REVISION }}
-          path: kogwistar-email-plugin
-          persist-credentials: false
-
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -100,7 +91,6 @@ jobs:
           python -m pip install -e ./kogwistar
           python -m pip install -e ./kg-doc-parser
           python -m pip install -e ./kogwistar-obsidian-sink
-          python -m pip install -e ./kogwistar-email-plugin --no-deps
           python -m pip install -e ".[test,otel,agent]" --no-deps
           python -m pip install \
             "chromadb>=0.6" \
@@ -144,7 +134,7 @@ jobs:
           grep -F -- '--resource-report' "test-results/pytest-help-${{ matrix.label }}.txt" || true
           set +e
           python -m pytest \
-            -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma" \
+            -m "ci and not ci_full and not slow and not manual and not llm_real and not longrun and not requires_ollama and not requires_chroma and not requires_email_plugin" \
             tests -q --maxfail=1 --tb=long --show-capture=all \
             --durations=25 --durations-min=0 --resource-report \
             --resource-report-json "test-results/resource-report-${{ matrix.label }}.json" \

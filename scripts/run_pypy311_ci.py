@@ -16,7 +16,8 @@ from pathlib import Path
 
 PYTEST_MARKERS = (
     "ci and not ci_full and not slow and not manual and not llm_real and "
-    "not longrun and not requires_ollama and not requires_chroma"
+    "not longrun and not requires_ollama and not requires_chroma and "
+    "not requires_email_plugin"
 )
 
 
@@ -105,7 +106,6 @@ def main() -> int:
             "kogwistar",
             "kg-doc-parser",
             "kogwistar-obsidian-sink",
-            "kogwistar-email-plugin/src",
             "src",
         )
     ]
