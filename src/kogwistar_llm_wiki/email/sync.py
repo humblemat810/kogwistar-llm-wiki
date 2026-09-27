@@ -373,6 +373,8 @@ def _snapshot_payload(snapshot: object) -> dict[str, object]:
         elif isinstance(value, tuple):
             value = list(value)
         values[name] = value
+    if hasattr(snapshot, "recheck_offset"):
+        values["recheck_offset"] = int(getattr(snapshot, "recheck_offset"))
     return values
 
 

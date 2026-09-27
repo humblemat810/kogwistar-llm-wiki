@@ -17,7 +17,10 @@ from types import ModuleType, SimpleNamespace
 
 from kogwistar.ontology import (
     OntologyClassDescriptor,
+    OntologyEdgeRole,
+    OntologyEdgeShapeDescriptor,
     OntologyPackage,
+    OntologyPropertyDescriptor,
     OntologyRelationDescriptor,
 )
 
@@ -34,11 +37,13 @@ def email_ontology_json() -> dict[str, object]:
                 descriptor_id="EmailMessage",
                 name="Email message",
                 aliases=("mail message", "email"),
+                property_ids=("subject",),
             ),
             OntologyClassDescriptor(
                 descriptor_id="EmailAddress",
                 name="Email address",
                 aliases=("sender", "recipient"),
+                property_ids=("address",),
             ),
             OntologyClassDescriptor(
                 descriptor_id="Attachment",
@@ -60,6 +65,47 @@ def email_ontology_json() -> dict[str, object]:
                 name="Message exchange",
                 source_class_ids=("EmailMessage",),
                 target_class_ids=("EmailAddress",),
+            ),
+            OntologyPropertyDescriptor(
+                descriptor_id="subject",
+                name="Subject",
+                value_kind="string",
+                min_count=0,
+            ),
+            OntologyPropertyDescriptor(
+                descriptor_id="address",
+                name="Address",
+                value_kind="string",
+                min_count=1,
+                max_count=1,
+            ),
+            OntologyEdgeShapeDescriptor(
+                descriptor_id="message_exchange_shape",
+                name="Message exchange edge",
+                relation_id="message_exchange",
+                roles=(
+                    OntologyEdgeRole(
+                        role_id="message",
+                        target_kind="node",
+                        allowed_class_ids=("EmailMessage",),
+                        min_count=1,
+                        max_count=1,
+                    ),
+                    OntologyEdgeRole(
+                        role_id="sender",
+                        target_kind="node",
+                        allowed_class_ids=("EmailAddress",),
+                        min_count=1,
+                        max_count=1,
+                    ),
+                    OntologyEdgeRole(
+                        role_id="recipient",
+                        target_kind="node",
+                        allowed_class_ids=("EmailAddress",),
+                        min_count=0,
+                        max_count=None,
+                    ),
+                ),
             ),
             OntologyRelationDescriptor(
                 descriptor_id="attachment_of",

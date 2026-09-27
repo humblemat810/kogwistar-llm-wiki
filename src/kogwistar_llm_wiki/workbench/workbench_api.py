@@ -37,6 +37,7 @@ from ..email import (
     EmailViewer,
     InMemoryEmailMappingProposalStore,
     InMemoryEmailReviewStateStore,
+    default_deny_email_stream,
 )
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
 from ..ingest_pipeline import IngestPipeline
@@ -94,10 +95,11 @@ class WorkbenchApi:
         )
         self.agent_responder = agent_responder
         self.cockpit_responder = cockpit_responder
+        email_authorizer = email_authorize_stream or default_deny_email_stream
         self.email_runtime = EmailRuntime(
             pipeline=pipeline,
             store=email_evidence_store,
-            authorize_stream=email_authorize_stream,
+            authorize_stream=email_authorizer,
         )
         self.email_review_store = email_review_store or InMemoryEmailReviewStateStore()
         self.email_mapping_proposal_store = (
@@ -105,11 +107,10 @@ class WorkbenchApi:
         )
         self.email_viewer = EmailViewer(
             self.email_runtime.store,
-            authorize_stream=email_authorize_stream or (lambda _workspace_id, _stream_id: True),
+            authorize_stream=email_authorizer,
             review_store=self.email_review_store,
         )
         self.email_materializer = EmailProposalMaterializer()
-        email_authorizer = email_authorize_stream or (lambda _workspace_id, _stream_id: True)
         self.email_memory_promoter = EmailMemoryPromotionService(
             evidence_store=self.email_runtime.store,
             review_store=self.email_review_store,

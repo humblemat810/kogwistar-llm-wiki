@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -52,6 +53,10 @@ class EmailProposalMaterializer:
         relations = mapping.get("relations")
         if not isinstance(entities, list) or not isinstance(relations, list):
             raise TypeError("email mapping entities and relations must be arrays")
+        from .runtime import load_email_plugin
+        from .ontology import EmailOntologyBinding
+
+        EmailOntologyBinding.from_plugin(load_email_plugin()).validate_mapping(mapping)
         namespace = f"email:{_digest(record.stream_id)}:"
         entity_ids: dict[str, str] = {}
         operations: list[MaintenancePatchOperation] = []
@@ -108,28 +113,53 @@ class EmailProposalMaterializer:
             relation_id = str(relation.get("relation_id") or "").strip()
             subject_id = str(relation.get("subject_id") or "").strip()
             targets = relation.get("target_ids")
-            if not relation_id or subject_id not in entity_ids or not isinstance(targets, list):
+            roles = relation.get("roles")
+            if not relation_id or subject_id not in entity_ids or not isinstance(targets, list) or not isinstance(roles, Mapping):
                 raise ValueError("email mapping relation has invalid subject or targets")
+            subject_roles = tuple(
+                str(role_id)
+                for role_id, role_targets in roles.items()
+                if isinstance(role_targets, (list, tuple))
+                and subject_id in {str(value) for value in role_targets}
+            )
             for target_index, target in enumerate(targets):
                 target_id = entity_ids.get(str(target))
                 if target_id is None:
                     raise ValueError("email relation target is not declared as an entity")
-                material = f"{relation_id}:{subject_id}:{target_id}:{index}:{target_index}"
-                operation_id = f"add-edge:{_digest(material)}"
-                operations.append(
-                    MaintenancePatchOperation(
-                        operation_id=operation_id,
-                        kind=MaintenanceOperationKind.ADD_EDGE,
-                        edge_id=f"{namespace}{_digest(material)}",
-                        from_node_id=entity_ids[subject_id],
-                        to_node_id=target_id,
-                        relation=relation_id,
-                        label=relation_id,
-                        properties={"email_relation_id": relation_id},
-                        provenance=provenance(operation_id),
-                        reason="Accepted email structural proposal",
-                    )
+                target_roles = tuple(
+                    str(role_id)
+                    for role_id, role_targets in roles.items()
+                    if isinstance(role_targets, (list, tuple))
+                    and str(target) in {str(value) for value in role_targets}
                 )
+                if not target_roles:
+                    raise ValueError("email relation target has no declared role")
+                for role_id in target_roles:
+                    material = f"{relation_id}:{subject_id}:{target_id}:{role_id}:{index}:{target_index}"
+                    operation_id = f"add-edge:{_digest(material)}"
+                    operations.append(
+                        MaintenancePatchOperation(
+                            operation_id=operation_id,
+                            kind=MaintenanceOperationKind.ADD_EDGE,
+                            edge_id=f"{namespace}{_digest(material)}",
+                            from_node_id=entity_ids[subject_id],
+                            to_node_id=target_id,
+                            relation=relation_id,
+                            label=relation_id,
+                            properties={
+                                "email_relation_id": relation_id,
+                                "email_target_role": role_id,
+                                "email_subject_roles": json.dumps(subject_roles, separators=(",", ":")),
+                                "email_role_bindings": json.dumps(
+                                    {str(key): list(value) for key, value in roles.items()},
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ),
+                            },
+                            provenance=provenance(operation_id),
+                            reason="Accepted email structural proposal",
+                        )
+                    )
         patch = MaintenancePatch(
             patch_id=f"email-patch:{mapping_id}",
             intent=MaintenanceIntent.DERIVE_ENTITY,
