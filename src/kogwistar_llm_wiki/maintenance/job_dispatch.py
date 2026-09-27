@@ -25,6 +25,12 @@ class MaintenanceJobDispatchMixin:
 
     def _handle_job(self, workspace_id: str, job: JobQueueItem) -> None:
         payload = getattr(job, "payload", {})
+        if isinstance(payload, Mapping):
+            payload_workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not payload_workspace_id or payload_workspace_id != workspace_id:
+                raise ValueError(
+                    "maintenance job payload workspace_id must match the queue workspace"
+                )
         claims = payload.get("authority_claims") if isinstance(payload, Mapping) else None
         if isinstance(payload, Mapping) and bool(payload.get("authority_required")):
             authorize_durable_claims(claims, workspace_id=workspace_id, scope="write")

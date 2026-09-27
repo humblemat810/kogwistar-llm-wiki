@@ -77,6 +77,40 @@ def test_fair_maintenance_worker_processes_one_claimed_job_per_poll() -> None:
     assert jobs.claims == 1
 
 
+@pytest.mark.parametrize("payload_workspace_id", [None, "", "other-workspace"])
+def test_maintenance_dispatch_rejects_missing_or_cross_workspace_payload(
+    payload_workspace_id: str | None,
+) -> None:
+    worker = object.__new__(MaintenanceWorker)
+    dispatched = False
+
+    def handle_job_with_authority(_workspace_id: str, _job) -> None:
+        nonlocal dispatched
+        dispatched = True
+
+    worker._handle_job_with_authority = handle_job_with_authority
+    job = SimpleNamespace(payload={"workspace_id": payload_workspace_id})
+
+    with pytest.raises(ValueError, match="workspace_id"):
+        worker._handle_job("workspace", job)
+
+    assert dispatched is False
+
+
+def test_maintenance_dispatch_accepts_matching_payload_workspace() -> None:
+    worker = object.__new__(MaintenanceWorker)
+    dispatched = False
+
+    def handle_job_with_authority(_workspace_id: str, _job) -> None:
+        nonlocal dispatched
+        dispatched = True
+
+    worker._handle_job_with_authority = handle_job_with_authority
+    worker._handle_job("workspace", SimpleNamespace(payload={"workspace_id": "workspace"}))
+
+    assert dispatched is True
+
+
 def test_lease_renewal_exception_fences_the_worker_claim() -> None:
     events: list[dict[str, object]] = []
 
