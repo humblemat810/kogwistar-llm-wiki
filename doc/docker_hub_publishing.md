@@ -48,15 +48,15 @@ or embedding images.
 ## Publish An Application Release
 
 The application package version and release tag must match exactly. For
-example, `pyproject.toml` version `0.5.0` is published as `v0.5.0`; do not
+example, `pyproject.toml` version `0.5.4` is published as `v0.5.4`; do not
 reuse an existing version tag. The local publishers and GitHub Actions verify
 the package version and reject an existing release tag by default.
 
 From PowerShell:
 
 ```powershell
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.4
+git push origin v0.5.4
 ```
 
 The tag publishes only the Torch-free application image. It receives the
@@ -104,7 +104,7 @@ reports the account from `docker info`, the namespace can be omitted:
 
 ```powershell
 docker login
-.\scripts\publish_docker_images.ps1 -Tag v0.5.0
+.\scripts\publish_docker_images.ps1 -Tag v0.5.4
 ```
 
 For a non-interactive shell, set the namespace explicitly:
@@ -117,9 +117,9 @@ $env:DOCKERHUB_USERNAME = 'profchan'
 The default target is `app`. Use explicit targets for the standalone images:
 
 ```powershell
-.\scripts\publish_docker_images.ps1 -Tag v0.5.0 -Target embedding-cpu
-.\scripts\publish_docker_images.ps1 -Tag v0.5.0 -Target embedding-cuda12.8
-.\scripts\publish_docker_images.ps1 -Tag v0.5.0 -Target all
+.\scripts\publish_docker_images.ps1 -Tag v0.5.4 -Target embedding-cpu
+.\scripts\publish_docker_images.ps1 -Tag v0.5.4 -Target embedding-cuda12.8
+.\scripts\publish_docker_images.ps1 -Tag v0.5.4 -Target all
 ```
 
 The Bash publisher uses the equivalent `--target` values. The legacy

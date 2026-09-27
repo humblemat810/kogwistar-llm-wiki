@@ -40,3 +40,5 @@ kg-doc-parser/.pytest_cache
 kogwistar-obsidian-sink/.pytest_cache
 .env
 *.zip
+# The email ontology/parser is an optional external plugin, never an image dependency.
+kogwistar-email-plugin

@@ -193,6 +193,14 @@ def test_application_dockerfile_separates_churn_layers_and_runtime_tools() -> No
     assert "COPY kg-doc-parser" not in runtime
 
 
+def test_application_image_excludes_the_optional_email_plugin() -> None:
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "kogwistar-email-plugin" in dockerignore
+    assert "kogwistar-email-plugin" not in dockerfile
+
+
 def test_docker_multimodal_contract_is_explicit_and_opt_in() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     embedding_dockerfile = (ROOT / "Dockerfile.embedding-service").read_text(encoding="utf-8")

@@ -280,20 +280,20 @@ For prebuilt public images and the release workflow, see
 ### Use a published application image
 
 The GitHub repository includes the Compose files, but it does not require a
-local application build. For release `v0.5.0`, pull the published Torch-free
+local application build. For release `v0.5.4`, pull the published Torch-free
 LLM-Wiki image and point both application services at it:
 
 ```bash
-docker pull profchan/kogwistar-llm-wiki:v0.5.0
-LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.5.0 \
+docker pull profchan/kogwistar-llm-wiki:v0.5.4
+LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.5.4 \
   docker compose up -d
 ```
 
 PowerShell:
 
 ```powershell
-docker pull profchan/kogwistar-llm-wiki:v0.5.0
-$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.5.0"
+docker pull profchan/kogwistar-llm-wiki:v0.5.4
+$env:LLM_WIKI_IMAGE = "profchan/kogwistar-llm-wiki:v0.5.4"
 docker compose up -d
 ```
 
@@ -501,6 +501,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/release_0.5.1.md](doc/release_0.5.1.md) | Version 0.5.1 maintenance release and unified image targets |
 | [doc/release_0.5.2.md](doc/release_0.5.2.md) | Version 0.5.2 multimodal evidence and profile-isolated projections |
 | [doc/release_0.5.3.md](doc/release_0.5.3.md) | Version 0.5.3 Kogwistar 0.6 downstream alignment |
+| [doc/release_0.5.4.md](doc/release_0.5.4.md) | Version 0.5.4 email-boundary hardening and current pins |
 | [doc/mcp_v2_migration.md](doc/mcp_v2_migration.md) | MCP V2 migration, compatibility, and upgrade order |
 | [doc/adr_composable_ontology_email_intelligence.md](doc/adr_composable_ontology_email_intelligence.md) | Composable ontology, email plugin boundaries, ACLs, and evidence invariants |
 | [doc/email_viewer_plugin.md](doc/email_viewer_plugin.md) | Email evidence runtime, viewer, review state, and explicit acceptance |

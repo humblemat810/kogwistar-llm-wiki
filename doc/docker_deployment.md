@@ -230,7 +230,7 @@ must not be combined with the vLLM overlay.
 Copy `.env.example` to `.env` and set at least:
 
 ```dotenv
-LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.5.0
+LLM_WIKI_IMAGE=profchan/kogwistar-llm-wiki:v0.5.4
 POSTGRES_PASSWORD=change-this-development-password
 LLM_WIKI_EMBEDDING_VLLM_IMAGE=vllm/vllm-openai@sha256:<pinned-64-hex-digest>
 LLM_WIKI_EMBEDDING_VLLM_TOKEN=change-me
