@@ -62,7 +62,7 @@ class MaintenanceObservationWorkerMixin:
                 job_id=ctx.job_id,
                 reason="no_reviewable_parse_member",
             )
-            if ctx.job_id:
+            if ctx.job_id and not self._advance_maintenance_plan(ctx):
                 self._acknowledge_job(ctx)
             return
         subject = ObservationSubject(

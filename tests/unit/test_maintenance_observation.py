@@ -19,6 +19,35 @@ from kogwistar_llm_wiki.maintenance.worker_parse import (
 from kogwistar_llm_wiki.parsing.parse_views import ParseView, ParseViewSelection, SourceRegion
 
 
+def test_unresolved_review_subject_advances_the_maintenance_plan() -> None:
+    events: list[dict[str, object]] = []
+    advanced: list[str] = []
+    acknowledged: list[str] = []
+    worker = object.__new__(MaintenanceObservationWorkerMixin)
+    worker._emit_trace = lambda event, **payload: events.append({"event": event, **payload})
+    worker._advance_maintenance_plan = lambda _ctx: advanced.append("advanced") or True
+    worker._acknowledge_job = lambda _ctx: acknowledged.append("acknowledged")
+    ctx = SimpleNamespace(
+        workspace_id="demo",
+        job_id="job-1",
+        request_node_id="request-1",
+        payload={"maintenance_kind": "review_maintenance_subject"},
+    )
+
+    worker._handle_review_maintenance_subject(ctx)
+
+    assert events == [
+        {
+            "event": "maintenance_observation_skipped",
+            "workspace_id": "demo",
+            "job_id": "job-1",
+            "reason": "no_reviewable_parse_member",
+        }
+    ]
+    assert advanced == ["advanced"]
+    assert acknowledged == []
+
+
 def test_parse_view_switch_requeues_only_affected_local_crosslinks() -> None:
     edges = [
         SimpleNamespace(

@@ -699,7 +699,7 @@ def test_maintenance_first_requeues_each_planner_phase_fairly(
     trace: list[dict[str, object]] = []
     worker.trace_sink = trace.append
 
-    for _ in range(4):
+    for _ in range(6):
         worker.process_pending_jobs(request.workspace_id)
 
     jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
@@ -711,9 +711,11 @@ def test_maintenance_first_requeues_each_planner_phase_fairly(
     assert parsed == [artifacts.source_document_id]
     assert [row["next_kind"] for row in trace if row["event"] == "maintenance_plan_advanced"] == [
         "document_parse_graph",
+        "review_maintenance_subject",
         "document_propose_crosslinks",
         "document_validate_crosslinks",
     ]
+    assert any(row["event"] == "maintenance_observation_skipped" for row in trace)
     assert any(row["event"] == "maintenance_parse_complete" for row in trace)
 
 
