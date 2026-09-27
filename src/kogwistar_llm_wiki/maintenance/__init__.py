@@ -34,6 +34,15 @@ from .maintenance_selection import (
     select_embedding_exploration,
     select_request_candidates,
 )
+from .maintenance_observation import (
+    MaintenanceObservationFrame,
+    ObservationFinding,
+    ObservationRuntimeLimits,
+    ObservationSubject,
+    ParseAndGraphQualityAssessment,
+    assess_observation_frame,
+    build_observation_frame,
+)
 from .maintenance_statistics import (
     build_maintenance_statistics,
     operation_category,
@@ -47,16 +56,23 @@ from .maintenance_strategies import (
 
 __all__ = [
     "MaintenanceCandidate",
+    "MaintenanceObservationFrame",
     "MaintenanceJobExecutionContext",
     "MaintenanceProfileDecision",
     "MaintenanceProfileLadderDecision",
     "MaintenanceProfileLevel",
     "MaintenanceStrategy",
     "MaintenanceStrategyRegistry",
+    "ObservationFinding",
+    "ObservationRuntimeLimits",
+    "ObservationSubject",
+    "ParseAndGraphQualityAssessment",
+    "assess_observation_frame",
     "add_usage",
     "budget_fits",
     "build_default_maintenance_strategy_registry",
     "build_maintenance_statistics",
+    "build_observation_frame",
     "configured_maintenance_budget",
     "configured_maintenance_enabled",
     "configured_maintenance_profile",

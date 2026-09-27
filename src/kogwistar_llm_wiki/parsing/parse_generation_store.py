@@ -9,6 +9,7 @@ from .parse_views import (
     ParseGenerationCommit,
     ParseGenerationMember,
     ParseGenerationStatus,
+    validate_generation_member_ancestry,
 )
 
 
@@ -49,6 +50,7 @@ class ParseGenerationStore:
             raise TypeError("parse generation commits and members must be objects")
         commits = tuple(ParseGenerationCommit.model_validate(item) for item in commits_payload.values())
         members = tuple(ParseGenerationMember.model_validate(item) for item in members_payload.values())
+        validate_generation_member_ancestry(members)
         for commit in commits:
             if (
                 commit.workspace_id != self.workspace_id
@@ -161,6 +163,9 @@ class ParseGenerationStore:
             expected_authoritative = int(row.get("last_authoritative_seq", -1))
             expected_materialized = int(row.get("last_materialized_seq", -1))
             next_version = expected_authoritative + 1
+        validate_generation_member_ancestry(
+            [ParseGenerationMember.model_validate(item) for item in payload["members"].values()]
+        )
         inserted = self.metadata.compare_and_swap_named_projection(
             self.namespace,
             key,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import logging
 from collections.abc import Mapping
 from hashlib import sha256
@@ -181,8 +182,22 @@ def durable_maintenance_usage(
         return {}
     events = []
     try:
-        rows = iterator(namespace=namespace, from_seq=1, batch_size=500)
-        for _seq, _event_id, _entity_kind, _entity_id, payload_json in rows:
+        parameters = inspect.signature(iterator).parameters.values()
+        supports_batch_size = any(
+            parameter.name == "batch_size"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+        iterator_kwargs = {"namespace": namespace, "from_seq": 1}
+        if supports_batch_size:
+            iterator_kwargs["batch_size"] = 500
+        rows = iterator(**iterator_kwargs)
+        for row in rows:
+            # Core metadata stores expose five columns; older test seams and
+            # SQLite adapters may include an additional event-id column.
+            if not isinstance(row, (tuple, list)) or len(row) < 5:
+                continue
+            payload_json = row[-1]
             try:
                 payload = json.loads(payload_json)
                 attribution = payload.get("attribution")

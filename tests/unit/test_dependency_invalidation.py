@@ -60,6 +60,7 @@ def test_invalidation_uses_existing_edge_endpoints_and_same_workspace_only() -> 
     assert plan.affected_entity_ids == ("edge:changed", "summary:a")
     assert plan.affected_source_document_ids == ("source:a",)
     assert plan.follow_up_kinds == ("document_propose_crosslinks", "document_summarize_units")
+    assert plan.projection_entity_ids == ()
     assert plan.skipped_cross_workspace_ids == ("summary:foreign",)
 
 
@@ -86,6 +87,35 @@ def test_invalidation_is_bounded_and_deterministic() -> None:
 
     assert plan.affected_entity_ids == ("summary:0", "summary:1")
     assert plan.truncated is True
+
+
+def test_invalidation_targets_changed_projection_visible_entities() -> None:
+    plan = plan_dependency_invalidation(
+        workspace_id="workspace-a",
+        changed_entity_ids={"promoted:1"},
+        nodes=[
+            SimpleNamespace(
+                id="promoted:1",
+                metadata={
+                    "workspace_id": "workspace-a",
+                    "artifact_kind": "promoted_knowledge",
+                    "projection_visible": True,
+                },
+            ),
+            SimpleNamespace(
+                id="promoted:foreign",
+                metadata={
+                    "workspace_id": "workspace-b",
+                    "artifact_kind": "promoted_knowledge",
+                    "projection_visible": True,
+                },
+            ),
+        ],
+        edges=(),
+    )
+
+    assert plan.projection_entity_ids == ("promoted:1",)
+    assert plan.skipped_cross_workspace_ids == ()
 
 
 def test_invalidation_rejects_non_positive_bound() -> None:
@@ -165,3 +195,66 @@ def test_worker_does_not_start_a_second_invalidation_wave(pipeline, ingest_reque
     patch = SimpleNamespace(operations=[])
 
     assert worker._plan_and_enqueue_dependency_invalidation(context, patch) is None
+
+
+def test_worker_enqueues_projection_refresh_on_existing_projection_queue(
+    pipeline, ingest_request
+) -> None:
+    request = ingest_request.model_copy(update={"workspace_id": "projection-invalidation-w"})
+    source_id = pipeline._source_document_id(request)
+    ns = WorkspaceNamespaces(request.workspace_id)
+    pipeline.register_source(request=request, source_document_id=source_id, namespace=ns.conv_bg)
+    with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
+        pipeline.engines.kg.write.add_node(
+            Node(
+                id="promoted:1",
+                label="Promoted",
+                type="entity",
+                summary="Promoted entity",
+                mentions=[Grounding(spans=[Span.from_dummy_for_conversation("promoted:1")])],
+                metadata={
+                    "workspace_id": request.workspace_id,
+                    "graph_space": "curated_kg",
+                    "artifact_kind": "promoted_knowledge",
+                    "projection_visible": True,
+                    "source_document_id": source_id,
+                },
+            )
+        )
+    patch = MaintenancePatch(
+        patch_id="patch-projection-invalidation",
+        intent=MaintenanceIntent.DERIVE_ENTITY,
+        scope=MaintenanceScope(workspace_id=request.workspace_id),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="update-promoted",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="promoted:1",
+                properties={"summary": "Updated promoted entity"},
+                provenance=MaintenanceProvenance(
+                    source_document_id=source_id,
+                    source_pointers=[{"doc_id": source_id, "start_char": 0, "end_char": 1}],
+                    maintenance_run_id="run-projection-invalidation",
+                    confidence=0.9,
+                ),
+            )
+        ],
+    )
+    worker = MaintenanceWorker(pipeline.engines)
+    context = SimpleNamespace(
+        workspace_id=request.workspace_id,
+        job_id="projection-patch-job",
+        payload={},
+    )
+
+    plan = worker._plan_and_enqueue_dependency_invalidation(context, patch)
+
+    assert plan is not None
+    jobs = pipeline.engines.conversation.jobs.list(
+        namespace=ns.projection_jobs,
+        status="PENDING",
+        limit=10,
+    )
+    assert len(jobs) == 1
+    assert jobs[0].job_kind == "projection_request"
+    assert jobs[0].payload["projection_origin"] == "dependency_invalidation"

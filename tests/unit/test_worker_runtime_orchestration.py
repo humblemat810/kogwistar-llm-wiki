@@ -110,6 +110,36 @@ def test_lease_renewal_exception_fences_the_worker_claim() -> None:
     assert any(event["event"] == "maintenance_lease_renewal_failed" for event in events)
 
 
+def test_lease_renewal_survives_a_long_provider_call_without_progress() -> None:
+    renewals = 0
+
+    class SlowJobs:
+        def renew_lease(self, *_args, **_kwargs):
+            nonlocal renewals
+            renewals += 1
+            if renewals >= 3:
+                stop.set()
+            return True
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.worker_id = "maintenance-long-provider-test"
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=SlowJobs()))
+    worker.lease_seconds = 150
+    worker.lease_renew_interval_seconds = 0.001
+    worker.lease_progress_grace_seconds = 0.001
+    worker._last_progress_monotonic = time.monotonic() - 10
+    worker._claim_lost = threading.Event()
+    worker.trace_sink = None
+    worker._emit_trace = lambda *_args, **_kwargs: None
+
+    stop = threading.Event()
+    ctx = SimpleNamespace(job_id="job-long-provider", job=SimpleNamespace(claim_token="claim-1"))
+    worker._renew_claim_while_progressing(ctx, stop)
+
+    assert renewals >= 3
+    assert not worker._claim_lost.is_set()
+
+
 def test_claim_loss_before_graph_patch_never_calls_the_applier(monkeypatch) -> None:
     applied: list[object] = []
     traces: list[dict[str, object]] = []
@@ -727,8 +757,26 @@ def test_fair_runtime_suspension_reads_job_payload_and_requeues_at_tail(
                 },
             )
 
-        def resume_run(self, **kwargs):
-            captured["resume_kwargs"] = kwargs
+        def resume_run(
+            self,
+            *,
+            run_id,
+            suspended_node_id,
+            suspended_token_id,
+            client_result,
+            workflow_id,
+            conversation_id,
+            turn_node_id,
+        ):
+            captured["resume_kwargs"] = {
+                "run_id": run_id,
+                "suspended_node_id": suspended_node_id,
+                "suspended_token_id": suspended_token_id,
+                "client_result": client_result,
+                "workflow_id": workflow_id,
+                "conversation_id": conversation_id,
+                "turn_node_id": turn_node_id,
+            }
             return SimpleNamespace(status="finished", run_id="maintenance-run-1")
 
     monkeypatch.setattr(worker, "runtime", SuspendedRuntime())

@@ -21,6 +21,7 @@ JOB_KIND_INTENTS: dict[str, MaintenanceIntent] = {
     "document_extract_entities": MaintenanceIntent.DERIVE_ENTITY,
     "document_propose_crosslinks": MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
     "document_validate_crosslinks": MaintenanceIntent.ADD_CROSSLINK,
+    "document_revalidate_crosslinks": MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
     "document_retract_crosslinks": MaintenanceIntent.RETRACT_CROSSLINK,
     "document_detect_conflicts": MaintenanceIntent.REQUEST_REVIEW,
     "entity_merge_candidate": MaintenanceIntent.REQUEST_REVIEW,

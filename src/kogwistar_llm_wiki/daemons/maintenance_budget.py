@@ -405,7 +405,10 @@ class MaintenanceBudgetMixin:
             "maintenance_background_cycle_scheduled",
             workspace_id=self.workspace_id,
             cycle_number=cycle_number,
-            cycle_seed=cycle_seed,
+            # OpenTelemetry integer attributes are signed 64-bit values;
+            # retain the full deterministic seed in metadata while emitting
+            # it as a string so high-bit seeds remain exportable.
+            cycle_seed=str(cycle_seed),
             selected_count=len(selected),
             exploration_strategy=strategy,
             maintenance_profile=decision.effective,

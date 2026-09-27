@@ -40,18 +40,14 @@ class MaintenanceRuntimeWorkerMixin:
     def _renew_claim_while_progressing(
         self, ctx: MaintenanceJobExecutionContext, stop: threading.Event
     ) -> None:
-        """Renew only an owned, unexpired lease while traces show progress."""
+        """Renew an owned lease until the active attempt finishes.
+
+        Provider calls can legitimately outlast the interval between workflow
+        traces. Lease ownership is established by the queue renewal result,
+        not by application-level progress emitted from another thread.
+        """
         while not stop.wait(self.lease_renew_interval_seconds):
             idle_seconds = time.monotonic() - self._last_progress_monotonic
-            if idle_seconds > self.lease_progress_grace_seconds:
-                self._emit_trace(
-                    "maintenance_lease_renewal_stopped",
-                    job_id=ctx.job_id,
-                    reason="no_progress",
-                    idle_seconds=round(idle_seconds, 2),
-                )
-                self._claim_lost.set()
-                return
             try:
                 renewed = self.engines.conversation.jobs.renew_lease(
                     ctx.job, lease_seconds=self.lease_seconds

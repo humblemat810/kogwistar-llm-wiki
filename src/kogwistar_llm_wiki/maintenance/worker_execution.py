@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 import time
 from collections.abc import Mapping
 
@@ -33,7 +34,14 @@ from ..maintenance.maintenance_guards import (
 from ..maintenance.maintenance_patch_apply import (
     apply_maintenance_patch_for_scope as _default_apply_maintenance_patch_for_scope,
 )
-from ..maintenance.maintenance_patches import MaintenancePatch
+from ..maintenance.maintenance_patches import (
+    MaintenanceIntent,
+    MaintenanceOperationKind,
+    MaintenancePatch,
+    MaintenancePatchOperation,
+    MaintenanceProvenance,
+    MaintenanceScope,
+)
 from ..maintenance.maintenance_planner import decide_next_maintenance_phase
 from ..utils import _temporary_namespace
 from .dependency_planning import (
@@ -470,6 +478,325 @@ class MaintenanceExecutionWorkerMixin:
             if ctx.job_id:
                 self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
 
+    def _handle_crosslink_maintenance_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
+        """Create or route a guarded derived-link patch; never mutate in place."""
+
+        try:
+            patch_payload = ctx.payload.get("patch")
+            if isinstance(patch_payload, Mapping):
+                patch = MaintenancePatch.model_validate(patch_payload)
+            elif ctx.maintenance_kind in {
+                "document_propose_crosslinks",
+                "document_validate_crosslinks",
+                "document_revalidate_crosslinks",
+            }:
+                if not isinstance(ctx.payload.get("crosslink_candidate"), Mapping):
+                    if ctx.maintenance_kind == "document_revalidate_crosslinks":
+                        edge_id = str(
+                            ctx.payload.get("crosslink_edge_id")
+                            or ctx.payload.get("supersedes_edge_id")
+                            or ""
+                        ).strip()
+                        if not edge_id:
+                            raise ValueError("crosslink revalidation requires crosslink_edge_id")
+                        patch = MaintenancePatch(
+                            patch_id=str(
+                                stable_id(
+                                    "maintenance_crosslink_stale_review",
+                                    ctx.workspace_id,
+                                    edge_id,
+                                    str(ctx.payload.get("active_view_version") or ""),
+                                )
+                            ),
+                            intent=MaintenanceIntent.REQUEST_REVIEW,
+                            scope=MaintenanceScope(workspace_id=ctx.workspace_id),
+                            rationale="active ParseView changed; derived crosslink requires revalidation",
+                            operations=[
+                                MaintenancePatchOperation(
+                                    operation_id=f"review:{edge_id}",
+                                    kind=MaintenanceOperationKind.REQUEST_REVIEW,
+                                    reason="derived crosslink is stale until source evidence is revalidated",
+                                    properties={
+                                        "crosslink_status": "needs_revalidation",
+                                        "crosslink_edge_id": edge_id,
+                                        "active_view_version": int(
+                                            ctx.payload.get("active_view_version") or 0
+                                        ),
+                                    },
+                                )
+                            ],
+                        )
+                        next_payload = dict(ctx.payload)
+                        next_payload.update(
+                            {
+                                "maintenance_kind": "graph_patch_apply",
+                                "patch": patch.model_dump(mode="json"),
+                                "crosslink_lifecycle": "needs_revalidation",
+                                "maintenance_previous_kind": ctx.maintenance_kind,
+                            }
+                        )
+                        self.engines.conversation.jobs.requeue_at_tail(ctx.job, payload=next_payload)
+                        return
+                    self._emit_trace(
+                        "maintenance_crosslink_no_candidate",
+                        workspace_id=ctx.workspace_id,
+                        job_id=ctx.job_id,
+                        request_node_id=ctx.request_node_id,
+                        reason="bounded proposal found no eligible candidate",
+                    )
+                    self._emit_lane_reply(
+                        workspace_id=ctx.workspace_id,
+                        source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                        request_node_id=ctx.request_node_id,
+                        reply_to_message_id=ctx.lane_message_id or None,
+                        status="completed",
+                        payload={
+                            "maintenance_kind": ctx.maintenance_kind,
+                            "crosslink_lifecycle": "no_candidate",
+                            "graph_mutation": False,
+                        },
+                    )
+                    if self._advance_maintenance_plan(ctx):
+                        return
+                    if ctx.job_id:
+                        self._acknowledge_job(ctx)
+                    return
+                patch = self._build_crosslink_candidate_patch(ctx)
+            else:
+                raise ValueError(
+                    f"{ctx.maintenance_kind} requires a previously persisted crosslink patch"
+                )
+            if ctx.maintenance_kind == "document_validate_crosslinks":
+                patch = self._promote_crosslink_candidate(ctx, patch)
+            elif ctx.maintenance_kind == "document_retract_crosslinks":
+                if patch.intent != MaintenanceIntent.RETRACT_CROSSLINK:
+                    raise ValueError("crosslink retraction requires retract_crosslink intent")
+            next_payload = dict(ctx.payload)
+            next_payload.update(
+                {
+                    "maintenance_kind": "graph_patch_apply",
+                    "patch": patch.model_dump(mode="json"),
+                    "crosslink_lifecycle": (
+                        "candidate"
+                        if ctx.maintenance_kind == "document_propose_crosslinks"
+                        else "revalidation_candidate"
+                        if ctx.maintenance_kind == "document_revalidate_crosslinks"
+                        else "validated"
+                        if ctx.maintenance_kind == "document_validate_crosslinks"
+                        else "retracted"
+                    ),
+                    "maintenance_previous_kind": ctx.maintenance_kind,
+                }
+            )
+            self.engines.conversation.jobs.requeue_at_tail(ctx.job, payload=next_payload)
+            self._emit_trace(
+                "maintenance_crosslink_patch_prepared",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                maintenance_kind=ctx.maintenance_kind,
+                patch_id=patch.patch_id,
+                lifecycle=next_payload["crosslink_lifecycle"],
+            )
+        except Exception as exc:
+            self._emit_trace(
+                "maintenance_crosslink_patch_rejected",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                maintenance_kind=ctx.maintenance_kind,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            self._emit_lane_reply(
+                workspace_id=ctx.workspace_id,
+                source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                request_node_id=ctx.request_node_id,
+                reply_to_message_id=ctx.lane_message_id or None,
+                status="failed",
+                payload={"maintenance_kind": ctx.maintenance_kind, "error": str(exc)},
+            )
+            if ctx.job_id:
+                self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
+
+    def _build_crosslink_candidate_patch(self, ctx: MaintenanceJobExecutionContext) -> MaintenancePatch:
+        candidate = ctx.payload.get("crosslink_candidate")
+        if not isinstance(candidate, Mapping):
+            raise ValueError("crosslink proposal requires crosslink_candidate evidence")
+        left_id = str(candidate.get("left_node_id") or "").strip()
+        right_id = str(candidate.get("right_node_id") or "").strip()
+        relation = str(candidate.get("relation") or "related_to").strip()
+        left_doc = str(candidate.get("left_source_document_id") or "").strip()
+        right_doc = str(candidate.get("right_source_document_id") or "").strip()
+        if not left_id or not right_id or not relation or not left_doc or not right_doc:
+            raise ValueError("crosslink candidate requires both nodes, relation, and two source documents")
+        namespace_prefix = f"ws:{ctx.workspace_id}:"
+        if not left_id.startswith(namespace_prefix) or not right_id.startswith(namespace_prefix):
+            raise ValueError("crosslink candidate nodes must remain in the workspace namespace")
+        pointers = candidate.get("source_pointers")
+        normalized_pointers = [dict(item) for item in pointers if isinstance(item, Mapping)] if isinstance(pointers, list) else []
+        if len({left_doc, right_doc}) < 2:
+            raise ValueError("crosslink candidate requires evidence from two source documents")
+        if not normalized_pointers:
+            raise ValueError("crosslink candidate requires authoritative source pointers")
+        pointer_documents = {
+            str(pointer.get("doc_id") or pointer.get("source_document_id") or "").strip()
+            for pointer in normalized_pointers
+        }
+        if {left_doc, right_doc} - pointer_documents:
+            raise ValueError("crosslink candidate pointers must cover both source documents")
+        for pointer in normalized_pointers:
+            pointer_workspace = str(pointer.get("workspace_id") or "").strip()
+            if pointer_workspace and pointer_workspace != ctx.workspace_id:
+                raise ValueError("crosslink candidate evidence crosses workspace boundaries")
+            pointer_namespace = str(pointer.get("namespace") or "").strip()
+            if pointer_namespace and not pointer_namespace.startswith(namespace_prefix):
+                raise ValueError("crosslink candidate evidence crosses namespace boundaries")
+        confidence = float(candidate.get("confidence") or 0.0)
+        supersedes_edge_id = str(candidate.get("supersedes_edge_id") or "").strip()
+        if ctx.maintenance_kind == "document_revalidate_crosslinks":
+            if not supersedes_edge_id:
+                raise ValueError("crosslink revalidation requires supersedes_edge_id")
+            if candidate.get("superseded_edge_source_native") is True:
+                raise ValueError("crosslink revalidation cannot replace a source-native edge")
+            if str(candidate.get("superseded_edge_status") or "").strip().lower() not in {
+                "accepted",
+                "stale",
+                "needs_revalidation",
+            }:
+                raise ValueError("crosslink revalidation requires an accepted or stale derived edge")
+        provenance = MaintenanceProvenance(
+            source_document_id=left_doc,
+            source_pointers=normalized_pointers,
+            maintenance_run_id=str(ctx.job_id or ctx.request_node_id),
+            confidence=confidence,
+        )
+        edge_id = str(
+            stable_id(
+                "kogwistar_llm_wiki.derived_crosslink",
+                ctx.workspace_id,
+                left_id,
+                right_id,
+                relation,
+                left_doc,
+                right_doc,
+                str(candidate.get("supersedes_edge_id") or ""),
+            )
+        )
+        return MaintenancePatch(
+            patch_id=str(stable_id("maintenance_crosslink_patch", edge_id, "candidate")),
+            intent=MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
+            scope=MaintenanceScope(workspace_id=ctx.workspace_id),
+            rationale=str(candidate.get("rationale") or "bounded cross-document relation candidate"),
+            operations=[
+                MaintenancePatchOperation(
+                    operation_id=f"candidate:{edge_id}",
+                    kind=MaintenanceOperationKind.ADD_EDGE,
+                    edge_id=edge_id,
+                    from_node_id=left_id,
+                    to_node_id=right_id,
+                    relation=relation,
+                    properties={
+                        "crosslink_status": "candidate",
+                        "left_source_document_id": left_doc,
+                        "right_source_document_id": right_doc,
+                        **(
+                            {
+                                "supersedes_edge_id": supersedes_edge_id,
+                                "crosslink_lifecycle": "revalidation_candidate",
+                            }
+                            if supersedes_edge_id
+                            else {}
+                        ),
+                    },
+                    provenance=provenance,
+                )
+            ],
+        )
+
+    @staticmethod
+    def _promote_crosslink_candidate(
+        ctx: MaintenanceJobExecutionContext,
+        patch: MaintenancePatch,
+    ) -> MaintenancePatch:
+        if patch.intent != MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE:
+            raise ValueError("crosslink validation requires a derived candidate patch")
+        if any(
+            str(operation.properties.get("crosslink_status") or "").strip().lower() != "candidate"
+            for operation in patch.operations
+        ):
+            raise ValueError("crosslink validation requires candidate-status operations")
+        blocked_statuses = {
+            "expanding",
+            "quality_unknown",
+            "review_required",
+            "stale",
+            "inactive",
+            "historical",
+            "failed",
+            "unknown",
+        }
+        for field_name in (
+            "crosslink_parse_quality",
+            "parse_quality_status",
+            "source_region_status",
+            "source_view_status",
+        ):
+            status = str(ctx.payload.get(field_name) or "").strip().lower()
+            if status in blocked_statuses:
+                raise ValueError(f"crosslink acceptance blocked by {field_name}={status}")
+        required_attestations = (
+            "crosslink_acl_authorized",
+            "crosslink_scope_valid",
+            "crosslink_profile_compatible",
+            "crosslink_source_revision_current",
+        )
+        for field_name in required_attestations:
+            if ctx.payload.get(field_name) is not True:
+                raise ValueError(f"crosslink acceptance requires explicit {field_name}=true")
+        accepted_confidence = float(ctx.payload.get("accepted_confidence") or 0.0)
+        if accepted_confidence < 0.8:
+            raise ValueError("crosslink acceptance requires accepted_confidence >= 0.8")
+        operations = [
+            operation.model_copy(
+                update={
+                    "properties": {
+                        **operation.properties,
+                        "crosslink_status": "accepted",
+                    },
+                    "provenance": (
+                        operation.provenance.model_copy(update={"confidence": accepted_confidence})
+                        if operation.provenance is not None
+                        else None
+                    ),
+                }
+            )
+            for operation in patch.operations
+        ]
+        promoted_operations: list[MaintenancePatchOperation] = []
+        for operation in operations:
+            superseded_id = str(operation.properties.get("supersedes_edge_id") or "").strip()
+            if not superseded_id:
+                promoted_operations.append(operation)
+                continue
+            if ctx.payload.get("superseded_edge_source_native") is True:
+                raise ValueError("crosslink replacement cannot tombstone a source-native edge")
+            promoted_operations.append(operation.model_copy(update={"supersedes_ids": [superseded_id]}))
+            promoted_operations.append(
+                MaintenancePatchOperation(
+                    operation_id=f"retract:{superseded_id}",
+                    kind=MaintenanceOperationKind.TOMBSTONE_EDGE,
+                    edge_id=superseded_id,
+                    reason=str(
+                        ctx.payload.get("replacement_reason")
+                        or "accepted crosslink replacement supersedes stale evidence"
+                    ),
+                    provenance=operation.provenance,
+                )
+            )
+        operations = promoted_operations
+        return patch.model_copy(
+            update={"intent": MaintenanceIntent.ADD_CROSSLINK, "operations": operations}
+        )
+
     @staticmethod
     def _dependency_invalidation_payload(
         plan: DependencyInvalidationPlan,
@@ -480,6 +807,7 @@ class MaintenanceExecutionWorkerMixin:
             "affected_entity_ids": list(plan.affected_entity_ids),
             "affected_source_document_ids": list(plan.affected_source_document_ids),
             "follow_up_kinds": list(plan.follow_up_kinds),
+            "projection_entity_ids": list(plan.projection_entity_ids),
             "skipped_cross_workspace_ids": list(plan.skipped_cross_workspace_ids),
             "truncated": plan.truncated,
         }
@@ -524,6 +852,8 @@ class MaintenanceExecutionWorkerMixin:
             )
             if plan.affected_source_document_ids and plan.follow_up_kinds:
                 self._enqueue_dependency_jobs(ctx, plan)
+            if plan.projection_entity_ids:
+                self._enqueue_projection_dependency_jobs(ctx, plan)
             self._emit_trace(
                 "maintenance_dependency_invalidation_planned",
                 job_id=ctx.job_id,
@@ -612,11 +942,56 @@ class MaintenanceExecutionWorkerMixin:
                     },
                 )
 
+    def _enqueue_projection_dependency_jobs(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        plan: DependencyInvalidationPlan,
+    ) -> None:
+        """Refresh existing projections without routing them through maintenance.
+
+        Projection jobs have their own queue and worker.  Keeping this path
+        separate prevents a graph patch from accidentally becoming a new
+        maintenance thread or from losing the projection worker's CAS and
+        manifest semantics.
+        """
+
+        ns = WorkspaceNamespaces(ctx.workspace_id)
+        self.engines.conversation.jobs.require_available(enqueue=True)
+        for entity_id in plan.projection_entity_ids[:256]:
+            job_id = str(
+                stable_id(
+                    "kogwistar_llm_wiki.dependency_projection_request",
+                    ctx.workspace_id,
+                    ctx.job_id,
+                    entity_id,
+                )
+            )
+            self.engines.conversation.jobs.enqueue(
+                job_id=job_id,
+                namespace=ns.projection_jobs,
+                entity_kind="projection_request",
+                entity_id=entity_id,
+                job_kind="projection_request",
+                op="UPSERT",
+                payload={
+                    "workspace_id": ctx.workspace_id,
+                    "promoted_entity_id": entity_id,
+                    "projection_origin": "dependency_invalidation",
+                    "maintenance_job_id": ctx.job_id,
+                    "dependency_invalidation": self._dependency_invalidation_payload(plan),
+                },
+            )
+
     def _handle_runtime_workflow_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
-        decision = self._evaluate_maintenance_guard(ctx)
-        if decision.status != "ready":
-            self._block_guarded_job(ctx, decision)
-            return
+        # Background distillation operates on already-materialized curated
+        # candidates and deliberately has no single source revision to pin.
+        # Request-bound workflows remain fenced by the immutable source
+        # revision guard before any runtime work begins.
+        if str(ctx.payload.get("mode") or "request") != "background":
+            decision = self._evaluate_maintenance_guard(ctx)
+            if decision.status != "ready":
+                self._block_guarded_job(ctx, decision)
+                return
         ns = WorkspaceNamespaces(ctx.workspace_id)
         workflow_id: str = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         payload: dict[str, object] = dict(ctx.payload)
@@ -693,23 +1068,36 @@ class MaintenanceExecutionWorkerMixin:
                     suspended_node_id = str(payload.get("suspended_node_id") or "")
                     suspended_token_id = str(payload.get("suspended_token_id") or "")
                     if continuation_run_id and suspended_node_id and suspended_token_id:
-                        result = self.runtime.resume_run(
-                            run_id=continuation_run_id,
-                            suspended_node_id=suspended_node_id,
-                            suspended_token_id=suspended_token_id,
-                            client_result=RunSuccess(
+                        resume_kwargs = {
+                            "run_id": continuation_run_id,
+                            "suspended_node_id": suspended_node_id,
+                            "suspended_token_id": suspended_token_id,
+                            "client_result": RunSuccess(
                                 state_update=[("u", {"_deps": runtime_deps})]
                             ),
-                            workflow_id=workflow_id,
-                            conversation_id=ns.conv_bg,
-                            turn_node_id=ctx.request_node_id,
-                            _parent_authority_context=runtime_authority_context(
+                            "workflow_id": workflow_id,
+                            "conversation_id": ns.conv_bg,
+                            "turn_node_id": ctx.request_node_id,
+                        }
+                        # Kogwistar added authority propagation to resume_run
+                        # after older deployed cores were already in use. Keep
+                        # the worker compatible with both API shapes without
+                        # retrying a possibly-mutating runtime call.
+                        resume_signature = inspect.signature(self.runtime.resume_run)
+                        if (
+                            "_parent_authority_context" in resume_signature.parameters
+                            or any(
+                                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                                for parameter in resume_signature.parameters.values()
+                            )
+                        ):
+                            resume_kwargs["_parent_authority_context"] = runtime_authority_context(
                                 ctx.payload.get("authority_claims")
                                 if isinstance(ctx.payload.get("authority_claims"), Mapping)
                                 else None,
                                 workspace_id=ctx.workspace_id,
-                            ),
-                        )
+                            )
+                        result = self.runtime.resume_run(**resume_kwargs)
                     else:
                         result = self.runtime.run(
                             workflow_id=workflow_id,

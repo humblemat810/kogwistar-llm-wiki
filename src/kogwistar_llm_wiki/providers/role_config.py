@@ -309,6 +309,10 @@ def resolve_maintenance_provider_settings(
         raise ValueError("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN must not contain duplicates")
     if provider_names[0] != primary.provider:
         primary = _provider_spec_from_chain_name(provider_names[0], primary)
+    else:
+        # Provider-specific settings must also apply when the provider is the
+        # primary entry, not only when it is reached as a fallback.
+        primary = _provider_spec_from_chain_name(provider_names[0], primary)
     fallbacks = [_provider_spec_from_chain_name(name, primary) for name in provider_names[1:]]
     primary.fallback_specs = fallbacks
     return build_workflow_provider_settings(parser=primary)

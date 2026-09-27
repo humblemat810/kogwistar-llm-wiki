@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -22,6 +23,7 @@ from ..utils import _temporary_namespace
 from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]*", re.IGNORECASE)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,11 +364,32 @@ class SemanticLensService:
             namespace = _namespace_for(ns, graph_space)
             if namespace is None:
                 continue
+            started = time.monotonic()
+            logger.info(
+                "graph_query_edges_start workspace=%s graph_space=%s namespace=%s nodes=%s",
+                request.workspace_id,
+                graph_space,
+                namespace,
+                len(nodes),
+            )
             with _temporary_namespace(self.engines.kg, namespace):
+                edge_limit = max(request.max_edges * 4, len(nodes) * 8, 20)
                 raw_edges = self.engines.kg.read.get_edges(
-                    limit=max(400, len(nodes) * 8),
+                    # The temporary namespace is the graph-space boundary;
+                    # edge metadata carries workspace scope but not a
+                    # duplicated graph_space field in the core projection.
+                    where={"workspace_id": request.workspace_id},
+                    limit=edge_limit,
                     resolve_mode="include_tombstones" if request.include_tombstones else "active_only",
+                    include=["documents", "metadatas"],
                 )
+            logger.info(
+                "graph_query_edges_complete workspace=%s graph_space=%s count=%s elapsed_ms=%s",
+                request.workspace_id,
+                graph_space,
+                len(raw_edges),
+                int((time.monotonic() - started) * 1000),
+            )
             for raw in raw_edges:
                 edge = _lens_edge(raw, graph_space, namespace)
                 if edge.id in seen or not edge.source_ids or not edge.target_ids:

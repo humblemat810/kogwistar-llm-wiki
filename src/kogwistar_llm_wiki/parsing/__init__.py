@@ -35,6 +35,7 @@ from .parse_views import (
     parse_session_id,
     reparse_session_id,
     validate_parse_view_selections,
+    validate_generation_member_ancestry,
 )
 
 __all__ = [
@@ -68,4 +69,5 @@ __all__ = [
     "parse_session_id",
     "reparse_session_id",
     "validate_parse_view_selections",
+    "validate_generation_member_ancestry",
 ]

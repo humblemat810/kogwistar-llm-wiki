@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
 
 from kogwistar_llm_wiki import (
@@ -129,6 +131,38 @@ def test_semantic_lens_pins_are_retained_and_edges_are_bounded():
         assert len(snapshot.nodes) == 2
         assert len(snapshot.edges) <= 1
         assert any(item.reason == "pinned" for item in snapshot.selection_explanations)
+    finally:
+        engines.close()
+
+
+def test_textual_lens_reads_do_not_load_embedding_payloads(monkeypatch: pytest.MonkeyPatch):
+    engines, workspace_id = _seed_graph()
+    try:
+        read_type = type(engines.kg.read)
+        node_includes: list[list[str] | None] = []
+        edge_includes: list[list[str] | None] = []
+        original_get_nodes = read_type.get_nodes
+        original_get_edges = read_type.get_edges
+
+        def get_nodes(read_self, *args, **kwargs):
+            node_includes.append(kwargs.get("include"))
+            return original_get_nodes(read_self, *args, **kwargs)
+
+        def get_edges(read_self, *args, **kwargs):
+            edge_includes.append(kwargs.get("include"))
+            return original_get_edges(read_self, *args, **kwargs)
+
+        monkeypatch.setattr(read_type, "get_nodes", get_nodes)
+        monkeypatch.setattr(read_type, "get_edges", get_edges)
+
+        SemanticLensService(engines).resolve(
+            SemanticLensRequest(workspace_id=workspace_id, query_text="verifier")
+        )
+
+        assert node_includes
+        assert edge_includes
+        assert all(include == ["documents", "metadatas"] for include in node_includes)
+        assert all(include == ["documents", "metadatas"] for include in edge_includes)
     finally:
         engines.close()
 

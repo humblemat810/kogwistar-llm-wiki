@@ -172,3 +172,10 @@ validation rather than claims made by these provider-free tests.
 - `kg-doc-parser`: bounded serializable layered seed/expansion contracts;
 - `kogwistar-llm-wiki`: revision documents, durable sessions/frontiers,
   ParseViews, orchestration, reconciliation, and operator-visible status.
+
+Opportunistic parse-quality review and defect-aware repair scheduling are
+defined separately in
+[`adr_bounded_maintenance_observation_and_parse_quality.md`](adr_bounded_maintenance_observation_and_parse_quality.md).
+That policy may recommend a new generation or parent-region reparse, but it
+does not weaken any source-revision, immutable-evidence, or ParseView CAS
+invariant in this ADR.

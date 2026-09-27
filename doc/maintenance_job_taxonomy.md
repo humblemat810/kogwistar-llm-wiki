@@ -28,6 +28,7 @@ Reusable lessons derived from execution outcomes. Not a synonym for maintenance.
 The maintenance subsystem is divided into these families:
 
 - ingest follow-up
+- parse-quality observation
 - link maintenance
 - entity maintenance
 - evidence maintenance
@@ -41,12 +42,14 @@ The maintenance subsystem is divided into these families:
 flowchart TB
     REQUEST[Maintenance request] --> CLASSIFY[Job family classification]
     CLASSIFY --> INGEST[Ingest follow-up]
+    CLASSIFY --> PARSE[Parse-quality observation]
     CLASSIFY --> LINKS[Links and entities]
     CLASSIFY --> EVIDENCE[Evidence and contradictions]
     CLASSIFY --> PROMOTE[Promotion and synthesis]
     CLASSIFY --> WISDOM[Wisdom maintenance]
     CLASSIFY --> PROJECTION[Projection request]
     INGEST --> FENCE[Budget, scope, provenance, acceptance fences]
+    PARSE --> FENCE
     LINKS --> FENCE
     EVIDENCE --> FENCE
     PROMOTE --> FENCE
@@ -99,7 +102,40 @@ Normalize and classify source-native links extracted from documents.
 **Human review**  
 Rare
 
-## 4.3 `candidate_crosslink`
+## 4.3 `review_maintenance_subject`
+
+**Purpose**
+Build a bounded observation frame around a node, edge, or hyperedge and assess
+source interpretation, incident relations, and neighbouring concepts before
+recommending a maintenance action.
+
+**Typical trigger**
+- maintenance traversal encounters an unreviewed active parsed node
+- parser diagnostics record fallback, fuzzy repair, or unresolved boundaries
+- relation validation suggests its endpoints may have been parsed poorly
+- explicit operator or user review request
+
+**Inputs**
+- existing node, edge, or hyperedge identity
+- active ParseView and immutable source-revision metadata where applicable
+- bounded parent, sibling, relation, and concept neighbourhood
+- prior compatible quality assessment and budget state
+
+**Outputs**
+- typed parse-and-graph quality assessment
+- quality watermark
+- at most one recommendation for parent review, parse repair, graph-patch
+  proposal, crosslink validation, or human review
+
+This job changes observation and scheduling state only. It does not change the
+persisted node, edge, or hyperedge model and does not mutate raw source or graph
+entities directly. Details are defined in
+[`adr_bounded_maintenance_observation_and_parse_quality.md`](adr_bounded_maintenance_observation_and_parse_quality.md).
+
+**Human review**
+Required only for uncertain, conflicting, or policy-sensitive findings.
+
+## 4.4 `candidate_crosslink`
 
 **Purpose**  
 Find likely useful cross-links across documents, conversation artifacts, and knowledge entities.
@@ -121,7 +157,28 @@ Find likely useful cross-links across documents, conversation artifacts, and kno
 **Human review**  
 Optional for suggestion stage. Recommended before strong promotion.
 
-## 4.4 `entity_merge_candidate`
+The executable cross-link lifecycle is split into bounded maintenance jobs:
+
+```mermaid
+stateDiagram-v2
+    [*] --> candidate
+    candidate --> validated: guarded validation
+    validated --> accepted: parse/ACL/scope/profile fences pass
+    accepted --> needs_revalidation: active ParseView changes
+    needs_revalidation --> candidate: new evidence proposal
+    candidate --> rejected: validation or policy failure
+    accepted --> retracted: derived edge only
+    needs_revalidation --> accepted: add replacement + tombstone old
+```
+
+`document_revalidate_crosslinks` never mutates an accepted edge in place. A
+ParseView switch queues only affected derived edges. Until a new candidate is
+accepted, the old link remains historical/stale evidence and a review artifact
+records the revalidation requirement. A replacement is one guarded atomic patch
+containing the new accepted edge and a tombstone for the old derived edge.
+Source-native edges cannot enter this retraction or replacement path.
+
+## 4.5 `entity_merge_candidate`
 
 **Purpose**  
 Identify likely duplicate or alias entities.
@@ -142,7 +199,7 @@ Identify likely duplicate or alias entities.
 **Human review**  
 Usually required before destructive merge.
 
-## 4.5 `entity_disambiguation`
+## 4.6 `entity_disambiguation`
 
 **Purpose**  
 Resolve, weaken, or invalidate pending ambiguity about whether records refer to
@@ -170,7 +227,7 @@ the same entity or to distinct entities.
 Required only when the evidence is still ambiguous or the question is not
 concrete enough to answer safely.
 
-## 4.6 `topic_assignment`
+## 4.7 `topic_assignment`
 
 **Purpose**  
 Assign entities, documents, or conversation artifacts to topic clusters or topic pages.
@@ -192,7 +249,7 @@ Assign entities, documents, or conversation artifacts to topic clusters or topic
 **Human review**  
 Optional
 
-## 4.6 `evidence_support_scan`
+## 4.8 `evidence_support_scan`
 
 **Purpose**  
 Check whether important promoted artifacts still have sufficient support.
@@ -214,7 +271,7 @@ Check whether important promoted artifacts still have sufficient support.
 **Human review**  
 Recommended for demotion or warning decisions.
 
-## 4.7 `contradiction_scan`
+## 4.9 `contradiction_scan`
 
 **Purpose**  
 Detect conflicting claims, summaries, or relations.
@@ -236,26 +293,7 @@ Detect conflicting claims, summaries, or relations.
 **Human review**  
 Usually required.
 
-## 5. Safety Boundary
-
-Maintenance may create bounded derived or interpretation artifacts and may add
-grounded support, relationship, supersession, or conflict edges. It must never
-rewrite or tombstone raw source documents, source revisions, source-map seeds,
-readiness records, or lane messages containing user or historical statements.
-
-If maintenance believes a source contains a spelling or factual error, it adds
-an explicitly labeled interpretation candidate and an edge to the unchanged
-source evidence. A new source snapshot is created only through the explicit
-ingest/reingest path when the upstream source actually changes.
-
-Maintenance follow-up rounds may carry a bounded structured context containing
-prior round summaries, touched node/edge IDs, selection reasons, and next seed
-IDs. The context is capped at a conservative 10,000-character/token budget and
-does not accept raw transcripts. Follow-ups reuse the same leased job, round
-counter, and budget ledger. They do not call the user-facing maintenance
-request path and cannot recursively create another maintenance job.
-
-## 4.8 `link_validation`
+## 4.10 `link_validation`
 
 **Purpose**  
 Re-check old inferred links for validity and usefulness.
@@ -276,7 +314,7 @@ Re-check old inferred links for validity and usefulness.
 **Human review**  
 Optional depending on risk.
 
-## 4.9 `synthesis_refresh`
+## 4.11 `synthesis_refresh`
 
 **Purpose**  
 Refresh derived summaries, topic pages, or cross-document synthesis artifacts.
@@ -300,7 +338,7 @@ Refresh derived summaries, topic pages, or cross-document synthesis artifacts.
 **Human review**  
 Recommended for important public-facing pages.
 
-## 4.10 `promotion_evaluation`
+## 4.12 `promotion_evaluation`
 
 **Purpose**  
 Evaluate whether a conversation or maintenance artifact is ready for KG promotion.
@@ -324,7 +362,7 @@ Evaluate whether a conversation or maintenance artifact is ready for KG promotio
 **Human review**  
 Optional or required depending on policy tier.
 
-## 4.11 `staleness_scan`
+## 4.13 `staleness_scan`
 
 **Purpose**  
 Identify stale knowledge, stale topic pages, or stale projections.
@@ -346,7 +384,7 @@ Identify stale knowledge, stale topic pages, or stale projections.
 **Human review**  
 Not usually needed for detection.
 
-## 4.12 `wisdom_distillation`
+## 4.14 `wisdom_distillation`
 
 **Purpose**  
 Derive reusable lessons from execution outcomes.
@@ -370,7 +408,7 @@ Derive reusable lessons from execution outcomes.
 **Human review**  
 Recommended.
 
-## 4.13 `projection_refresh_request`
+## 4.15 `projection_refresh_request`
 
 **Purpose**  
 Decide when a visible KG change should cause sink refresh.
@@ -393,7 +431,31 @@ Rare
 
 ---
 
-## 5. Job Metadata Contract
+## 5. Safety Boundary
+
+Maintenance may create bounded derived or interpretation artifacts and may add
+grounded support, relationship, supersession, or conflict edges. It must never
+rewrite or tombstone raw source documents, source revisions, source-map seeds,
+readiness records, or lane messages containing user or historical statements.
+
+If maintenance believes a source contains a spelling or factual error, it adds
+an explicitly labeled interpretation candidate and an edge to the unchanged
+source evidence. A new source snapshot is created only through the explicit
+ingest/reingest path when the upstream source actually changes.
+
+Maintenance follow-up rounds may carry a bounded structured context containing
+prior round summaries, touched node/edge IDs, selection reasons, and next seed
+IDs. The context is capped at a conservative 10,000-character/token budget and
+does not accept raw transcripts. Follow-ups reuse the same leased job, round
+counter, and budget ledger. They do not call the user-facing maintenance
+request path and cannot recursively create another maintenance job.
+
+Parse-quality observation changes only review and action-routing state. It does
+not alter the persisted node, edge, or hyperedge model. Any resulting reparse
+creates immutable derivation evidence and any relation change uses the existing
+guarded graph-patch path.
+
+## 6. Job Metadata Contract
 
 Each maintenance job request should include:
 
@@ -424,7 +486,7 @@ MaintenanceJobCompleted["backend"] {
 
 ---
 
-## 6. Review Tiers
+## 7. Review Tiers
 
 ### Tier 0 — Fully automatic
 Low-risk organizational jobs.
@@ -452,7 +514,7 @@ Examples:
 
 ---
 
-## 7. Input View Recommendations
+## 8. Input View Recommendations
 
 | Job | Recommended Views |
 |---|---|
@@ -467,7 +529,7 @@ Examples:
 
 ---
 
-## 8. Scheduling Guidance
+## 9. Scheduling Guidance
 
 ### Hot-path jobs
 Run soon after ingest or user action:
@@ -485,7 +547,7 @@ Run when system is not busy:
 
 ---
 
-## 9. Anti-Patterns
+## 10. Anti-Patterns
 
 - maintenance job mutates authoritative graph without emitting events
 - maintenance job drops provenance
@@ -495,7 +557,7 @@ Run when system is not busy:
 
 ---
 
-## 10. Outcome
+## 11. Outcome
 
 This taxonomy defines the operational brain of the product.
 

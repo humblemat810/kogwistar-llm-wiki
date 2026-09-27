@@ -27,6 +27,10 @@ class MaintenanceJobExecutionContext:
 
 
 class MaintenanceWorkerLike(Protocol):
+    def _handle_review_maintenance_subject(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
+    def _handle_crosslink_maintenance_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
     def _handle_document_parse_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
 
     def _handle_document_expand_parse_children_strategy(
@@ -98,6 +102,32 @@ class GraphPatchProposalMaintenanceStrategy:
         worker._handle_runtime_workflow_strategy(ctx)
 
 
+class MaintenanceObservationStrategy:
+    name = "maintenance_observation"
+
+    def can_handle(self, maintenance_kind: str) -> bool:
+        return normalize_maintenance_kind(maintenance_kind) == "review_maintenance_subject"
+
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
+        worker._handle_review_maintenance_subject(ctx)
+
+
+class CrosslinkMaintenanceStrategy:
+    name = "crosslink_lifecycle"
+    _KINDS = {
+        "document_propose_crosslinks",
+        "document_validate_crosslinks",
+        "document_revalidate_crosslinks",
+        "document_retract_crosslinks",
+    }
+
+    def can_handle(self, maintenance_kind: str) -> bool:
+        return normalize_maintenance_kind(maintenance_kind) in self._KINDS
+
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
+        worker._handle_crosslink_maintenance_strategy(ctx)
+
+
 class RuntimeWorkflowMaintenanceStrategy:
     name = "runtime_workflow"
 
@@ -136,6 +166,8 @@ def build_default_maintenance_strategy_registry() -> MaintenanceStrategyRegistry
         [
             ExecutionWisdomMaintenanceStrategy(),
             GraphPatchApplyMaintenanceStrategy(),
+            MaintenanceObservationStrategy(),
+            CrosslinkMaintenanceStrategy(),
             DocumentParseMaintenanceStrategy(),
             DocumentExpandParseChildrenMaintenanceStrategy(),
             GraphPatchProposalMaintenanceStrategy(),

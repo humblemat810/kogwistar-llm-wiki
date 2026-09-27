@@ -33,6 +33,7 @@ from .maintenance.state import (
 from .maintenance.worker_derived import DerivedMaintenanceWorkerMixin
 from .maintenance.worker_execution import MaintenanceExecutionWorkerMixin
 from .maintenance.worker_parse import DurableParseMaintenanceWorkerMixin
+from .maintenance.worker_observation import MaintenanceObservationWorkerMixin
 from .maintenance.worker_runtime import MaintenanceRuntimeWorkerMixin
 from .maintenance.worker_selection import MaintenanceSelectionWorkerMixin
 from .models import NamespaceEngines
@@ -72,6 +73,7 @@ class BaseWorker(ABC):
 class MaintenanceWorker(
     MaintenanceJobDispatchMixin,
     DurableParseMaintenanceWorkerMixin,
+    MaintenanceObservationWorkerMixin,
     MaintenanceExecutionWorkerMixin,
     DerivedMaintenanceWorkerMixin,
     MaintenanceRuntimeWorkerMixin,

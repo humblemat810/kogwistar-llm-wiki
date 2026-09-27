@@ -125,3 +125,19 @@ def test_explicit_ladder_provider_does_not_get_replaced_by_global_chain(monkeypa
     assert settings.parser.provider == "ollama"
     assert settings.parser.model == "gemma4:e2b"
     assert settings.parser.fallback_specs == []
+
+
+def test_primary_codex_provider_uses_codex_specific_model(monkeypatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER", "codex")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN", "codex")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_MODEL", "gemma4:e2b")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_CODEX_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_CODEX_BASE_URL", "http://bridge:8791")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_CODEX_API_KEY_ENV", "BRIDGE_TOKEN")
+
+    settings = resolve_maintenance_provider_settings()
+
+    assert settings.parser.provider == "codex"
+    assert settings.parser.model == "gpt-5.6-luna"
+    assert settings.parser.base_url == "http://bridge:8791"
+    assert settings.parser.api_key_env == "BRIDGE_TOKEN"

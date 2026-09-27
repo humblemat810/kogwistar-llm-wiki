@@ -25,6 +25,7 @@ from kogwistar_llm_wiki.parsing.parse_views import (
     generation_member_id,
     legacy_generation_id,
     reparse_session_id,
+    validate_generation_member_ancestry,
 )
 
 
@@ -119,6 +120,33 @@ def _commit_region(
     return member
 
 
+def test_generation_member_ancestry_requires_same_lineage_and_containment() -> None:
+    parent = ParseGenerationMember(
+        member_id="parent",
+        generation_id="g1",
+        workspace_id="demo",
+        source_document_id="logical-source",
+        source_revision_id="revision-1",
+        revision_document_id="rev-doc",
+        region=_region(0, 20),
+    )
+    child = parent.model_copy(
+        update={"member_id": "child", "parent_member_id": "parent", "region": _region(5, 10)}
+    )
+
+    validate_generation_member_ancestry([parent, child])
+
+    with pytest.raises(ValueError, match="outside its parent"):
+        validate_generation_member_ancestry(
+            [parent, child.model_copy(update={"region": _region(15, 25)})]
+        )
+
+    with pytest.raises(ValueError, match="unknown parent"):
+        validate_generation_member_ancestry(
+            [child.model_copy(update={"parent_member_id": "missing"})]
+        )
+
+
 def test_parse_evidence_ids_are_stable_but_generation_members_are_event_scoped() -> None:
     generation = generation_id(
         workspace_id="demo",
@@ -181,6 +209,20 @@ def test_parse_view_activation_is_per_source_and_cas_protected() -> None:
     assert store.get("logical-source").view_version == 2
     with pytest.raises(ValueError, match="must increase"):
         store.activate(_view(2), expected_view_version=2)
+
+
+def test_stale_parse_view_repair_cannot_change_active_interpretation() -> None:
+    store = ParseViewStore(InMemoryMetaStore(), workspace_id="demo")
+    assert store.activate(_view(1), expected_view_version=None) is True
+    assert store.activate(_view(2), expected_view_version=1) is True
+
+    with pytest.raises(ParseViewConflict, match="version changed"):
+        store.activate(_view(3), expected_view_version=1)
+
+    active = store.get("logical-source")
+    assert active is not None
+    assert active.view_id == "view-2"
+    assert active.view_version == 2
 
 
 def test_parse_view_read_rejects_payload_under_the_wrong_source_key() -> None:

@@ -6,6 +6,8 @@ do not need to reach into engine namespaces directly.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -17,6 +19,8 @@ from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
 from ..parsing.parse_views import ParseViewResolver
 from ..utils import _temporary_namespace
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +73,24 @@ class GraphSpaceQueryService:
         )
         for graph_space in requested_spaces:
             for namespace, resolved_space in self._candidate_namespaces(ns, graph_space):
+                started = time.monotonic()
+                logger.info(
+                    "graph_query_read_start workspace=%s graph_space=%s namespace=%s",
+                    workspace_id,
+                    graph_space.value,
+                    namespace,
+                )
                 nodes = self._read_nodes(
                     engine=self._engine_for_graph_space(graph_space),
                     namespace=namespace,
-                    where=query_where,
+                    where={**query_where, "graph_space": graph_space.value},
+                )
+                logger.info(
+                    "graph_query_read_nodes workspace=%s graph_space=%s count=%s elapsed_ms=%s",
+                    workspace_id,
+                    graph_space.value,
+                    len(nodes),
+                    int((time.monotonic() - started) * 1000),
                 )
                 for node in nodes:
                     if graph_space == GraphSpace.SOURCE and not self._is_active_source_node(
@@ -95,6 +113,13 @@ class GraphSpaceQueryService:
                     if node_id:
                         seen_ids.add(node_id)
                     results.append(result)
+                logger.info(
+                    "graph_query_read_complete workspace=%s graph_space=%s results=%s elapsed_ms=%s",
+                    workspace_id,
+                    graph_space.value,
+                    len(results),
+                    int((time.monotonic() - started) * 1000),
+                )
         return results
 
     @staticmethod
@@ -127,7 +152,16 @@ class GraphSpaceQueryService:
 
     def _read_nodes(self, *, engine: GraphKnowledgeEngine, namespace: str, where: Mapping[str, object]) -> list[Node]:
         with _temporary_namespace(engine, namespace):
-            return list(engine.read.get_nodes(where=dict(where), limit=10_000))
+            # Textual lens resolution only needs reconstructed payload and
+            # metadata. Avoid loading every stored embedding for a graph scan;
+            # vector retrieval has its own explicit path below the lens layer.
+            return list(
+                engine.read.get_nodes(
+                    where=dict(where),
+                    limit=10_000,
+                    include=["documents", "metadatas"],
+                )
+            )
 
     def _node_matches_graph_space(self, node: Node, graph_space: GraphSpace) -> bool:
         metadata = dict(getattr(node, "metadata", None) or {})
@@ -236,6 +270,7 @@ class GraphSpaceQueryService:
                 target_engine.read.get_nodes(
                     ids=[logical_ref.target_id],
                     resolve_mode=target_resolve_mode,
+                    include=["documents", "metadatas"],
                 )
             )
         if not nodes:
