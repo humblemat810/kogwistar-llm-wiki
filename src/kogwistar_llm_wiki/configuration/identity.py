@@ -313,12 +313,12 @@ def authorize_durable_claims(
 def durable_claims_context(claims: Mapping[str, object] | None) -> Iterator[None]:
     """Restore a sanitized job creator identity for one worker execution."""
 
-    if not isinstance(claims, Mapping):
-        yield
-        return
-    token = set_claims_ctx(
+    sanitized = (
         {key: claims[key] for key in _DURABLE_CLAIM_KEYS if key in claims}
+        if isinstance(claims, Mapping)
+        else None
     )
+    token = set_claims_ctx(sanitized)
     try:
         yield
     finally:
