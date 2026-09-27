@@ -10,13 +10,21 @@ from kogwistar_llm_wiki.maintenance.maintenance_observation import (
 from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     build_default_maintenance_strategy_registry,
 )
-from kogwistar_llm_wiki.maintenance.worker_execution import MaintenanceExecutionWorkerMixin
-from kogwistar_llm_wiki.maintenance.worker_observation import MaintenanceObservationWorkerMixin
+from kogwistar_llm_wiki.maintenance.worker_execution import (
+    MaintenanceExecutionWorkerMixin,
+)
+from kogwistar_llm_wiki.maintenance.worker_observation import (
+    MaintenanceObservationWorkerMixin,
+)
 from kogwistar_llm_wiki.maintenance.worker_parse import (
     select_affected_crosslink_ids,
     select_affected_parse_view_artifact_ids,
 )
-from kogwistar_llm_wiki.parsing.parse_views import ParseView, ParseViewSelection, SourceRegion
+from kogwistar_llm_wiki.parsing.parse_views import (
+    ParseView,
+    ParseViewSelection,
+    SourceRegion,
+)
 
 
 def test_unresolved_review_subject_advances_the_maintenance_plan() -> None:

@@ -4,6 +4,15 @@ Implementation modules live inside this package so the maintenance boundary is
 discoverable without importing the worker or daemon.
 """
 
+from .maintenance_observation import (
+    MaintenanceObservationFrame,
+    ObservationFinding,
+    ObservationRuntimeLimits,
+    ObservationSubject,
+    ParseAndGraphQualityAssessment,
+    assess_observation_frame,
+    build_observation_frame,
+)
 from .maintenance_policy import (
     is_execution_wisdom_kind,
     is_graph_patch_kind,
@@ -34,15 +43,6 @@ from .maintenance_selection import (
     select_embedding_exploration,
     select_request_candidates,
 )
-from .maintenance_observation import (
-    MaintenanceObservationFrame,
-    ObservationFinding,
-    ObservationRuntimeLimits,
-    ObservationSubject,
-    ParseAndGraphQualityAssessment,
-    assess_observation_frame,
-    build_observation_frame,
-)
 from .maintenance_statistics import (
     build_maintenance_statistics,
     operation_category,
@@ -56,8 +56,8 @@ from .maintenance_strategies import (
 
 __all__ = [
     "MaintenanceCandidate",
-    "MaintenanceObservationFrame",
     "MaintenanceJobExecutionContext",
+    "MaintenanceObservationFrame",
     "MaintenanceProfileDecision",
     "MaintenanceProfileLadderDecision",
     "MaintenanceProfileLevel",
@@ -67,8 +67,8 @@ __all__ = [
     "ObservationRuntimeLimits",
     "ObservationSubject",
     "ParseAndGraphQualityAssessment",
-    "assess_observation_frame",
     "add_usage",
+    "assess_observation_frame",
     "budget_fits",
     "build_default_maintenance_strategy_registry",
     "build_maintenance_statistics",

@@ -669,7 +669,6 @@ __all__ = [
     "ParseViewSelection",
     "ParseViewStatus",
     "ParseViewStore",
-    "validate_generation_member_ancestry",
     "SourceRegion",
     "frontier_id",
     "generation_id",
@@ -677,5 +676,6 @@ __all__ = [
     "legacy_generation_id",
     "parse_session_id",
     "reparse_session_id",
+    "validate_generation_member_ancestry",
     "validate_parse_view_selections",
 ]

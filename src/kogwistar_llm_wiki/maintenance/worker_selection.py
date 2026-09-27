@@ -10,8 +10,8 @@ from kogwistar.id_provider import stable_id
 from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
-from ..utils import _temporary_namespace
 from ..parsing.parse_views import ParseViewResolver
+from ..utils import _temporary_namespace
 from .maintenance_selection import select_request_candidates
 from .maintenance_strategies import MaintenanceJobExecutionContext
 from .state import belongs_to_workspace as _belongs_to_workspace

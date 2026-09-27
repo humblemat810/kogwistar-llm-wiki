@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import inspect
+import logging
 import time
 from collections.abc import Mapping
 
@@ -13,8 +13,8 @@ from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.models import RunSuccess
 from kogwistar.server.auth_middleware import can_access_security_scope
 
-from ..configuration.workspace import WorkspaceNamespaces
 from ..configuration.identity import runtime_authority_context
+from ..configuration.workspace import WorkspaceNamespaces
 from ..maintenance import (
     MaintenanceJobExecutionContext,
     workflow_id_for_maintenance_kind,
@@ -608,9 +608,11 @@ class MaintenanceExecutionWorkerMixin:
             self._validate_crosslink_authority(ctx, patch)
             if ctx.maintenance_kind == "document_validate_crosslinks":
                 patch = self._promote_crosslink_candidate(ctx, patch)
-            elif ctx.maintenance_kind == "document_retract_crosslinks":
-                if patch.intent != MaintenanceIntent.RETRACT_CROSSLINK:
-                    raise ValueError("crosslink retraction requires retract_crosslink intent")
+            elif (
+                ctx.maintenance_kind == "document_retract_crosslinks"
+                and patch.intent != MaintenanceIntent.RETRACT_CROSSLINK
+            ):
+                raise ValueError("crosslink retraction requires retract_crosslink intent")
             next_payload = dict(ctx.payload)
             next_payload.update(
                 {
