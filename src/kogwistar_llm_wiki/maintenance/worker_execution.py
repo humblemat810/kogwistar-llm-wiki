@@ -860,8 +860,8 @@ class MaintenanceExecutionWorkerMixin:
             "crosslink_source_revision_current",
         )
         for field_name in required_attestations:
-            if ctx.payload.get(field_name) is False:
-                raise ValueError(f"crosslink acceptance rejected by {field_name}=false")
+            if ctx.payload.get(field_name) is not True:
+                raise ValueError(f"crosslink acceptance requires {field_name}=true")
         accepted_confidence = float(ctx.payload.get("accepted_confidence") or 0.0)
         if accepted_confidence < 0.8:
             raise ValueError("crosslink acceptance requires accepted_confidence >= 0.8")

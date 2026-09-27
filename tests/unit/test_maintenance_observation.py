@@ -587,6 +587,63 @@ def test_crosslink_revalidation_requires_a_derived_edge_and_preserves_old_until_
     assert accepted.operations[1].kind.value == "TOMBSTONE_EDGE"
 
 
+@pytest.mark.parametrize(
+    "missing_attestation",
+    [
+        "crosslink_acl_authorized",
+        "crosslink_scope_valid",
+        "crosslink_profile_compatible",
+        "crosslink_source_revision_current",
+    ],
+)
+def test_crosslink_acceptance_requires_every_attestation(
+    missing_attestation: str,
+) -> None:
+    ctx = SimpleNamespace(
+        workspace_id="demo",
+        request_node_id="request-1",
+        job_id="job-1",
+        maintenance_kind="document_validate_crosslinks",
+        payload={
+            "accepted_confidence": 0.95,
+            **{
+                field_name: True
+                for field_name in (
+                    "crosslink_acl_authorized",
+                    "crosslink_scope_valid",
+                    "crosslink_profile_compatible",
+                    "crosslink_source_revision_current",
+                )
+                if field_name != missing_attestation
+            },
+        },
+    )
+    candidate_ctx = SimpleNamespace(
+        workspace_id="demo",
+        request_node_id="request-1",
+        job_id="job-1",
+        maintenance_kind="document_propose_crosslinks",
+        payload={
+            "crosslink_candidate": {
+                "left_node_id": "ws:demo:left",
+                "right_node_id": "ws:demo:right",
+                "relation": "related_to",
+                "left_source_document_id": "doc-left",
+                "right_source_document_id": "doc-right",
+                "confidence": 0.7,
+                "source_pointers": [
+                    {"doc_id": "doc-left", "start_char": 0, "end_char": 5},
+                    {"doc_id": "doc-right", "start_char": 0, "end_char": 5},
+                ],
+            }
+        },
+    )
+    patch = MaintenanceExecutionWorkerMixin._build_crosslink_candidate_patch(object(), candidate_ctx)
+
+    with pytest.raises(ValueError, match=missing_attestation):
+        MaintenanceExecutionWorkerMixin._promote_crosslink_candidate(ctx, patch)
+
+
 def test_crosslink_revalidation_rejects_source_native_replacement() -> None:
     ctx = SimpleNamespace(
         workspace_id="demo",
