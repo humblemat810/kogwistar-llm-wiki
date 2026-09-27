@@ -332,6 +332,9 @@ def test_workbench_email_memory_promotion_is_explicit_and_idempotent(pipeline, m
         pipeline,
         email_evidence_store=evidence,
         email_review_store=reviews,
+        email_authorize_stream=lambda workspace, stream: (
+            workspace == "w" and stream == "stream-a"
+        ),
     )
 
     proposal = api.propose_email_memory(

@@ -15,6 +15,8 @@ from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 
+pytestmark = pytest.mark.usefixtures("install_fake_email_plugin")
+
 RAW_ACCEPTANCE_EMAIL = b"immutable email bytes"
 
 
@@ -43,7 +45,11 @@ def _record() -> EmailEvidenceRecord:
                     "relation_id": "message_exchange",
                     "subject_id": "message",
                     "target_ids": ["person"],
-                    "roles": {},
+                    "roles": {
+                        "message": ["message"],
+                        "sender": ["person"],
+                        "recipient": [],
+                    },
                 }
             ],
         },

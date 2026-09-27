@@ -18,6 +18,8 @@ from kogwistar_llm_wiki.email import (
 from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
 from tests._helpers.fake_email_plugin import FakeRfc822SourceAdapter
 
+pytestmark = pytest.mark.usefixtures("install_fake_email_plugin")
+
 RAW_EMAIL = (
     b"From: Alice <alice@example.test>\r\n"
     b"To: Bob <bob@example.test>\r\n"

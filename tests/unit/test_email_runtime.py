@@ -20,6 +20,8 @@ from kogwistar_llm_wiki.email import (
 )
 from kogwistar_llm_wiki.email.review import EmailReviewState
 
+pytestmark = pytest.mark.usefixtures("install_fake_email_plugin")
+
 RAW_EMAIL = (
     b"From: Alice <alice@example.test>\r\n"
     b"To: Bob <bob@example.test>\r\n"
@@ -34,7 +36,11 @@ RAW_EMAIL = (
 
 def test_email_runtime_persists_immutable_evidence_and_pending_mapping(pipeline) -> None:
     store = InMemoryEmailEvidenceStore()
-    runtime = EmailRuntime(pipeline=pipeline, store=store)
+    runtime = EmailRuntime(
+        pipeline=pipeline,
+        store=store,
+        authorize_stream=lambda _workspace, _stream: True,
+    )
     request = EmailIngestRequest(
         workspace_id="email-workspace",
         stream_id="mail-stream-a",
@@ -63,7 +69,11 @@ def test_email_runtime_persists_immutable_evidence_and_pending_mapping(pipeline)
 
 def test_email_viewer_checks_workspace_stream_scope_and_escapes_html(pipeline) -> None:
     store = InMemoryEmailEvidenceStore()
-    runtime = EmailRuntime(pipeline=pipeline, store=store)
+    runtime = EmailRuntime(
+        pipeline=pipeline,
+        store=store,
+        authorize_stream=lambda _workspace, _stream: True,
+    )
     request = EmailIngestRequest(
         workspace_id="viewer-workspace",
         stream_id="mail-stream-a",
@@ -118,7 +128,11 @@ def test_email_viewer_checks_workspace_stream_scope_and_escapes_html(pipeline) -
 
 def test_email_evidence_store_rejects_identity_or_digest_mismatch(pipeline) -> None:
     store = InMemoryEmailEvidenceStore()
-    runtime = EmailRuntime(pipeline=pipeline, store=store)
+    runtime = EmailRuntime(
+        pipeline=pipeline,
+        store=store,
+        authorize_stream=lambda _workspace, _stream: True,
+    )
     request = EmailIngestRequest(
         workspace_id="evidence-workspace",
         stream_id="mail-stream-a",
@@ -156,6 +170,23 @@ def test_email_runtime_rejects_unauthorized_stream_without_parsing(pipeline) -> 
                 source_key="uid:3",
                 raw_bytes=RAW_EMAIL,
                 source_revision_id="rfc822:revision-3",
+            )
+        )
+
+
+def test_email_runtime_denies_streams_without_an_explicit_policy(pipeline) -> None:
+    runtime = EmailRuntime(
+        pipeline=pipeline,
+        store=InMemoryEmailEvidenceStore(),
+    )
+    with pytest.raises(PermissionError, match="not authorized"):
+        runtime.ingest(
+            EmailIngestRequest(
+                workspace_id="email-workspace",
+                stream_id="mail-stream-a",
+                source_key="uid:default-deny",
+                raw_bytes=RAW_EMAIL,
+                source_revision_id="rfc822:default-deny",
             )
         )
 

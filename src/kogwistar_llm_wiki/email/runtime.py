@@ -27,6 +27,12 @@ class EmailPluginUnavailable(RuntimeError):
     """Raised when email integration is requested without the optional plugin."""
 
 
+def default_deny_email_stream(_workspace_id: str, _stream_id: str) -> bool:
+    """Require callers to provide an explicit mailbox-stream ACL policy."""
+
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class EmailIngestRequest:
     workspace_id: str
@@ -245,7 +251,7 @@ class EmailRuntime:
         self.store = store or InMemoryEmailEvidenceStore()
         self.plugin = plugin
         self.ontology = ontology
-        self.authorize_stream = authorize_stream or (lambda _workspace_id, _stream_id: True)
+        self.authorize_stream = authorize_stream or default_deny_email_stream
 
     def ingest(self, request: EmailIngestRequest) -> EmailIngestResult:
         if not self.authorize_stream(request.workspace_id, request.stream_id):

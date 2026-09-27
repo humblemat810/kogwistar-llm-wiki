@@ -18,6 +18,8 @@ from kogwistar_llm_wiki.email import (
     SQLiteEmailSyncStateStore,
 )
 
+pytestmark = pytest.mark.usefixtures("install_fake_email_plugin")
+
 RAW_EMAIL = (
     b"From: Alice <alice@example.test>\r\n"
     b"To: Bob <bob@example.test>\r\n"
@@ -67,7 +69,11 @@ class Adapter:
 
 
 def test_email_sync_ingests_batch_before_committing_snapshot(pipeline, tmp_path: Path) -> None:
-    runtime = EmailRuntime(pipeline=pipeline, store=InMemoryEmailEvidenceStore())
+    runtime = EmailRuntime(
+        pipeline=pipeline,
+        store=InMemoryEmailEvidenceStore(),
+        authorize_stream=lambda _workspace, _stream: True,
+    )
     state = SQLiteEmailSyncStateStore(tmp_path / "sync.sqlite3", snapshot_type=Snapshot)
     snapshot = Snapshot("stream-a", "rfc822", (), {})
     adapter = Adapter(
@@ -116,7 +122,11 @@ def test_email_sync_does_not_commit_snapshot_after_ingest_failure(pipeline, tmp_
 
 
 def test_email_sync_persists_idempotent_mailbox_events(pipeline) -> None:
-    runtime = EmailRuntime(pipeline=pipeline, store=InMemoryEmailEvidenceStore())
+    runtime = EmailRuntime(
+        pipeline=pipeline,
+        store=InMemoryEmailEvidenceStore(),
+        authorize_stream=lambda _workspace, _stream: True,
+    )
     events = InMemoryEmailMailboxEventStore()
     snapshot = Snapshot("stream-a", "rfc822", ("uid:1",), {})
     service = EmailSyncService(
@@ -147,7 +157,11 @@ def test_email_sync_does_not_advance_snapshot_when_event_persistence_fails(pipel
     new = Snapshot("stream-a", "rfc822", ("uid:new",), {})
     state = InMemoryEmailSyncStateStore()
     state.put(workspace_id="w", stream_id="stream-a", snapshot=old)
-    runtime = EmailRuntime(pipeline=pipeline, store=InMemoryEmailEvidenceStore())
+    runtime = EmailRuntime(
+        pipeline=pipeline,
+        store=InMemoryEmailEvidenceStore(),
+        authorize_stream=lambda _workspace, _stream: True,
+    )
     service = EmailSyncService(
         runtime=runtime,
         state_store=state,

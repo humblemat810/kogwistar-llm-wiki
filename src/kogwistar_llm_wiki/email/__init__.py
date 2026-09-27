@@ -54,6 +54,7 @@ from .runtime import (
     EmailRuntime,
     InMemoryEmailEvidenceStore,
     SQLiteEmailEvidenceStore,
+    default_deny_email_stream,
 )
 from .sync import (
     EmailMailboxEvent,
@@ -120,6 +121,7 @@ __all__ = [
     "InMemoryEmailSyncStateStore",
     "SQLiteEmailConnectorBindingStore",
     "SQLiteEmailEvidenceStore",
+    "default_deny_email_stream",
     "SQLiteEmailMailboxEventStore",
     "SQLiteEmailMappingProposalStore",
     "SQLiteEmailReviewStateStore",

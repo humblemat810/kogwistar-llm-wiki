@@ -26,6 +26,8 @@ from kogwistar_llm_wiki.email import (
     InMemoryEmailEvidenceStore,
 )
 
+pytestmark = pytest.mark.usefixtures("install_fake_email_plugin")
+
 
 def _install_fake_email_plugin(monkeypatch) -> ModuleType:
     """Exercise the host boundary without installing the private plugin repo."""
@@ -232,7 +234,13 @@ def test_workbench_http_exposes_acl_checked_email_viewer(monkeypatch) -> None:
         blob_ref="sha256:" + content_sha256,
         ),
     )
-    api = WorkbenchApi(IngestPipeline(engines), email_evidence_store=store)
+    api = WorkbenchApi(
+        IngestPipeline(engines),
+        email_evidence_store=store,
+        email_authorize_stream=lambda workspace, stream: (
+            workspace == "email-http" and stream == "stream-1"
+        ),
+    )
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
