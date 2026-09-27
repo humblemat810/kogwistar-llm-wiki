@@ -472,6 +472,9 @@ class MaintenanceExecutionWorkerMixin:
                 # destination namespace.
                 namespace_prefix=f"ws:{ctx.workspace_id}:",
             )
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_after_graph_patch")
+                return
             invalidation = None
             if result.status.value == "applied":
                 invalidation = self._plan_and_enqueue_dependency_invalidation(ctx, patch)
@@ -502,6 +505,9 @@ class MaintenanceExecutionWorkerMixin:
             else:
                 raise RuntimeError(f"graph patch apply did not complete: {result.status.value}")
         except Exception as e:
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_graph_patch")
+                return
             logger.exception("Maintenance job %s encountered graph patch apply error", ctx.request_node_id)
             self._emit_lane_reply(
                 workspace_id=ctx.workspace_id,
@@ -574,6 +580,9 @@ class MaintenanceExecutionWorkerMixin:
                                 "maintenance_previous_kind": ctx.maintenance_kind,
                             }
                         )
+                        if self._claim_lost.is_set():
+                            self._emit_stale_claim_discarded(ctx, reason="claim_lost_before_crosslink_requeue")
+                            return
                         self.engines.conversation.jobs.requeue_at_tail(ctx.job, payload=next_payload)
                         return
                     self._emit_trace(
@@ -583,6 +592,9 @@ class MaintenanceExecutionWorkerMixin:
                         request_node_id=ctx.request_node_id,
                         reason="bounded proposal found no eligible candidate",
                     )
+                    if self._claim_lost.is_set():
+                        self._emit_stale_claim_discarded(ctx, reason="claim_lost_before_crosslink_reply")
+                        return
                     self._emit_lane_reply(
                         workspace_id=ctx.workspace_id,
                         source_document_id=str(ctx.payload.get("source_document_id") or ""),
@@ -595,6 +607,9 @@ class MaintenanceExecutionWorkerMixin:
                             "graph_mutation": False,
                         },
                     )
+                    if self._claim_lost.is_set():
+                        self._emit_stale_claim_discarded(ctx, reason="claim_lost_before_crosslink_advance")
+                        return
                     if self._advance_maintenance_plan(ctx):
                         return
                     if ctx.job_id:
@@ -630,6 +645,9 @@ class MaintenanceExecutionWorkerMixin:
                     "maintenance_previous_kind": ctx.maintenance_kind,
                 }
             )
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_before_crosslink_requeue")
+                return
             self.engines.conversation.jobs.requeue_at_tail(ctx.job, payload=next_payload)
             self._emit_trace(
                 "maintenance_crosslink_patch_prepared",
@@ -640,6 +658,9 @@ class MaintenanceExecutionWorkerMixin:
                 lifecycle=next_payload["crosslink_lifecycle"],
             )
         except Exception as exc:
+            if self._claim_lost.is_set():
+                self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_crosslink")
+                return
             self._emit_trace(
                 "maintenance_crosslink_patch_rejected",
                 workspace_id=ctx.workspace_id,

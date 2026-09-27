@@ -228,6 +228,53 @@ def test_claim_loss_before_graph_patch_never_calls_the_applier(monkeypatch) -> N
     assert any(event["event"] == "maintenance_repeated_work_discarded" for event in traces)
 
 
+def test_claim_loss_before_crosslink_requeue_discards_prepared_patch() -> None:
+    requeued: list[object] = []
+    traces: list[dict[str, object]] = []
+
+    class FakeJobs:
+        def requeue_at_tail(self, *_args, **_kwargs):
+            requeued.append(True)
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=FakeJobs()))
+    worker._claim_lost = threading.Event()
+    worker._claim_lost.set()
+    worker.trace_sink = traces.append
+    worker._validate_crosslink_authority = lambda _ctx, _patch: None
+
+    patch = MaintenancePatch(
+        patch_id="patch-crosslink-lease-loss",
+        intent="derive_crosslink_candidate",
+        scope={"workspace_id": "workspace-lease-loss"},
+        operations=[
+            {
+                "operation_id": "candidate-1",
+                "kind": "ADD_EDGE",
+                "edge_id": "ws:workspace-lease-loss:edge-1",
+                "from_node_id": "ws:workspace-lease-loss:left",
+                "to_node_id": "ws:workspace-lease-loss:right",
+                "relation": "related_to",
+                "properties": {"crosslink_status": "candidate"},
+            }
+        ],
+    )
+    ctx = SimpleNamespace(
+        workspace_id="workspace-lease-loss",
+        job=SimpleNamespace(claim_token="claim-1"),
+        job_id="job-crosslink-lease-loss",
+        payload={"patch": patch.model_dump(mode="json")},
+        request_node_id="request-crosslink-lease-loss",
+        lane_message_id="",
+        maintenance_kind="document_propose_crosslinks",
+    )
+
+    worker._handle_crosslink_maintenance_strategy(ctx)
+
+    assert requeued == []
+    assert any(event["event"] == "maintenance_repeated_work_discarded" for event in traces)
+
+
 def test_expired_maintenance_claim_cannot_be_completed_by_stale_worker() -> None:
     """A first persisted result may win, but a stale queue ack must not.
 

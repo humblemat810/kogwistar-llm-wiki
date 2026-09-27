@@ -145,6 +145,88 @@ def test_crosslink_authority_rejects_endpoint_outside_security_scope(monkeypatch
         )
 
 
+def test_crosslink_authority_rejects_source_document_outside_security_scope(monkeypatch) -> None:
+    document = SimpleNamespace(
+        metadata={"workspace_id": "demo", "security_scope": "tenant-a"},
+    )
+    worker = SimpleNamespace(
+        engines=SimpleNamespace(
+            kg=SimpleNamespace(
+                read=SimpleNamespace(
+                    get_nodes=lambda **kwargs: [],
+                    get_document=lambda _document_id: document,
+                )
+            )
+        )
+    )
+    patch = SimpleNamespace(
+        scope=SimpleNamespace(workspace_id="demo"),
+        operations=[
+            SimpleNamespace(
+                from_node_id=None,
+                to_node_id=None,
+                provenance=SimpleNamespace(
+                    source_pointers=[{"doc_id": "doc-a", "source_revision_id": "rev-1"}]
+                ),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.maintenance.worker_execution.can_access_security_scope",
+        lambda scope: False,
+    )
+
+    with pytest.raises(PermissionError, match="evidence"):
+        MaintenanceExecutionWorkerMixin._validate_crosslink_authority(
+            worker,
+            SimpleNamespace(workspace_id="demo"),
+            patch,
+        )
+
+
+def test_crosslink_authority_rejects_pointer_pinned_to_stale_source_revision(monkeypatch) -> None:
+    document = SimpleNamespace(
+        metadata={
+            "workspace_id": "demo",
+            "security_scope": "tenant-a",
+            "source_revision_id": "rev-current",
+        },
+    )
+    worker = SimpleNamespace(
+        engines=SimpleNamespace(
+            kg=SimpleNamespace(
+                read=SimpleNamespace(
+                    get_nodes=lambda **kwargs: [],
+                    get_document=lambda _document_id: document,
+                )
+            )
+        )
+    )
+    patch = SimpleNamespace(
+        scope=SimpleNamespace(workspace_id="demo"),
+        operations=[
+            SimpleNamespace(
+                from_node_id=None,
+                to_node_id=None,
+                provenance=SimpleNamespace(
+                    source_pointers=[{"doc_id": "doc-a", "source_revision_id": "rev-old"}]
+                ),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.maintenance.worker_execution.can_access_security_scope",
+        lambda scope: True,
+    )
+
+    with pytest.raises(ValueError, match="stale source revision"):
+        MaintenanceExecutionWorkerMixin._validate_crosslink_authority(
+            worker,
+            SimpleNamespace(workspace_id="demo"),
+            patch,
+        )
+
+
 def test_observation_reparse_target_rejects_mismatched_active_view(monkeypatch) -> None:
     view = ParseView(
         view_id="view-1",
