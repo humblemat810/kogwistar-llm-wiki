@@ -25,13 +25,15 @@ class FakeNode:
 
 
 def test_request_payload_is_enriched_from_fake_graph(monkeypatch) -> None:
-    seed = FakeNode("seed", [1.0, 0.0])
-    neighbor = FakeNode("neighbor", [0.0, 1.0])
-    semantic = FakeNode("semantic", [0.9, 0.1])
+    seed = FakeNode("seed", [1.0, 0.0], workspace_id="demo")
+    neighbor = FakeNode("neighbor", [0.0, 1.0], workspace_id="demo")
+    semantic = FakeNode("semantic", [0.9, 0.1], workspace_id="demo")
     graph = SimpleNamespace(
         read=SimpleNamespace(
             get_nodes=lambda **_: [seed, neighbor, semantic],
-            get_edges=lambda **_: [SimpleNamespace(source_ids=["seed"], target_ids=["neighbor"])],
+            get_edges=lambda **_: [SimpleNamespace(
+                source_ids=["seed"], target_ids=["neighbor"], metadata={"workspace_id": "demo"}
+            )],
         )
     )
     worker = object.__new__(MaintenanceWorker)
@@ -56,6 +58,38 @@ def test_request_payload_is_enriched_from_fake_graph(monkeypatch) -> None:
         "semantic",
     ]
     assert ctx.payload["selection_strategy"] == "connected_semantic_evidence_history"
+
+
+def test_request_selection_excludes_inaccessible_nodes_and_edges(monkeypatch) -> None:
+    nodes = [
+        FakeNode("seed", [1.0, 0.0], workspace_id="demo", security_scope="tenant-a"),
+        FakeNode("allowed", [0.0, 1.0], workspace_id="demo", security_scope="tenant-a"),
+        FakeNode("blocked", [0.0, 1.0], workspace_id="demo", security_scope="tenant-b"),
+        FakeNode("foreign", [0.0, 1.0], workspace_id="other", security_scope="tenant-a"),
+    ]
+    graph = SimpleNamespace(
+        read=SimpleNamespace(
+            get_nodes=lambda **_: nodes,
+            get_edges=lambda **_: [
+                SimpleNamespace(source_ids=["seed"], target_ids=["allowed"], metadata={"workspace_id": "demo", "security_scope": "tenant-a"}),
+                SimpleNamespace(source_ids=["seed"], target_ids=["blocked"], metadata={"workspace_id": "demo", "security_scope": "tenant-b"}),
+            ],
+        )
+    )
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(kg=graph)
+    worker._emit_trace = lambda *_args, **_kwargs: None
+    monkeypatch.setattr(worker_module, "_temporary_namespace", lambda *_args: nullcontext())
+    monkeypatch.setattr("kogwistar.server.auth_middleware.get_security_scope", lambda: "tenant-a")
+    ctx = MaintenanceJobExecutionContext(
+        workspace_id="demo", job=SimpleNamespace(job_id="job-1"), job_id="job-1",
+        payload={"mode": "request", "seed_node_ids": ["seed"]}, request_node=None,
+        request_node_id="seed", lane_message_id="", maintenance_kind="document_propose_crosslinks",
+    )
+
+    worker._attach_request_selection(ctx)
+
+    assert {item["candidate_id"] for item in ctx.payload["maintenance_candidates"]} == {"allowed"}
 
 
 def test_background_cycle_enqueues_fake_payload_with_recent_and_probe_halves(monkeypatch) -> None:

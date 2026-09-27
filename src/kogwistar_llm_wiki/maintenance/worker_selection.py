@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from kogwistar.engine_core.models import Node
 from kogwistar.id_provider import stable_id
+from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..utils import _temporary_namespace
@@ -15,6 +16,18 @@ from .maintenance_selection import select_request_candidates
 from .maintenance_strategies import MaintenanceJobExecutionContext
 from .state import belongs_to_workspace as _belongs_to_workspace
 from .state import edge_ids as _edge_ids
+
+
+def _selection_entity_is_accessible(entity: object, workspace_id: str) -> bool:
+    """Require explicit workspace ownership and an accessible entity scope."""
+
+    metadata = getattr(entity, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return False
+    if str(metadata.get("workspace_id") or "").strip() != str(workspace_id):
+        return False
+    scope = str(metadata.get("acl_scope") or metadata.get("security_scope") or "").strip()
+    return not scope or can_access_security_scope(scope)
 
 
 class MaintenanceSelectionWorkerMixin:
@@ -53,12 +66,20 @@ class MaintenanceSelectionWorkerMixin:
                     nodes.extend(self.engines.kg.read.get_nodes(limit=250))
                     edges.extend(self.engines.kg.read.get_edges(limit=500))
             nodes = [node for node in nodes if _belongs_to_workspace(node, ctx.workspace_id)]
+            nodes = [
+                node for node in nodes
+                if _selection_entity_is_accessible(node, ctx.workspace_id)
+            ]
             nodes = [node for node in nodes if self._is_active_source_derivation(node, ctx.workspace_id)]
             node_ids = {
                 str(getattr(node, "safe_get_id", lambda node=node: getattr(node, "id", ""))() or "")
                 for node in nodes
             }
-            edges = [edge for edge in edges if _edge_ids(edge) <= node_ids]
+            edges = [
+                edge for edge in edges
+                if _selection_entity_is_accessible(edge, ctx.workspace_id)
+                and _edge_ids(edge) <= node_ids
+            ]
         except Exception as exc:  # noqa: BLE001 - selection is advisory; guarded work remains authoritative
             self._emit_trace(
                 "maintenance_selection_degraded",
