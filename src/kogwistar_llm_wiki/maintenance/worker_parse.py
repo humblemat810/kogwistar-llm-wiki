@@ -272,7 +272,9 @@ class DurableParseMaintenanceWorkerMixin:
             )
             return
         try:
-            session, frontier, version = self._recover_pending_parse_view(store, stored)
+            session, frontier, version = self._recover_pending_parse_view(
+                store, stored, ctx=ctx
+            )
             result = self.layered_parser(ctx, session, frontier)
             next_session = ParseSessionState.model_validate(result.get("session", {}))
             self._validate_parse_session_transition(session, next_session)
@@ -307,9 +309,22 @@ class DurableParseMaintenanceWorkerMixin:
                 raise ValueError("layered parser returned duplicate frontier IDs")
             if not (available_ids - consumed_ids).issubset(next_frontier_ids):
                 raise ValueError("layered parser dropped an unconsumed frontier item")
+            reconciliation = result.get("reconciliation")
+            review_required = isinstance(reconciliation, Mapping) and bool(
+                reconciliation.get("requires_review")
+            )
             next_session = next_session.model_copy(
                 update={
-                    "phase": ParseSessionPhase.STABLE if stable else ParseSessionPhase.EXPANDING,
+                    "phase": (
+                        ParseSessionPhase.REVIEW_REQUIRED
+                        if stable and review_required
+                        else ParseSessionPhase.STABLE
+                        if stable
+                        else ParseSessionPhase.EXPANDING
+                    ),
+                    "failure_reason": (
+                        "reconciliation_review_required" if review_required else None
+                    ),
                     "frontier_ids": tuple(item.frontier_id for item in next_frontier),
                     "consumed_frontier_ids": tuple(
                         sorted(set(session.consumed_frontier_ids).union(consumed_ids))
@@ -365,7 +380,10 @@ class DurableParseMaintenanceWorkerMixin:
                 if expected_view_version is None and current_view is not None:
                     raise ValueError("expected_view_version is required when replacing a ParseView")
                 pending_session = next_session.model_copy(
-                    update={"pending_view": view.model_dump(mode="json")}
+                    update={
+                        "pending_view": view.model_dump(mode="json"),
+                        "dependents_enqueued_view_version": None,
+                    }
                 )
                 pending_version = store.save(
                     pending_session,
@@ -385,15 +403,22 @@ class DurableParseMaintenanceWorkerMixin:
                     source_document_id=session.source_document_id,
                     active_view_version=view.view_version,
                 )
-                next_session = pending_session.model_copy(update={"pending_view": None})
+                next_session = pending_session.model_copy(
+                    update={
+                        "pending_view": None,
+                        "dependents_enqueued_view_version": view.view_version,
+                    }
+                )
                 store.save(next_session, next_frontier, expected_version=pending_version)
             else:
                 store.save(next_session, next_frontier, expected_version=version)
             if stable:
-                reconciliation = result.get("reconciliation")
-                review_required = isinstance(reconciliation, Mapping) and bool(
-                    reconciliation.get("requires_review")
-                )
+                if isinstance(members_payload, list) and members_payload:
+                    first_member = members_payload[0]
+                    if isinstance(first_member, Mapping):
+                        ctx.payload["parse_generation_member_id"] = str(
+                            first_member.get("member_id") or ""
+                        )
                 if not review_required:
                     self._record_durable_parse_readiness(ctx, next_session)
                 if review_required:
@@ -404,6 +429,8 @@ class DurableParseMaintenanceWorkerMixin:
                         job_id=ctx.job_id,
                         reconciliation=dict(reconciliation),
                     )
+                    if self._advance_maintenance_plan(ctx):
+                        return
                     self._acknowledge_job(ctx)
                     return
                 if self._advance_maintenance_plan(ctx):
@@ -427,6 +454,7 @@ class DurableParseMaintenanceWorkerMixin:
             ParseSessionStoreConflict,
             ParseViewConflict,
             TimeoutError,
+            RuntimeError,
             TypeError,
             ValueError,
             KeyError,
@@ -453,8 +481,8 @@ class DurableParseMaintenanceWorkerMixin:
         ns = WorkspaceNamespaces(ctx.workspace_id)
         try:
             with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
-                edges = self.engines.kg.read.get_edges(limit=512)
-                nodes = self.engines.kg.read.get_nodes(limit=512)
+                edges = self.engines.kg.read.get_edges(limit=None)
+                nodes = self.engines.kg.read.get_nodes(limit=None)
             affected_ids = select_affected_crosslink_ids(
                 edges,
                 workspace_id=ctx.workspace_id,
@@ -507,7 +535,13 @@ class DurableParseMaintenanceWorkerMixin:
                         "maintenance_max_rounds": 1,
                         "maintenance_plan": ["document_revalidate_crosslinks"],
                         "maintenance_phase_index": 0,
-                        "budgets": {"steps": 1},
+                        "budgets": {"max_steps": 1},
+                        "authority_claims": (
+                            dict(ctx.payload["authority_claims"])
+                            if isinstance(ctx.payload.get("authority_claims"), Mapping)
+                            else None
+                        ),
+                        "authority_required": bool(ctx.payload.get("authority_required")),
                     },
                 )
             for maintenance_kind in ("document_summarize_units",) if summary_ids else ():
@@ -541,7 +575,13 @@ class DurableParseMaintenanceWorkerMixin:
                         "maintenance_max_rounds": 1,
                         "maintenance_plan": [maintenance_kind],
                         "maintenance_phase_index": 0,
-                        "budgets": {"steps": 1},
+                        "budgets": {"max_steps": 1},
+                        "authority_claims": (
+                            dict(ctx.payload["authority_claims"])
+                            if isinstance(ctx.payload.get("authority_claims"), Mapping)
+                            else None
+                        ),
+                        "authority_required": bool(ctx.payload.get("authority_required")),
                     },
                 )
             for entity_id in projection_ids:
@@ -577,7 +617,7 @@ class DurableParseMaintenanceWorkerMixin:
                 summary_count=len(summary_ids),
                 projection_count=len(projection_ids),
             )
-        except Exception as exc:  # pragma: no cover - post-activation reporting guard
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_parse_view_dependents_enqueue_failed",
                 workspace_id=ctx.workspace_id,
@@ -585,6 +625,9 @@ class DurableParseMaintenanceWorkerMixin:
                 active_view_version=active_view_version,
                 error_type=type(exc).__name__,
             )
+            # Activation is idempotent and the leased parse job can be retried.
+            # Do not acknowledge a view switch whose dependents were not queued.
+            raise
 
     def _record_durable_parse_readiness(
         self,
@@ -665,6 +708,8 @@ class DurableParseMaintenanceWorkerMixin:
         self,
         store: ParseSessionStore,
         stored: tuple[ParseSessionState, list[ParseFrontierItem], int],
+        *,
+        ctx: MaintenanceJobExecutionContext | None = None,
     ) -> tuple[ParseSessionState, list[ParseFrontierItem], int]:
         """Finish a view CAS left pending by a worker crash."""
 
@@ -677,22 +722,48 @@ class DurableParseMaintenanceWorkerMixin:
             workspace_id=session.workspace_id,
         )
         current = view_store.get(view.source_document_id)
+        dependents_enqueued = False
         if current is None:
             view_store.activate(view, expected_view_version=None)
+            if ctx is not None:
+                self._enqueue_derived_revalidation_after_view_switch(
+                    ctx,
+                    source_document_id=view.source_document_id,
+                    active_view_version=view.view_version,
+                )
+                dependents_enqueued = True
         elif current.view_id == view.view_id and current.view_version == view.view_version:
-            pass
+            if session.dependents_enqueued_view_version != view.view_version and ctx is not None:
+                self._enqueue_derived_revalidation_after_view_switch(
+                    ctx,
+                    source_document_id=view.source_document_id,
+                    active_view_version=view.view_version,
+                )
+                dependents_enqueued = True
         elif current.view_version > view.view_version:
             # A concurrent worker won with a newer complete view. The older
             # pending proposal is no longer actionable, but must be cleared so
             # the session does not retry forever.
-            recovered = session.model_copy(update={"pending_view": None})
+            recovered = session.model_copy(
+                update={
+                    "pending_view": None,
+                    "dependents_enqueued_view_version": current.view_version,
+                }
+            )
             recovered_version = store.save(recovered, frontier, expected_version=version)
             return recovered, frontier, recovered_version
         elif current.view_version == view.view_version:
             raise ParseViewConflict("pending ParseView conflicts at the active view version")
         else:
             view_store.activate(view, expected_view_version=current.view_version)
-        recovered = session.model_copy(update={"pending_view": None})
+        recovered = session.model_copy(
+            update={
+                "pending_view": None,
+                "dependents_enqueued_view_version": (
+                    view.view_version if dependents_enqueued else session.dependents_enqueued_view_version
+                ),
+            }
+        )
         recovered_version = store.save(recovered, frontier, expected_version=version)
         return recovered, frontier, recovered_version
 

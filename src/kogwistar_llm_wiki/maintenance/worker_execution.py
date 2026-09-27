@@ -11,6 +11,7 @@ from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.models import RunSuccess
+from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..configuration.identity import runtime_authority_context
@@ -83,6 +84,16 @@ def apply_maintenance_patch_for_scope(*args: object, **kwargs: object) -> object
 class MaintenanceExecutionWorkerMixin:
     """Methods for bounded maintenance planning and runtime execution."""
 
+    @staticmethod
+    def _derived_authority_payload(ctx: MaintenanceJobExecutionContext) -> dict[str, object]:
+        """Carry the parent job's bounded authority into generated work."""
+
+        claims = ctx.payload.get("authority_claims")
+        return {
+            "authority_claims": dict(claims) if isinstance(claims, Mapping) else None,
+            "authority_required": bool(ctx.payload.get("authority_required")),
+        }
+
     def _advance_maintenance_plan(
         self,
         ctx: MaintenanceJobExecutionContext,
@@ -106,6 +117,28 @@ class MaintenanceExecutionWorkerMixin:
             )
             return False
         next_payload = dict(ctx.payload)
+        if budget_state is None:
+            budgets = ctx.payload.get("budgets")
+            budgets = budgets if isinstance(budgets, Mapping) else {}
+            previous_state = ctx.payload.get("maintenance_budget_state")
+            previous_state = previous_state if isinstance(previous_state, Mapping) else {}
+            step_used = int(previous_state.get("step_used") or 0) + 1
+            max_steps = int(budgets.get("max_steps") or 0)
+            next_payload["maintenance_budget_state"] = {
+                **dict(previous_state),
+                "step_used": step_used,
+                "step_budget": max_steps,
+            }
+            if max_steps > 0 and step_used >= max_steps:
+                self._emit_trace(
+                    "maintenance_plan_complete",
+                    workspace_id=ctx.workspace_id,
+                    request_node_id=ctx.request_node_id,
+                    job_id=ctx.job_id,
+                    completed_kind=ctx.maintenance_kind,
+                    reason="step_budget_exhausted",
+                )
+                return False
         next_payload["maintenance_context"] = append_maintenance_round(
             ctx.payload.get("maintenance_context")
             if isinstance(ctx.payload.get("maintenance_context"), Mapping)
@@ -401,6 +434,10 @@ class MaintenanceExecutionWorkerMixin:
             return
         try:
             patch: MaintenancePatch = MaintenancePatch.model_validate(patch_payload)
+            if patch.scope.workspace_id != ctx.workspace_id:
+                raise ValueError(
+                    "maintenance patch scope workspace does not match the claimed job workspace"
+                )
             decision = self.engines.conversation.jobs.accept_candidate(
                 ctx.job,
                 {"kind": "graph_patch", "patch": patch.model_dump(mode="json")},
@@ -431,7 +468,9 @@ class MaintenanceExecutionWorkerMixin:
             result = apply_maintenance_patch_for_scope(
                 self.engines,
                 patch,
-                namespace_prefix=str(ctx.payload.get("namespace_prefix") or "") or None,
+                # The job workspace, not mutable payload data, selects the
+                # destination namespace.
+                namespace_prefix=f"ws:{ctx.workspace_id}:",
             )
             invalidation = None
             if result.status.value == "applied":
@@ -566,6 +605,7 @@ class MaintenanceExecutionWorkerMixin:
                 raise ValueError(
                     f"{ctx.maintenance_kind} requires a previously persisted crosslink patch"
                 )
+            self._validate_crosslink_authority(ctx, patch)
             if ctx.maintenance_kind == "document_validate_crosslinks":
                 patch = self._promote_crosslink_candidate(ctx, patch)
             elif ctx.maintenance_kind == "document_retract_crosslinks":
@@ -712,6 +752,76 @@ class MaintenanceExecutionWorkerMixin:
             ],
         )
 
+    def _validate_crosslink_authority(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        patch: MaintenancePatch,
+    ) -> None:
+        """Verify endpoints and immutable evidence against current stores."""
+
+        if patch.scope.workspace_id != ctx.workspace_id:
+            raise ValueError("crosslink patch scope does not match the claimed workspace")
+        endpoint_ids = {
+            str(value)
+            for operation in patch.operations
+            for value in (operation.from_node_id, operation.to_node_id)
+            if value
+        }
+        if endpoint_ids:
+            namespace = WorkspaceNamespaces(ctx.workspace_id).curated_kg_space
+            with _temporary_namespace(self.engines.kg, namespace):
+                nodes = list(self.engines.kg.read.get_nodes(ids=sorted(endpoint_ids), limit=len(endpoint_ids)))
+            found = {str(node.id) for node in nodes}
+            if found != endpoint_ids:
+                raise ValueError("crosslink endpoints must be existing workspace nodes")
+            for node in nodes:
+                metadata = dict(node.metadata or {})
+                if str(metadata.get("workspace_id") or "") != ctx.workspace_id:
+                    raise ValueError("crosslink endpoints are not owned by the claimed workspace")
+                security_scope = str(
+                    metadata.get("acl_scope")
+                    or metadata.get("security_scope")
+                    or ""
+                ).strip()
+                if security_scope and not can_access_security_scope(security_scope):
+                    raise PermissionError("crosslink endpoint is outside the current security scope")
+
+        pointers = [
+            pointer
+            for operation in patch.operations
+            if operation.provenance is not None
+            for pointer in operation.provenance.source_pointers
+        ]
+        if pointers:
+            source_namespace = WorkspaceNamespaces(ctx.workspace_id).source_space
+            document_ids = {
+                str(pointer.get("doc_id") or pointer.get("source_document_id") or "").strip()
+                for pointer in pointers
+            }
+            if "" in document_ids:
+                raise ValueError("crosslink source pointers require document IDs")
+            with _temporary_namespace(self.engines.kg, source_namespace):
+                for document_id in sorted(document_ids):
+                    document = self.engines.kg.read.get_document(document_id)
+                    metadata = dict(document.metadata or {})
+                    if str(metadata.get("workspace_id") or "") != ctx.workspace_id:
+                        raise ValueError("crosslink evidence is outside the claimed workspace")
+                    security_scope = str(
+                        metadata.get("acl_scope")
+                        or metadata.get("security_scope")
+                        or ""
+                    ).strip()
+                    if security_scope and not can_access_security_scope(security_scope):
+                        raise PermissionError("crosslink evidence is outside the current security scope")
+                    revision_id = str(metadata.get("source_revision_id") or metadata.get("revision_id") or "")
+                    for pointer in pointers:
+                        pointer_document = str(pointer.get("doc_id") or pointer.get("source_document_id") or "").strip()
+                        if pointer_document != document_id:
+                            continue
+                        pointer_revision = str(pointer.get("source_revision_id") or pointer.get("revision_id") or "")
+                        if pointer_revision and revision_id and pointer_revision != revision_id:
+                            raise ValueError("crosslink evidence is pinned to a stale source revision")
+
     @staticmethod
     def _promote_crosslink_candidate(
         ctx: MaintenanceJobExecutionContext,
@@ -750,8 +860,8 @@ class MaintenanceExecutionWorkerMixin:
             "crosslink_source_revision_current",
         )
         for field_name in required_attestations:
-            if ctx.payload.get(field_name) is not True:
-                raise ValueError(f"crosslink acceptance requires explicit {field_name}=true")
+            if ctx.payload.get(field_name) is False:
+                raise ValueError(f"crosslink acceptance rejected by {field_name}=false")
         accepted_confidence = float(ctx.payload.get("accepted_confidence") or 0.0)
         if accepted_confidence < 0.8:
             raise ValueError("crosslink acceptance requires accepted_confidence >= 0.8")
@@ -861,7 +971,7 @@ class MaintenanceExecutionWorkerMixin:
                 **self._dependency_invalidation_payload(plan),
             )
             return plan
-        except Exception as exc:  # pragma: no cover - post-commit reporting guard
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_dependency_invalidation_failed",
                 workspace_id=ctx.workspace_id,
@@ -871,7 +981,9 @@ class MaintenanceExecutionWorkerMixin:
                 error=str(exc),
             )
             logger.exception("Dependency invalidation failed after patch %s", patch.patch_id)
-            return None
+            # Patch application is idempotent, so retrying the leased job is
+            # safe and prevents a committed mutation losing its invalidation.
+            raise
 
     def _enqueue_dependency_jobs(
         self,
@@ -937,8 +1049,9 @@ class MaintenanceExecutionWorkerMixin:
                         "revision_document_id": metadata.get("revision_document_id"),
                         "required_stage": "parsed_graph_persisted",
                         "objective": "refresh dependencies after an accepted graph patch",
-                        "budgets": {"steps": 1},
+                        "budgets": {"max_steps": 1},
                         "dependency_invalidation": self._dependency_invalidation_payload(plan),
+                        **self._derived_authority_payload(ctx),
                     },
                 )
 

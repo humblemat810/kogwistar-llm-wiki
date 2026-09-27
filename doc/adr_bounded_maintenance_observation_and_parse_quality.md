@@ -193,7 +193,7 @@ flowchart TD
     BUILD --> HARD[Run deterministic structural checks]
     HARD --> DECIDE{Enough evidence?}
     DECIDE -->|yes| CLASSIFY[Classify findings]
-    DECIDE -->|no| CRITIC[Run bounded semantic critic]
+    DECIDE -->|no| CRITIC[Run bounded deterministic critic]
     CRITIC --> CLASSIFY
     CLASSIFY --> NEXT{Action hint}
     NEXT -->|none| MARK[Persist assessment and watermark]
@@ -384,7 +384,10 @@ reviewed again before changing a core persistence contract.
 
 - [x] Persist normalized parser diagnostics, strategy, retry count, and critic
   outcome with each generation member.
-- [x] Feed normalized critic findings into the next same-strategy proposal.
+- [x] Feed normalized deterministic critic findings into the next same-strategy
+  proposal.
+- [x] Add an optional provider-backed semantic critic behind the same bounded
+  structured-result contract; provider failure must remain `quality_unknown`.
 - [x] Make critic or provider failure produce `quality_unknown` rather than a
   successful review.
 - [x] Classify retry failures so the parser switches strategy only when the

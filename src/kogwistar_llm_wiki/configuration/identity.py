@@ -147,6 +147,7 @@ def authenticate_bearer(value: str | None) -> LlmWikiIdentity | None:
             "role": "rw" if "write" in scopes else "ro",
             "scope": " ".join(sorted(scopes)),
             "security_scope": os.getenv("LLM_WIKI_SECURITY_SCOPE", "llm-wiki"),
+            "workspaces": ["*"],
         }
         return LlmWikiIdentity(
             claims["sub"],
@@ -264,6 +265,50 @@ def durable_claims_snapshot() -> dict[str, object] | None:
     return snapshot or None
 
 
+def identity_from_durable_claims(claims: Mapping[str, object]) -> LlmWikiIdentity:
+    """Rebuild the bounded identity used to authorize a queued follow-up."""
+
+    principal = str(claims.get("sub") or claims.get("client_id") or claims.get("agent_id") or "").strip()
+    if not principal:
+        raise IdentityError("durable authority claims have no principal", status=401)
+    scopes = _claim_scopes(claims)
+    role = str(claims.get("role") or "ro").strip().lower()
+    if role not in {"ro", "rw"}:
+        role = "ro"
+    workspaces = frozenset(
+        _workspace_items(
+            claims.get("workspaces")
+            or claims.get("workspace_ids")
+            or claims.get("allowed_workspaces")
+        )
+    )
+    security_scope = str(
+        claims.get("security_scope") or claims.get("tenant") or principal
+    ).strip().lower()
+    return LlmWikiIdentity(
+        principal,
+        scopes,
+        role,
+        security_scope,
+        workspaces,
+        dict(claims),
+        "durable",
+    )
+
+
+def authorize_durable_claims(
+    claims: Mapping[str, object] | None,
+    *,
+    workspace_id: str,
+    scope: str = "write",
+) -> None:
+    """Reapply application ACL rules to a queued user-derived operation."""
+
+    if not isinstance(claims, Mapping):
+        raise IdentityError("user-derived maintenance job has no durable authority", status=403)
+    authorize(identity_from_durable_claims(claims), workspace_id=workspace_id, scope=scope)
+
+
 @contextmanager
 def durable_claims_context(claims: Mapping[str, object] | None) -> Iterator[None]:
     """Restore a sanitized job creator identity for one worker execution."""
@@ -331,8 +376,10 @@ __all__ = [
     "auth_mode",
     "authenticate_bearer",
     "authorize",
+    "authorize_durable_claims",
     "claims_context",
-    "durable_claims_snapshot",
     "durable_claims_context",
+    "durable_claims_snapshot",
+    "identity_from_durable_claims",
     "runtime_authority_context",
 ]

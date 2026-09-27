@@ -129,6 +129,31 @@ def test_invalidation_rejects_non_positive_bound() -> None:
         )
 
 
+def test_invalidation_bound_applies_to_source_and_projection_followups() -> None:
+    items = [
+        SimpleNamespace(
+            id=f"summary:{index}",
+            metadata={
+                "workspace_id": "workspace-a",
+                "artifact_kind": "derived_summary",
+                "source_document_id": f"source:{index}",
+                "lineage_node_ids": ["node:changed"],
+            },
+        )
+        for index in range(4)
+    ]
+    plan = plan_dependency_invalidation(
+        workspace_id="workspace-a",
+        changed_entity_ids={"node:changed"},
+        nodes=items,
+        edges=[],
+        max_dependents=2,
+    )
+    assert plan.truncated is True
+    assert len(plan.affected_entity_ids) == 2
+    assert len(plan.affected_source_document_ids) == 2
+
+
 def test_worker_enqueues_one_bounded_same_workspace_invalidation_job(pipeline, ingest_request) -> None:
     request = ingest_request.model_copy(update={"workspace_id": "invalidation-w"})
     source_id = pipeline._source_document_id(request)

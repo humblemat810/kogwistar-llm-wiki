@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import time
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from kogwistar.id_provider import stable_id
 from pydantic import BaseModel, ConfigDict, Field
-
 
 SubjectKind = Literal["node", "edge", "hyperedge"]
 QualityVerdict = Literal[
@@ -234,6 +233,23 @@ def build_observation_frame(
         _scoped_records(parent_context[:1], subject=subject),
         token_budget=budget * 15 // 100,
     )
+    # Include the bounded evidence snapshot in the identity. A subject/view
+    # can be revisited after graph changes; reusing the old audit key would
+    # silently discard the newer assessment through idempotency.
+    evidence_digest = hashlib.sha256(
+        json.dumps(
+            {
+                "source": sorted(source, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
+                "relations": sorted(relations, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
+                "neighborhood": sorted(neighborhood, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
+                "parents": sorted(parents, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
+                "token_budget": budget,
+            },
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     frame_id = str(
         stable_id(
             "kogwistar_llm_wiki.maintenance_observation",
@@ -245,6 +261,7 @@ def build_observation_frame(
             subject.parse_member_id or "",
             active_view_id or "",
             active_view_version or 0,
+            evidence_digest,
         )
     )
     return MaintenanceObservationFrame(
@@ -270,11 +287,15 @@ def assess_observation_frame(
     frame: MaintenanceObservationFrame,
     *,
     critic_failed: bool = False,
+    critic_status: Literal["not_used", "succeeded", "failed"] = "not_used",
+    critic_findings: Sequence[ObservationFinding] = (),
     watermark_expiry_seconds: int = 86_400,
 ) -> ParseAndGraphQualityAssessment:
-    """Apply conservative deterministic checks; semantic review is optional."""
+    """Apply bounded deterministic checks plus an optional structured critic."""
 
-    findings: list[ObservationFinding] = []
+    if critic_status == "failed":
+        critic_failed = True
+    findings: list[ObservationFinding] = list(critic_findings)
     quality_action: RecommendedAction | None = None
     quality_verdict: QualityVerdict | None = None
     source_statuses = {
@@ -288,15 +309,30 @@ def assess_observation_frame(
         "overlap": ("overlap", "retry_same_strategy"),
         "duplicate": ("duplicate", "review_parent"),
     }
+    action_priority = {
+        "request_human_review": 100,
+        "reparse_region": 90,
+        "switch_to_boundary": 80,
+        "switch_to_excerpt": 70,
+        "retry_same_strategy": 60,
+        "expand_children": 50,
+        "review_parent": 40,
+    }
+    selected_action: tuple[int, RecommendedAction] | None = None
+    selected_verdict: tuple[int, QualityVerdict] | None = None
     for item in frame.source_context:
         status = str(item.get("quality_status") or item.get("parse_status") or "").strip().lower()
         if status not in source_quality_actions:
             continue
-        quality_verdict, quality_action = source_quality_actions[status]
+        item_verdict, item_action = source_quality_actions[status]
+        rank = action_priority[item_action]
+        if selected_action is None or rank > selected_action[0]:
+            selected_action = (rank, item_action)
+            selected_verdict = (rank, item_verdict)
         findings.append(
             ObservationFinding(
                 code=f"parse_quality_{status}",
-                verdict=quality_verdict,
+                verdict=item_verdict,
                 severity="warning",
                 subject_id=frame.subject.subject_id,
                 evidence_ids=tuple(
@@ -344,6 +380,10 @@ def assess_observation_frame(
                 )
             )
     if findings:
+        if selected_action is not None:
+            quality_action = selected_action[1]
+        if selected_verdict is not None:
+            quality_verdict = selected_verdict[1]
         verdict: QualityVerdict = (
             "quality_unknown"
             if critic_failed
@@ -383,7 +423,7 @@ def assess_observation_frame(
             findings=tuple(findings),
             active_view_id=frame.active_view_id,
             active_view_version=frame.active_view_version,
-            critic_status="failed" if critic_failed else "not_used",
+            critic_status="failed" if critic_failed else critic_status,
             continuation_allowed=not critic_failed,
             watermark_expiry_seconds=max(60, int(watermark_expiry_seconds)),
         )
@@ -411,7 +451,7 @@ def assess_observation_frame(
         recommended_action="none",
         active_view_id=frame.active_view_id,
         active_view_version=frame.active_view_version,
-        critic_status="not_used",
+        critic_status=critic_status,
         continuation_allowed=False,
         watermark_expiry_seconds=max(60, int(watermark_expiry_seconds)),
     )

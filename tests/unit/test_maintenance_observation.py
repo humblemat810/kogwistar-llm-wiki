@@ -16,6 +16,7 @@ from kogwistar_llm_wiki.maintenance.worker_parse import (
     select_affected_crosslink_ids,
     select_affected_parse_view_artifact_ids,
 )
+from kogwistar_llm_wiki.parsing.parse_views import ParseView, ParseViewSelection, SourceRegion
 
 
 def test_parse_view_switch_requeues_only_affected_local_crosslinks() -> None:
@@ -72,6 +73,78 @@ def test_parse_view_switch_requeues_only_affected_local_crosslinks() -> None:
         workspace_id="demo",
         source_document_id="source-a",
     ) == ("edge-local-left",)
+
+
+def test_crosslink_authority_rejects_endpoint_outside_security_scope(monkeypatch) -> None:
+    node = SimpleNamespace(
+        id="node-a",
+        metadata={"workspace_id": "demo", "security_scope": "tenant-a"},
+    )
+    worker = SimpleNamespace(
+        engines=SimpleNamespace(
+            kg=SimpleNamespace(
+                read=SimpleNamespace(
+                    get_nodes=lambda **kwargs: [node],
+                )
+            )
+        )
+    )
+    patch = SimpleNamespace(
+        scope=SimpleNamespace(workspace_id="demo"),
+        operations=[
+            SimpleNamespace(from_node_id="node-a", to_node_id=None, provenance=None)
+        ],
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.maintenance.worker_execution.can_access_security_scope",
+        lambda scope: False,
+    )
+
+    with pytest.raises(PermissionError, match="security scope"):
+        MaintenanceExecutionWorkerMixin._validate_crosslink_authority(
+            worker,
+            SimpleNamespace(workspace_id="demo"),
+            patch,
+        )
+
+
+def test_observation_reparse_target_rejects_mismatched_active_view(monkeypatch) -> None:
+    view = ParseView(
+        view_id="view-1",
+        view_version=1,
+        workspace_id="demo",
+        source_document_id="source-1",
+        source_revision_id="revision-current",
+        revision_document_id="revision-doc-current",
+        selections=(
+            ParseViewSelection(
+                member_id="member-1",
+                generation_id="generation-1",
+                region=SourceRegion(
+                    source_document_id="revision-doc-current",
+                    start_char=0,
+                    end_char=10,
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.maintenance.worker_observation.ParseViewStore.get",
+        lambda self, source_document_id: view,
+    )
+    worker = MaintenanceObservationWorkerMixin()
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(meta_sqlite=object()))
+    ctx = SimpleNamespace(
+        workspace_id="demo",
+        payload={
+            "source_document_id": "source-1",
+            "source_revision_id": "revision-stale",
+            "revision_document_id": "revision-doc-stale",
+            "parse_generation_member_id": "member-1",
+        },
+    )
+
+    assert worker._derive_observation_parse_target(ctx) is None
 
 
 def test_parse_view_switch_selection_is_bounded() -> None:
@@ -281,6 +354,34 @@ def test_parser_granularity_findings_choose_different_bounded_actions(
 
     assert assessment.verdict == expected_verdict
     assert assessment.recommended_action == expected_action
+
+
+def test_observation_priority_is_order_independent_and_frame_identity_tracks_evidence() -> None:
+    subject = ObservationSubject(
+        kind="node",
+        subject_id="node-1",
+        workspace_id="demo",
+        namespace="ws:demo:source",
+    )
+    first = build_observation_frame(
+        subject,
+        source_context=[
+            {"member_id": "m1", "quality_status": "too_coarse"},
+            {"member_id": "m2", "quality_status": "coverage_gap"},
+        ],
+    )
+    second = build_observation_frame(
+        subject,
+        source_context=list(reversed(first.source_context)),
+    )
+    assert first.frame_id == second.frame_id
+    assert assess_observation_frame(first).recommended_action == "reparse_region"
+
+    changed = build_observation_frame(
+        subject,
+        source_context=[{"member_id": "m1", "quality_status": "too_coarse"}],
+    )
+    assert changed.frame_id != first.frame_id
 
 
 def test_relation_without_evidence_is_not_accepted_automatically() -> None:

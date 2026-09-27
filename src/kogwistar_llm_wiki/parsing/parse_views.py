@@ -30,6 +30,7 @@ class ParseSessionPhase(StrEnum):
     SEEDED = "parse_seeded"
     EXPANDING = "parse_expanding"
     STABLE = "parsed_graph_persisted"
+    REVIEW_REQUIRED = "review_required"
     FAILED = "failed"
 
 
@@ -239,6 +240,9 @@ class ParseSessionState(BaseModel):
     # A view activation is a two-phase operation. Keeping the proposed view in
     # the session makes a crash between session CAS and view CAS recoverable.
     pending_view: dict[str, Any] | None = None
+    # Idempotent outbox watermark: dependent maintenance must be queued before
+    # the pending view is cleared after activation.
+    dependents_enqueued_view_version: int | None = Field(default=None, ge=1)
 
 
 class ParseViewSelection(BaseModel):

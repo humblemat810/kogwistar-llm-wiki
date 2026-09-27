@@ -7,6 +7,7 @@ DEFAULT_DOCUMENT_MAINTENANCE_PLAN: tuple[str, ...] = (
     "document_seed_graph",
     "document_parse_graph",
     "document_expand_parse_children",
+    "review_maintenance_subject",
     "document_propose_crosslinks",
     "document_validate_crosslinks",
 )
