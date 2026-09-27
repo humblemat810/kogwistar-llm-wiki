@@ -4,6 +4,19 @@ Use this checklist when changing the semantic lens or frontend. The workbench
 is an additional application projection; Kogwistar core and Obsidian remain
 unchanged.
 
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant API as Workbench API
+    participant ACL as Auth and ACL
+    participant G as Graph substrate
+    B->>API: load bounded view
+    API->>ACL: authorize workspace and namespace
+    ACL->>G: execute read
+    G-->>API: grounded projection
+    API-->>B: safe display model
+```
+
 ## Backend Contract
 
 - [x] Lens reads are scoped by workspace and explicit graph space.

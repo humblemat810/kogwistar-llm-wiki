@@ -22,6 +22,15 @@ Published canonical aliases:
 
 Future model images should use this model-qualified form as the primary tag.
 
+```mermaid
+flowchart LR
+    CHECKPOINT[Ovis checkpoint] --> QUANT[Quantization and layout]
+    QUANT --> VLLM[vLLM serving profile]
+    VLLM --> IMAGE[Model-qualified container tag]
+    IMAGE --> PROFILE[Embedding profile fingerprint]
+    PROFILE --> STORE[Profile-isolated vector projection]
+```
+
 ## Phase 1 checkpoint residency inventory
 
 The reproducible inventory command is:

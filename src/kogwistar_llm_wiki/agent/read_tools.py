@@ -9,6 +9,20 @@ from .protocol import bounded_lens_arguments as _bounded_lens_arguments
 
 
 class AgentReadToolsMixin:
+    def _authorized_memory_stream_ids(self, arguments: Mapping[str, Any], workspace_id: str) -> tuple[str, ...]:
+        raw_stream_ids = arguments.get("stream_ids") or []
+        if not isinstance(raw_stream_ids, list) or not all(
+            isinstance(stream_id, str) and stream_id.strip() for stream_id in raw_stream_ids
+        ):
+            raise ValueError("memory stream_ids must be a list of non-empty strings")
+        stream_ids = tuple(str(stream_id).strip() for stream_id in raw_stream_ids)
+        if any(
+            not self.api.email_runtime.authorize_stream(workspace_id, stream_id)
+            for stream_id in stream_ids
+        ):
+            raise PermissionError("memory stream is not authorized for workspace")
+        return stream_ids
+
     def query(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         return self._answer(arguments)
 
@@ -27,11 +41,14 @@ class AgentReadToolsMixin:
         }
 
     def memory_recall(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        workspace_id = str(arguments.get("workspace_id") or "").strip()
+        stream_ids = self._authorized_memory_stream_ids(arguments, workspace_id)
         return self.api.recall_memory(
-            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            workspace_id=workspace_id,
             query_text=str(arguments.get("query_text") or ""),
             include_inferred=bool(arguments.get("include_inferred", True)),
             limit=arguments.get("limit"),
+            authorized_stream_ids=stream_ids,
         )
 
     def memory_capture(self, arguments: Mapping[str, Any]) -> dict[str, object]:
@@ -47,12 +64,30 @@ class AgentReadToolsMixin:
         raise ValueError("memory_capture record(s) must be an object or list of objects")
 
     def memory_review(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        workspace_id = str(arguments.get("workspace_id") or "").strip()
         return self.api.review_memory(
-            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            workspace_id=workspace_id,
             kind=str(arguments.get("kind") or "").strip() or None,
             confidence=str(arguments.get("confidence") or "").strip() or None,
             lifecycle_status=str(arguments.get("lifecycle_status") or "").strip() or None,
             limit=int(arguments.get("limit") or 50),
+            authorized_stream_ids=self._authorized_memory_stream_ids(arguments, workspace_id),
+        )
+
+    def email_view(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.view_email(
+            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            stream_id=str(arguments.get("stream_id") or "").strip(),
+            source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
+        )
+
+    def email_propose(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.propose_email_mapping(
+            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            stream_id=str(arguments.get("stream_id") or "").strip(),
+            source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
+            source_document_id=str(arguments.get("source_document_id") or "").strip(),
+            confidence=float(arguments.get("confidence", 0.75)),
         )
 
     def hypergraph_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:

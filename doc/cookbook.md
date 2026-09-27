@@ -19,6 +19,16 @@ the package is installed.
 | Recover or migrate data | `archive` | Operator-only, isolated target required |
 | Compare embedding configurations | `embeddings inspect` | Do not mix profiles in one physical store |
 
+```mermaid
+flowchart LR
+    CHOOSE[Choose a recipe] --> SETUP[Configure backend and profiles]
+    SETUP --> INGEST[Ingest immutable evidence]
+    INGEST --> REVIEW[Review proposals]
+    REVIEW --> ACCEPT[Explicit acceptance]
+    ACCEPT --> QUERY[Query or project]
+    QUERY --> OPERATE[Observe, archive, recover]
+```
+
 The one-process `demo` is the recommended first run. Embedded local Chroma is
 not a safe shared directory for independent writer processes. See the
 [Docker deployment guide](docker_deployment.md) for the container boundary and

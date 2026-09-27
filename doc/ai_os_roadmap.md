@@ -4,6 +4,16 @@
 > Track B (AI OS) is a multi-month architectural build, ordered by dependency.
 > Each item has: goal, concrete deliverables, acceptance criteria, and estimated effort.
 
+```mermaid
+flowchart LR
+    A[Track A: production polish] --> GATE[Release and compatibility gates]
+    B[Track B: AI OS capabilities] --> GATE
+    GATE --> CORE[Stable Kogwistar contracts]
+    CORE --> PARSER[Parser and ingestion]
+    CORE --> PRODUCT[LLM-Wiki orchestration]
+    PRODUCT --> PROJECTIONS[Rebuildable projections]
+```
+
 ---
 
 ## Track A â€” Polish to Production-Ready
@@ -407,7 +417,6 @@ The system qualifies as a genuine AI-native OS when:
 - [ ] Any resource (node, file, run, service) has a stable URI and is discoverable via a common query surface (Gap B9)
 - [ ] A developer types one command and a fully operational system starts, supervises itself, and restarts crashed components (Gaps A3 + A4 + B7)
 - [ ] User feedback on an assistant response triggers immediate re-distillation without any CLI command (Gap B8)
-
 
 
 

@@ -15,6 +15,19 @@ The embedding images contain the inference runtime but do not contain the Qwen
 checkpoint. Mount or configure the Hugging Face cache and set an immutable
 `LLM_WIKI_EMBEDDING_MODEL_REVISION` before starting the service.
 
+```mermaid
+flowchart LR
+    TAG[Main commit or release tag] --> CI[Required CI and dependency pins]
+    CI --> APP[CPU application image]
+    CI --> EMBEDCPU[CPU embedding image]
+    CI --> EMBEDGPU[CUDA embedding image]
+    CI -->|manual gated profile| ADAPTERS[All-adapters image]
+    APP --> HUB[Docker Hub repository]
+    EMBEDCPU --> HUB
+    EMBEDGPU --> HUB
+    ADAPTERS --> HUB
+```
+
 ## One-Time Docker Hub Setup
 
 1. Create two **public** Docker Hub repositories under the intended account:

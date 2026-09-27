@@ -68,6 +68,36 @@ So maintenance should not be reduced to conversation alone.
 - review thresholds
 - lane semantics
 
+```mermaid
+flowchart TB
+    subgraph Core[Core mechanics]
+        EVENT[Append-only events]
+        RUNTIME[Workflow runtime]
+        PROVENANCE[Provenance and scope checks]
+    end
+    subgraph App[LLM-Wiki maintenance semantics]
+        JOB[Maintenance job]
+        CANDIDATE[Candidate or critique]
+        PROMOTION[Promotion decision]
+    end
+    subgraph Graphs[Graph roles]
+        WF[Workflow]
+        CONV[Conversation]
+        KG[Knowledge]
+        WISDOM[Wisdom]
+    end
+    EVENT --> RUNTIME --> JOB --> WF
+    JOB --> CANDIDATE --> CONV
+    CANDIDATE --> PROMOTION --> KG
+    KG --> WISDOM
+    PROVENANCE -. gates every transition .-> JOB
+    PROVENANCE -. gates every transition .-> CANDIDATE
+    PROVENANCE -. gates every transition .-> PROMOTION
+```
+
+The graph role is selected from the artifact's meaning; maintenance is not a
+new graph kind and does not bypass core event, provenance, or ACL mechanisms.
+
 ---
 
 ## 3. Artifact Mapping by Use Case

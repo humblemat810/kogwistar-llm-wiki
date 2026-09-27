@@ -4,6 +4,16 @@
 **Prepared:** 2026-07-14  
 **Companion policy:** [Consumer Compatibility Reminder](kogwistar_rust_port_compatibility_reminder.md)
 
+```mermaid
+flowchart LR
+    BASELINE[Pre-migration behavior] --> FIXTURES[Golden fixtures]
+    BASELINE --> BENCH[Performance baseline]
+    BASELINE --> PARITY[Python and Rust parity checks]
+    FIXTURES --> GATE[Migration gate]
+    BENCH --> GATE
+    PARITY --> GATE
+```
+
 ## Purpose
 
 This is the factual baseline and evidence plan to capture while the Python

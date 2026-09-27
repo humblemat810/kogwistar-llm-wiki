@@ -35,6 +35,19 @@ index. The versioned release workflow instead passes immutable merged adapter
 commit SHAs to the Dockerfile, so it does not depend on a moving feature
 branch or a package-index upload completing at the same time.
 
+```mermaid
+flowchart LR
+    CONFIG[Backend configuration] --> SELECT[Adapter selection]
+    SELECT --> PG[Postgres]
+    SELECT --> CHROMA[Chroma]
+    SELECT --> PINE[Pinecone optional]
+    SELECT --> QDRANT[Qdrant optional]
+    PG --> PROFILE[Profile-scoped projection]
+    CHROMA --> PROFILE
+    PINE --> PROFILE
+    QDRANT --> PROFILE
+```
+
 Versioned Docker releases are gated by the all-adapters build. The release
 workflow builds this variant without publishing it, verifies both optional
 adapter imports, and only then publishes the standard release image. If an

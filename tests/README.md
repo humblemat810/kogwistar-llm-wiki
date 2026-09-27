@@ -9,6 +9,18 @@ The root test suite follows the application boundary described in
 - `fixtures/` contains bounded, copyright-safe input payloads.
 - `_helpers/` contains reusable test setup, markers, and assertions.
 
+```mermaid
+flowchart TB
+    CHANGE[Code change] --> UNIT[unit tests]
+    CHANGE --> INTEGRATION[integration tests]
+    CHANGE --> SMOKE[smoke tests]
+    UNIT --> CI[Default CI]
+    INTEGRATION --> GATE{External dependency?}
+    SMOKE --> GATE
+    GATE -->|No| CI
+    GATE -->|Yes| SLOW[slow/manual profile]
+```
+
 Keep real credentials, GPU/model loads, Docker orchestration, and long worker
 soaks out of ordinary CI. Mark those tests `manual` and/or `slow`; fake
 providers and in-memory backends belong in the default `ci` profile. The CI

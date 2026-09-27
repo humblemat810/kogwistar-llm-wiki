@@ -15,6 +15,15 @@ LLM-Wiki `0.5.0` is the MCP 2.x release. It is built on Kogwistar
   is built and smoke-tested in the image; it is published separately from
   the standard CPU application image.
 
+```mermaid
+flowchart LR
+    CORE[Kogwistar 0.5.0] --> PARSER[KG Doc Parser 0.2.0]
+    PARSER --> APP[LLM-Wiki 0.5.0]
+    SINK[Obsidian sink 0.2.0] --> APP
+    APP --> MCP[MCP 2.x and legacy wire clients]
+    APP --> IMAGES[CPU and PyPy image profiles]
+```
+
 ## Dependency pins
 
 The release workflows use these immutable revisions:

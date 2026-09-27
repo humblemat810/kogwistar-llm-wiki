@@ -23,6 +23,16 @@ Grouping:
 
 Unless explicitly marked otherwise, findings `F1` through `F20` are in scope.
 
+```mermaid
+flowchart LR
+    FINDING[Architecture finding] --> TARGET[Implementation target]
+    TARGET --> SEARCH[Similar-class and boundary search]
+    SEARCH --> TEST[Regression and invariant tests]
+    TEST --> EVIDENCE[Review evidence]
+    EVIDENCE -->|complete| CLOSED[Finding closed]
+    EVIDENCE -->|gap remains| TARGET
+```
+
 ## How To Use This Checklist
 
 1. Start from the matching finding section in this document.

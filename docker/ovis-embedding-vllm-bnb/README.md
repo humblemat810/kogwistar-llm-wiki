@@ -4,6 +4,15 @@ This image includes `vllm-bnb-plugin`, which is required for pre-quantized
 BitsAndBytes checkpoints. Set `MODEL_ID` or mount a local checkpoint at
 `MODEL_PATH`. The default command uses the pooling embedding API:
 
+```mermaid
+flowchart LR
+    INPUT[Image or text input] --> API[vLLM pooling API]
+    API --> BNB[vllm-bnb-plugin]
+    BNB --> MODEL[Quantized Ovis checkpoint]
+    MODEL --> EMBED[Finite normalized 1024-d vector]
+    OVERRIDE[MODEL_ID or MODEL_PATH] -. selects checkpoint .-> MODEL
+```
+
 ```powershell
 docker run --rm --gpus all -p 8000:8000 `
   -e MODEL_ID=pt810/Ovis-Omni-Embedding-3B-bnb-4bit-vllm `

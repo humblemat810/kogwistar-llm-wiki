@@ -15,6 +15,16 @@ Parser revisions without changing their independent release versions.
 - Keeps the gated all-adapters image in the same Docker Hub repository.
 - Keeps the optional PyPy 3.11 image in the same Docker Hub repository.
 
+```mermaid
+flowchart TB
+    SOURCE[Immutable source evidence] --> SPAN[Typed multimodal span]
+    SPAN --> REF[Embedding reference]
+    REF --> PROFILE[Complete embedding profile fingerprint]
+    PROFILE --> INDEX[Isolated vector projection]
+    REF --> TARGET[Authorized source-map or semantic target]
+    INDEX -. never becomes .-> TRUTH[Canonical graph truth]
+```
+
 ## Pinned source revisions
 
 The release builds use immutable merged revisions:

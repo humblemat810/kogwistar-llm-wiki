@@ -22,6 +22,7 @@ import logging
 import os
 
 from .daemons import maintenance_budget as _maintenance_budget
+from .daemons.email_sync_daemon import EmailSyncDaemon
 from .daemons.maintenance_daemon import MaintenanceDaemonRuntime
 from .daemons.projection_daemon import ProjectionDaemon
 from .daemons.runtime_support import (
@@ -88,4 +89,4 @@ class MaintenanceDaemon(MaintenanceDaemonRuntime):
         finally:
             _maintenance_budget._temporary_namespace = namespace_context
 
-__all__ = ["MaintenanceDaemon", "ProjectionDaemon"]
+__all__ = ["EmailSyncDaemon", "MaintenanceDaemon", "ProjectionDaemon"]

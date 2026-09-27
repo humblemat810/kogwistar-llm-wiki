@@ -1,5 +1,13 @@
 # ADR: Optional Two-Stage Conversation Materialization
 
+```mermaid
+flowchart LR
+    SOURCE[Source evidence] --> TURN[Conversation turn]
+    TURN --> CANDIDATE[Grounded candidate]
+    CANDIDATE --> REVIEW[Review and acceptance]
+    REVIEW --> KG[Curated knowledge]
+```
+
 ## Status
 
 Accepted for the llm-wiki conversation namespace when explicitly configured.

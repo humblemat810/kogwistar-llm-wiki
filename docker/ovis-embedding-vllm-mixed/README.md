@@ -4,6 +4,15 @@ This is a runtime-only vLLM image. The default build serves
 `pt810/Ovis-Omni-Embedding-3B-mixed-w2-w4-w8-ct` with vLLM's
 compressed-tensors backend and a 1024-dimensional embedding pooler.
 
+```mermaid
+flowchart LR
+    CLIENT[Embedding client] --> API[vLLM /v1/embeddings]
+    API --> MODEL[Ovis Omni Embedding model]
+    MODEL --> POOL[Configured pooler dimension]
+    POOL --> VECTOR[Normalized embedding vector]
+    CHECK[Model or checkpoint override] -. runtime configuration .-> MODEL
+```
+
 The same Dockerfile was also built with `MODEL_ID` overrides for the GPTQ
 experiments:
 

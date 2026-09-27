@@ -7,6 +7,16 @@ non-blocking application workflow in `.github/workflows/pypy-beta.yml` update
 the probe result and exact dependency/interpreter evidence before any row is
 promoted.
 
+```mermaid
+flowchart LR
+    CPY[CPython 3.12-3.14] --> REQUIRED[Required application CI]
+    P311[PyPy 3.11] --> EXP[Experimental full provider-free CI]
+    P312[PyPy 3.12 beta] --> ABI[Optional ABI and dependency probe]
+    REQUIRED --> REPORT[Comparable reports]
+    EXP --> REPORT
+    ABI --> REPORT
+```
+
 ## Experimental PyPy 3.11
 
 The separate `.github/workflows/pypy-311-experimental.yml` lane uses the

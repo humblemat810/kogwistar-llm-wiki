@@ -224,7 +224,7 @@ def test_agent_gateway_exposes_only_semantic_capability_names(pipeline):
     assert gateway.mcp_tool_names() == (
         "query", "search", "ingest", "source", "reingest", "maintain",
         "status", "hypergraph_search", "history", "memory_recall",
-        "memory_capture", "memory_review", "propose", "confirm",
+        "memory_capture", "memory_review", "email_view", "email_propose", "email_accept", "propose", "confirm",
     )
     assert set(gateway.mcp_tool_names()) == set(gateway.mcp_tool_descriptions())
     gateway.api.close()

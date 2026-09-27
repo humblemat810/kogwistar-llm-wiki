@@ -26,6 +26,16 @@ Before listing gaps, be clear about what exists â€” this is a strong founda
 
 This already exceeds most agent frameworks. But an *operating system* requires several things that don't exist yet.
 
+```mermaid
+flowchart TB
+    INPUT[Sources and requests] --> SUBSTRATE[Kogwistar substrate]
+    SUBSTRATE --> EVENTS[Append-only events and CDC]
+    EVENTS --> RUNTIME[Workflow runtime and recovery]
+    RUNTIME --> SERVICES[Agents, maintenance, projections]
+    SERVICES --> VIEWS[Chat, workbench, Obsidian]
+    SERVICES -. missing capabilities .-> GAPS[Scheduler, lifecycle, policy, observability gaps]
+```
+
 ---
 
 ## Gap 1 â€” No System-Level Scheduler / Process Manager
@@ -304,7 +314,6 @@ The ecosystem is genuinely closer to an AI-native OS than almost any public proj
 > *"Collect data for future AI wisdom on what and how to do things."* â€” kogwistar README
 
 The data collection layer works. The wisdom layer works. The layer that acts on wisdom to change its own behavior is the next frontier.
-
 
 
 

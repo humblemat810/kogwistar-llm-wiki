@@ -3,6 +3,20 @@
 For the complete article ingestion, maintenance, recovery, and agent-serving
 runbook, see the [LLM-Wiki Cookbook](../../doc/cookbook.md).
 
+```mermaid
+sequenceDiagram
+    participant Pi as Pi agent
+    participant Ext as llm-wiki extension
+    participant MCP as LLM-Wiki MCP/REST gateway
+    participant Graph as Scoped graph
+    Pi->>Ext: Ask, search, or propose
+    Ext->>MCP: Send workspace-scoped request
+    MCP->>Graph: Apply ACL and provenance checks
+    Graph-->>MCP: Grounded result or proposal
+    MCP-->>Ext: Return bounded response
+    Ext-->>Pi: Present result; confirmation stays explicit
+```
+
 Install the standalone TypeScript extension into pi's global or project
 extension directory:
 

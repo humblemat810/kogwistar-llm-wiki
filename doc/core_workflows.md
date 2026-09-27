@@ -1,5 +1,14 @@
 # Core Workflows
 
+```mermaid
+flowchart LR
+    FILE[Source file] --> PARSER[Parser]
+    PARSER --> CONV[Conversation graph]
+    CONV --> MAINT[Maintenance proposal]
+    MAINT --> KG[Accepted knowledge]
+    KG --> OBS[Obsidian projection]
+```
+
 ## 1. Purpose
 
 This document defines the main end-to-end workflows for the LLM-wiki product.

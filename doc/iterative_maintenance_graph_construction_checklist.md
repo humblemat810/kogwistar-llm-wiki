@@ -1,5 +1,15 @@
 # Iterative Maintenance Graph Construction Checklist
 
+```mermaid
+flowchart LR
+    REQUEST[Bounded request] --> SELECT[Candidate selection]
+    SELECT --> PROPOSE[Proposals with reasons]
+    PROPOSE --> ACCEPT[Acceptance fence]
+    ACCEPT --> NEXT[Persist round counters]
+    NEXT -->|budget remains| SELECT
+    NEXT -->|complete| DONE[Durable completion]
+```
+
 ## Summary
 
 Add a `kogwistar-llm-wiki` operation mode where ingest can seed a document and

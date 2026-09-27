@@ -3,6 +3,14 @@
 LLM-Wiki `0.5.3` is the downstream alignment release for the merged
 Kogwistar 0.6 substrate and its compatible parser and projection adapters.
 
+```mermaid
+flowchart LR
+    CORE[Core and parser pins] --> APP[LLM-Wiki release commit]
+    APP --> CI[Full CI and dependency verification]
+    CI --> TAG[v0.5.3]
+    TAG --> PUBLISH[Publish only from merged main]
+```
+
 ## Release scope
 
 - Bumps the LLM-Wiki package and application image version to `0.5.3`.

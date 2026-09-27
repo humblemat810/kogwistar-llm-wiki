@@ -1,5 +1,14 @@
 # ADR: Agent Gateway Protocols And Optional OpenTelemetry
 
+```mermaid
+flowchart LR
+    CLIENT[Agent client] --> AUTH[Authentication and ACL]
+    AUTH --> GATEWAY[Agent gateway]
+    GATEWAY --> TOOL[Bounded tool dispatch]
+    TOOL --> TRACE[Optional OTel trace]
+    TOOL --> GRAPH[Canonical graph operations]
+```
+
 ## Status
 
 Accepted for implementation in the llm-wiki application. Kogwistar core is

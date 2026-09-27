@@ -19,7 +19,7 @@ from typing import Any
 from mcp import types
 from mcp.server.lowlevel import Server
 
-from ..codex.codex_memory import CodexMemoryRecord
+from ..memory import MemoryRecord
 from ..configuration.identity import (
     LlmWikiIdentity,
     auth_mode,
@@ -43,6 +43,8 @@ READ_TOOL_NAMES = frozenset(
         "history",
         "memory_recall",
         "memory_review",
+        "email_view",
+        "email_propose",
     }
 )
 
@@ -87,7 +89,7 @@ def _memory_record_schema() -> dict[str, object]:
     resolve correctly for MCP clients.
     """
 
-    schema = CodexMemoryRecord.model_json_schema()
+    schema = MemoryRecord.model_json_schema()
     definitions = schema.pop("$defs", None)
     if not isinstance(definitions, dict):
         definitions = {}
@@ -254,6 +256,12 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "query_text": string(default=""),
                     "include_inferred": {"default": True, "type": "boolean"},
                     "limit": {"default": 12, "type": "integer"},
+                    "stream_ids": {
+                        "items": {"type": "string"},
+                        "maxItems": 32,
+                        "type": "array",
+                        "default": [],
+                    },
                 },
                 required=("workspace_id",),
             ),
@@ -279,8 +287,61 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "confidence": string(default=""),
                     "lifecycle_status": string(default=""),
                     "limit": {"default": 50, "type": "integer"},
+                    "stream_ids": {
+                        "items": {"type": "string"},
+                        "maxItems": 32,
+                        "type": "array",
+                        "default": [],
+                    },
                 },
                 required=("workspace_id",),
+            ),
+        ),
+        (
+            "email_view",
+            "View an authorized parsed email and its pending structural proposals.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "stream_id": string(),
+                    "source_revision_id": string(),
+                },
+                required=("workspace_id", "stream_id", "source_revision_id"),
+            ),
+        ),
+        (
+            "email_propose",
+            "Build a grounded email mapping patch without applying it.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "stream_id": string(),
+                    "source_revision_id": string(),
+                    "source_document_id": string(),
+                    "confidence": {"default": 0.75, "type": "number"},
+                },
+                required=("workspace_id", "stream_id", "source_revision_id", "source_document_id"),
+            ),
+        ),
+        (
+            "email_accept",
+            "Explicitly accept a grounded email mapping patch.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "stream_id": string(),
+                    "source_revision_id": string(),
+                    "source_document_id": string(),
+                    "confirmed": {"type": "boolean"},
+                    "confidence": {"default": 0.75, "type": "number"},
+                },
+                required=(
+                    "workspace_id",
+                    "stream_id",
+                    "source_revision_id",
+                    "source_document_id",
+                    "confirmed",
+                ),
             ),
         ),
         (

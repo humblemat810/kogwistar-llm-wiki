@@ -15,6 +15,15 @@ It is a companion note to the wisdom ARD and the maintenance ontology.
 - `knowledge` is the durable promoted knowledge graph.
 - `wisdom` is the reusable lesson graph.
 
+```mermaid
+flowchart LR
+    CONV[conversation<br/>working memory] -->|read-only evidence| WISDOM[wisdom<br/>reusable lessons]
+    WORKFLOW[workflow<br/>execution state] -->|derivation input| WISDOM
+    KNOWLEDGE[knowledge<br/>accepted durable facts] -->|derivation input| WISDOM
+    WISDOM -. guidance only .-> WORKFLOW
+    WISDOM -. citation or pointer .-> CONV
+```
+
 The safe baseline is:
 
 - `conversation` may reference `wisdom` through stable pointer/citation style

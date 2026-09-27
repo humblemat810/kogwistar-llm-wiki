@@ -4,6 +4,18 @@ This document records the current status of the deep-review findings across the 
 
 The original review identified several contract and runtime risks. Most of the high- and medium-severity items covered here have now been addressed in code. The remaining open item is primarily repo hygiene and reviewability rather than a known behavioral regression.
 
+```mermaid
+flowchart TB
+    REVIEW[Repository review] --> CORE[Kogwistar core]
+    REVIEW --> PARSER[KG Doc Parser]
+    REVIEW --> APP[LLM-Wiki application]
+    REVIEW --> SINK[Projection sinks]
+    CORE --> RISKS[Boundary and invariant findings]
+    PARSER --> RISKS
+    APP --> RISKS
+    SINK --> RISKS
+```
+
 ## Reviewed Surface
 
 I reviewed the boundary-first parser path in `kg-doc-parser`, the surrounding workflow/runtime wiring, the maintenance operation-mode path in the host app, and the local `kogwistar` primitive that now supplies fuzzy offset repair.

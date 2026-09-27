@@ -16,6 +16,16 @@ The core evidence-pack primitive, production `llm-wiki` ingest promotion path,
 derivation provenance walk tests, and the long-run harness promotion provenance
 checks are all wired through the same `promotion_evidence_pack` contract.
 
+```mermaid
+flowchart LR
+    SOURCE[Source nodes and edges] --> PACK[Promotion evidence pack]
+    PACK --> DIGEST[Canonical digest]
+    DIGEST --> PROPOSAL[Promotion proposal]
+    PROPOSAL --> REVIEW[Scope and provenance review]
+    REVIEW -->|accepted| GRAPH[Durable promoted knowledge]
+    REVIEW -->|rejected| HOLD[No canonical mutation]
+```
+
 ## Core Semantics
 
 - [x] Add a reusable core evidence-pack model outside conversation-specific code, for example `kogwistar.provenance.EvidencePackDigest`.

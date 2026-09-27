@@ -17,12 +17,14 @@ interchangeable.
 
 The projection flow is:
 
-```text
-embedding profile
-  -> isolated vector/reference projection
-  -> immutable MultimodalSpan
-  -> pinned source-map reference
-  -> optional semantic/conversation/edge reference
+```mermaid
+flowchart LR
+    PROFILE[Complete embedding profile] --> PROJECTION[Profile-isolated vector\nreference projection]
+    PROJECTION --> SPAN[Immutable MultimodalSpan]
+    SPAN --> SOURCE[Pinned source-map target\nauthoritative evidence]
+    SOURCE --> OPTIONAL[Optional semantic, conversation,\nnode, edge, or hyperedge target]
+    PROFILE -. same dimension is insufficient .-> OTHER[Different model or preprocessing]
+    OTHER -. rejected as a mismatch .-> PROJECTION
 ```
 
 `MultimodalSpan` is source evidence, not a claim. A source revision and its
@@ -55,6 +57,20 @@ as labeled retrieval results. They are not silently redirected or rewritten.
 Vector stores are profile-scoped and reject profile mismatches before writes or
 queries. Canonical graph/source/conversation storage is independent of vector
 projection lifetime.
+
+```mermaid
+sequenceDiagram
+    participant Q as Query
+    participant V as Profile-scoped vector store
+    participant A as ACL and namespace guard
+    participant G as Canonical graph
+    Q->>V: Search with complete profile fingerprint
+    V-->>Q: Candidate embedding references
+    Q->>A: Authorize pinned source-map target
+    A->>G: Resolve source and optional targets
+    G-->>Q: Grounded or labeled stale result
+    V-->>Q: Reject cross-profile read before scoring
+```
 
 ## Consequences
 

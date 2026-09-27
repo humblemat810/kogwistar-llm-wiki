@@ -1,5 +1,14 @@
 # Graph Space Namespace Refactor Checklist
 
+```mermaid
+flowchart TB
+    TENANT[Tenant] --> WORKSPACE[Workspace]
+    WORKSPACE --> NAMESPACE[Graph namespace]
+    NAMESPACE --> ACL[Scope and ACL checks]
+    ACL --> READ[Read or write operation]
+    READ --> EVENTS[Scoped append-only event]
+```
+
 ## Summary
 
 Refactor `kogwistar-llm-wiki` namespace and ingestion semantics so source

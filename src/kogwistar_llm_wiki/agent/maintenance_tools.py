@@ -19,6 +19,16 @@ from ..models import IngestPipelineRequest
 
 
 class AgentMaintenanceToolsMixin:
+    def email_accept(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.accept_email_mapping(
+            workspace_id=str(arguments.get("workspace_id") or "").strip(),
+            stream_id=str(arguments.get("stream_id") or "").strip(),
+            source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
+            source_document_id=str(arguments.get("source_document_id") or "").strip(),
+            confirmed=bool(arguments.get("confirmed", False)),
+            confidence=float(arguments.get("confidence", 0.75)),
+        )
+
     def maintain(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         topic = str(arguments.get("topic") or "").strip()
@@ -89,5 +99,4 @@ class AgentMaintenanceToolsMixin:
             "budgets": budgets,
             "skipped_source_document_ids": skipped_source_ids,
         }
-
 

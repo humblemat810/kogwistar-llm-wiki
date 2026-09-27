@@ -3,6 +3,14 @@
 This document is the shortest operational context for a person, AI coding
 agent, or other agent client integrating with llm-wiki.
 
+```mermaid
+flowchart LR
+    AGENT[Agent client] --> TOKEN[Bearer token]
+    TOKEN --> SERVER[Gateway server]
+    SERVER --> ACL[Workspace and tool ACL]
+    ACL --> TOOLS[Read-only or proposal tools]
+```
+
 ## Start The Server
 
 The existing `workbench` command serves the local graph workbench and the

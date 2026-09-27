@@ -6,6 +6,15 @@
 **Mode:** Runtime refactor active across `kogwistar` and `kogwistar-llm-wiki`; cross-repo extraction is ongoing  
 **Scope:** `kogwistar`, `kogwistar-llm-wiki`, and sibling docs/tests
 
+```mermaid
+flowchart LR
+    CORE[Kogwistar core] --> APP[LLM-Wiki runtime]
+    APP --> CI[Cross-repository CI]
+    CI --> RELEASE[Versioned release and image]
+    APP --> DOCS[Architecture and operator docs]
+    DOCS --> REVIEW[Human review and follow-up]
+```
+
 ### What is already true
 
 - core maintenance plumbing exists and is working

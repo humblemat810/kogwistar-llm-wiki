@@ -1,5 +1,13 @@
 # Page-Index Parser Refactor Checklist
 
+```mermaid
+flowchart LR
+    PAGE[Page or document] --> INDEX[Page index]
+    INDEX --> REGION[Bounded region]
+    REGION --> PARSE[Grounded parser output]
+    PARSE --> GRAPH[Evidence and graph derivation]
+```
+
 ## Summary
 
 Refactor page-index parsing from "ask the LLM to generate a recursive tree

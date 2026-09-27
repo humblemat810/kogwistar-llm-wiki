@@ -1,4 +1,4 @@
-"""Project-scoped, evidence-backed memory for Codex MCP clients."""
+"""Project-scoped, evidence-backed memory for MCP clients."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Literal
 
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
@@ -32,11 +32,11 @@ _SECRET_LIKE = re.compile(
 _WORD = re.compile(r"[a-z0-9][a-z0-9_-]{1,}")
 
 
-class CodexMemoryError(ValueError):
+class MemoryValidationError(ValueError):
     """A rejected memory request that must not reach graph persistence."""
 
 
-class MemoryDisabledError(CodexMemoryError):
+class MemoryDisabledError(MemoryValidationError):
     """Autonomous memory capture is not enabled for this process."""
 
 
@@ -64,44 +64,44 @@ class MemoryEvidence(BaseModel):
             return None
         text = value.strip()
         if "\\" in text or text.lower().startswith("file:"):
-            raise CodexMemoryError("memory evidence must not contain host filesystem paths")
+            raise MemoryValidationError("memory evidence must not contain host filesystem paths")
         if len(text) >= 2 and text[1] == ":" and text[0].isalpha():
-            raise CodexMemoryError("memory evidence must not contain drive-qualified paths")
+            raise MemoryValidationError("memory evidence must not contain drive-qualified paths")
         if _SECRET_LIKE.search(text):
-            raise CodexMemoryError("memory evidence contains secret-like content")
+            raise MemoryValidationError("memory evidence contains secret-like content")
         return text
 
     @field_validator("revision")
     @classmethod
     def _valid_revision(cls, value: str | None) -> str | None:
         if value is not None and not _REVISION.fullmatch(value.strip()):
-            raise CodexMemoryError("repository evidence revision must be a commit hash")
+            raise MemoryValidationError("repository evidence revision must be a commit hash")
         return value.strip() if value is not None else None
 
     @field_validator("content_sha256")
     @classmethod
     def _valid_hash(cls, value: str | None) -> str | None:
         if value is not None and not _SHA256.fullmatch(value.strip()):
-            raise CodexMemoryError("repository evidence content_sha256 must be a SHA-256 hash")
+            raise MemoryValidationError("repository evidence content_sha256 must be a SHA-256 hash")
         return value.lower() if value is not None else None
 
     @model_validator(mode="after")
     def _validate_shape(self) -> MemoryEvidence:
         if self.kind == "repository":
             if not self.repository_path or self.repository_path.startswith("/"):
-                raise CodexMemoryError("repository evidence requires a relative repository_path")
+                raise MemoryValidationError("repository evidence requires a relative repository_path")
             if any(part == ".." for part in self.repository_path.split("/")):
-                raise CodexMemoryError("repository evidence path may not escape the repository")
+                raise MemoryValidationError("repository evidence path may not escape the repository")
             if not self.revision or not self.content_sha256:
-                raise CodexMemoryError("repository evidence requires revision and content_sha256")
+                raise MemoryValidationError("repository evidence requires revision and content_sha256")
             if self.start_line is None or self.end_line is None or self.start_line > self.end_line:
-                raise CodexMemoryError("repository evidence requires an ordered line range")
+                raise MemoryValidationError("repository evidence requires an ordered line range")
         elif not self.source_document_id:
-            raise CodexMemoryError("source_span evidence requires source_document_id")
+            raise MemoryValidationError("source_span evidence requires source_document_id")
         if self.span is not None:
             Span.model_validate(self.span)
         if _SECRET_LIKE.search(self.excerpt):
-            raise CodexMemoryError("memory evidence excerpt contains secret-like content")
+            raise MemoryValidationError("memory evidence excerpt contains secret-like content")
         return self
 
     def stable_id(self) -> str:
@@ -109,7 +109,7 @@ class MemoryEvidence(BaseModel):
         return str(stable_id("kogwistar_llm_wiki.codex_memory.evidence", json.dumps(payload, sort_keys=True)))
 
 
-class CodexMemoryRecord(BaseModel):
+class MemoryRecord(BaseModel):
     """An immutable project memory candidate with explicit grounding."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -129,13 +129,14 @@ class CodexMemoryRecord(BaseModel):
     capture_policy_version: str = Field(default="1", min_length=1, max_length=40)
     lifecycle_status: Literal["candidate", "reviewed", "superseded", "retired"] = "candidate"
     created_at_ms: int = Field(default_factory=lambda: int(time.time() * 1000), ge=0)
+    metadata: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("workspace_id", "session_id", "statement", "rationale")
     @classmethod
     def _clean_text(cls, value: str) -> str:
         text = value.strip()
         if _SECRET_LIKE.search(text):
-            raise CodexMemoryError("memory content contains secret-like content")
+            raise MemoryValidationError("memory content contains secret-like content")
         return text
 
     @field_validator(
@@ -148,20 +149,38 @@ class CodexMemoryRecord(BaseModel):
     def _clean_link_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         cleaned = tuple(value.strip() for value in values)
         if any(not value for value in cleaned):
-            raise CodexMemoryError("memory relationship IDs must be non-empty")
+            raise MemoryValidationError("memory relationship IDs must be non-empty")
         return cleaned
 
+    @field_validator("metadata")
+    @classmethod
+    def _bounded_json_metadata(cls, value: dict[str, object]) -> dict[str, object]:
+        try:
+            encoded = json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            decoded = json.loads(encoded)
+        except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+            raise MemoryValidationError("memory metadata must be JSON-serializable") from exc
+        if not isinstance(decoded, dict) or len(encoded) > 16_000:
+            raise MemoryValidationError("memory metadata must be a bounded JSON object")
+        return decoded
+
     @model_validator(mode="after")
-    def _require_grounding(self) -> CodexMemoryRecord:
+    def _require_grounding(self) -> MemoryRecord:
         if self.confidence in {"verified", "inferred"} and not self.evidence:
-            raise CodexMemoryError("memory records require at least one evidence reference")
+            raise MemoryValidationError("memory records require at least one evidence reference")
         linked_ids = (
             *self.related_memory_ids,
             *self.supersedes_memory_ids,
             *self.conflicts_with_memory_ids,
         )
         if self.memory_id() in linked_ids:
-            raise CodexMemoryError("a memory record cannot link to itself")
+            raise MemoryValidationError("a memory record cannot link to itself")
         return self
 
     def memory_id(self) -> str:
@@ -177,7 +196,7 @@ class CodexMemoryRecord(BaseModel):
         )
 
 
-class CodexMemoryService:
+class MemoryService:
     """Persist and retrieve project memory using existing graph primitives."""
 
     __slots__ = ("enabled", "engines", "max_recall_records", "max_records_per_capture")
@@ -213,17 +232,17 @@ class CodexMemoryService:
             )
         raw_records = [payload] if isinstance(payload, Mapping) else list(payload)
         if not raw_records or len(raw_records) > self.max_records_per_capture:
-            raise CodexMemoryError(
+            raise MemoryValidationError(
                 f"memory capture accepts 1..{self.max_records_per_capture} records"
             )
         records: list[dict[str, object]] = []
-        validated: list[CodexMemoryRecord] = []
+        validated: list[MemoryRecord] = []
         for raw in raw_records:
-            record = CodexMemoryRecord.model_validate(raw)
+            record = MemoryRecord.model_validate(raw)
             validated.append(record)
         workspace_ids = {record.workspace_id for record in validated}
         if len(workspace_ids) != 1:
-            raise CodexMemoryError("a memory capture batch must contain one workspace only")
+            raise MemoryValidationError("a memory capture batch must contain one workspace only")
         for record in validated:
             records.append(self._persist(record))
         return {"status": "captured", "workspace_id": records[0]["workspace_id"], "records": records}
@@ -235,14 +254,19 @@ class CodexMemoryService:
         query_text: str = "",
         include_inferred: bool = True,
         limit: int | None = None,
+        authorized_stream_ids: Collection[str] | None = None,
     ) -> dict[str, object]:
         if not workspace_id.strip():
-            raise CodexMemoryError("memory recall requires workspace_id")
-        records = self._read_records(workspace_id)
+            raise MemoryValidationError("memory recall requires workspace_id")
+        records = [
+            record
+            for record in self._read_records(workspace_id)
+            if _memory_acl_allows(record, authorized_stream_ids)
+        ]
         if not include_inferred:
             records = [item for item in records if item.confidence != "inferred"]
         query_words = {word.lower() for word in _WORD.findall(query_text)}
-        ranked: list[tuple[float, CodexMemoryRecord]] = []
+        ranked: list[tuple[float, MemoryRecord]] = []
         for record in records:
             words = {word.lower() for word in _WORD.findall(f"{record.statement} {record.rationale}")}
             overlap = len(query_words & words) / max(1, len(query_words)) if query_words else 0.0
@@ -269,16 +293,21 @@ class CodexMemoryService:
         confidence: str | None = None,
         lifecycle_status: str | None = None,
         limit: int = 50,
+        authorized_stream_ids: Collection[str] | None = None,
     ) -> dict[str, object]:
         if not workspace_id.strip():
-            raise CodexMemoryError("memory review requires workspace_id")
+            raise MemoryValidationError("memory review requires workspace_id")
         if kind is not None and kind not in {"decision", "constraint", "convention", "finding", "task_outcome"}:
-            raise CodexMemoryError("memory review kind is invalid")
+            raise MemoryValidationError("memory review kind is invalid")
         if confidence is not None and confidence not in {"verified", "inferred"}:
-            raise CodexMemoryError("memory review confidence is invalid")
+            raise MemoryValidationError("memory review confidence is invalid")
         if lifecycle_status is not None and lifecycle_status not in {"candidate", "reviewed", "superseded", "retired"}:
-            raise CodexMemoryError("memory review lifecycle_status is invalid")
-        records = self._read_records(workspace_id)
+            raise MemoryValidationError("memory review lifecycle_status is invalid")
+        records = [
+            record
+            for record in self._read_records(workspace_id)
+            if _memory_acl_allows(record, authorized_stream_ids)
+        ]
         filters = {"kind": kind, "confidence": confidence, "lifecycle_status": lifecycle_status}
         records = [
             record
@@ -295,13 +324,30 @@ class CodexMemoryService:
             "count": len(selected),
         }
 
-    def _persist(self, record: CodexMemoryRecord) -> dict[str, object]:
+    def _persist(self, record: MemoryRecord) -> dict[str, object]:
         memory_id = record.memory_id()
         evidence = [item.model_copy(update={"evidence_id": item.evidence_id or item.stable_id()}) for item in record.evidence]
         record = record.model_copy(update={"evidence": tuple(evidence)})
         namespace = WorkspaceNamespaces(record.workspace_id).conv_fg
         with _temporary_namespace(self.engines.conversation, namespace):
             existing = self.engines.conversation.read.get_nodes(ids=[memory_id], limit=1)
+            if existing:
+                stored_payload = (getattr(existing[0], "metadata", {}) or {}).get(
+                    "memory_payload_json"
+                )
+                if not isinstance(stored_payload, str):
+                    raise MemoryValidationError("existing memory is missing its durable payload")
+                try:
+                    stored = MemoryRecord.model_validate(json.loads(stored_payload))
+                except (json.JSONDecodeError, ValueError) as exc:
+                    raise MemoryValidationError("existing memory has an invalid durable payload") from exc
+                stored_payload = stored.model_dump(mode="json", exclude={"created_at_ms"})
+                incoming_payload = record.model_dump(mode="json", exclude={"created_at_ms"})
+                if stored_payload != incoming_payload:
+                    raise MemoryValidationError(
+                        "memory ID already exists with a different validated payload"
+                    )
+                return self._record_payload(stored, persisted=False)
             if not existing:
                 linked_ids = (
                     *record.related_memory_ids,
@@ -316,7 +362,7 @@ class CodexMemoryService:
                     and not self.engines.conversation.read.get_edges(ids=[target_id], limit=1)
                 ]
                 if missing_links:
-                    raise CodexMemoryError(
+                    raise MemoryValidationError(
                         "memory link targets must already exist; missing: "
                         + ", ".join(sorted(set(missing_links)))
                     )
@@ -344,13 +390,13 @@ class CodexMemoryService:
                     )
         return self._record_payload(record, persisted=not bool(existing))
 
-    def _read_records(self, workspace_id: str) -> list[CodexMemoryRecord]:
+    def _read_records(self, workspace_id: str) -> list[MemoryRecord]:
         namespace = WorkspaceNamespaces(workspace_id).conv_fg
         with _temporary_namespace(self.engines.conversation, namespace):
             # Filter after reconstruction because PostgreSQL, Chroma, and the
             # in-memory backend do not share identical nested-where behavior.
             nodes = self.engines.conversation.read.get_nodes(limit=1000)
-        records: list[CodexMemoryRecord] = []
+        records: list[MemoryRecord] = []
         for node in nodes:
             metadata = dict(getattr(node, "metadata", {}) or {})
             if metadata.get("workspace_id") != workspace_id or metadata.get("artifact_kind") != self.artifact_kind:
@@ -358,12 +404,12 @@ class CodexMemoryService:
             raw = metadata.get("memory_payload_json")
             if isinstance(raw, str):
                 try:
-                    records.append(CodexMemoryRecord.model_validate(json.loads(raw)))
+                    records.append(MemoryRecord.model_validate(json.loads(raw)))
                 except (json.JSONDecodeError, ValueError):
                     continue
         return records
 
-    def _record_payload(self, record: CodexMemoryRecord, **extra: object) -> dict[str, object]:
+    def _record_payload(self, record: MemoryRecord, **extra: object) -> dict[str, object]:
         payload = record.model_dump(mode="json")
         payload["memory_id"] = record.memory_id()
         payload["evidence"] = [
@@ -374,7 +420,7 @@ class CodexMemoryService:
         return payload
 
 
-def _memory_node(record: CodexMemoryRecord, memory_id: str) -> Node:
+def _memory_node(record: MemoryRecord, memory_id: str) -> Node:
     payload = record.model_dump(mode="json")
     span = Span.from_dummy_for_conversation(f"memory:{memory_id}")
     return Node(
@@ -387,7 +433,7 @@ def _memory_node(record: CodexMemoryRecord, memory_id: str) -> Node:
         metadata={
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
-            "artifact_kind": CodexMemoryService.artifact_kind,
+            "artifact_kind": MemoryService.artifact_kind,
             "memory_payload_json": json.dumps(payload, sort_keys=True, separators=(",", ":")),
             "memory_id": memory_id,
             "memory_kind": record.kind,
@@ -397,7 +443,25 @@ def _memory_node(record: CodexMemoryRecord, memory_id: str) -> Node:
     )
 
 
-def _evidence_node(record: CodexMemoryRecord, evidence: MemoryEvidence, evidence_id: str) -> Node:
+def _memory_acl_allows(
+    record: MemoryRecord,
+    authorized_stream_ids: Collection[str] | None,
+) -> bool:
+    """Hide scoped memories unless the caller proves every source stream."""
+
+    if "acl" not in record.metadata:
+        return True
+    acl = record.metadata.get("acl")
+    if not isinstance(acl, Mapping) or acl.get("workspace_id") != record.workspace_id:
+        return False
+    stream_ids = acl.get("stream_ids")
+    if not isinstance(stream_ids, (list, tuple)) or not stream_ids:
+        return False
+    authorized = {str(stream_id) for stream_id in (authorized_stream_ids or ())}
+    return all(str(stream_id) in authorized for stream_id in stream_ids)
+
+
+def _evidence_node(record: MemoryRecord, evidence: MemoryEvidence, evidence_id: str) -> Node:
     excerpt = evidence.excerpt or evidence.locator or evidence.repository_path or evidence.source_document_id or evidence_id
     span = Span.from_dummy_for_conversation(f"evidence:{evidence_id}")
     return Node(
@@ -410,14 +474,14 @@ def _evidence_node(record: CodexMemoryRecord, evidence: MemoryEvidence, evidence
         metadata={
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
-            "artifact_kind": CodexMemoryService.evidence_artifact_kind,
+            "artifact_kind": MemoryService.evidence_artifact_kind,
             "evidence_payload_json": json.dumps(evidence.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
             "evidence_id": evidence_id,
         },
     )
 
 
-def _support_edge(record: CodexMemoryRecord, memory_id: str, evidence: Sequence[MemoryEvidence]) -> Edge:
+def _support_edge(record: MemoryRecord, memory_id: str, evidence: Sequence[MemoryEvidence]) -> Edge:
     evidence_ids = [item.evidence_id or item.stable_id() for item in evidence]
     edge_id = str(stable_id("kogwistar_llm_wiki.codex_memory.support", memory_id, json.dumps(evidence_ids)))
     return Edge(
@@ -435,7 +499,7 @@ def _support_edge(record: CodexMemoryRecord, memory_id: str, evidence: Sequence[
         metadata={
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
-            "artifact_kind": CodexMemoryService.artifact_kind,
+            "artifact_kind": MemoryService.artifact_kind,
             "edge_kind": "hyperedge",
             "memory_id": memory_id,
             "evidence_ids": evidence_ids,
@@ -444,7 +508,7 @@ def _support_edge(record: CodexMemoryRecord, memory_id: str, evidence: Sequence[
 
 
 def _memory_relation_edge(
-    record: CodexMemoryRecord,
+    record: MemoryRecord,
     memory_id: str,
     target_id: str,
     relation: str,
@@ -465,7 +529,7 @@ def _memory_relation_edge(
         metadata={
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
-            "artifact_kind": CodexMemoryService.artifact_kind,
+            "artifact_kind": MemoryService.artifact_kind,
             "edge_kind": "memory_relation",
             "memory_id": memory_id,
             "target_id": target_id,
@@ -485,10 +549,19 @@ def _bounded_int(value: object, *, default: int, upper: int) -> int:
     return max(1, min(number, upper))
 
 
+# Compatibility aliases preserve imports from the first Codex-facing release.
+CodexMemoryError = MemoryValidationError
+CodexMemoryRecord = MemoryRecord
+CodexMemoryService = MemoryService
+
+
 __all__ = [
     "CodexMemoryError",
     "CodexMemoryRecord",
     "CodexMemoryService",
+    "MemoryValidationError",
+    "MemoryRecord",
+    "MemoryService",
     "MemoryDisabledError",
     "MemoryEvidence",
 ]

@@ -51,14 +51,16 @@ are versioned derived artifacts. Existing text embedding and graph retrieval
 operate on those textual derivatives. Every derived claim retains a resolvable
 lineage chain back to the exact source revision and media locator.
 
-```text
-immutable media asset
-    -> source revision and media manifest
-    -> typed source units (page, region, time range, frame)
-    -> versioned text/structure derivatives
-    -> existing semantic parser and maintenance workflows
-    -> knowledge nodes, edges, and hyperedges
-    -> text embeddings and graph projections
+```mermaid
+flowchart LR
+    ASSET[Immutable media asset] --> REV[Source revision and media manifest]
+    REV --> UNIT[Typed source units\npage, region, time, or frame]
+    UNIT --> DERIV[Versioned text and structure\nderivatives]
+    DERIV --> PARSER[Existing semantic parser\nand maintenance workflows]
+    PARSER --> GRAPH[Knowledge nodes, edges,\nand hyperedges]
+    GRAPH --> INDEX[Text embeddings\nand graph projections]
+    UNIT -. exact lineage .-> REV
+    DERIV -. never overwrites raw evidence .-> ASSET
 ```
 
 Media bytes do not belong in graph events, vector columns, prompts, or node

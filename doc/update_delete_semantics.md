@@ -1,5 +1,13 @@
 # Update & Delete Semantics
 
+```mermaid
+flowchart LR
+    FACT[Original fact] --> REVISION[New immutable revision]
+    REVISION --> EDGE[Correction or supersession edge]
+    FACT --> TOMBSTONE[Tombstone when source lifecycle requires it]
+    EDGE --> QUERY[Readers resolve active interpretation]
+```
+
 ## 1. Purpose
 
 Define update and delete behavior consistent with:

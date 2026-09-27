@@ -75,15 +75,17 @@ fallback search, but native media vectors are a first-class retrieval path.
 Add an app-owned **multimodal retrieval plane** beside the existing knowledge
 graph and text retrieval plane.
 
-```text
-source bundle
-  -> immutable assets and source occurrences
-  -> typed retrieval views
-  -> multimodal embedding jobs
-  -> isolated profile-bound vector projection
-  -> grouped cross-modal candidates
-  -> ACL filter + graph expansion + reranking
-  -> grounded answer, lens, or proposal
+```mermaid
+flowchart LR
+    BUNDLE[Source bundle] --> ASSET[Immutable assets and\nsource occurrences]
+    ASSET --> VIEW[Typed retrieval views]
+    VIEW --> JOB[Multimodal embedding jobs]
+    JOB --> VECTOR[Profile-isolated vector projection]
+    VECTOR --> CANDIDATE[Grouped cross-modal candidates]
+    CANDIDATE --> AUTH[ACL and namespace filter]
+    AUTH --> EXPAND[Graph expansion and reranking]
+    EXPAND --> OUTPUT[Grounded answer, lens,\nor proposal]
+    AUTH -. rejects unauthorized refs .-> DROP[No result or labeled stale result]
 ```
 
 The authoritative source graph remains event-sourced and provenance-first.

@@ -1,5 +1,14 @@
 # Environment Cheat Sheet
 
+```mermaid
+flowchart LR
+    ENV[Environment variables] --> CONFIG[Validated settings]
+    CONFIG --> COMPOSE[Compose services]
+    CONFIG --> CLI[CLI and daemons]
+    CONFIG --> PROVIDER[Provider and embedding selection]
+    COMPOSE --> DATA[Durable volumes and graph backend]
+```
+
 ## 1. Repo Status
 
 - `kogwistar-llm-wiki` application package plus docs and tests
