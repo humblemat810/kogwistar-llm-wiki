@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from jose import jwt
-from mcp import Client
+from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from kogwistar_llm_wiki.agent.gateway import AgentGateway
@@ -367,10 +367,12 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                 httpx.AsyncClient(
                     transport=transport, base_url="http://testserver"
                 ) as http_client,
-                Client(streamable_http_client(
+                streamable_http_client(
                     "http://testserver/mcp", http_client=http_client
-                )) as session,
+                ) as (read_stream, write_stream),
+                ClientSession(read_stream, write_stream) as session,
             ):
+                await session.initialize()
                 tools = await session.list_tools()
                 assert {tool.name for tool in tools.tools} == {
                     "query",

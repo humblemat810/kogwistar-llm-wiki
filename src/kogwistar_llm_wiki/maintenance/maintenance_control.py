@@ -292,6 +292,10 @@ def send_control_command(data_dir: str | os.PathLike[str], **command: object) ->
             client.settimeout(2.0)
             client.connect(str(control.socket_path))
             client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            # The server reads one request until EOF. Half-close the write side
+            # so it can parse the command and send the live response instead of
+            # waiting forever for more bytes from this client.
+            client.shutdown(socket.SHUT_WR)
             return json.loads(client.recv(8192).decode("utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         if payload.get("status"):

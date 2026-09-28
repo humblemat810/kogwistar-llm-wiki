@@ -9,13 +9,13 @@ from collections.abc import Mapping
 
 from kogwistar.engine_core.jobs import JobQueueItem
 
+from ..configuration.identity import authorize_durable_claims, durable_claims_context
 from ..maintenance import (
     MaintenanceJobExecutionContext,
     MaintenanceStrategy,
     is_execution_wisdom_kind,
 )
 from ..maintenance.maintenance_context import maintenance_execution_context
-from ..configuration.identity import durable_claims_context
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,15 @@ class MaintenanceJobDispatchMixin:
 
     def _handle_job(self, workspace_id: str, job: JobQueueItem) -> None:
         payload = getattr(job, "payload", {})
+        if isinstance(payload, Mapping):
+            payload_workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not payload_workspace_id or payload_workspace_id != workspace_id:
+                raise ValueError(
+                    "maintenance job payload workspace_id must match the queue workspace"
+                )
         claims = payload.get("authority_claims") if isinstance(payload, Mapping) else None
+        if isinstance(payload, Mapping) and bool(payload.get("authority_required")):
+            authorize_durable_claims(claims, workspace_id=workspace_id, scope="write")
         with durable_claims_context(claims):
             self._handle_job_with_authority(workspace_id, job)
 

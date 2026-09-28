@@ -31,7 +31,7 @@ the email topology is required.
 The release workflows use immutable merged source revisions:
 
 ```text
-Kogwistar:       14ca3c3f012f6bbb0b28980fbfa39f0705e2a855
-KG Doc Parser:   dec9d958009c960785167ccd4b9f069ec0c13e48
+Kogwistar:       3a9dfb8951175a35f7be9299208ac31d849c288f
+KG Doc Parser:   70bc77f2a3a3f8b7c95be51a2605e3a0a33b1135
 Obsidian sink:   2fcea33c34bfb2d09445fe587fa25f25ef8bc6d4
 ```

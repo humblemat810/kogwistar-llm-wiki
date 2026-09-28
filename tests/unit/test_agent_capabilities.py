@@ -574,3 +574,38 @@ def test_durable_maintenance_usage_recovers_failed_attempt_budget():
     assert state["step_used"] == 2
     assert state["time_used_ms"] == 30
     assert state["cost_used"] == 0.02
+
+
+def test_durable_maintenance_usage_supports_postgres_event_rows_without_batch_size():
+    job_id = "maintenance-job-postgres"
+    attribution = BudgetAttribution(
+        workspace_id="w",
+        source_document_id="source-a",
+        maintenance_job_id=job_id,
+    )
+    event = BudgetEvent(
+        run_id="run-1",
+        source="runtime",
+        kind="debit",
+        amount=48,
+        unit="token",
+        attribution=attribution,
+    )
+
+    class PostgresMeta:
+        def iter_entity_events(self, *, namespace, from_seq):
+            assert namespace == "usage"
+            assert from_seq == 1
+            payload = budget_event_to_dict(event)
+            payload["artifact_kind"] = "usage_event"
+            yield 1, "usage_event", "event-1", "UPSERT", json.dumps(payload)
+
+    assert _durable_maintenance_usage(
+        PostgresMeta(), namespace="usage", maintenance_job_id=job_id
+    ) == {
+        "token_used": 48,
+        "call_used": 0,
+        "step_used": 0,
+        "time_used_ms": 0,
+        "cost_used": 0.0,
+    }

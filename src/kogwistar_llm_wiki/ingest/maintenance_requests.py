@@ -13,6 +13,7 @@ from kogwistar.id_provider import stable_id
 from kogwistar.policy import PromotionDecision
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 
+from ..configuration.identity import durable_claims_snapshot
 from ..maintenance.maintenance_context import (
     bound_maintenance_context,
     maintenance_execution_active,
@@ -21,7 +22,6 @@ from ..maintenance.maintenance_guards import (
     required_stage_for_maintenance,
 )
 from ..maintenance.maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
-from ..configuration.identity import durable_claims_snapshot
 from ..models import (
     IngestPipelineRequest,
 )
@@ -802,6 +802,7 @@ class MaintenanceRequestMixin:
                 "maintenance execution cannot enqueue a new maintenance job; "
                 "follow-up phases must reuse the current leased job"
             )
+        authority_claims = durable_claims_snapshot()
         payload = {
             "workspace_id": request.workspace_id,
             "request_node_id": request_node_id,
@@ -831,7 +832,8 @@ class MaintenanceRequestMixin:
             "durable_layered_parse": bool(
                 request.parser_lane == "workflow_layered" or parse_target is not None
             ),
-            "authority_claims": durable_claims_snapshot(),
+            "authority_claims": authority_claims,
+            "authority_required": authority_claims is not None,
         }
         if request.operation_mode == "maintenance_first" and maintenance_kind == "document_seed_graph":
             payload.update(

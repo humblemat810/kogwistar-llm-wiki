@@ -60,6 +60,11 @@ def test_durable_frontier_write_is_member_tagged_before_view_activation(
     )
 
     member_id = result["members"][0]["member_id"]
+    member_payload = result["members"][0]["payload"]
+    assert member_payload["frontier_id"]
+    assert "diagnostics" in member_payload
+    assert member_payload["parser_strategy"]
+    assert result["members"][0]["parent_member_id"] is None
     with _temporary_namespace(pipeline.engines.kg, namespaces.source_space):
         nodes = pipeline.engines.kg.read.get_nodes(
             where={"parse_generation_member_id": member_id},

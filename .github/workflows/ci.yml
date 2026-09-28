@@ -17,8 +17,8 @@ concurrency:
 env:
   # The application imports these sibling repositories at runtime. Keep CI
   # aligned with the revisions used by publish-dockerhub.yml.
-  KOGWISTAR_REVISION: 14ca3c3f012f6bbb0b28980fbfa39f0705e2a855
-  KG_DOC_PARSER_REVISION: dec9d958009c960785167ccd4b9f069ec0c13e48
+  KOGWISTAR_REVISION: 3a9dfb8951175a35f7be9299208ac31d849c288f
+  KG_DOC_PARSER_REVISION: 70bc77f2a3a3f8b7c95be51a2605e3a0a33b1135
   OBSIDIAN_SINK_REVISION: 2fcea33c34bfb2d09445fe587fa25f25ef8bc6d4
 
 jobs:
@@ -76,6 +76,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Expose checked-out package sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Rust for the local Kogwistar package
         if: matrix.is_pypy == false
         uses: dtolnay/rust-toolchain@stable
@@ -97,7 +105,7 @@ jobs:
             "mcp>=2.2.0,<3" \
             "langchain-openai>=0.3" \
             "langchain-ollama>=0.3" \
-            "sqlalchemy>=2.0" \
+            "sqlalchemy[asyncio]>=2.0" \
             "opentelemetry-api>=1.25" \
             "opentelemetry-sdk>=1.25" \
             "opentelemetry-exporter-otlp-proto-http>=1.25" \
@@ -110,10 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           python -c 'import sys; assert sys.implementation.name == "pypy"; assert sys.version_info[:2] == (3, 11); print(sys.implementation); print(sys.version)'
-          {
-            echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src"
-            echo "KOGWISTAR_IMPL_MODE=python"
-          } >> "$GITHUB_ENV"
+          echo "KOGWISTAR_IMPL_MODE=python" >> "$GITHUB_ENV"
           python -m pip install --upgrade pip
           python -m pip install --no-deps --ignore-requires-python -e .
           python -m pip install -r requirements/pypy-3.11-experimental.txt
@@ -139,9 +144,21 @@ jobs:
             --durations=25 --durations-min=0 --resource-report \
             --resource-report-json "test-results/resource-report-${{ matrix.label }}.json" \
             --junitxml "test-results/junit-${{ matrix.label }}.xml" \
+            -p tests._helpers.resource_report \
             -p no:cacheprovider 2>&1 | tee "test-results/pytest-${{ matrix.label }}.log"
           status=${PIPESTATUS[0]}
           set -e
+          if [ "$status" -ne 0 ]; then
+            summary=$(grep -E 'FAILED|ERROR|passed|failed|Error|ModuleNotFoundError|ImportError|UsageError' \
+              "test-results/pytest-${{ matrix.label }}.log" | tail -n 20 | tr '\n' ' ' | cut -c1-3000 || true)
+            echo "::error title=Provider-free pytest failure (${{ matrix.label }})::$summary"
+            {
+              echo "### Provider-free pytest failure (${{ matrix.label }})"
+              echo '```text'
+              tail -n 120 "test-results/pytest-${{ matrix.label }}.log" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           exit "$status"
 
       - name: Run PyPy 3.11 provider-free CI profile
@@ -152,7 +169,23 @@ jobs:
           KOGWISTAR_LOG_LEVEL: WARNING
           LOG_LEVEL: WARNING
         shell: bash
-        run: python scripts/run_pypy311_ci.py --skip-install --results-dir test-results/${{ matrix.label }}
+        run: |
+          set +e
+          python scripts/run_pypy311_ci.py --skip-install --results-dir test-results/${{ matrix.label }} \
+            2>&1 | tee "test-results/pytest-${{ matrix.label }}.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(grep -E 'FAILED|ERROR|passed|failed|Error|ModuleNotFoundError|ImportError|AssertionError' \
+              "test-results/pytest-${{ matrix.label }}.log" | tail -n 20 | tr '\n' ' ' | cut -c1-3000 || true)
+            echo "::error title=PyPy 3.11 provider-free pytest failure::$summary"
+            {
+              echo "### PyPy 3.11 provider-free pytest failure"
+              echo '```text'
+              tail -n 160 "test-results/pytest-${{ matrix.label }}.log" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
 
       - name: Upload per-runtime resource report
         if: always()

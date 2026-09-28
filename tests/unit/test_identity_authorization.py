@@ -136,6 +136,17 @@ def test_durable_claims_context_restores_and_resets_claims() -> None:
     assert durable_claims_snapshot() is None
 
 
+def test_durable_claims_context_none_hides_ambient_claims_and_restores_them() -> None:
+    ambient = {"sub": "ambient", "security_scope": "ambient-scope"}
+    token = claims_ctx.set(ambient)
+    try:
+        with durable_claims_context(None):
+            assert claims_ctx.get() is None
+        assert claims_ctx.get() == ambient
+    finally:
+        claims_ctx.reset(token)
+
+
 def test_runtime_authority_context_never_invents_capabilities() -> None:
     context = runtime_authority_context(
         {"sub": "alice", "security_scope": "tenant-a", "scope": "read write"},

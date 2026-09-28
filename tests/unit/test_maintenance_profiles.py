@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from kogwistar_llm_wiki.maintenance.maintenance_control import (
@@ -97,6 +99,18 @@ def test_profile_ladder_survives_socket_fallback(tmp_path, monkeypatch) -> None:
     assert result["ok"] is True
     assert result["profile_ladder"][0]["name"] == "primary"
     assert MaintenanceControl(tmp_path).get().profile_ladder[0]["provider"] == "codex"
+
+
+def test_live_control_socket_returns_without_waiting_for_client_close(tmp_path) -> None:
+    control = MaintenanceControl(tmp_path)
+    stop_event = threading.Event()
+    control.serve(stop_event)
+    try:
+        result = send_control_command(tmp_path, background_enabled=False)
+        assert result["ok"] is True
+        assert result["background_enabled"] is False
+    finally:
+        stop_event.set()
 
 
 def test_budget_caps_are_independent_and_checked_across_windows() -> None:

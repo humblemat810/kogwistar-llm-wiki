@@ -164,6 +164,12 @@ def apply_maintenance_patch(
             valid=False,
             issues=[*validation.issues, *raw_fact_issues],
         )
+    derived_link_issues = _derived_crosslink_retraction_issues(engine, patch)
+    if derived_link_issues:
+        validation = MaintenancePatchValidationReport(
+            valid=False,
+            issues=[*validation.issues, *derived_link_issues],
+        )
     if not validation.valid:
         artifact_id = _emit_patch_artifact(engine, patch, validation, [], MaintenancePatchStatus.REJECTED) if emit_artifact else None
         return MaintenancePatchApplyResult(
@@ -379,6 +385,53 @@ def _immutable_raw_fact_issues(
                     message=(
                         "maintenance cannot tombstone an edge belonging to a raw source or "
                         "conversation fact"
+                    ),
+                )
+            )
+    return issues
+
+
+def _derived_crosslink_retraction_issues(
+    engine: _MaintenanceEngineLike,
+    patch: MaintenancePatch,
+) -> list[MaintenancePatchValidationIssue]:
+    """Allow retraction only for edges explicitly created as derived links."""
+
+    if patch.intent.value != "retract_crosslink":
+        return []
+    target_ids = {
+        str(operation.tombstone_target_id)
+        for operation in patch.operations
+        if operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE
+        and operation.tombstone_target_id
+    }
+    if not target_ids:
+        return []
+    try:
+        edges = _read_entities_by_ids(engine, "edge", target_ids)
+    except Exception:
+        edges = []
+    by_id = {str(edge.id): edge for edge in edges}
+    issues: list[MaintenancePatchValidationIssue] = []
+    for target_id in sorted(target_ids):
+        edge = by_id.get(target_id)
+        metadata = dict(getattr(edge, "metadata", None) or {}) if edge is not None else {}
+        status = str(metadata.get("crosslink_status") or "").strip().lower()
+        source_native = bool(metadata.get("source_native")) or str(
+            metadata.get("edge_kind") or ""
+        ).strip().lower() in {"source_native", "has_child", "source_map"}
+        if edge is None or source_native or status not in {
+            "candidate",
+            "accepted",
+            "stale",
+            "needs_revalidation",
+        }:
+            issues.append(
+                MaintenancePatchValidationIssue(
+                    code="derived_crosslink_required",
+                    message=(
+                        f"crosslink retraction may target only a derived crosslink edge; "
+                        f"{target_id!r} is source-native, unknown, or lacks crosslink status"
                     ),
                 )
             )

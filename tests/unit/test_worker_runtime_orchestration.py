@@ -77,6 +77,40 @@ def test_fair_maintenance_worker_processes_one_claimed_job_per_poll() -> None:
     assert jobs.claims == 1
 
 
+@pytest.mark.parametrize("payload_workspace_id", [None, "", "other-workspace"])
+def test_maintenance_dispatch_rejects_missing_or_cross_workspace_payload(
+    payload_workspace_id: str | None,
+) -> None:
+    worker = object.__new__(MaintenanceWorker)
+    dispatched = False
+
+    def handle_job_with_authority(_workspace_id: str, _job) -> None:
+        nonlocal dispatched
+        dispatched = True
+
+    worker._handle_job_with_authority = handle_job_with_authority
+    job = SimpleNamespace(payload={"workspace_id": payload_workspace_id})
+
+    with pytest.raises(ValueError, match="workspace_id"):
+        worker._handle_job("workspace", job)
+
+    assert dispatched is False
+
+
+def test_maintenance_dispatch_accepts_matching_payload_workspace() -> None:
+    worker = object.__new__(MaintenanceWorker)
+    dispatched = False
+
+    def handle_job_with_authority(_workspace_id: str, _job) -> None:
+        nonlocal dispatched
+        dispatched = True
+
+    worker._handle_job_with_authority = handle_job_with_authority
+    worker._handle_job("workspace", SimpleNamespace(payload={"workspace_id": "workspace"}))
+
+    assert dispatched is True
+
+
 def test_lease_renewal_exception_fences_the_worker_claim() -> None:
     events: list[dict[str, object]] = []
 
@@ -108,6 +142,36 @@ def test_lease_renewal_exception_fences_the_worker_claim() -> None:
     assert not lease_thread.is_alive()
     assert worker._claim_lost.is_set()
     assert any(event["event"] == "maintenance_lease_renewal_failed" for event in events)
+
+
+def test_lease_renewal_survives_a_long_provider_call_without_progress() -> None:
+    renewals = 0
+
+    class SlowJobs:
+        def renew_lease(self, *_args, **_kwargs):
+            nonlocal renewals
+            renewals += 1
+            if renewals >= 3:
+                stop.set()
+            return True
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.worker_id = "maintenance-long-provider-test"
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=SlowJobs()))
+    worker.lease_seconds = 150
+    worker.lease_renew_interval_seconds = 0.001
+    worker.lease_progress_grace_seconds = 0.001
+    worker._last_progress_monotonic = time.monotonic() - 10
+    worker._claim_lost = threading.Event()
+    worker.trace_sink = None
+    worker._emit_trace = lambda *_args, **_kwargs: None
+
+    stop = threading.Event()
+    ctx = SimpleNamespace(job_id="job-long-provider", job=SimpleNamespace(claim_token="claim-1"))
+    worker._renew_claim_while_progressing(ctx, stop)
+
+    assert renewals >= 3
+    assert not worker._claim_lost.is_set()
 
 
 def test_claim_loss_before_graph_patch_never_calls_the_applier(monkeypatch) -> None:
@@ -161,6 +225,53 @@ def test_claim_loss_before_graph_patch_never_calls_the_applier(monkeypatch) -> N
     worker._handle_graph_patch_apply_strategy(ctx)
 
     assert applied == []
+    assert any(event["event"] == "maintenance_repeated_work_discarded" for event in traces)
+
+
+def test_claim_loss_before_crosslink_requeue_discards_prepared_patch() -> None:
+    requeued: list[object] = []
+    traces: list[dict[str, object]] = []
+
+    class FakeJobs:
+        def requeue_at_tail(self, *_args, **_kwargs):
+            requeued.append(True)
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=FakeJobs()))
+    worker._claim_lost = threading.Event()
+    worker._claim_lost.set()
+    worker.trace_sink = traces.append
+    worker._validate_crosslink_authority = lambda _ctx, _patch: None
+
+    patch = MaintenancePatch(
+        patch_id="patch-crosslink-lease-loss",
+        intent="derive_crosslink_candidate",
+        scope={"workspace_id": "workspace-lease-loss"},
+        operations=[
+            {
+                "operation_id": "candidate-1",
+                "kind": "ADD_EDGE",
+                "edge_id": "ws:workspace-lease-loss:edge-1",
+                "from_node_id": "ws:workspace-lease-loss:left",
+                "to_node_id": "ws:workspace-lease-loss:right",
+                "relation": "related_to",
+                "properties": {"crosslink_status": "candidate"},
+            }
+        ],
+    )
+    ctx = SimpleNamespace(
+        workspace_id="workspace-lease-loss",
+        job=SimpleNamespace(claim_token="claim-1"),
+        job_id="job-crosslink-lease-loss",
+        payload={"patch": patch.model_dump(mode="json")},
+        request_node_id="request-crosslink-lease-loss",
+        lane_message_id="",
+        maintenance_kind="document_propose_crosslinks",
+    )
+
+    worker._handle_crosslink_maintenance_strategy(ctx)
+
+    assert requeued == []
     assert any(event["event"] == "maintenance_repeated_work_discarded" for event in traces)
 
 
@@ -635,7 +746,7 @@ def test_maintenance_first_requeues_each_planner_phase_fairly(
     trace: list[dict[str, object]] = []
     worker.trace_sink = trace.append
 
-    for _ in range(4):
+    for _ in range(6):
         worker.process_pending_jobs(request.workspace_id)
 
     jobs = pipeline.engines.conversation.meta_sqlite.list_index_jobs(
@@ -647,9 +758,11 @@ def test_maintenance_first_requeues_each_planner_phase_fairly(
     assert parsed == [artifacts.source_document_id]
     assert [row["next_kind"] for row in trace if row["event"] == "maintenance_plan_advanced"] == [
         "document_parse_graph",
+        "review_maintenance_subject",
         "document_propose_crosslinks",
         "document_validate_crosslinks",
     ]
+    assert any(row["event"] == "maintenance_observation_skipped" for row in trace)
     assert any(row["event"] == "maintenance_parse_complete" for row in trace)
 
 
@@ -727,8 +840,26 @@ def test_fair_runtime_suspension_reads_job_payload_and_requeues_at_tail(
                 },
             )
 
-        def resume_run(self, **kwargs):
-            captured["resume_kwargs"] = kwargs
+        def resume_run(
+            self,
+            *,
+            run_id,
+            suspended_node_id,
+            suspended_token_id,
+            client_result,
+            workflow_id,
+            conversation_id,
+            turn_node_id,
+        ):
+            captured["resume_kwargs"] = {
+                "run_id": run_id,
+                "suspended_node_id": suspended_node_id,
+                "suspended_token_id": suspended_token_id,
+                "client_result": client_result,
+                "workflow_id": workflow_id,
+                "conversation_id": conversation_id,
+                "turn_node_id": turn_node_id,
+            }
             return SimpleNamespace(status="finished", run_id="maintenance-run-1")
 
     monkeypatch.setattr(worker, "runtime", SuspendedRuntime())

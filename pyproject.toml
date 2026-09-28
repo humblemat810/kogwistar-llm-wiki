@@ -34,7 +34,7 @@ chromadb = ["chromadb>=0.6"]
 vector-pinecone = ["kogwistar-pinecone>=0.6,<0.7"]
 vector-qdrant = ["kogwistar-qdrant>=0.6,<0.7"]
 vector-postgres = [
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "pgvector>=0.3.6",
     "psycopg[binary]>=3.1",
 ]
@@ -118,14 +118,14 @@ embedding-cuda = [
 test = [
     "pytest>=8.0",
     "pytest-anyio",
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "langchain-ollama>=0.3.0",
 ]
 pypy = [
     "pytest>=8.0",
     "pytest-anyio",
     "mcp>=2.2.0,<3",
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "psycopg>=3.1",
 ]
 dev = [

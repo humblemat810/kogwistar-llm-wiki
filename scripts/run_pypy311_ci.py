@@ -170,6 +170,8 @@ def main() -> int:
             "--resource-report-json",
             str(results / "resource-report-pypy311.json"),
             "-p",
+            "tests._helpers.resource_report",
+            "-p",
             "no:cacheprovider",
         ],
         env=env,

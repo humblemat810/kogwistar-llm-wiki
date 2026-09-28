@@ -19,6 +19,7 @@ _FOLLOW_UP_KINDS_BY_ARTIFACT: dict[str, tuple[str, ...]] = {
     "promotion_evidence_pack": ("conversation_promote_to_kg",),
     "projection_status_event": (),
 }
+_PROJECTION_ARTIFACT_KINDS = frozenset({"promoted_knowledge"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,7 @@ class DependencyInvalidationPlan:
     affected_entity_ids: tuple[str, ...]
     affected_source_document_ids: tuple[str, ...]
     follow_up_kinds: tuple[str, ...]
+    projection_entity_ids: tuple[str, ...] = ()
     skipped_cross_workspace_ids: tuple[str, ...] = ()
     truncated: bool = False
 
@@ -56,6 +58,7 @@ def plan_dependency_invalidation(
     affected: set[str] = set()
     source_ids: set[str] = set()
     follow_up_kinds: set[str] = set()
+    projection_entity_ids: set[str] = set()
     skipped: set[str] = set()
 
     def metadata(item: object) -> dict[str, object]:
@@ -71,7 +74,7 @@ def plan_dependency_invalidation(
 
     def consider(item: object, references: set[str]) -> None:
         item_id = str(getattr(item, "id", "") or "").strip()
-        if not item_id or not references & changed:
+        if not item_id or (item_id not in changed and not references & changed):
             return
         item_metadata = metadata(item)
         if str(item_metadata.get("workspace_id") or "") != workspace_id:
@@ -79,14 +82,19 @@ def plan_dependency_invalidation(
                 skipped.add(item_id)
             return
         artifact_kind = str(item_metadata.get("artifact_kind") or "").strip()
-        if artifact_kind not in _FOLLOW_UP_KINDS_BY_ARTIFACT:
+        if (
+            artifact_kind not in _FOLLOW_UP_KINDS_BY_ARTIFACT
+            and artifact_kind not in _PROJECTION_ARTIFACT_KINDS
+        ):
             return
         affected.add(item_id)
+        if artifact_kind in _PROJECTION_ARTIFACT_KINDS:
+            projection_entity_ids.add(item_id)
         source_ids.update(ids_from(item_metadata.get("source_document_ids")))
         source_id = str(item_metadata.get("source_document_id") or "").strip()
         if source_id:
             source_ids.add(source_id)
-        follow_up_kinds.update(_FOLLOW_UP_KINDS_BY_ARTIFACT[artifact_kind])
+        follow_up_kinds.update(_FOLLOW_UP_KINDS_BY_ARTIFACT.get(artifact_kind, ()))
 
     for node in nodes:
         item_metadata = metadata(node)
@@ -116,12 +124,28 @@ def plan_dependency_invalidation(
     truncated = len(ordered_affected) > max_dependents
     if truncated:
         ordered_affected = ordered_affected[:max_dependents]
+    # Bound every derived queue, not only the display list of affected IDs.
+    bounded_affected = set(ordered_affected)
+    bounded_source_ids: set[str] = set()
+    bounded_projection_ids: set[str] = set()
+    for item in (*nodes, *edges):
+        item_id = str(getattr(item, "id", "") or "")
+        if item_id not in bounded_affected:
+            continue
+        item_metadata = metadata(item)
+        bounded_source_ids.update(ids_from(item_metadata.get("source_document_ids")))
+        source_id = str(item_metadata.get("source_document_id") or "").strip()
+        if source_id:
+            bounded_source_ids.add(source_id)
+        if item_id in projection_entity_ids:
+            bounded_projection_ids.add(item_id)
     return DependencyInvalidationPlan(
         workspace_id=workspace_id,
         changed_entity_ids=tuple(sorted(changed)),
         affected_entity_ids=ordered_affected,
-        affected_source_document_ids=tuple(sorted(source_ids)),
+        affected_source_document_ids=tuple(sorted(bounded_source_ids)),
         follow_up_kinds=tuple(sorted(follow_up_kinds)),
+        projection_entity_ids=tuple(sorted(bounded_projection_ids)),
         skipped_cross_workspace_ids=tuple(sorted(skipped)),
         truncated=truncated,
     )

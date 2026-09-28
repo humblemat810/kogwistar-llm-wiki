@@ -7,13 +7,27 @@ from collections.abc import Mapping
 
 from kogwistar.engine_core.models import Node
 from kogwistar.id_provider import stable_id
+from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
+from ..parsing.parse_views import ParseViewResolver
 from ..utils import _temporary_namespace
 from .maintenance_selection import select_request_candidates
 from .maintenance_strategies import MaintenanceJobExecutionContext
 from .state import belongs_to_workspace as _belongs_to_workspace
 from .state import edge_ids as _edge_ids
+
+
+def _selection_entity_is_accessible(entity: object, workspace_id: str) -> bool:
+    """Require explicit workspace ownership and an accessible entity scope."""
+
+    metadata = getattr(entity, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return False
+    if str(metadata.get("workspace_id") or "").strip() != str(workspace_id):
+        return False
+    scope = str(metadata.get("acl_scope") or metadata.get("security_scope") or "").strip()
+    return not scope or can_access_security_scope(scope)
 
 
 class MaintenanceSelectionWorkerMixin:
@@ -52,11 +66,20 @@ class MaintenanceSelectionWorkerMixin:
                     nodes.extend(self.engines.kg.read.get_nodes(limit=250))
                     edges.extend(self.engines.kg.read.get_edges(limit=500))
             nodes = [node for node in nodes if _belongs_to_workspace(node, ctx.workspace_id)]
+            nodes = [
+                node for node in nodes
+                if _selection_entity_is_accessible(node, ctx.workspace_id)
+            ]
+            nodes = [node for node in nodes if self._is_active_source_derivation(node, ctx.workspace_id)]
             node_ids = {
                 str(getattr(node, "safe_get_id", lambda node=node: getattr(node, "id", ""))() or "")
                 for node in nodes
             }
-            edges = [edge for edge in edges if _edge_ids(edge) <= node_ids]
+            edges = [
+                edge for edge in edges
+                if _selection_entity_is_accessible(edge, ctx.workspace_id)
+                and _edge_ids(edge) <= node_ids
+            ]
         except Exception as exc:  # noqa: BLE001 - selection is advisory; guarded work remains authoritative
             self._emit_trace(
                 "maintenance_selection_degraded",
@@ -94,6 +117,42 @@ class MaintenanceSelectionWorkerMixin:
             selection_strategy=ctx.payload["selection_strategy"],
             candidates=ctx.payload["maintenance_candidates"],
         )
+
+    def _is_active_source_derivation(self, node: object, workspace_id: str) -> bool:
+        """Exclude inactive parse generations before candidate ranking."""
+
+        metadata = getattr(node, "metadata", None)
+        if not isinstance(metadata, Mapping):
+            return True
+        member_id = str(
+            metadata.get("parse_generation_member_id")
+            or metadata.get("generation_member_id")
+            or ""
+        ).strip()
+        generation_id = str(metadata.get("parse_generation_id") or metadata.get("generation_id") or "").strip()
+        source_document_id = str(metadata.get("source_document_id") or "").strip()
+        if not member_id and not generation_id:
+            return True
+        if not source_document_id:
+            return False
+        metadata_store = getattr(getattr(self.engines, "conversation", None), "meta_sqlite", None)
+        if metadata_store is None:
+            return False
+        try:
+            resolver = ParseViewResolver(metadata_store, workspace_id=workspace_id)
+            return resolver.is_active_metadata(
+                source_document_id,
+                metadata,
+                fallback_revision_document_id=str(metadata.get("revision_document_id") or "") or None,
+            )
+        except Exception as exc:  # noqa: BLE001 - inactive is safer than ranking stale evidence
+            self._emit_trace(
+                "maintenance_selection_active_view_check_failed",
+                workspace_id=workspace_id,
+                node_id=str(getattr(node, "id", "")),
+                error_type=type(exc).__name__,
+            )
+            return False
 
     def _persist_selection_audit(self, ctx: MaintenanceJobExecutionContext) -> None:
         """Persist selection metadata in the workspace maintenance lane."""

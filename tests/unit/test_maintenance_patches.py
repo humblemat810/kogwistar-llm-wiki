@@ -736,6 +736,62 @@ def test_crosslink_acceptance_and_retraction_flow_is_append_and_tombstone() -> N
     assert engine.tombstone_edge_calls == ["ws:demo:edge:accepted"]
 
 
+def test_crosslink_retraction_cannot_mutate_source_native_edge() -> None:
+    engine = _FakeEngine()
+    seed = MaintenancePatch(
+        patch_id="patch-source-native",
+        intent=MaintenanceIntent.SEED_DOCUMENT,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-left",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="ws:demo:node:left",
+                provenance=_provenance(),
+            ),
+            MaintenancePatchOperation(
+                operation_id="op-right",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="ws:demo:node:right",
+                provenance=_provenance(),
+            ),
+            MaintenancePatchOperation(
+                operation_id="op-source-edge",
+                kind=MaintenanceOperationKind.ADD_EDGE,
+                edge_id="ws:demo:edge:source-native",
+                from_node_id="ws:demo:node:left",
+                to_node_id="ws:demo:node:right",
+                relation="has_child",
+                properties={"source_native": True, "edge_kind": "has_child"},
+                provenance=_provenance(),
+            ),
+        ],
+    )
+    apply_maintenance_patch(engine, seed, namespace_prefix="ws:demo:")
+
+    retract = MaintenancePatch(
+        patch_id="patch-source-native-retract",
+        intent=MaintenanceIntent.RETRACT_CROSSLINK,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="op-retract-source-edge",
+                kind=MaintenanceOperationKind.TOMBSTONE_EDGE,
+                target_id="ws:demo:edge:source-native",
+                provenance=_provenance(),
+                reason="maintenance must not rewrite source structure",
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch(engine, retract, namespace_prefix="ws:demo:")
+
+    assert result.status == "rejected"
+    assert any(issue.code == "derived_crosslink_required" for issue in result.validation.issues)
+    assert engine.tombstone_edge_calls == []
+    assert engine.edges["ws:demo:edge:source-native"].metadata.get("lifecycle_status") != "tombstoned"
+
+
 def test_maintenance_scope_keeps_conversation_lanes_explicit() -> None:
     with pytest.raises(ValidationError):
         MaintenanceScope(workspace_id="demo", scope_kind="conversation")

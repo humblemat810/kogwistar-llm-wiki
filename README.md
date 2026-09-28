@@ -492,6 +492,9 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
 | [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |
 | [doc/adr_invariant_safe_layered_reparse.md](doc/adr_invariant_safe_layered_reparse.md) | Immutable source revisions, durable layered parsing, and per-source ParseViews |
+| [doc/acl_source_revision_policy.md](doc/acl_source_revision_policy.md) | ACL supersession, source-revision policy scope, and historical access rules |
+| [doc/adr_bounded_maintenance_observation_and_parse_quality.md](doc/adr_bounded_maintenance_observation_and_parse_quality.md) | Bounded source, relation, and concept-neighbourhood review with parse-quality repair routing |
+| [doc/tutorial_bounded_maintenance_and_cross_document_links.md](doc/tutorial_bounded_maintenance_and_cross_document_links.md) | One-document parsing, bounded review, and two-document cross-link walkthrough |
 | [doc/pypy_3_12_support_action_plan.md](doc/pypy_3_12_support_action_plan.md) | Experimental PyPy 3.12 compatibility plan and promotion gates |
 | [doc/pypy_3_12_compatibility_matrix.md](doc/pypy_3_12_compatibility_matrix.md) | Current PyPy dependency and native-boundary evidence ledger |
 | [doc/python_slots_memory_layout_plan.md](doc/python_slots_memory_layout_plan.md) | Measured Python object-layout optimization plan and benchmark protocol |

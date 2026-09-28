@@ -32,6 +32,7 @@ from .maintenance.state import (
 )
 from .maintenance.worker_derived import DerivedMaintenanceWorkerMixin
 from .maintenance.worker_execution import MaintenanceExecutionWorkerMixin
+from .maintenance.worker_observation import MaintenanceObservationWorkerMixin
 from .maintenance.worker_parse import DurableParseMaintenanceWorkerMixin
 from .maintenance.worker_runtime import MaintenanceRuntimeWorkerMixin
 from .maintenance.worker_selection import MaintenanceSelectionWorkerMixin
@@ -72,6 +73,7 @@ class BaseWorker(ABC):
 class MaintenanceWorker(
     MaintenanceJobDispatchMixin,
     DurableParseMaintenanceWorkerMixin,
+    MaintenanceObservationWorkerMixin,
     MaintenanceExecutionWorkerMixin,
     DerivedMaintenanceWorkerMixin,
     MaintenanceRuntimeWorkerMixin,
@@ -101,6 +103,9 @@ class MaintenanceWorker(
         layered_parser: Callable[
             [MaintenanceJobExecutionContext, ParseSessionState, list[ParseFrontierItem]],
             Mapping[str, object],
+        ] | None = None,
+        observation_critic: Callable[
+            [object, MaintenanceJobExecutionContext], Mapping[str, object]
         ] | None = None,
     ) -> None:
         """
@@ -133,6 +138,7 @@ class MaintenanceWorker(
         # immutable source evidence. Deployments can still inject a richer
         # layered parser, but absence must never be treated as completion.
         self.layered_parser = layered_parser or self._expand_durable_parse_frontier
+        self.observation_critic = observation_critic
         self.telemetry = LlmWikiTelemetry.from_environment()
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()

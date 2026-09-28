@@ -813,6 +813,7 @@ class PgVectorMultimodalProjectionStore:
             sa.UniqueConstraint("view_id", "vector_ordinal"),
         )
         self._ensure_schema()
+        self._ensure_vector_extension()
         self._metadata.create_all(self._engine)
         self._bind_profile()
 
@@ -821,6 +822,12 @@ class PgVectorMultimodalProjectionStore:
             return
         with self._engine.begin() as connection:
             connection.exec_driver_sql(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
+
+    def _ensure_vector_extension(self) -> None:
+        """Make the pgvector type available before creating profile tables."""
+
+        with self._engine.begin() as connection:
+            connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
 
     def _bind_profile(self) -> None:
         import sqlalchemy as sqlalchemy_module

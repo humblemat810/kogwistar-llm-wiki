@@ -63,6 +63,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
        "opentelemetry-sdk>=1.25" \
        "opentelemetry-exporter-otlp-proto-http>=1.25" \
        "chromadb>=0.6" \
+       "sqlalchemy[asyncio]>=2.0" \
        "Pillow>=10"
 
 COPY pyproject.toml README.md .env.example ./

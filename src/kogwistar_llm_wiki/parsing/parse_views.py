@@ -30,6 +30,7 @@ class ParseSessionPhase(StrEnum):
     SEEDED = "parse_seeded"
     EXPANDING = "parse_expanding"
     STABLE = "parsed_graph_persisted"
+    REVIEW_REQUIRED = "review_required"
     FAILED = "failed"
 
 
@@ -148,6 +149,47 @@ class ParseGenerationMember(BaseModel):
         return self
 
 
+def validate_generation_member_ancestry(
+    members: Sequence[ParseGenerationMember],
+    *,
+    structural_parent_ids: Mapping[str, str] | None = None,
+) -> None:
+    """Validate durable member lineage before a view can expose it.
+
+    Parent links are evidence metadata, not a replacement graph relation.  A
+    child must remain in the same immutable generation and revision, and its
+    region must be contained by its parent.  Callers may additionally provide
+    source-graph parent assertions; those are checked when available and are
+    never inferred from insertion order.
+    """
+
+    by_id = {member.member_id: member for member in members}
+    expected_parents = structural_parent_ids or {}
+    for member in members:
+        parent_id = member.parent_member_id
+        if not parent_id:
+            continue
+        parent = by_id.get(parent_id)
+        if parent is None:
+            raise ValueError("parse generation member references an unknown parent member")
+        if (
+            parent.generation_id != member.generation_id
+            or parent.workspace_id != member.workspace_id
+            or parent.source_document_id != member.source_document_id
+            or parent.source_revision_id != member.source_revision_id
+            or parent.revision_document_id != member.revision_document_id
+        ):
+            raise ValueError("parse generation member parent is outside the immutable lineage")
+        if (
+            parent.region.start_char > member.region.start_char
+            or parent.region.end_char < member.region.end_char
+        ):
+            raise ValueError("parse generation member region is outside its parent region")
+        expected_parent = expected_parents.get(member.member_id)
+        if expected_parent is not None and expected_parent != parent_id:
+            raise ValueError("parse generation member disagrees with the source structural parent")
+
+
 class ParseFrontierItem(BaseModel):
     """Durable bounded work item; status changes are session state, not evidence."""
 
@@ -198,6 +240,9 @@ class ParseSessionState(BaseModel):
     # A view activation is a two-phase operation. Keeping the proposed view in
     # the session makes a crash between session CAS and view CAS recoverable.
     pending_view: dict[str, Any] | None = None
+    # Idempotent outbox watermark: dependent maintenance must be queued before
+    # the pending view is cleared after activation.
+    dependents_enqueued_view_version: int | None = Field(default=None, ge=1)
 
 
 class ParseViewSelection(BaseModel):
@@ -469,6 +514,12 @@ class ParseViewStore:
                 ):
                     raise ValueError("ParseView selection references a foreign generation commit")
                 committed_member_ids.update(commit.member_ids)
+            parsed_members = [
+                ParseGenerationMember.model_validate(member_payload)
+                for member_payload in members.values()
+                if isinstance(member_payload, Mapping)
+            ]
+            validate_generation_member_ancestry(parsed_members)
             member_payload = members.get(selection.member_id)
             if not isinstance(member_payload, Mapping):
                 raise TypeError("ParseView selection references an unknown generation member")
@@ -625,5 +676,6 @@ __all__ = [
     "legacy_generation_id",
     "parse_session_id",
     "reparse_session_id",
+    "validate_generation_member_ancestry",
     "validate_parse_view_selections",
 ]
