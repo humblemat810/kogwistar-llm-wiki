@@ -139,9 +139,21 @@ jobs:
             --durations=25 --durations-min=0 --resource-report \
             --resource-report-json "test-results/resource-report-${{ matrix.label }}.json" \
             --junitxml "test-results/junit-${{ matrix.label }}.xml" \
+            -p tests._helpers.resource_report \
             -p no:cacheprovider 2>&1 | tee "test-results/pytest-${{ matrix.label }}.log"
           status=${PIPESTATUS[0]}
           set -e
+          if [ "$status" -ne 0 ]; then
+            summary=$(grep -E 'FAILED|ERROR|passed|failed|Error|ModuleNotFoundError|ImportError|UsageError' \
+              "test-results/pytest-${{ matrix.label }}.log" | tail -n 20 | tr '\n' ' ' | cut -c1-3000 || true)
+            echo "::error title=Provider-free pytest failure (${{ matrix.label }})::$summary"
+            {
+              echo "### Provider-free pytest failure (${{ matrix.label }})"
+              echo '```text'
+              tail -n 120 "test-results/pytest-${{ matrix.label }}.log" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           exit "$status"
 
       - name: Run PyPy 3.11 provider-free CI profile
@@ -152,7 +164,24 @@ jobs:
           KOGWISTAR_LOG_LEVEL: WARNING
           LOG_LEVEL: WARNING
         shell: bash
-        run: python scripts/run_pypy311_ci.py --skip-install --results-dir test-results/${{ matrix.label }}
+        shell: bash
+        run: |
+          set +e
+          python scripts/run_pypy311_ci.py --skip-install --results-dir test-results/${{ matrix.label }} \
+            2>&1 | tee "test-results/pytest-${{ matrix.label }}.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            summary=$(grep -E 'FAILED|ERROR|passed|failed|Error|ModuleNotFoundError|ImportError|AssertionError' \
+              "test-results/pytest-${{ matrix.label }}.log" | tail -n 20 | tr '\n' ' ' | cut -c1-3000 || true)
+            echo "::error title=PyPy 3.11 provider-free pytest failure::$summary"
+            {
+              echo "### PyPy 3.11 provider-free pytest failure"
+              echo '```text'
+              tail -n 160 "test-results/pytest-${{ matrix.label }}.log" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
 
       - name: Upload per-runtime resource report
         if: always()
