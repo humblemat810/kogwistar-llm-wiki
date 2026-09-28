@@ -102,20 +102,34 @@ target workspace before gateway dispatch; missing membership is denied. The
 context is reset after each request, including errors. This is an llm-wiki
 transport boundary and does not change Kogwistar core or Obsidian behavior.
 
-OpenTelemetry support is optional and app-owned. `LlmWikiTelemetry` is a safe
-no-op when disabled or when OTel packages are not installed. It instruments
-workbench protocol calls, ingestion trace events, and long-run trace events.
-Only primitive correlation fields are emitted by the event adapter; raw source
-text, secrets, and full graph payloads are not emitted.
+OpenTelemetry support is optional. `LlmWikiTelemetry` is the app-owned facade
+for workbench protocol calls, ingestion trace events, and long-run trace events.
+The maintenance worker also opts its Kogwistar `WorkflowRuntime` into the core
+`OpenTelemetrySink` using the app facade's `enabled` value at worker
+construction. Core workflow lifecycle spans and app-specific spans are distinct
+projections; both use the configured OTel provider/export path. The event
+adapter emits only primitive correlation fields, not raw source text, secrets,
+or full graph payloads.
+
+**Runtime-toggle limitation:** applying `otel_enabled` currently calls
+`LlmWikiTelemetry.set_enabled()` for app-owned spans, but does not reconfigure
+an already-created core `WorkflowRuntime` or close its OTel sink. Therefore a
+live settings change to disabled is not proof that core workflow telemetry has
+stopped. Core sink enablement remains the value captured when the maintenance
+worker was constructed; recreate that worker/runtime to apply a changed core
+setting. Do not describe the settings control as a process-wide telemetry kill
+switch until the core runtime sink is wired to the same live toggle and a
+regression test proves it.
 
 The operating settings console exposes the effective OTel state, configured
 OTLP endpoint, service name, and package availability without exposing tokens.
 The `otel_enabled` setting can be staged and explicitly applied as a live
-emission toggle for the current process. It does not start or stop Docker
-containers; Grafana/OTel Collector lifecycle remains a Compose or deployment
-operation. When no OTLP endpoint or exporter is available, the UI reports the
-sink as disabled or unavailable rather than claiming that Grafana received
-traces.
+emission toggle for app-owned `LlmWikiTelemetry` spans in the current process;
+the limitation above applies to core workflow spans. It does not start or stop
+Docker containers; Grafana/OTel Collector lifecycle remains a Compose or
+deployment operation. When no OTLP endpoint or exporter is available, the UI
+reports the sink as disabled or unavailable rather than claiming that Grafana
+received traces.
 
 Integration artifacts live outside the Python package: pi uses
 `integrations/pi-agent/`, Hermes uses `integrations/hermes-agent/`, and
