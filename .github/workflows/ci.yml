@@ -164,7 +164,6 @@ jobs:
           KOGWISTAR_LOG_LEVEL: WARNING
           LOG_LEVEL: WARNING
         shell: bash
-        shell: bash
         run: |
           set +e
           python scripts/run_pypy311_ci.py --skip-install --results-dir test-results/${{ matrix.label }} \
