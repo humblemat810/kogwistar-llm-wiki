@@ -76,6 +76,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Expose checked-out package sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Rust for the local Kogwistar package
         if: matrix.is_pypy == false
         uses: dtolnay/rust-toolchain@stable
@@ -110,10 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           python -c 'import sys; assert sys.implementation.name == "pypy"; assert sys.version_info[:2] == (3, 11); print(sys.implementation); print(sys.version)'
-          {
-            echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src"
-            echo "KOGWISTAR_IMPL_MODE=python"
-          } >> "$GITHUB_ENV"
+          echo "KOGWISTAR_IMPL_MODE=python" >> "$GITHUB_ENV"
           python -m pip install --upgrade pip
           python -m pip install --no-deps --ignore-requires-python -e .
           python -m pip install -r requirements/pypy-3.11-experimental.txt
