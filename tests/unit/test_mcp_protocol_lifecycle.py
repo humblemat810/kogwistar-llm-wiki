@@ -5,7 +5,7 @@ import httpx
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.shared.memory import create_client_server_memory_streams
 
 from kogwistar_llm_wiki.agent.mcp_server import AgentMcpServer
 
@@ -30,21 +30,30 @@ def test_official_mcp_server_completes_real_session_lifecycle() -> None:
     server = AgentMcpServer(gateway)
 
     async def exercise() -> None:
-        async with create_connected_server_and_client_session(server.server) as client:
-            init = await client.initialize()
-            assert init.serverInfo is not None
-            assert init.serverInfo.name == "llm-wiki"
-            tools = await client.list_tools()
-            names = {tool.name for tool in tools.tools}
-            assert {"status", "maintain", "memory_recall"}.issubset(names)
+        async with create_client_server_memory_streams() as (client_streams, server_streams):
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(
+                    server.server.run,
+                    server_streams[0],
+                    server_streams[1],
+                    server.server.create_initialization_options(),
+                )
+                async with ClientSession(*client_streams) as client:
+                    init = await client.initialize()
+                    assert init.server_info is not None
+                    assert init.server_info.name == "llm-wiki"
+                    tools = await client.list_tools()
+                    names = {tool.name for tool in tools.tools}
+                    assert {"status", "maintain", "memory_recall"}.issubset(names)
 
-            result = await client.call_tool("status", {"workspace_id": "demo"})
-            assert result.isError is False
-            assert result.structuredContent == {
-                "tool": "status",
-                "workspace_id": "demo",
-                "ok": True,
-            }
+                    result = await client.call_tool("status", {"workspace_id": "demo"})
+                    assert result.is_error is False
+                    assert result.structured_content == {
+                        "tool": "status",
+                        "workspace_id": "demo",
+                        "ok": True,
+                    }
+                task_group.cancel_scope.cancel()
 
     anyio.run(exercise)
     assert gateway.calls == [("status", {"workspace_id": "demo"})]
@@ -66,13 +75,13 @@ def test_official_mcp_streamable_http_round_trip(monkeypatch: pytest.MonkeyPatch
         ) as http_client, streamable_http_client(
             "http://testserver/mcp",
             http_client=http_client,
-        ) as (read_stream, write_stream, _session_id), ClientSession(
+        ) as (read_stream, write_stream), ClientSession(
             read_stream, write_stream
         ) as client:
             await client.initialize()
             result = await client.call_tool("status", {"workspace_id": "http-demo"})
-            assert result.isError is False
-            assert result.structuredContent == {
+            assert result.is_error is False
+            assert result.structured_content == {
                 "tool": "status",
                 "workspace_id": "http-demo",
                 "ok": True,
@@ -80,8 +89,8 @@ def test_official_mcp_streamable_http_round_trip(monkeypatch: pytest.MonkeyPatch
             write_result = await client.call_tool(
                 "maintain", {"workspace_id": "http-demo", "topic": "mcp"}
             )
-            assert write_result.isError is False
-            assert write_result.structuredContent == {
+            assert write_result.is_error is False
+            assert write_result.structured_content == {
                 "tool": "maintain",
                 "workspace_id": "http-demo",
                 "ok": True,

@@ -313,16 +313,16 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     ]
     assert all(tool.description for tool in tools)
     query = next(tool for tool in tools if tool.name == "query")
-    assert query.inputSchema["required"] == ["workspace_id", "query_text"]
+    assert query.input_schema["required"] == ["workspace_id", "query_text"]
     reingest = next(tool for tool in tools if tool.name == "reingest")
-    assert "source_document_id" in reingest.inputSchema["properties"]
+    assert "source_document_id" in reingest.input_schema["properties"]
 
 
 def test_native_mcp_memory_capture_publishes_record_contract():
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     tools = asyncio.run(mcp.list_tools())
     memory_capture = next(tool for tool in tools if tool.name == "memory_capture")
-    schema = memory_capture.inputSchema
+    schema = memory_capture.input_schema
 
     record = schema["properties"]["record"]
     record_schema = next(item for item in record["anyOf"] if item.get("type") == "object")
@@ -369,7 +369,7 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                 ) as http_client,
                 streamable_http_client(
                     "http://testserver/mcp", http_client=http_client
-                ) as (read_stream, write_stream, _session_id),
+                ) as (read_stream, write_stream),
                 ClientSession(read_stream, write_stream) as session,
             ):
                 await session.initialize()
@@ -397,8 +397,8 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                     "query",
                     {"workspace_id": "w", "query_text": "hello"},
                 )
-            assert result.isError is False
-            assert result.structuredContent["answer"]["text"] == (
+            assert result.is_error is False
+            assert result.structured_content["answer"]["text"] == (
                     "grounded: hello"
                 )
 

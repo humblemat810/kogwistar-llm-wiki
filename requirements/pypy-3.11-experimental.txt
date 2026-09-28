@@ -10,8 +10,8 @@ pydantic-extension>=0.0.7
 anyio>=4.0
 Jinja2>=3.1
 fastapi>=0.111
-# The registry uses the MCP 1.27 low-level Server decorator contract.  Later
-# releases changed that surface; advance this pin only with an API migration.
+# The adapter uses the MCP 2.x low-level Server constructor-handler contract.
+# Keep this lane on the same SDK family as the application CI.
 mcp>=2.2.0,<3
 httpx>=0.28.1
 python-jose[cryptography]>=3.3

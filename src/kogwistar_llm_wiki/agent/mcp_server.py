@@ -373,7 +373,14 @@ class AgentMcpServer:
 
     def __init__(self, gateway: AgentGateway) -> None:
         self.gateway = gateway
-        self.server = Server("llm-wiki")
+        # MCP 2.x registers low-level handlers through the constructor.  Keep
+        # the handlers on the adapter so request authentication remains at the
+        # protocol boundary rather than in the gateway.
+        self.server = Server(
+            "llm-wiki",
+            on_list_tools=self._handle_list_tools,
+            on_call_tool=self._handle_call_tool,
+        )
         self._tools = tuple(
             types.Tool(name=name, description=description, inputSchema=schema)
             for name, description, schema in _tool_specs()
@@ -405,20 +412,6 @@ class AgentMcpServer:
             if selected_mode != "disabled" and required
             else None
         )
-
-        @self.server.list_tools()
-        async def _list_tools_handler() -> list[types.Tool]:
-            result = await self._handle_list_tools(None, None)
-            return result.tools
-
-        @self.server.call_tool()
-        async def _call_tool_handler(
-            name: str, arguments: dict[str, object]
-        ) -> types.CallToolResult:
-            return await self._handle_call_tool(
-                None,
-                types.CallToolRequestParams(name=name, arguments=arguments),
-            )
 
     async def list_tools(self) -> list[types.Tool]:
         """Return the complete tool contract for local inspection and tests."""
