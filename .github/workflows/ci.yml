@@ -97,7 +97,7 @@ jobs:
             "mcp>=2.2.0,<3" \
             "langchain-openai>=0.3" \
             "langchain-ollama>=0.3" \
-            "sqlalchemy>=2.0" \
+            "sqlalchemy[asyncio]>=2.0" \
             "opentelemetry-api>=1.25" \
             "opentelemetry-sdk>=1.25" \
             "opentelemetry-exporter-otlp-proto-http>=1.25" \

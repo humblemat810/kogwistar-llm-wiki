@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from jose import jwt
-from mcp import Client
+from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from kogwistar_llm_wiki.agent.gateway import AgentGateway
@@ -313,16 +313,16 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     ]
     assert all(tool.description for tool in tools)
     query = next(tool for tool in tools if tool.name == "query")
-    assert query.input_schema["required"] == ["workspace_id", "query_text"]
+    assert query.inputSchema["required"] == ["workspace_id", "query_text"]
     reingest = next(tool for tool in tools if tool.name == "reingest")
-    assert "source_document_id" in reingest.input_schema["properties"]
+    assert "source_document_id" in reingest.inputSchema["properties"]
 
 
 def test_native_mcp_memory_capture_publishes_record_contract():
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     tools = asyncio.run(mcp.list_tools())
     memory_capture = next(tool for tool in tools if tool.name == "memory_capture")
-    schema = memory_capture.input_schema
+    schema = memory_capture.inputSchema
 
     record = schema["properties"]["record"]
     record_schema = next(item for item in record["anyOf"] if item.get("type") == "object")
@@ -367,10 +367,12 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                 httpx.AsyncClient(
                     transport=transport, base_url="http://testserver"
                 ) as http_client,
-                Client(streamable_http_client(
+                streamable_http_client(
                     "http://testserver/mcp", http_client=http_client
-                )) as session,
+                ) as (read_stream, write_stream, _session_id),
+                ClientSession(read_stream, write_stream) as session,
             ):
+                await session.initialize()
                 tools = await session.list_tools()
                 assert {tool.name for tool in tools.tools} == {
                     "query",
@@ -395,8 +397,8 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                     "query",
                     {"workspace_id": "w", "query_text": "hello"},
                 )
-            assert result.is_error is False
-            assert result.structured_content["answer"]["text"] == (
+            assert result.isError is False
+            assert result.structuredContent["answer"]["text"] == (
                     "grounded: hello"
                 )
 

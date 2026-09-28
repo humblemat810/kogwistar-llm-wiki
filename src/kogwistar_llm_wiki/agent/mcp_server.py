@@ -373,13 +373,9 @@ class AgentMcpServer:
 
     def __init__(self, gateway: AgentGateway) -> None:
         self.gateway = gateway
-        self.server = Server(
-            "llm-wiki",
-            on_list_tools=self._handle_list_tools,
-            on_call_tool=self._handle_call_tool,
-        )
+        self.server = Server("llm-wiki")
         self._tools = tuple(
-            types.Tool(name=name, description=description, input_schema=schema)
+            types.Tool(name=name, description=description, inputSchema=schema)
             for name, description, schema in _tool_specs()
         )
         selected_mode = auth_mode()
@@ -410,6 +406,20 @@ class AgentMcpServer:
             else None
         )
 
+        @self.server.list_tools()
+        async def _list_tools_handler() -> list[types.Tool]:
+            result = await self._handle_list_tools(None, None)
+            return result.tools
+
+        @self.server.call_tool()
+        async def _call_tool_handler(
+            name: str, arguments: dict[str, object]
+        ) -> types.CallToolResult:
+            return await self._handle_call_tool(
+                None,
+                types.CallToolRequestParams(name=name, arguments=arguments),
+            )
+
     async def list_tools(self) -> list[types.Tool]:
         """Return the complete tool contract for local inspection and tests."""
 
@@ -437,11 +447,11 @@ class AgentMcpServer:
         except Exception as exc:  # noqa: BLE001 - expose failures as tool results
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=str(exc))],
-                is_error=True,
+                isError=True,
             )
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
-            structured_content=result,
+            structuredContent=result,
         )
 
     def _authenticate_request(self) -> LlmWikiIdentity | None:
@@ -511,11 +521,11 @@ class AgentMcpServer:
         except Exception as exc:  # noqa: BLE001 - MCP tools expose errors as protocol results
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=str(exc))],
-                is_error=True,
+                isError=True,
             )
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
-            structured_content=result,
+            structuredContent=result,
         )
 
     async def _run_stdio(self) -> None:

@@ -35,5 +35,5 @@ langchain-core>=1.2
 # LLM-Wiki control plane and provider-free tests use the official MCP SDK.
 pytest>=8
 pytest-anyio
-sqlalchemy>=2.0
+sqlalchemy[asyncio]>=2.0
 psycopg>=3.1
