@@ -238,6 +238,20 @@ The requested ten-hour runtime-monitoring window elapsed at 2026-09-29 07:30 UTC
 deadline and was stopped at 16:34 UTC; this overrun is recorded rather than
 presented as compliant. No further periodic polling is part of this run.
 
+## Offline Maintenance Test Follow-Up (2026-09-30)
+
+- The maintenance default test initially failed locally because the installed
+  `pytest-dotenv` plugin loads the workspace `.env` before test execution. The
+  test cleared the master switch but not the independent background switch, so
+  an explicitly configured `LLM_WIKI_MAINTENANCE_BACKGROUND_ENABLED=true`
+  leaked into the default assertion.
+- Updated the test to clear both switches before constructing a new control
+  state. No production default or runtime configuration behavior was changed.
+- The maintenance/profile/provider/embedding offline unit selection passed:
+  `125 passed, 1 warning`. `git diff --check` also passed. These results verify
+  deterministic offline contracts only; they do not establish that the expired
+  live Bonsai maintenance run is active, scheduled, or healthy.
+
 - At the stop observation, Bonsai llama-server PID 43176 was still
   live on port 8181, and the maintenance container was healthy. The active
   scheduled cycle was 511, started at 16:30:31 UTC. Its first critic call hit
