@@ -251,6 +251,13 @@ presented as compliant. No further periodic polling is part of this run.
   `125 passed, 1 warning`. `git diff --check` also passed. These results verify
   deterministic offline contracts only; they do not establish that the expired
   live Bonsai maintenance run is active, scheduled, or healthy.
+- Added a checked-in, `slow` in-memory graph integration test for observation
+  audit persistence. It enters the same durable workspace namespace context as
+  maintenance job dispatch, delivers the same assessment twice, and verifies
+  one audit lane message remains in `conv:bg` (`1 passed in 3.32s`). This proves
+  app-to-Kogwistar serialization and duplicate-delivery idempotency for the
+  in-memory backend only; the historical PostgreSQL `ValueError` remains
+  unexplained and unverified after the runtime cutoff.
 
 - At the stop observation, Bonsai llama-server PID 43176 was still
   live on port 8181, and the maintenance container was healthy. The active
