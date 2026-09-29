@@ -42,13 +42,14 @@ class Qwen3VLDenseEncoder:
         except ImportError as exc:
             raise RuntimeError("embedding service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
         _validate_torch(torch, config)
+        model_source = config.model_path or config.model
         kwargs: dict[str, object] = {"trust_remote_code": True, "revision": config.revision}
         if config.device == "cuda":
             kwargs.update({"torch_dtype": torch.float16, "device_map": "auto"})
         else:
             kwargs["torch_dtype"] = torch.float32
-        model = AutoModelForMultimodalLM.from_pretrained(config.model, **kwargs).eval()
-        processor = AutoProcessor.from_pretrained(config.model, trust_remote_code=True, revision=config.revision, padding_side="right")
+        model = AutoModelForMultimodalLM.from_pretrained(model_source, **kwargs).eval()
+        processor = AutoProcessor.from_pretrained(model_source, trust_remote_code=True, revision=config.revision, padding_side="right")
         return cls(model, processor, profile=config.profile, device=config.device, batch_size=config.batch_size, vision_processor=process_vision_info, instruction=config.instruction)
 
     def _conversation(self, item: Mapping[str, object], *, value: object | None = None) -> list[dict[str, object]]:
@@ -116,6 +117,16 @@ class Qwen3VLDenseEncoder:
                 value.close()
 
 
+def build_dense_encoder(config: EmbeddingServiceConfig) -> object:
+    """Select a standalone encoder from the explicit service profile."""
+
+    if config.encoder == "clip-vit-b32":
+        from .clip_encoder import CLIPDualProjectionEncoder
+
+        return CLIPDualProjectionEncoder.from_pretrained(config)
+    return Qwen3VLDenseEncoder.from_pretrained(config)
+
+
 def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
     version = str(torch.__version__).partition("+")[0]
     if version != "2.8.0":
@@ -135,4 +146,4 @@ def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
             raise RuntimeError("CUDA embedding requires accelerate") from exc
 
 
-__all__ = ["EmbeddingInferenceError", "Qwen3VLDenseEncoder"]
+__all__ = ["EmbeddingInferenceError", "Qwen3VLDenseEncoder", "build_dense_encoder"]
