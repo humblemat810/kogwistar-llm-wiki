@@ -127,6 +127,25 @@ def test_explicit_ladder_provider_does_not_get_replaced_by_global_chain(monkeypa
     assert settings.parser.fallback_specs == []
 
 
+def test_local_bonsai_provider_chain_stays_on_openai_compatible_endpoint(monkeypatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER", "openai")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN", "openai")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_MODEL", "Ternary-Bonsai-2-27B-PTQ1_0")
+    monkeypatch.setenv(
+        "KOGWISTAR_MAINTENANCE_BASE_URL", "http://host.docker.internal:8181/v1"
+    )
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_API_KEY_ENV", "LLM_WIKI_LOCAL_MODEL_API_KEY")
+    monkeypatch.setenv("LLM_WIKI_LOCAL_MODEL_API_KEY", "local-bonsai")
+
+    settings = resolve_maintenance_provider_settings()
+
+    assert settings.parser.provider == "openai"
+    assert settings.parser.model == "Ternary-Bonsai-2-27B-PTQ1_0"
+    assert settings.parser.base_url == "http://host.docker.internal:8181/v1"
+    assert settings.parser.api_key_env == "LLM_WIKI_LOCAL_MODEL_API_KEY"
+    assert settings.parser.fallback_specs == []
+
+
 def test_primary_codex_provider_uses_codex_specific_model(monkeypatch) -> None:
     monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER", "codex")
     monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN", "codex")

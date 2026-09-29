@@ -258,6 +258,12 @@ presented as compliant. No further periodic polling is part of this run.
   app-to-Kogwistar serialization and duplicate-delivery idempotency for the
   in-memory backend only; the historical PostgreSQL `ValueError` remains
   unexplained and unverified after the runtime cutoff.
+- Added an exact local Bonsai provider-resolution regression: the configured
+  OpenAI-compatible adapter resolves the pinned Bonsai model and localhost-Docker
+  endpoint with an empty fallback list. Combined provider, scheduler, control,
+  and audit-persistence tests passed (`31 passed in 4.85s`); Ruff and
+  `git diff --check` passed. These remain configuration/fake-backend checks,
+  not evidence of live model inference.
 
 - At the stop observation, Bonsai llama-server PID 43176 was still
   live on port 8181, and the maintenance container was healthy. The active
