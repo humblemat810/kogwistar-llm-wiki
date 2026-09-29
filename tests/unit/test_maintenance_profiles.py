@@ -22,6 +22,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_profiles import (
 
 def test_new_control_state_is_master_disabled_from_deployment_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("LLM_WIKI_MAINTENANCE_ENABLED", raising=False)
+    monkeypatch.delenv("LLM_WIKI_MAINTENANCE_BACKGROUND_ENABLED", raising=False)
     state = MaintenanceControl(tmp_path).get()
     assert state.enabled is False
     assert state.request_enabled is True
