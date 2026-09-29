@@ -384,6 +384,12 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 
 ## Offline revalidation (2026-09-30)
 
+- Parsed the local language GGUF header read-only with the matching
+  `D:\prism-llama.cpp\gguf-py` reader: `general.architecture=qwen35` and
+  `qwen35.context_length=262144`. This confirms the model-declared ceiling
+  independently of the upstream model-card text; it does not show that this
+  host can load or run the model at that context. Runtime evidence still only
+  supports 8,192, and the host's maximum usable context remains unknown.
 - The local llama.cpp source checkout is on branch `prism`, commit
   `1a07bfa5f4144274c8f1c9963821dd9d9a51854b`, with a clean worktree. The paired
   Windows binary reports `0.2.0-dev (build 10706, commit 1a07bfa5)`. This was
