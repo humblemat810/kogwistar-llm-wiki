@@ -11,7 +11,11 @@ from fastapi.testclient import TestClient
 
 from llm_wiki_embedding_contract import EmbeddingProfile
 from llm_wiki_embedding_service.app import create_app
-from llm_wiki_embedding_service.config import EmbeddingServiceConfig, load_config
+from llm_wiki_embedding_service.config import (
+    CLIP_DIMENSION,
+    EmbeddingServiceConfig,
+    load_config,
+)
 
 
 class FakeEncoder:
@@ -56,6 +60,24 @@ def test_service_contract_preserves_auth_profile_and_order() -> None:
         )
         assert response.status_code == 200
         assert [item["item_id"] for item in response.json()["results"]] == ["second", "first"]
+
+
+def test_clip_capabilities_advertise_only_supported_modalities() -> None:
+    config = load_config(
+        {
+            "LLM_WIKI_EMBEDDING_ENCODER": "clip-vit-b32",
+            "LLM_WIKI_EMBEDDING_MODEL_REVISION": "clip-test-revision",
+            "LLM_WIKI_EMBEDDING_TOKEN": "secret",
+        }
+    )
+    with TestClient(create_app(encoder=FakeEncoder(config.profile), config=config)) as client:
+        response = client.get(
+            "/v1/capabilities",
+            headers={"Authorization": "Bearer secret"},
+        )
+    assert response.status_code == 200
+    assert response.json()["modalities"] == ["text", "image"]
+    assert response.json()["profile"]["dimension"] == CLIP_DIMENSION
 
 
 def test_service_rejects_path_and_bad_asset_hash() -> None:

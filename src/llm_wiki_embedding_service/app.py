@@ -18,7 +18,7 @@ from llm_wiki_embedding_contract import (
 )
 
 from .config import EmbeddingServiceConfig, load_config
-from .encoder import Qwen3VLDenseEncoder
+from .encoder import build_dense_encoder
 
 
 def _profile(config: EmbeddingServiceConfig) -> dict[str, object]:
@@ -43,7 +43,7 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
             async def load_model() -> None:
                 try:
                     state["encoder"] = await asyncio.to_thread(
-                        Qwen3VLDenseEncoder.from_pretrained, selected
+                        build_dense_encoder, selected
                     )
                 except Exception as exc:  # noqa: BLE001 - readiness reports model failures
                     state["load_error"] = str(exc)
@@ -70,7 +70,10 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
     def capabilities(request: Request) -> Any:
         if not _authorized(request, selected.token):
             return _error("unauthorized", 401)
-        return {"contract_version": "v1", "service": "llm-wiki-embedding", "embedding": "dense", "modalities": ["text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"], "profile": _profile(selected), "batch_size": selected.batch_size, "max_items": selected.max_items, "max_request_bytes": selected.max_request_bytes}
+        modalities = ["text", "image"] if selected.encoder == "clip-vit-b32" else [
+            "text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"
+        ]
+        return {"contract_version": "v1", "service": "llm-wiki-embedding", "embedding": "dense", "modalities": modalities, "profile": _profile(selected), "batch_size": selected.batch_size, "max_items": selected.max_items, "max_request_bytes": selected.max_request_bytes}
 
     @app.post("/v1/represent")
     async def represent(request: Request) -> Any:
