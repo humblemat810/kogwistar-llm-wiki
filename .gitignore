@@ -26,7 +26,6 @@ site/
 .pytest_tmp/
 .pytest-temp/
 .codex-test-temp/
-.test/
 tests/_tmp/
 .ruff_cache/
 .mypy_cache/
