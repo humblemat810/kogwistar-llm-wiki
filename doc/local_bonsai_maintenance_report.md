@@ -817,6 +817,16 @@ the original ten-hour monitoring limit has been honored as a stop condition.
   relocation remains separate. This work is on the already-existing
   `feat/bonsai-maintenance-review` branch to avoid creating another branch.
 
+### Control Socket Recovery (2026-09-30 13:44 UTC)
+
+The daemon finished startup after the earlier 13:39 snapshot. The container is
+now `healthy`; both `maintenance.sock` and the stale `test.sock` exist. A
+read-only `maintenance-control --status` request received a successful socket
+response (`ok=true`), confirming the listener works after startup. Durable
+background mode remains disabled and direct-request mode remains enabled. This
+corrects the transient health state above; it does not establish that another
+background cycle is scheduled or that direct maintenance has been exercised.
+
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB
