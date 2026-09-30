@@ -978,6 +978,36 @@ background cycle is scheduled or that direct maintenance has been exercised.
   repair. It neither establishes the maximum context nor supports corpus
   expansion.
 
+### Runtime And CI Follow-up (2026-09-30 15:56 UTC)
+
+- The maintenance container started at 13:33:53 UTC. Use 23:33:53 UTC as the
+  hard stop for this ten-hour monitoring window; do not extend it automatically.
+- Scheduled cycles 694 and 695 each made two successful Bonsai calls and were
+  acknowledged. Both final assessments remained `weak_label` with
+  `review_parent` recommendations. Neither authorized graph mutation or source
+  expansion. Cycle 696 was scheduled at 15:54:55 UTC and had started when this
+  observation was recorded. The worker is keeping pace with the five-minute
+  cadence, though each two-call cycle takes about 5.5 minutes of dispatch time.
+- The Bonsai endpoint remains responsive with the 27B model at `n_ctx=8192`.
+  A point-in-time GPU sample showed 6,895 MiB of 8,192 MiB allocated and 0%
+  utilization; this is an idle sample, not a peak-usage measurement. The
+  maximum safe context has still not been established.
+- GitHub CI on `4ac9ca8` exposed one shared failure across CPython 3.12-3.14:
+  `test_disconnected_control_client_does_not_kill_server` used a socket path
+  beneath pytest's deeply nested temporary directory, exceeding Linux's Unix
+  socket path limit. The test also raced on socket-file creation before
+  `listen()` completed. It now uses a unique short path under the OS temp
+  directory and waits until a connection succeeds before intentionally
+  disconnecting. The entire test module passes on the Linux PyPy 3.11 image
+  (`16 passed`); the changed file's Ruff check, CI's `E4,E7,E9,F` selector, and
+  `git diff --check` pass. A broader default Ruff run reports 65 `I001`
+  import-order findings across the repository, unrelated to this socket fix.
+  GitHub CI has not yet rerun on this fix, so hosted green status remains
+  unverified.
+- Grafana remains stopped; failed OTLP exports are noisy but have not prevented
+  local worker logs, provider calls, acknowledgements, or scheduling. Quality
+  remains below the acceptance bar: keep the no-new-sources hold in place.
+
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB

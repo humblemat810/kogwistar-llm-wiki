@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import socket
+import tempfile
 import threading
 import time
+import uuid
+from pathlib import Path
 
 import pytest
 
@@ -120,17 +123,26 @@ def test_live_control_socket_returns_without_waiting_for_client_close(tmp_path) 
 def test_disconnected_control_client_does_not_kill_server(tmp_path) -> None:
     if not hasattr(socket, "AF_UNIX"):
         pytest.skip("Unix-domain sockets are unavailable on this platform")
-    control = MaintenanceControl(tmp_path)
+    # GitHub's nested pytest basetemp can exceed the Unix socket path limit.
+    socket_path = Path(tempfile.gettempdir()) / f"mc-{uuid.uuid4().hex}.sock"
+    control = MaintenanceControl(tmp_path, socket_path=str(socket_path))
     stop_event = threading.Event()
     server_thread = control.serve(stop_event)
     try:
         deadline = time.monotonic() + 2
-        while not control.socket_path.exists() and time.monotonic() < deadline:
+        disconnected = False
+        while time.monotonic() < deadline:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                client.connect(str(control.socket_path))
+                disconnected = True
+                break
+            except OSError:
+                client.close()
             time.sleep(0.01)
-        assert control.socket_path.exists()
+        assert disconnected, "maintenance control socket did not become connectable"
 
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.connect(str(control.socket_path))
+        client.close()
 
         result = send_control_command(tmp_path, status=True)
         assert result["ok"] is True
