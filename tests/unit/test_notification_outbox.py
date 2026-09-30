@@ -74,7 +74,7 @@ def _job(*, workspace_id="ws-a", recipient_id="user-a", source_id="mail-a"):
         },
         retry_count=2,
         max_retries=5,
-        last_error="smtp failed for secret@example.com",
+        last_error="delivery failed for private destination",
         claim_attempts=3,
         status="PENDING",
         created_at_ms=1_800_000_000_000,
