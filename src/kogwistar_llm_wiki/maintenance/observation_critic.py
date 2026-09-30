@@ -11,7 +11,7 @@ from kg_doc_parser.workflow_ingest.providers import (
     WorkflowProviderSettings,
     build_chat_model,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .maintenance_observation import MaintenanceObservationFrame, ObservationFinding
 
@@ -68,7 +68,13 @@ class ObservationCriticOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    findings: tuple[ObservationFinding, ...] = Field(default=(), max_length=8)
+    findings: tuple[ObservationFinding, ...] = Field(default=(), max_length=4)
+
+    @model_validator(mode="after")
+    def _findings_are_concise(self) -> ObservationCriticOutput:
+        if any(len(finding.message) > 200 for finding in self.findings):
+            raise ValueError("observation critic finding messages must not exceed 200 characters")
+        return self
 
 
 def _frame_evidence_ids(frame: MaintenanceObservationFrame) -> set[str]:
@@ -122,7 +128,9 @@ def build_observation_critic(
                     "Assess grounding, labels, granularity, coverage, and relation support. "
                     "Return only findings supported by supplied evidence IDs. When a safe "
                     "bounded follow-up is clearly supported, set recommended_action to one "
-                    "of the schema's allowed actions; otherwise leave it null. Do not invent "
+                    "of the schema's allowed actions; otherwise leave it null. Return at most "
+                    "four findings; each message must be one concise sentence of at most 200 "
+                    "characters. Do not include reasoning traces or preambles. Do not invent "
                     "IDs, request graph mutations, or request secrets. Return no finding if "
                     "the bounded frame does not support a concrete issue."
                 ),

@@ -886,6 +886,34 @@ background cycle is scheduled or that direct maintenance has been exercised.
   focused gateway tests pass and Ruff passes. The change is not in the running
   image, so live direct maintenance remains unverified.
 
+## Scheduled Bonsai Follow-up (2026-09-30 14:48 UTC)
+
+- Durable control was changed to `background_enabled=true` and
+  `request_enabled=true`. The daemon scheduled and claimed cycles 683, 684, and
+  685 at its configured five-minute cadence, using only the local Bonsai model
+  and existing stock-knowledge nodes. No new source documents were added.
+- Cycle 683's first critic call returned HTTP 200 after 99 seconds and
+  assessed `weak_label`; its second critic response hit the 4,096-token output
+  cap and failed closed as `quality_unknown`. No graph change was authorized.
+- Cycle 684 made two successful Bonsai calls (2,136 and 3,000 output tokens),
+  completed its follow-up at `max_rounds_reached`, and was acknowledged. Its
+  verdict remained `weak_label` due to unverified grounding, unsupported
+  `HAS_CHILD` relation provenance, and granularity concerns. No graph change
+  was authorized.
+- Cycle 685's critic response again hit the 4,096-token output cap, failed
+  closed, and was deferred for human review. These observations establish that
+  an 8,192-token context can complete successful critic calls and one
+  successful follow-up; they do not establish the maximum usable context or
+  acceptable parse/crosslink quality. The fail-closed behavior prevented
+  unsupported automatic repair.
+- The feature branch now limits critic output to four findings, each at most
+  200 characters, and asks for no reasoning trace or preamble. Its focused
+  regressions pass, but the running container still uses the older v0.5.1
+  image, so the change has not yet been tested against Bonsai live.
+- Grafana is stopped; OTLP export failures are observability noise and did not
+  prevent the maintenance jobs from completing. Direct MCP execution remains
+  unverified pending a request against a known source ID.
+
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB

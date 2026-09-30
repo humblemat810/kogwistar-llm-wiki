@@ -15,6 +15,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_observation import (
     build_observation_frame,
 )
 from kogwistar_llm_wiki.maintenance.observation_critic import (
+    ObservationCriticOutput,
     build_observation_critic,
     is_context_window_error,
 )
@@ -89,6 +90,23 @@ def test_provider_critic_returns_only_schema_valid_evidence_bound_findings(monke
 
     assert result == {"status": "succeeded", "findings": [finding]}
     assert model.schema is not None
+
+
+def test_provider_critic_output_is_bounded_to_four_concise_findings() -> None:
+    finding = ObservationFinding(
+        code="weak_label",
+        verdict="weak_label",
+        severity="warning",
+        subject_id="node-1",
+        evidence_ids=("node-1",),
+        message="x" * 201,
+    )
+    with pytest.raises(ValueError, match="must not exceed 200 characters"):
+        ObservationCriticOutput(findings=(finding,))
+
+    concise = finding.model_copy(update={"message": "x" * 200})
+    with pytest.raises(ValueError):
+        ObservationCriticOutput(findings=(concise,) * 5)
 
 
 @pytest.mark.parametrize(
@@ -172,7 +190,10 @@ def test_provider_change_rebuilds_default_critic_but_preserves_injected_critic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     built_for: list[object] = []
-    replacement_critic = lambda *_args: {"status": "succeeded", "findings": []}
+
+    def replacement_critic(*_args: object) -> dict[str, object]:
+        return {"status": "succeeded", "findings": []}
+
     monkeypatch.setattr(
         "kogwistar_llm_wiki.worker.build_observation_critic",
         lambda settings: built_for.append(settings) or replacement_critic,
@@ -185,7 +206,9 @@ def test_provider_change_rebuilds_default_critic_but_preserves_injected_critic(
     assert default_worker.observation_critic is replacement_critic
     assert built_for == [provider_settings]
 
-    custom_critic = lambda *_args: {"status": "succeeded", "findings": []}
+    def custom_critic(*_args: object) -> dict[str, object]:
+        return {"status": "succeeded", "findings": []}
+
     injected_worker = SimpleNamespace(
         _uses_default_observation_critic=False,
         observation_critic=custom_critic,
