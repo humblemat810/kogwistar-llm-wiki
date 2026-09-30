@@ -714,6 +714,13 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 - Removed the unused `KOGWISTAR_MAINTENANCE_MAX_OUTPUT_TOKENS` setting from the
   Bonsai environment snippet. The current critic path does not consume it, so
   leaving it there would imply a completion cap that is not implemented.
+- Expanded offline regression verification across
+  `test_worker_runtime_orchestration.py`, `test_maintenance_job_lowering.py`,
+  adaptive scheduling, observation execution/persistence, context abort, and
+  provider configuration: **94 passed in 83.34s**. This covers the control and
+  queue paths for direct, follow-up, and scheduled work with test providers;
+  it is not evidence that Bonsai inference or live PostgreSQL persistence
+  succeeds after restart.
 
 ## Objective Acceptance Snapshot (2026-09-30)
 
