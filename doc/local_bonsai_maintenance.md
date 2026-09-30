@@ -131,17 +131,15 @@ evidence of a Bonsai call; look for `maintenance_observation_provider_call`
 with `provider=openai`, the Bonsai model name, and `llm_call_count=1`, alongside
 the corresponding llama-server request log.
 
-The Bonsai observation critic uses `reasoning_effort=medium` and sends a
-2,048-token `reasoning_budget_tokens` extension in the OpenAI-compatible
-request. This is intended to bound internal reasoning while leaving room for
-the structured finding response inside the configured 8,192-token context.
-The setting is unit-tested but was not deployed or verified against the live
-llama.cpp server during the previous run. The upstream [Bonsai known-issues
-guide](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/blob/main/KNOWN_ISSUES.md)
-recommends `reasoning_effort=medium` for moderate output limits and documents
-`reasoning_budget_tokens` as a top-level request field; the local Prism
-llama.cpp source supports that field. Treat successful local tests as contract
-coverage, not proof that the live model respects the budget.
+The current LLM-Wiki observation critic uses the shared provider factory and
+does not itself set provider-specific reasoning or completion-token limits.
+Earlier experiment notes about `reasoning_effort=medium`, a 2,048-token
+reasoning budget, or a 4,096-token completion cap must not be read as proof
+that those limits are present in this current call path. The configured model
+may reject an oversized request; recognized context-window failures are now
+made terminal and pause future background cycles rather than silently falling
+back to another provider. A provider-neutral generation cap still requires a
+verified adapter contract for every supported backend.
 
 The scheduler also carries explicit limits into each job. This avoids the
 previous silent no-op behavior where an omitted `max_llm_calls` became zero.
@@ -151,6 +149,28 @@ test verifies that these explicit profile values reach the queued observation
 job rather than being replaced with the defaults.
 Direct parse requests retain their explicit budgets and their configured
 follow-up round limit.
+
+If the configured provider reports a context-window/input-token overflow during
+an observation or parser call, the assessment/job is marked `blocked_context`,
+the current maintenance plan is terminated without retrying that job, and
+durable maintenance control sets `background_enabled=false` with
+`status_reason=blocked_context_window`. The daemon does not automatically switch
+providers or retry the same oversized job. Explicit request maintenance remains
+enabled. After changing hardware or deliberately reducing the frame/context
+requirements, inspect the control state and explicitly resume background work:
+
+```powershell
+python -m kogwistar_llm_wiki daemon maintenance-control --status
+python -m kogwistar_llm_wiki daemon maintenance-control --background-enabled true
+```
+
+Context-overflow classification recognizes common OpenAI-compatible, Anthropic-
+style, Google, and llama.cpp error wording; it is a fail-safe heuristic, not a
+preflight guarantee that a provider's advertised context window will fit a
+specific prompt. The current LLM-Wiki pin does not yet include the separate
+parser feature branch's optional Anthropic adapter. A profile switch rebuilds
+the default critic with the newly selected supported provider; injected custom
+critics are intentionally left untouched.
 
 After changing provider settings, recreate only the maintenance service:
 

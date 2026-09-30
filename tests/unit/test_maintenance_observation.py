@@ -458,6 +458,34 @@ def test_observation_identity_tracks_critic_content_and_is_repeatable() -> None:
     assert first.assessment_id != changed.assessment_id
 
 
+def test_critic_recommendation_selects_only_a_declared_bounded_followup() -> None:
+    subject = ObservationSubject(
+        kind="node",
+        subject_id="node-1",
+        workspace_id="demo",
+        namespace="ws:demo:g:curated_kg",
+    )
+    frame = build_observation_frame(subject)
+    finding = ObservationFinding(
+        code="granularity_too_coarse",
+        verdict="too_coarse",
+        severity="warning",
+        subject_id="node-1",
+        evidence_ids=("node-1",),
+        message="The reviewed evidence groups multiple concepts together.",
+        recommended_action="expand_children",
+    )
+
+    assessment = assess_observation_frame(
+        frame,
+        critic_status="succeeded",
+        critic_findings=(finding,),
+    )
+
+    assert assessment.recommended_action == "expand_children"
+    assert assessment.continuation_allowed is True
+
+
 def test_uncertain_parse_never_becomes_adequate_or_auto_repaired() -> None:
     subject = ObservationSubject(
         kind="edge",

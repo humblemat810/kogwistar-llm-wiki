@@ -584,6 +584,36 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 
 ## Offline verification update (2026-09-30)
 
+- Added a provider-agnostic context-overflow stop path for read-only maintenance
+  reviews. Recognized overflow errors persist `critic_status=blocked_context`,
+  suppress continuation/remaining job steps, and durably disable autonomous
+  background maintenance with `status_reason=blocked_context_window`; explicit
+  request maintenance remains enabled. Provider wording is heuristically
+  classified, so unrecognized provider errors remain ordinary fail-closed critic
+  failures and are not claimed to trigger the persistent stop.
+- Source audit correction: the current LLM-Wiki observation critic constructs
+  its model through the shared provider factory without setting an output-token
+  cap or Bonsai reasoning budget. Earlier report entries describe prior runtime
+  observations/experiments and are not evidence that those limits exist in the
+  current source path. Provider-specific generation caps, especially across a
+  Codex bridge or any future Claude adapter, remain a separate unverified item.
+- Regressions cover common context-limit wording, chained exceptions, durable
+  background pause, assessment status, parser-job terminal failure, no retry,
+  provider-switch refresh, and no continuation. Focused maintenance/provider
+  selection: **63 passed**; Ruff and `git diff --check` passed. This is offline
+  code evidence only; it does not establish current Bonsai runtime health.
+- The separate KG Doc Parser provider-bounds feature branch's full `ci` marker
+  selection completed after adding the optional Anthropic adapter: **66 passed,
+  1 skipped, 166 deselected**; provider-limit
+  Ruff and diff checks passed. It remains unmerged and is not yet pinned by
+  LLM-Wiki.
+- The parser feature commit `e9c0fbe` was pushed to
+  `feat/provider-generation-bounds`. GitHub Actions has not run for that branch:
+  the parser workflow is configured for pushes to `main` and pull requests
+  targeting `main`, not arbitrary branch pushes. The branch still needs a PR
+  before its remote CI status can be verified; the local full marker suite is
+  green.
+
 - Re-ran the focused embedding-service suites after confirming that the CPU
   CLIP encoder calls its learned text and image projection heads:
   `python -m pytest tests/unit/test_embedding_service.py
