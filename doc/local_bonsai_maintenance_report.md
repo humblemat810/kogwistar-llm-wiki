@@ -679,6 +679,24 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
   no Compose service was started and no graph was mutated. They do not change
   the outstanding live-verification statuses below.
 
+## Post-restart Local Readiness Snapshot (2026-09-30)
+
+- The custom llama-server executable and both Bonsai files are present at the
+  documented D-drive paths. The executable reports llama.cpp
+  `0.2.0-dev`/build `10706`, commit `1a07bfa5f`, MSVC `19.42.34438.0`, x64.
+- `scripts/start_local_bonsai.ps1` defaults to `-c 8192`. This is the
+  conservative previously exercised operating point, not a proven maximum;
+  the actual host maximum remains unknown pending an explicitly authorized
+  controlled memory/context ladder.
+- A read-only `nvidia-smi` snapshot reports an 8-GiB RTX 3080 Laptop GPU with
+  8,016 MiB free and 0% utilization. This is consistent with the user-reported
+  post-restart unloaded state, not evidence of successful inference. No server,
+  Docker service, or database was started or queried for this snapshot.
+- The required assets are present: the language GGUF is 5,946,648,928 bytes and
+  the matching vision projector is 629,246,976 bytes. The Windows launch script
+  binds `0.0.0.0` for Docker Desktop reachability; firewall scoping remains an
+  operator requirement.
+
 ## Objective Acceptance Snapshot (2026-09-30)
 
 | Requirement | Current evidence | Status |
