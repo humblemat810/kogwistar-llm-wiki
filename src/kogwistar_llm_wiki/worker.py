@@ -250,6 +250,7 @@ class MaintenanceWorker(
                     )
                     if is_context_window_error(exc):
                         self.background_enabled = False
+                        self.request_enabled = False
                         pause_background = getattr(self, "context_limit_sink", None)
                         if callable(pause_background):
                             try:
@@ -265,6 +266,7 @@ class MaintenanceWorker(
                             str(job.job_id),
                             "blocked_context_window: provider rejected maintenance prompt size",
                             final=True,
+                            claim_token=job.claim_token,
                         )
                         self._emit_trace(
                             "maintenance_job_failed_context_limit",

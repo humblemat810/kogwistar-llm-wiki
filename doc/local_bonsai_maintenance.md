@@ -153,14 +153,17 @@ follow-up round limit.
 If the configured provider reports a context-window/input-token overflow during
 an observation or parser call, the assessment/job is marked `blocked_context`,
 the current maintenance plan is terminated without retrying that job, and
-durable maintenance control sets `background_enabled=false` with
-`status_reason=blocked_context_window`. The daemon does not automatically switch
-providers or retry the same oversized job. Explicit request maintenance remains
-enabled. After changing hardware or deliberately reducing the frame/context
-requirements, inspect the control state and explicitly resume background work:
+durable maintenance control sets both `request_enabled=false` and
+`background_enabled=false` with `status_reason=blocked_context_window`. This
+aborts the maintenance experiment as a whole, including direct/follow-up work;
+the daemon does not automatically switch providers, retry the oversized job,
+or continue with other queued jobs. After a hardware/model upgrade or deliberate
+context reduction, inspect the control state and explicitly re-enable the modes
+you want to resume:
 
 ```powershell
 python -m kogwistar_llm_wiki daemon maintenance-control --status
+python -m kogwistar_llm_wiki daemon maintenance-control --request-enabled true
 python -m kogwistar_llm_wiki daemon maintenance-control --background-enabled true
 ```
 

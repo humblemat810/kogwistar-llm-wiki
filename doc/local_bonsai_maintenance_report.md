@@ -587,8 +587,10 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 - Added a provider-agnostic context-overflow stop path for read-only maintenance
   reviews. Recognized overflow errors persist `critic_status=blocked_context`,
   suppress continuation/remaining job steps, and durably disable autonomous
-  background maintenance with `status_reason=blocked_context_window`; explicit
-  request maintenance remains enabled. Provider wording is heuristically
+  and request maintenance with `status_reason=blocked_context_window`, aborting
+  the maintenance experiment rather than leaving direct/follow-up requests
+  available. Final job failure includes the claim token to prevent stale-worker
+  writes. Provider wording is heuristically
   classified, so unrecognized provider errors remain ordinary fail-closed critic
   failures and are not claimed to trigger the persistent stop.
 - Source audit correction: the current LLM-Wiki observation critic constructs
@@ -598,10 +600,15 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
   current source path. Provider-specific generation caps, especially across a
   Codex bridge or any future Claude adapter, remain a separate unverified item.
 - Regressions cover common context-limit wording, chained exceptions, durable
-  background pause, assessment status, parser-job terminal failure, no retry,
-  provider-switch refresh, and no continuation. Focused maintenance/provider
-  selection: **63 passed**; Ruff and `git diff --check` passed. This is offline
-  code evidence only; it does not establish current Bonsai runtime health.
+  full maintenance pause, assessment status, parser-job terminal failure, no
+  retry, claim-token fencing, provider-switch refresh, and no continuation.
+  Focused maintenance/provider selection after the full-stop/fencing assertions:
+  **63 passed**. The changed files pass Ruff `E402,E9,F` and `git diff --check`.
+  A broader daemon-recovery selection was attempted but its seven persistent
+  backend cases could not initialize because this isolated environment lacks
+  optional `chromadb`; this does not count as a pass for those integration
+  tests. This is offline code evidence only; it does not establish current
+  Bonsai runtime health.
 - The separate KG Doc Parser provider-bounds feature branch's full `ci` marker
   selection completed after adding the optional Anthropic adapter: **66 passed,
   1 skipped, 166 deselected**; provider-limit

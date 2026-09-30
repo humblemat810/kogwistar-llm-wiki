@@ -238,7 +238,7 @@ def test_context_limit_blocks_critic_and_pauses_durable_background_control(
     traces: list[dict[str, object]] = []
     worker = SimpleNamespace(
         observation_critic=critic,
-        context_limit_sink=lambda: MaintenanceDaemonRuntime._pause_background_for_context_limit(
+        context_limit_sink=lambda: MaintenanceDaemonRuntime._stop_for_context_limit(
             SimpleNamespace(
                 control=control,
                 control_state=control.get(),
@@ -261,13 +261,20 @@ def test_context_limit_blocks_critic_and_pauses_durable_background_control(
     assert assessment.critic_status == "blocked_context"
     assert assessment.continuation_allowed is False
     assert persisted.background_enabled is False
-    assert persisted.request_enabled is True
+    assert persisted.request_enabled is False
     assert persisted.status_reason == "blocked_context_window"
+    restarted_control = MaintenanceControl(tmp_path)
+    assert restarted_control.get().request_enabled is False
+    assert restarted_control.get().background_enabled is False
     assert any(item["event"] == "maintenance_observation_context_limit_blocked" for item in traces)
 
 
 def test_parser_context_overflow_marks_job_final_and_does_not_retry() -> None:
-    job = SimpleNamespace(job_id="job-parse-overflow", payload={"mode": "background"})
+    job = SimpleNamespace(
+        job_id="job-parse-overflow",
+        payload={"mode": "background"},
+        claim_token="claim-parse-overflow",
+    )
     failed: list[tuple[object, ...]] = []
     retried: list[object] = []
     paused: list[bool] = []
@@ -305,10 +312,11 @@ def test_parser_context_overflow_marks_job_final_and_does_not_retry() -> None:
 
     assert len(failed) == 1
     assert failed[0][0] == "job-parse-overflow"
-    assert failed[0][2] == {"final": True}
+    assert failed[0][2] == {"final": True, "claim_token": "claim-parse-overflow"}
     assert retried == []
     assert paused == [True]
     assert worker.background_enabled is False
+    assert worker.request_enabled is False
     assert any(item["event"] == "maintenance_job_failed_context_limit" for item in traces)
 
 
