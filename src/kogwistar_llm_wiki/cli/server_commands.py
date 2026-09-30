@@ -6,9 +6,11 @@ import argparse
 import json
 import logging
 import os
+import re
 import signal
 import threading
 from collections.abc import Callable
+from importlib.metadata import entry_points
 from pathlib import Path
 
 from ..models import NamespaceEngines
@@ -18,6 +20,50 @@ logger = logging.getLogger("kogwistar_llm_wiki")
 BuildEngines = Callable[..., NamespaceEngines]
 CloseEngines = Callable[[NamespaceEngines], None]
 PersistenceKwargs = Callable[[argparse.Namespace], dict[str, str]]
+NOTIFICATION_SOURCE_ENTRY_POINT_GROUP = "kogwistar_llm_wiki.notification_sources"
+_NOTIFICATION_SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+
+
+def _load_notification_source_plugins(
+    data_dir: str,
+    enabled: str,
+    authorize_source: Callable[[str, str, str], bool],
+) -> dict[str, object]:
+    """Load only explicitly enabled trusted notification source adapters."""
+
+    if not isinstance(enabled, str) or not enabled.strip():
+        raise ValueError("at least one notification source plugin must be enabled")
+    if not callable(authorize_source):
+        raise TypeError("notification source authorization callback is required")
+    names = tuple(item.strip() for item in enabled.split(","))
+    if any(not _NOTIFICATION_SOURCE_ID.fullmatch(name) for name in names):
+        raise ValueError("notification source plugin IDs are invalid")
+    if len(set(names)) != len(names):
+        raise ValueError("notification source plugin IDs must not contain duplicates")
+    reserved = {"feed", "system", "core"}
+    if reserved.intersection(names):
+        raise ValueError("notification source plugin ID is reserved")
+
+    available = {
+        point.name: point
+        for point in entry_points(group=NOTIFICATION_SOURCE_ENTRY_POINT_GROUP)
+    }
+    missing = [name for name in names if name not in available]
+    if missing:
+        raise ValueError(f"notification source plugin {missing[0]!r} is not installed")
+
+    loaded: dict[str, object] = {}
+    for name in names:
+        factory = available[name].load()
+        if not callable(factory):
+            raise TypeError(f"notification source plugin {name!r} is not callable")
+        adapter = factory(data_dir=data_dir, authorize_source=authorize_source)
+        if not callable(getattr(adapter, "list_sources", None)) or not callable(
+            getattr(adapter, "read_window", None)
+        ):
+            raise TypeError(f"notification source plugin {name!r} has an invalid adapter")
+        loaded[name] = adapter
+    return loaded
 
 
 def daemon_projection(
@@ -153,6 +199,7 @@ def serve_combined(
     """Serve REST, MCP, and maintenance from one shared engine bundle."""
     from ..agent.gateway import AgentGateway
     from ..agent.mcp_server import build_agent_mcp
+    from ..app_contracts.workbench_extensions import load_workbench_extensions
     from ..daemon import MaintenanceDaemon
     from ..ingest_pipeline import IngestPipeline
     from ..workbench.workbench_api import WorkbenchApi
@@ -162,7 +209,20 @@ def serve_combined(
     pipeline = IngestPipeline(engines)
     api = WorkbenchApi(pipeline)
     stop_event = threading.Event()
-    server = create_workbench_server(api, host=args.host, port=args.port)
+    extension_ids = tuple(
+        item.strip()
+        for item in os.environ.get("LLM_WIKI_WORKBENCH_EXTENSIONS", "").split(",")
+        if item.strip()
+    )
+    try:
+        extensions = load_workbench_extensions(api, extension_ids)
+        server = create_workbench_server(
+            api, host=args.host, port=args.port, extensions=extensions
+        )
+    except Exception:
+        api.close()
+        close_engines(engines)
+        raise
     maintenance = MaintenanceDaemon(
         engines,
         args.workspace,

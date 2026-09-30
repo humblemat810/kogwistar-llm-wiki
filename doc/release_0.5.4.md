@@ -1,17 +1,16 @@
 # LLM-Wiki 0.5.4
 
-LLM-Wiki `0.5.4` is a patch release after the merged email-boundary hardening
-work. The application image remains intentionally independent of the optional
-`kogwistar-email-plugin` repository.
+LLM-Wiki `0.5.4` is a patch release after plugin-boundary hardening. The base
+application remains independent of optional channel-specific integrations.
 
 ## Release scope
 
 - Bumps the package and application image version to `0.5.4`.
 - Aligns CI and Docker builds with the merged Kogwistar, KG Doc Parser, and
   Obsidian sink revisions.
-- Keeps the default and all-adapters images free of email-plugin code and
-  dependencies.
-- Keeps the email ontology/parser as a separately installed downstream plugin.
+- Keeps the default and all-adapters images free of optional channel-plugin
+  code and dependencies.
+- Keeps source-specific parsers and ontologies outside the product host.
 
 ## Image targets
 
@@ -22,9 +21,9 @@ profchan/kogwistar-llm-wiki:v0.5.4
 profchan/kogwistar-llm-wiki:all-v0.5.4
 ```
 
-The PyPy and embedding images remain separate workflow targets. The email
-plugin is not copied into any LLM-Wiki image; install it separately only when
-the email topology is required.
+The PyPy and embedding images remain separate workflow targets. Optional
+channel integrations are installed separately and enabled explicitly by the
+application.
 
 ## Pinned source revisions
 

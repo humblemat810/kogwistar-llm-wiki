@@ -14,13 +14,6 @@ from .archiving.validation import (
     inspect_archive,
     verify_archive,
 )
-from .memory import (
-    MemoryDisabledError,
-    MemoryEvidence,
-    MemoryRecord,
-    MemoryService,
-    MemoryValidationError,
-)
 from .codex.codex_workbench_agent import (
     CodexAppServerRunner,
     CodexCliCockpitResponder,
@@ -34,6 +27,22 @@ from .configuration.workspace import (
     GraphSpaceNamespace,
     WorkspaceNamespaces,
 )
+from .disambiguation.contact_book import (
+    AddressBookClaim,
+    AddressBookEntry,
+    build_address_book_projection,
+    compose_contact_observation_providers,
+    compose_contact_scan_observation_providers,
+)
+from .disambiguation.contact_matching import (
+    ContactChannel,
+    ContactIdentityObservation,
+    ContactPointClaim,
+    ContactVerification,
+    contact_evidence_snapshot_id,
+    contact_match_basis,
+    discover_contact_match_candidates,
+)
 from .disambiguation.selection import (
     DefaultDisambiguationReviewPolicy,
     DisambiguationReviewPick,
@@ -42,6 +51,12 @@ from .disambiguation.selection import (
     select_disambiguation_review_requests,
 )
 from .disambiguation.service import DisambiguationAnswerRecord, DisambiguationService
+from .embeddings.multimodal_dereference import (
+    DereferenceStatus,
+    EmbeddingDereferenceResult,
+    EmbeddingReferenceDereferencer,
+    EmbeddingReferenceResolver,
+)
 from .embeddings.multimodal_grounding import (
     EvidenceClosureResolver,
     EvidenceClosureValidator,
@@ -53,12 +68,6 @@ from .embeddings.multimodal_grounding import (
     PinnedEntityRef,
     ResolvedEntityGrounding,
     SourceEvidenceRef,
-)
-from .embeddings.multimodal_dereference import (
-    DereferenceStatus,
-    EmbeddingDereferenceResult,
-    EmbeddingReferenceDereferencer,
-    EmbeddingReferenceResolver,
 )
 from .embeddings.multimodal_projection import (
     DEFAULT_COLQWEN_MODEL,
@@ -94,11 +103,11 @@ from .embeddings.multimodal_sources import (
     LocalFileAssetResolver,
     MappingAssetResolver,
     MultimodalSourceBundle,
+    audio_interval_unit,
     build_source_bundle,
     manifest_units,
     pdf_manifest_units,
     split_text_units,
-    audio_interval_unit,
     video_interval_unit,
     video_region_track_unit,
     webpage_units,
@@ -107,6 +116,13 @@ from .embeddings.vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 from .ingest_pipeline import (
     IngestPipeline,
     build_in_memory_namespace_engines,
+)
+from .memory import (
+    MemoryDisabledError,
+    MemoryEvidence,
+    MemoryRecord,
+    MemoryService,
+    MemoryValidationError,
 )
 from .models import (
     IngestPipelineArtifacts,
@@ -166,6 +182,8 @@ __all__ = [
     "ARCHIVE_FORMAT_VERSION",
     "DEFAULT_COLQWEN_MODEL",
     "DEFAULT_COLQWEN_REVISION",
+    "AddressBookClaim",
+    "AddressBookEntry",
     "AgentGateway",
     "AgentTurn",
     "ArchiveError",
@@ -181,18 +199,22 @@ __all__ = [
     "CodexWorkbenchDispatcher",
     "CodexWorkbenchWorker",
     "ColQwenNativeEncoder",
+    "ContactChannel",
+    "ContactIdentityObservation",
+    "ContactPointClaim",
+    "ContactVerification",
     "DefaultDisambiguationReviewPolicy",
+    "DereferenceStatus",
     "DisambiguationAnswerRecord",
     "DisambiguationReviewPick",
     "DisambiguationReviewSelection",
     "DisambiguationReviewService",
     "DisambiguationService",
-    "DereferenceStatus",
     "EmbeddingDereferenceResult",
-    "EmbeddingReferenceDereferencer",
-    "EmbeddingReferenceResolver",
     "EmbeddingProfileMismatch",
     "EmbeddingProtocolError",
+    "EmbeddingReferenceDereferencer",
+    "EmbeddingReferenceResolver",
     "EmbeddingServiceError",
     "EmbeddingServiceSettings",
     "EmbeddingServiceUnavailable",
@@ -239,13 +261,9 @@ __all__ = [
     "MultimodalSearchHit",
     "MultimodalSourceBundle",
     "MultimodalSourceUnit",
-    "PgVectorMultimodalProjectionStore",
-    "to_core_embedding_profile",
-    "audio_interval_unit",
-    "video_interval_unit",
-    "video_region_track_unit",
     "NamespaceEngines",
     "ObsidianBuildResult",
+    "PgVectorMultimodalProjectionStore",
     "PinnedEntityRef",
     "ProjectionEntity",
     "ProjectionIntegrityError",
@@ -271,12 +289,19 @@ __all__ = [
     "WorkbenchInteractionStore",
     "WorkbenchTurn",
     "WorkspaceNamespaces",
+    "audio_interval_unit",
+    "build_address_book_projection",
     "build_agent_mcp",
     "build_default_policies",
     "build_in_memory_namespace_engines",
     "build_source_bundle",
     "build_workbench_handler",
+    "compose_contact_observation_providers",
+    "compose_contact_scan_observation_providers",
+    "contact_evidence_snapshot_id",
+    "contact_match_basis",
     "create_archive",
+    "discover_contact_match_candidates",
     "dump_seed_bundle",
     "embed_pending",
     "export_graph_seed_bundle",
@@ -291,8 +316,11 @@ __all__ = [
     "select_disambiguation_review_requests",
     "serve_workbench",
     "split_text_units",
+    "to_core_embedding_profile",
     "validate_edit_proposal",
     "verify_archive",
+    "video_interval_unit",
+    "video_region_track_unit",
     "webpage_units",
     "workspace_graph_spaces",
 ]

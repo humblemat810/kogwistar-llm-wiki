@@ -5,10 +5,19 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Literal
 from urllib.parse import parse_qs, urlparse
 
 from ..agent.gateway import AgentGateway, _jsonrpc_result
+from ..app_contracts.workbench_extensions import (
+    WorkbenchExtension,
+    WorkbenchExtensionRequest,
+    WorkbenchExtensionResponse,
+    WorkbenchExtensionRoute,
+    index_workbench_extensions,
+)
 from ..configuration.identity import (
     IdentityError,
     auth_mode,
@@ -16,7 +25,6 @@ from ..configuration.identity import (
     authorize,
     claims_context,
 )
-from ..email.viewer_plugin import render_email_viewer_plugin
 from .workbench_api import WorkbenchApi
 
 API_VERSION = "v1"
@@ -29,8 +37,11 @@ MCP_READ_TOOLS = frozenset({
 def build_workbench_handler(
     api: WorkbenchApi,
     gateway: AgentGateway | None = None,
+    *,
+    extensions: Sequence[WorkbenchExtension] = (),
 ) -> type[BaseHTTPRequestHandler]:
     gateway = gateway or AgentGateway(api)
+    extension_routes = index_workbench_extensions(extensions)
     agent_api_enabled = os.getenv("LLM_WIKI_AGENT_API_ENABLED", "").lower() in {"1", "true", "yes", "on"}
     # Resolve once during server construction so invalid auth configuration
     # fails before the REST listener accepts requests.
@@ -51,10 +62,21 @@ def build_workbench_handler(
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
-            if parsed.path == "/email/viewer":
-                self._write_html(render_email_viewer_plugin())
-                return
             try:
+                route = extension_routes.get(("GET", parsed.path))
+                if route is not None:
+                    workspace_id = route.workspace_id(query, {})
+                    self._require_scope(route.required_scope, workspace_id)
+                    response = self._dispatch_extension(
+                        route,
+                        method="GET",
+                        path=parsed.path,
+                        query=query,
+                        payload={},
+                        workspace_id=workspace_id,
+                    )
+                    self._write_extension_response(response)
+                    return
                 if parsed.path in {"/.well-known/agent.json", "/.well-known/agent-card.json", "/a2a/.well-known/agent-card"}:
                     self._require_agent_api()
                     base_url = os.getenv("LLM_WIKI_PUBLIC_BASE_URL", "").rstrip("/") or f"http://{self.headers.get('host', '127.0.0.1')}"
@@ -146,75 +168,23 @@ def build_workbench_handler(
                     if body is None:
                         self._write_json({"error": "not_found"}, status=404)
                         return
-                elif parsed.path == "/api/email/view":
+                elif parsed.path == "/api/contact-matches":
                     workspace_id = _first(query, "workspace_id", "")
-                    stream_id = _first(query, "stream_id", "")
-                    source_revision_id = _first(query, "source_revision_id", "")
-                    if not workspace_id or not stream_id or not source_revision_id:
-                        raise ValueError(
-                            "workspace_id, stream_id, and source_revision_id are required"
-                        )
+                    if not workspace_id:
+                        raise ValueError("workspace_id is required")
                     self._require_scope("read", workspace_id)
-                    body = api.view_email(
+                    body = api.list_contact_matches(
                         workspace_id=workspace_id,
-                        stream_id=stream_id,
-                        source_revision_id=source_revision_id,
+                        limit=int(_first(query, "limit", "100")),
                     )
-                elif parsed.path == "/api/email/proposal":
+                elif parsed.path == "/api/address-book":
                     workspace_id = _first(query, "workspace_id", "")
-                    stream_id = _first(query, "stream_id", "")
-                    source_revision_id = _first(query, "source_revision_id", "")
-                    source_document_id = _first(query, "source_document_id", "")
-                    if not all((workspace_id, stream_id, source_revision_id, source_document_id)):
-                        raise ValueError(
-                            "workspace_id, stream_id, source_revision_id, and source_document_id are required"
-                        )
+                    if not workspace_id:
+                        raise ValueError("workspace_id is required")
                     self._require_scope("read", workspace_id)
-                    body = api.propose_email_mapping(
+                    body = api.list_address_book(
                         workspace_id=workspace_id,
-                        stream_id=stream_id,
-                        source_revision_id=source_revision_id,
-                        source_document_id=source_document_id,
-                        confidence=float(_first(query, "confidence", "0.75")),
-                    )
-                elif parsed.path == "/api/email/ontology/search":
-                    workspace_id = _first(query, "workspace_id", "")
-                    query_text = _first(query, "query", "")
-                    if not workspace_id or not query_text:
-                        raise ValueError("workspace_id and query are required")
-                    self._require_scope("read", workspace_id)
-                    identity = getattr(self, "_identity_context", None)
-                    principal = (
-                        str(getattr(identity, "principal_id", "system"))
-                        if identity is not None
-                        else "system"
-                    )
-                    body = api.search_email_ontology(
-                        workspace_id=workspace_id,
-                        query=query_text,
-                        principal=principal,
-                        mode=_first(query, "mode", "bm25"),
-                        limit=int(_first(query, "limit", "20")),
-                    )
-                elif parsed.path == "/api/email/memory/proposal":
-                    workspace_id = _first(query, "workspace_id", "")
-                    stream_id = _first(query, "stream_id", "")
-                    source_revision_id = _first(query, "source_revision_id", "")
-                    statement = _first(query, "statement", "")
-                    if not all((workspace_id, stream_id, source_revision_id, statement)):
-                        raise ValueError(
-                            "workspace_id, stream_id, source_revision_id, and statement are required"
-                        )
-                    self._require_scope("read", workspace_id)
-                    body = api.propose_email_memory(
-                        workspace_id=workspace_id,
-                        stream_id=stream_id,
-                        source_revision_id=source_revision_id,
-                        statement=statement,
-                        kind=_first(query, "kind", "finding"),
-                        confidence=_first(query, "confidence", "inferred"),
-                        session_id=_first(query, "session_id", "") or None,
-                        rationale=_first(query, "rationale", ""),
+                        limit=int(_first(query, "limit", "500")),
                     )
                 else:
                     self._write_json({"error": "not_found"}, status=404)
@@ -232,7 +202,8 @@ def build_workbench_handler(
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
-            if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/email/accept", "/api/email/memory/promote", "/api/email/sync/enqueue", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
+            extension_route = extension_routes.get(("POST", parsed.path))
+            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -240,9 +211,26 @@ def build_workbench_handler(
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")  # noqa: TRY004
-                workspace_id = _payload_workspace(payload)
+                extension_query = parse_qs(parsed.query)
+                workspace_id = (
+                    extension_route.workspace_id(extension_query, payload)
+                    if extension_route is not None
+                    else _payload_workspace(payload)
+                )
                 if selected_auth_mode == "kogwistar_jwt" and workspace_id is None:
                     raise IdentityError("workspace_id is required when JWT authorization is enabled", status=400)
+                if extension_route is not None:
+                    self._require_scope(extension_route.required_scope, workspace_id)
+                    response = self._dispatch_extension(
+                        extension_route,
+                        method="POST",
+                        path=parsed.path,
+                        query=extension_query,
+                        payload=payload,
+                        workspace_id=workspace_id,
+                    )
+                    self._write_extension_response(response)
+                    return
                 if parsed.path in agent_paths:
                     self._require_agent_api()
                     if parsed.path == "/a2a":
@@ -301,50 +289,6 @@ def build_workbench_handler(
                 elif parsed.path == "/api/interactions":
                     body = api.submit_interaction(payload)
                     status = 202
-                elif parsed.path == "/api/email/accept":
-                    body = api.accept_email_mapping(
-                        workspace_id=str(workspace_id or ""),
-                        stream_id=str(payload.get("stream_id") or ""),
-                        source_revision_id=str(payload.get("source_revision_id") or ""),
-                        source_document_id=str(payload.get("source_document_id") or ""),
-                        confirmed=bool(payload.get("confirmed", False)),
-                        confidence=float(payload.get("confidence", 0.75)),
-                    )
-                    status = 200
-                elif parsed.path == "/api/email/memory/promote":
-                    stream_ids = _payload_string_sequence(payload, "stream_ids")
-                    source_revision_ids = _payload_string_sequence(
-                        payload, "source_revision_ids"
-                    )
-                    body = api.promote_email_memory(
-                        workspace_id=str(workspace_id or ""),
-                        stream_id=str(payload.get("stream_id") or ""),
-                        source_revision_id=str(payload.get("source_revision_id") or ""),
-                        stream_ids=stream_ids,
-                        source_revision_ids=source_revision_ids,
-                        statement=str(payload.get("statement") or ""),
-                        confirmed=bool(payload.get("confirmed", False)),
-                        kind=str(payload.get("kind") or "finding"),
-                        confidence=str(payload.get("confidence") or "inferred"),
-                        session_id=(
-                            str(payload.get("session_id"))
-                            if payload.get("session_id") is not None
-                            else None
-                        ),
-                        rationale=str(payload.get("rationale") or ""),
-                    )
-                    status = 200
-                elif parsed.path == "/api/email/sync/enqueue":
-                    body = api.enqueue_email_sync(
-                        workspace_id=str(workspace_id or ""),
-                        connector_id=str(payload.get("connector_id") or ""),
-                        cycle_id=str(payload.get("cycle_id") or ""),
-                        owner_id=str(payload.get("owner_id") or ""),
-                        title_prefix=str(payload.get("title_prefix") or "Email"),
-                        lease_duration_ms=int(payload.get("lease_duration_ms", 60_000)),
-                        max_retries=int(payload.get("max_retries", 5)),
-                    )
-                    status = 202 if body.get("status") == "queued" else 503
                 elif parsed.path == "/api/proposal/confirm":
                     body = api.confirm_cockpit_proposal(payload)
                     status = 200
@@ -367,6 +311,18 @@ def build_workbench_handler(
                     status = 200
                 elif parsed.path == "/api/compose/check":
                     body = api.compose_check(payload)
+                    status = 200
+                elif parsed.path == "/api/contact-matches/decision":
+                    identity = getattr(self, "_identity_context", None)
+                    body = api.decide_contact_match(
+                        workspace_id=str(workspace_id or ""),
+                        candidate_key=payload.get("candidate_key"),
+                        evidence_snapshot_id=payload.get("evidence_snapshot_id"),
+                        expected_evidence_version=payload.get("expected_evidence_version"),
+                        decision=payload.get("decision"),
+                        confirmed=payload.get("confirmed"),
+                        actor_id=getattr(identity, "principal_id", None),
+                    )
                     status = 200
                 else:
                     body = api.validate_proposal(payload)
@@ -415,6 +371,36 @@ def build_workbench_handler(
             self.send_header("content-length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
+
+        def _dispatch_extension(
+            self,
+            route: WorkbenchExtensionRoute,
+            *,
+            method: Literal["GET", "POST"],
+            path: str,
+            query: dict[str, list[str]],
+            payload: dict[str, object],
+            workspace_id: str | None,
+        ) -> WorkbenchExtensionResponse:
+            response = route.handler(
+                WorkbenchExtensionRequest(
+                    method=method,
+                    path=path,
+                    query={key: tuple(values) for key, values in query.items()},
+                    payload=payload,
+                    workspace_id=workspace_id,
+                    identity=getattr(self, "_identity_context", None),
+                )
+            )
+            if not isinstance(response, WorkbenchExtensionResponse):
+                raise TypeError("workbench extension handler must return WorkbenchExtensionResponse")
+            return response
+
+        def _write_extension_response(self, response: WorkbenchExtensionResponse) -> None:
+            if response.content_type == "text/html":
+                self._write_html(str(response.body), status=response.status)
+            else:
+                self._write_json(response.body, status=response.status)
 
         def _write_html(self, body: str, *, status: int = 200) -> None:
             encoded = body.encode("utf-8")
@@ -520,9 +506,17 @@ def serve_workbench(api: WorkbenchApi, *, host: str = "127.0.0.1", port: int = 8
         api.close()
 
 
-def create_workbench_server(api: WorkbenchApi, *, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+def create_workbench_server(
+    api: WorkbenchApi,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    extensions: Sequence[WorkbenchExtension] = (),
+) -> ThreadingHTTPServer:
     """Create, but do not start, a workbench server for combined mode."""
-    return ThreadingHTTPServer((host, port), build_workbench_handler(api))
+    return ThreadingHTTPServer(
+        (host, port), build_workbench_handler(api, extensions=extensions)
+    )
 
 
 def _first(values: dict[str, list[str]], key: str, default: str) -> str:

@@ -130,8 +130,12 @@ class WorkspaceNamespaces:
         return f"ws:{self.workspace_id}:workbench_jobs"
 
     @property
-    def email_sync_jobs(self) -> str:
-        return f"ws:{self.workspace_id}:email_sync_jobs"
+    def notification_jobs(self) -> str:
+        return f"ws:{self.workspace_id}:notification_jobs"
+
+    @property
+    def urgent_notification_jobs(self) -> str:
+        return f"ws:{self.workspace_id}:urgent_notification_jobs"
 
     @property
     def projection_state(self) -> str:

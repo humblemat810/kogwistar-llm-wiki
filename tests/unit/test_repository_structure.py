@@ -1,10 +1,10 @@
 from pathlib import Path
 
 from kogwistar_llm_wiki import maintenance
-from kogwistar_llm_wiki.memory import MemoryRecord
 from kogwistar_llm_wiki.embeddings import VllmEmbeddingSettings
 from kogwistar_llm_wiki.maintenance.maintenance_policy import normalize_maintenance_kind
 from kogwistar_llm_wiki.maintenance.maintenance_profiles import normalize_profile_ladder
+from kogwistar_llm_wiki.memory import MemoryRecord
 from kogwistar_llm_wiki.parsing import ParseTarget
 
 
@@ -196,3 +196,5 @@ def test_root_has_no_removed_functional_facades() -> None:
         "worker_state.py",
     }
     assert not {name for name in removed_facades if (root / name).exists()}
+
+
