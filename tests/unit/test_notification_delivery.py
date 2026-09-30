@@ -710,7 +710,8 @@ def test_notification_delivery_uses_real_kogwistar_durable_queue(namespace_engin
 def test_real_queue_claims_new_urgent_before_older_routine(namespace_engines) -> None:
     workspace_id = f"notification-priority-{uuid4().hex}"
     scheduler = NotificationDeliveryScheduler(engines=namespace_engines)
-    authorize = lambda *_: True
+    def authorize(*_):
+        return True
     for event_id, severity in (("routine-old", "normal"), ("urgent-new", "critical")):
         digest = build_notification_digest(
             [_event(event_id, severity=severity, workspace_id=workspace_id)],

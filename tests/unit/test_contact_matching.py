@@ -91,7 +91,8 @@ def test_exact_name_candidate_is_deterministic_but_single_common_name_is_ignored
         _observation("person-2", "chat", name="jordan  smith"),
         _observation("person-3", "calendar", name="Jordan"),
     )
-    authorize = lambda _workspace, _stream: True
+    def authorize(_workspace, _stream):
+        return True
 
     candidates = discover_contact_match_candidates(observations, authorize_stream=authorize)
     reversed_candidates = discover_contact_match_candidates(
@@ -239,7 +240,8 @@ def test_changed_source_revision_changes_evidence_snapshot_not_candidate_identit
         point=ContactPointClaim(channel="contact", value="address:alice"),
     )
     revised = second.model_copy(update={"evidence_revision_ids": ("revision:contacts-v2",)})
-    authorize = lambda _workspace, _stream: True
+    def authorize(_workspace, _stream):
+        return True
 
     original_candidate = discover_contact_match_candidates(
         (first, second), authorize_stream=authorize

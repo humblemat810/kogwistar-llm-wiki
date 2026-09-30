@@ -152,7 +152,8 @@ def test_event_evidence_source_must_have_its_own_acl_grant():
 
 def test_cli_notification_plugins_load_only_explicit_allowlist(monkeypatch):
     loaded = []
-    authorizer = lambda *_args: True
+    def authorizer(*_args):
+        return True
     adapter = FakeSource(("chat:team",))
 
     class EntryPoint:
