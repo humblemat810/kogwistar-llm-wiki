@@ -19,6 +19,15 @@ from kogwistar_llm_wiki import (
     build_in_memory_namespace_engines,
     build_workbench_handler,
 )
+from kogwistar_llm_wiki.app_contracts import (
+    WorkbenchExtension,
+    WorkbenchExtensionRequest,
+    WorkbenchExtensionResponse,
+    WorkbenchExtensionRoute,
+)
+from kogwistar_llm_wiki.app_contracts.workbench_extensions import (
+    index_workbench_extensions,
+)
 from kogwistar_llm_wiki.email import (
     EmailEvidenceRecord,
     EmailIngestRequest,
@@ -490,3 +499,128 @@ def test_workbench_http_auth_matrix_is_explicit_and_env_independent(monkeypatch,
         server.server_close()
         thread.join(timeout=5)
         engines.close()
+
+
+def test_workbench_extension_routes_use_host_acl_before_dispatch(monkeypatch):
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "static_token")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN", "extension-secret")
+    monkeypatch.setenv("LLM_WIKI_API_TOKEN_SCOPES", "read")
+    calls: list[WorkbenchExtensionRequest] = []
+
+    def handle(request: WorkbenchExtensionRequest) -> WorkbenchExtensionResponse:
+        calls.append(request)
+        return WorkbenchExtensionResponse(
+            {
+                "principal": request.identity.principal_id if request.identity else None,
+                "workspace_id": request.workspace_id,
+                "query": dict(request.query),
+                "payload": dict(request.payload),
+            }
+        )
+
+    extension = WorkbenchExtension(
+        "demo",
+        (
+            WorkbenchExtensionRoute(
+                "GET",
+                "/plugins/demo/status",
+                "read",
+                lambda query, _payload: query.get("workspace_id", (None,))[0],
+                handle,
+            ),
+            WorkbenchExtensionRoute(
+                "POST",
+                "/plugins/demo/action",
+                "write",
+                lambda _query, payload: str(payload.get("workspace_id") or "") or None,
+                handle,
+            ),
+        ),
+    )
+    engines = build_in_memory_namespace_engines()
+    api = WorkbenchApi(IngestPipeline(engines))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        build_workbench_handler(api, extensions=(extension,)),
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/plugins/demo/status?workspace_id=acme")
+        unauthorized = connection.getresponse()
+        unauthorized.read()
+        assert unauthorized.status == 401
+        assert calls == []
+
+        headers = {"Authorization": "Bearer extension-secret"}
+        connection.request(
+            "GET", "/plugins/demo/status?workspace_id=acme&view=compact", headers=headers
+        )
+        response = connection.getresponse()
+        result = json.loads(response.read())
+        assert response.status == 200
+        assert result == {
+            "principal": "llm-wiki-static-client",
+            "workspace_id": "acme",
+            "query": {"workspace_id": ["acme"], "view": ["compact"]},
+            "payload": {},
+        }
+
+        body = json.dumps({"workspace_id": "acme", "action": "test"}).encode()
+        connection.request(
+            "POST",
+            "/plugins/demo/action",
+            body=body,
+            headers={**headers, "content-type": "application/json"},
+        )
+        forbidden = connection.getresponse()
+        forbidden.read()
+        assert forbidden.status == 403
+        assert len(calls) == 1
+
+        monkeypatch.setenv("LLM_WIKI_API_TOKEN_SCOPES", "read,write")
+        connection.request(
+            "POST",
+            "/plugins/demo/action?source=mail",
+            body=body,
+            headers={**headers, "content-type": "application/json"},
+        )
+        accepted = connection.getresponse()
+        result = json.loads(accepted.read())
+        assert accepted.status == 200
+        assert result["workspace_id"] == "acme"
+        assert result["payload"] == {"workspace_id": "acme", "action": "test"}
+        assert calls[-1].query == {"source": ("mail",)}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        api.close()
+        engines.close()
+
+
+def test_workbench_extension_routes_must_be_namespaced_and_unique():
+    def respond(_request: WorkbenchExtensionRequest) -> WorkbenchExtensionResponse:
+        return WorkbenchExtensionResponse({"ok": True})
+
+    with pytest.raises(ValueError, match="namespaced"):
+        WorkbenchExtension(
+            "mail",
+            (
+                WorkbenchExtensionRoute(
+                    "GET", "/api/email/view", "read", lambda _q, _p: None, respond
+                ),
+            ),
+        )
+
+    duplicate = WorkbenchExtensionRoute(
+        "GET", "/plugins/mail/view", "read", lambda _q, _p: None, respond
+    )
+    with pytest.raises(ValueError, match="duplicate extension route"):
+        WorkbenchExtension("mail", (duplicate, duplicate))
+
+    with pytest.raises(ValueError, match="duplicate workbench extension"):
+        index_workbench_extensions(
+            (WorkbenchExtension("mail", (duplicate,)), WorkbenchExtension("mail", (duplicate,)))
+        )

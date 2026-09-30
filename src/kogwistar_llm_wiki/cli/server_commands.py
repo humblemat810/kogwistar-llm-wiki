@@ -153,6 +153,7 @@ def serve_combined(
     """Serve REST, MCP, and maintenance from one shared engine bundle."""
     from ..agent.gateway import AgentGateway
     from ..agent.mcp_server import build_agent_mcp
+    from ..app_contracts.workbench_extensions import load_workbench_extensions
     from ..daemon import MaintenanceDaemon
     from ..ingest_pipeline import IngestPipeline
     from ..workbench.workbench_api import WorkbenchApi
@@ -162,7 +163,20 @@ def serve_combined(
     pipeline = IngestPipeline(engines)
     api = WorkbenchApi(pipeline)
     stop_event = threading.Event()
-    server = create_workbench_server(api, host=args.host, port=args.port)
+    extension_ids = tuple(
+        item.strip()
+        for item in os.environ.get("LLM_WIKI_WORKBENCH_EXTENSIONS", "").split(",")
+        if item.strip()
+    )
+    try:
+        extensions = load_workbench_extensions(api, extension_ids)
+        server = create_workbench_server(
+            api, host=args.host, port=args.port, extensions=extensions
+        )
+    except Exception:
+        api.close()
+        close_engines(engines)
+        raise
     maintenance = MaintenanceDaemon(
         engines,
         args.workspace,

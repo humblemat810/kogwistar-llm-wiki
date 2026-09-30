@@ -5,10 +5,19 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Literal
 from urllib.parse import parse_qs, urlparse
 
 from ..agent.gateway import AgentGateway, _jsonrpc_result
+from ..app_contracts.workbench_extensions import (
+    WorkbenchExtension,
+    WorkbenchExtensionRequest,
+    WorkbenchExtensionResponse,
+    WorkbenchExtensionRoute,
+    index_workbench_extensions,
+)
 from ..configuration.identity import (
     IdentityError,
     auth_mode,
@@ -29,8 +38,11 @@ MCP_READ_TOOLS = frozenset({
 def build_workbench_handler(
     api: WorkbenchApi,
     gateway: AgentGateway | None = None,
+    *,
+    extensions: Sequence[WorkbenchExtension] = (),
 ) -> type[BaseHTTPRequestHandler]:
     gateway = gateway or AgentGateway(api)
+    extension_routes = index_workbench_extensions(extensions)
     agent_api_enabled = os.getenv("LLM_WIKI_AGENT_API_ENABLED", "").lower() in {"1", "true", "yes", "on"}
     # Resolve once during server construction so invalid auth configuration
     # fails before the REST listener accepts requests.
@@ -55,6 +67,20 @@ def build_workbench_handler(
                 self._write_html(render_email_viewer_plugin())
                 return
             try:
+                route = extension_routes.get(("GET", parsed.path))
+                if route is not None:
+                    workspace_id = route.workspace_id(query, {})
+                    self._require_scope(route.required_scope, workspace_id)
+                    response = self._dispatch_extension(
+                        route,
+                        method="GET",
+                        path=parsed.path,
+                        query=query,
+                        payload={},
+                        workspace_id=workspace_id,
+                    )
+                    self._write_extension_response(response)
+                    return
                 if parsed.path in {"/.well-known/agent.json", "/.well-known/agent-card.json", "/a2a/.well-known/agent-card"}:
                     self._require_agent_api()
                     base_url = os.getenv("LLM_WIKI_PUBLIC_BASE_URL", "").rstrip("/") or f"http://{self.headers.get('host', '127.0.0.1')}"
@@ -232,7 +258,8 @@ def build_workbench_handler(
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
-            if parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/email/accept", "/api/email/memory/promote", "/api/email/sync/enqueue", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
+            extension_route = extension_routes.get(("POST", parsed.path))
+            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/email/accept", "/api/email/memory/promote", "/api/email/sync/enqueue", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -240,9 +267,26 @@ def build_workbench_handler(
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")  # noqa: TRY004
-                workspace_id = _payload_workspace(payload)
+                extension_query = parse_qs(parsed.query)
+                workspace_id = (
+                    extension_route.workspace_id(extension_query, payload)
+                    if extension_route is not None
+                    else _payload_workspace(payload)
+                )
                 if selected_auth_mode == "kogwistar_jwt" and workspace_id is None:
                     raise IdentityError("workspace_id is required when JWT authorization is enabled", status=400)
+                if extension_route is not None:
+                    self._require_scope(extension_route.required_scope, workspace_id)
+                    response = self._dispatch_extension(
+                        extension_route,
+                        method="POST",
+                        path=parsed.path,
+                        query=extension_query,
+                        payload=payload,
+                        workspace_id=workspace_id,
+                    )
+                    self._write_extension_response(response)
+                    return
                 if parsed.path in agent_paths:
                     self._require_agent_api()
                     if parsed.path == "/a2a":
@@ -416,6 +460,36 @@ def build_workbench_handler(
             self.end_headers()
             self.wfile.write(encoded)
 
+        def _dispatch_extension(
+            self,
+            route: WorkbenchExtensionRoute,
+            *,
+            method: Literal["GET", "POST"],
+            path: str,
+            query: dict[str, list[str]],
+            payload: dict[str, object],
+            workspace_id: str | None,
+        ) -> WorkbenchExtensionResponse:
+            response = route.handler(
+                WorkbenchExtensionRequest(
+                    method=method,
+                    path=path,
+                    query={key: tuple(values) for key, values in query.items()},
+                    payload=payload,
+                    workspace_id=workspace_id,
+                    identity=getattr(self, "_identity_context", None),
+                )
+            )
+            if not isinstance(response, WorkbenchExtensionResponse):
+                raise TypeError("workbench extension handler must return WorkbenchExtensionResponse")
+            return response
+
+        def _write_extension_response(self, response: WorkbenchExtensionResponse) -> None:
+            if response.content_type == "text/html":
+                self._write_html(str(response.body), status=response.status)
+            else:
+                self._write_json(response.body, status=response.status)
+
         def _write_html(self, body: str, *, status: int = 200) -> None:
             encoded = body.encode("utf-8")
             self.send_response(status)
@@ -520,9 +594,17 @@ def serve_workbench(api: WorkbenchApi, *, host: str = "127.0.0.1", port: int = 8
         api.close()
 
 
-def create_workbench_server(api: WorkbenchApi, *, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+def create_workbench_server(
+    api: WorkbenchApi,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    extensions: Sequence[WorkbenchExtension] = (),
+) -> ThreadingHTTPServer:
     """Create, but do not start, a workbench server for combined mode."""
-    return ThreadingHTTPServer((host, port), build_workbench_handler(api))
+    return ThreadingHTTPServer(
+        (host, port), build_workbench_handler(api, extensions=extensions)
+    )
 
 
 def _first(values: dict[str, list[str]], key: str, default: str) -> str:
