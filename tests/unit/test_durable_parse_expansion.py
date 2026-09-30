@@ -3,9 +3,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
 
+import kogwistar_llm_wiki.maintenance.worker_parse as worker_parse_module
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipelineRequest
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
+from kogwistar_llm_wiki.models import NamespaceEngines
 from kogwistar_llm_wiki.parsing.parse_generation_store import ParseGenerationStore
 from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
 from kogwistar_llm_wiki.parsing.parse_views import (
@@ -28,6 +34,7 @@ from kogwistar_llm_wiki.worker import MaintenanceWorker
 def test_durable_frontier_write_is_member_tagged_before_view_activation(
     pipeline,
     ingest_request: IngestPipelineRequest,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = ingest_request.model_copy(
         update={"operation_mode": "maintenance_first", "parser_lane": "page_index"}
@@ -52,7 +59,23 @@ def test_durable_frontier_write_is_member_tagged_before_view_activation(
     ).get(session.session_id)
     assert stored is not None
 
-    worker = MaintenanceWorker(pipeline.engines)
+    provider_settings = WorkflowProviderSettings(
+        parser=ProviderEndpointConfig(
+            provider="openai",
+            model="local-bonsai-test",
+            base_url="http://127.0.0.1:8181/v1",
+            api_key_env="LLM_WIKI_LOCAL_MODEL_API_KEY",
+        )
+    )
+    captured_settings: list[WorkflowProviderSettings | None] = []
+    original_pipeline_type = worker_parse_module.IngestPipeline
+
+    def capture_pipeline(engines: NamespaceEngines, **kwargs: object) -> IngestPipeline:
+        captured_settings.append(kwargs.get("parser_provider_settings"))
+        return original_pipeline_type(engines, **kwargs)
+
+    monkeypatch.setattr(worker_parse_module, "IngestPipeline", capture_pipeline)
+    worker = MaintenanceWorker(pipeline.engines, provider_settings=provider_settings)
     result = worker._expand_durable_parse_frontier(
         SimpleNamespace(workspace_id=request.workspace_id, job_id="job-1", maintenance_kind="document_expand_parse_children"),
         stored[0],
@@ -64,6 +87,7 @@ def test_durable_frontier_write_is_member_tagged_before_view_activation(
     assert member_payload["frontier_id"]
     assert "diagnostics" in member_payload
     assert member_payload["parser_strategy"]
+    assert captured_settings == [provider_settings]
     assert result["members"][0]["parent_member_id"] is None
     with _temporary_namespace(pipeline.engines.kg, namespaces.source_space):
         nodes = pipeline.engines.kg.read.get_nodes(

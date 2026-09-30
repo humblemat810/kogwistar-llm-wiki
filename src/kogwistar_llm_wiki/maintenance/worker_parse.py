@@ -959,7 +959,10 @@ class DurableParseMaintenanceWorkerMixin:
         parser_request = source_request.model_copy(
             update={"raw_text": raw_text[selected.region.start_char : selected.region.end_char]}
         )
-        pipeline = IngestPipeline(self.engines)
+        pipeline = IngestPipeline(
+            self.engines,
+            parser_provider_settings=self.provider_settings,
+        )
         with parser_llm_cache_transaction() as parser_cache_transaction:
             parse_started = time.monotonic()
             parse_result = pipeline.parse_source(
