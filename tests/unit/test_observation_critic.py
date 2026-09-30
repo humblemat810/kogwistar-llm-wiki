@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 import kogwistar_llm_wiki.maintenance.observation_critic as critic_module
 from kogwistar_llm_wiki.daemons.maintenance_daemon import MaintenanceDaemonRuntime
@@ -18,6 +19,7 @@ from kogwistar_llm_wiki.maintenance.observation_critic import (
     ObservationCriticOutput,
     build_observation_critic,
     is_context_window_error,
+    safe_observation_critic_error_code,
 )
 from kogwistar_llm_wiki.maintenance.worker_observation import (
     MaintenanceObservationWorkerMixin,
@@ -254,6 +256,24 @@ def test_truncated_length_finish_is_treated_as_capacity_blocker() -> None:
     assert is_context_window_error(LengthFinishReasonError("structured output was truncated"))
 
 
+def test_critic_failure_diagnostics_are_safe_and_classified() -> None:
+    with pytest.raises(ValidationError) as captured:
+        ObservationCriticOutput.model_validate(
+            {"findings": [{"untrusted_field": "private model response"}]}
+        )
+
+    assert safe_observation_critic_error_code(captured.value) == "structured_schema_validation"
+    assert (
+        safe_observation_critic_error_code(
+            ValueError("critic finding must cite evidence IDs present in the observation frame")
+        )
+        == "finding_evidence_unmatched"
+    )
+    assert safe_observation_critic_error_code(ValueError("private model response")) == (
+        "invalid_critic_output"
+    )
+
+
 def test_context_limit_blocks_critic_and_pauses_durable_background_control(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -387,6 +407,30 @@ def test_worker_observation_critic_consumes_job_call_budget_once() -> None:
     assert len(calls) == 1
     assert ctx.payload["maintenance_budget_state"]["call_used"] == 1
     assert traces[0]["event"] == "maintenance_observation_critic_budget_exhausted"
+
+
+def test_worker_critic_failure_trace_excludes_exception_text() -> None:
+    traces: list[dict[str, object]] = []
+    worker = SimpleNamespace(
+        observation_critic=lambda *_args: (_ for _ in ()).throw(
+            ValueError("untrusted provider response must not be logged")
+        ),
+        _emit_trace=lambda event, **fields: traces.append({"event": event, **fields}),
+    )
+    ctx = SimpleNamespace(
+        workspace_id="demo",
+        job_id="job-failed-critic",
+        payload={"budgets": {"max_llm_calls": 1}},
+    )
+
+    status, findings = MaintenanceObservationWorkerMixin._run_observation_critic(
+        worker, ctx, _frame()
+    )
+
+    failure = next(item for item in traces if item["event"] == "maintenance_observation_critic_failed")
+    assert status == "failed" and findings == ()
+    assert failure["error_code"] == "invalid_critic_output"
+    assert "untrusted provider response" not in str(failure)
 
 
 def test_unavailable_expansion_session_does_not_enqueue_continuation() -> None:

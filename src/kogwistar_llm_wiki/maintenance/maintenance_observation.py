@@ -11,6 +11,8 @@ from typing import Literal
 from kogwistar.id_provider import stable_id
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..configuration.workspace import WorkspaceNamespaces
+
 SubjectKind = Literal["node", "edge", "hyperedge"]
 QualityVerdict = Literal[
     "adequate",
@@ -52,6 +54,7 @@ class ObservationSubject(BaseModel):
     source_document_id: str | None = None
     revision_id: str | None = None
     revision_document_id: str | None = None
+    source_digest: str | None = None
     parse_member_id: str | None = None
     acl_scope: str | None = None
     embedding_profile_fingerprint: str | None = None
@@ -105,7 +108,7 @@ class ObservationRuntimeLimits(BaseModel):
 
 
 class MaintenanceObservationFrame(BaseModel):
-    """A bounded frame; it contains metadata and IDs, never raw source text."""
+    """A bounded transient frame; raw excerpts are redacted before persistence."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -117,6 +120,7 @@ class MaintenanceObservationFrame(BaseModel):
     parent_context: tuple[dict[str, object], ...] = ()
     omitted_counts: dict[str, int] = Field(default_factory=dict)
     token_budget: int = Field(ge=1)
+    source_evidence_required: bool = False
     active_view_id: str | None = None
     active_view_version: int | None = Field(default=None, ge=1)
 
@@ -208,22 +212,40 @@ def _scoped_records(
         if workspace_id and workspace_id != subject.workspace_id:
             continue
         if namespace and namespace != subject.namespace:
-            continue
+            source_namespace = WorkspaceNamespaces(subject.workspace_id).source_space
+            if not (
+                record.get("evidence_role") == "authoritative_source"
+                and namespace == source_namespace
+            ):
+                continue
         if record.get("acl_authorized") is False or record.get("authorized") is False:
             continue
         if record.get("profile_compatible") is False:
             continue
+        record_metadata = record.get("metadata")
+        metadata = record_metadata if isinstance(record_metadata, Mapping) else {}
         record_revision = str(
-            record.get("source_revision_id") or record.get("revision_id") or ""
+            record.get("source_revision_id")
+            or record.get("revision_id")
+            or metadata.get("source_revision_id")
+            or metadata.get("revision_id")
+            or ""
         ).strip()
         if subject.revision_id and record_revision and record_revision != subject.revision_id:
             continue
-        record_revision_document = str(record.get("revision_document_id") or "").strip()
+        record_revision_document = str(
+            record.get("revision_document_id") or metadata.get("revision_document_id") or ""
+        ).strip()
         if (
             subject.revision_document_id
             and record_revision_document
             and record_revision_document != subject.revision_document_id
         ):
+            continue
+        record_digest = str(
+            record.get("source_digest") or metadata.get("source_digest") or ""
+        ).strip().lower()
+        if subject.source_digest and record_digest and record_digest != subject.source_digest.lower():
             continue
         record_profile = str(
             record.get("embedding_profile_fingerprint") or record.get("profile_fingerprint") or ""
@@ -248,6 +270,7 @@ def build_observation_frame(
     token_budget: int = 4_000,
     active_view_id: str | None = None,
     active_view_version: int | None = None,
+    source_evidence_required: bool = False,
 ) -> MaintenanceObservationFrame:
     """Build an auditable bounded frame before any semantic evaluation."""
 
@@ -279,6 +302,7 @@ def build_observation_frame(
                 "neighborhood": sorted(neighborhood, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
                 "parents": sorted(parents, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
                 "token_budget": budget,
+                "source_evidence_required": source_evidence_required,
             },
             sort_keys=True,
             default=str,
@@ -312,6 +336,7 @@ def build_observation_frame(
             "parent": omitted_parents,
         },
         token_budget=budget,
+        source_evidence_required=source_evidence_required,
         active_view_id=active_view_id,
         active_view_version=active_view_version,
         parent_context=parents,
@@ -380,6 +405,25 @@ def assess_observation_frame(
                 message=f"source interpretation is explicitly classified as {status}",
             )
         )
+    verified_source_present = any(
+        item.get("evidence_role") == "authoritative_source"
+        and item.get("source_evidence_status") == "span_verified"
+        for item in frame.source_context
+    )
+    if frame.source_evidence_required and not verified_source_present:
+        findings.append(
+            ObservationFinding(
+                code="source_evidence_unavailable",
+                verdict="review_required",
+                severity="error",
+                subject_id=frame.subject.subject_id,
+                evidence_ids=(frame.subject.subject_id,),
+                message="No digest-verified source span is available for this assessment.",
+                recommended_action="request_human_review",
+            )
+        )
+        selected_action = (action_priority["request_human_review"], "request_human_review")
+        selected_verdict = (action_priority["request_human_review"], "review_required")
     for finding in critic_findings:
         item_action = finding.recommended_action
         if item_action is None or item_action == "none":

@@ -11,7 +11,7 @@ from kg_doc_parser.workflow_ingest.providers import (
     WorkflowProviderSettings,
     build_chat_model,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .maintenance_observation import MaintenanceObservationFrame, ObservationFinding
 
@@ -63,6 +63,49 @@ def is_context_window_error(error: BaseException) -> bool:
             if isinstance(chained, BaseException):
                 pending.append(chained)
     return False
+
+
+def safe_observation_critic_error_code(error: BaseException) -> str:
+    """Classify critic failures without logging model output or exception text."""
+
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    value_errors: list[ValueError] = []
+    parse_failure = False
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, ValidationError):
+            return "structured_schema_validation"
+        if type(current).__name__ in {"OutputParserException", "JSONDecodeError"}:
+            parse_failure = True
+        if isinstance(current, ValueError):
+            value_errors.append(current)
+        for chained in (current.__cause__, current.__context__):
+            if isinstance(chained, BaseException):
+                pending.append(chained)
+    if parse_failure:
+        return "structured_output_parse_failure"
+    known_invariants = {
+        "observation critic finding messages must not exceed 200 characters": (
+            "finding_message_too_long"
+        ),
+        "critic finding subject_id does not match the reviewed subject": (
+            "finding_subject_mismatch"
+        ),
+        "critic finding must cite evidence IDs present in the observation frame": (
+            "finding_evidence_unmatched"
+        ),
+    }
+    for value_error in value_errors:
+        code = known_invariants.get(str(value_error))
+        if code is not None:
+            return code
+    if value_errors:
+        return "invalid_critic_output"
+    return "provider_failure"
 
 
 class ObservationCriticOutput(BaseModel):
@@ -159,4 +202,9 @@ def build_observation_critic(
     return critique
 
 
-__all__ = ["ObservationCriticOutput", "build_observation_critic", "is_context_window_error"]
+__all__ = [
+    "ObservationCriticOutput",
+    "build_observation_critic",
+    "is_context_window_error",
+    "safe_observation_critic_error_code",
+]

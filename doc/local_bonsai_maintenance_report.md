@@ -1184,3 +1184,115 @@ Model-size comparison sources: Apple's [MobileCLIP repository](https://github.co
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB
 checkpoint. This alternative is recorded for evaluation, not adopted.
+
+### Bonsai Runtime Follow-up (2026-09-30 18:48 UTC)
+
+- Cycle 714 was scheduled, processed by the Bonsai-backed worker, and
+  durably acknowledged. One critic round failed with `ValueError` and was
+  recorded as `quality_unknown`/human review; another returned `adequate` with
+  no findings. The bounded plan completed at `max_rounds_reached`; it did not
+  authorize a graph repair or new source ingestion. As in prior cycles, the
+  failure is not proven to be a context overflow.
+- Runtime provenance check found that the maintenance container was created
+  from this `feat/local-bonsai-maintenance` worktree's Compose files, while the
+  running MCP container has a read-only source bind from the separate
+  `feat/bonsai-maintenance-review` worktree. That review branch is an ancestor
+  already merged into this active feature branch; it is not a rebase target.
+  The source mismatch is recorded because live direct-MCP verification should
+  use a single known checkout, but the MCP service was not recreated during
+  this observation window to avoid dropping a potentially active bridge
+  session. This is not evidence that direct model-backed maintenance has
+  passed: the prior live direct request was acknowledged as a bounded no-op
+  without a provider call, and that requirement remains open.
+- Cycle 714 reinforces the mixed-result pattern: the configured frame can
+  produce an `adequate` response, but critic validation is not yet reliable
+  enough to authorize corpus expansion. No source documents were added; keep
+  the 8,192-token context and existing evidence limits unchanged.
+- GitHub's anonymous Actions API returned HTTP 403 during the check for
+  workflows triggered by report commit `a1792a4`; the browser fetch also
+  returned a cache miss. The earlier code commit `2a7335c` has verified green
+  workflows above, but checks for `a1792a4` are not independently verified in
+  this observation. Do not treat unavailable status as success.
+- At the 18:48 snapshot, the report update was the only local worktree change.
+  Monitoring remains time-bounded to 2026-10-01 00:48 UTC.
+
+### Source-Grounded Review Hardening (2026-09-30 19:30 UTC)
+
+- Live cycles 715–718 were scheduled and durably acknowledged. The reviewer
+  repeatedly reported `quality_unknown` after structured-output `ValueError`s;
+  the graph/source/relation/neighborhood groups were often omitted from the
+  bounded observation frame. An earlier cycle-714 `adequate` result therefore
+  did not prove that the model had actually seen authoritative source evidence.
+- The active feature branch now resolves a reviewed pointer to an immutable
+  source entity in the workspace source namespace, then requires exact
+  workspace, logical source identity, digest, requested revision/document pin,
+  bounded character span, and stored-excerpt agreement before invoking the
+  model critic. It scopes
+  reads through Kogwistar's namespace adapter, prioritizes the verified source
+  record within the frame budget, and fails closed to human review when proof
+  is missing. It does not mutate graph truth or source records.
+- Raw excerpts are transient model input only. Persisted audit and lane-reply
+  frame payloads redact `source_excerpt` while retaining revision, span, and
+  digest identifiers. Critic failures now emit a bounded safe error code rather
+  than logging untrusted exception text.
+- Added negative coverage for cross-namespace pointers, missing workspace
+  metadata, content and pinned-digest mismatches, revision/document mismatches,
+  unverifiable legacy documents, stale frame evidence, false-adequate
+  prevention, and excerpt redaction. The focused maintenance set passed
+  `69 passed`; full provider-free CI passed `835 passed, 6 skipped, 130
+  deselected` in 661.89 seconds. Full Ruff passes for changed files; the
+  repository's CI-critical Ruff selectors and `git diff --check` also pass.
+  A repository-wide Ruff run still reports 41 unrelated import-order findings;
+  they were not swept into this feature.
+- No new finance documents were added. No direct mutation was authorized by
+  the background reviews. Cycle 718 acknowledged despite two critic
+  validation failures; the current live image does not yet contain the new
+  evidence guard, so observations from that image remain historical evidence
+  only and must not be treated as source-verified review.
+- Runtime configuration check: maintenance chat is configured for
+  `openai`-compatible Bonsai at the local llama-server URL and model
+  `Ternary-Bonsai-2-27B-PTQ1_0`. No embedding-provider settings are present in
+  the running container. The app resolver consequently defaults to its
+  deterministic fake 2-D embedder when building a fresh engine. Do not silently
+  replace an existing profile: persisted vector-space compatibility has not yet
+  been proven. Candidate for a separate, CPU-only profile is BAAI
+  `bge-small-en-v1.5` (384 dimensions, 0.067 GB in FastEmbed's supported-model
+  table) served by Hugging Face TEI's CPU image and OpenAI-compatible endpoint.
+  Sources: [FastEmbed supported models](https://qdrant.github.io/fastembed/examples/Supported_Models/),
+  [TEI CPU images](https://github.com/huggingface/text-embeddings-inference#docker-images),
+  [TEI OpenAI embeddings API](https://huggingface.co/docs/text-embeddings-inference/quick_tour).
+  This is a researched candidate, not yet configured or used for this dataset.
+- PostgreSQL inspection confirms the live canonical graph schema has
+  `gke_nodes.embedding vector(2)`. Therefore a direct switch to the 384-D BGE
+  encoder would fail dimensional validation and must not be attempted against
+  this existing graph. CPU embeddings require a separately isolated vector
+  profile/store or a deliberate, tested migration and re-embedding plan; this
+  experiment has not done either.
+- Worktree remains on `feat/local-bonsai-maintenance`; `feat/bonsai-maintenance-review`
+  remains merged at `7b96d24`. No rebase of other feature branches is required.
+
+### Source-Grounded Review Follow-up (2026-09-30 19:50 UTC)
+
+- Focused validation of the current source-evidence implementation passes:
+  `63 passed` across evidence resolution, critic assessment, observation, and
+  persistence tests. Changed-file Ruff and `git diff --check` pass.
+- Fresh provider-free CI passes against this exact worktree:
+  `839 passed, 6 skipped, 130 deselected, 29 warnings` in 697.38 seconds.
+- Corrected two test fixtures so corrupted and legacy revision documents retain
+  the logical-source identity pinned by the source pointer. This keeps the
+  verifier's ordering meaningful: logical-source mismatch is rejected before
+  digest checks, while matching identities reach digest/legacy-evidence checks.
+- The live maintenance container is still the previously published `v0.5.1`
+  image, so its reviews do not exercise the new guard. Cycle 719 returned
+  `adequate`, but its frame omitted source, relation, and neighborhood evidence;
+  it is not evidence of a grounded review. Cycle 720 completed and was
+  acknowledged after two critic failures (`quality_unknown`). Cycle 721
+  completed at 19:52 UTC and was acknowledged; its first critic round failed,
+  while its second returned `adequate` with all source, relation, and
+  neighborhood groups omitted. It is not evidence of grounded quality. Cycle
+  722 was then scheduled at 19:58 UTC. No graph mutation or new source ingestion
+  was authorized. Grafana/OTLP remains unavailable and generates export
+  warnings without stopping the worker.
+- The local code change remains uncommitted on
+  `feat/local-bonsai-maintenance`. No other feature branch needs rebasing; the
+  old `feat/bonsai-maintenance-review` branch is already incorporated here.
