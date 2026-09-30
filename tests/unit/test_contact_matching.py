@@ -35,18 +35,18 @@ def _observation(
     )
 
 
-def test_shared_phone_links_email_and_im_observations_as_pending_candidate() -> None:
+def test_shared_claim_links_distinct_channels_as_pending_candidate() -> None:
     phone = ContactPointClaim(channel="phone", value="+14155550123")
-    email_side = ContactIdentityObservation(
+    address_side = ContactIdentityObservation(
         workspace_id="workspace-a",
-        stream_id="mail-stream",
-        entity_id="contact-email",
-        source_document_ids=("doc:contact-email",),
-        evidence_revision_ids=("revision:mail-message-1",),
+        stream_id="source-a",
+        entity_id="contact-address",
+        source_document_ids=("doc:contact-address",),
+        evidence_revision_ids=("revision:source-message-1",),
         observed_at_ms=100,
         display_names=("Morgan Lee",),
         contact_points=(
-            ContactPointClaim(channel="email", value="morgan@example.test"),
+            ContactPointClaim(channel="contact", value="address:morgan"),
             phone,
         ),
     )
@@ -61,14 +61,14 @@ def test_shared_phone_links_email_and_im_observations_as_pending_candidate() -> 
         contact_points=(
             phone,
             ContactPointClaim(
-                channel="im", provider="matrix", value="@morgan:example.test"
+                channel="im", provider="matrix", value="handle:morgan"
             ),
         ),
     )
     authorized: list[tuple[str, str]] = []
 
     candidates = discover_contact_match_candidates(
-        (chat_side, email_side),
+        (chat_side, address_side),
         authorize_stream=lambda workspace, stream: authorized.append((workspace, stream)) is None and True,
     )
 
@@ -76,18 +76,18 @@ def test_shared_phone_links_email_and_im_observations_as_pending_candidate() -> 
     candidate = candidates[0]
     assert candidate.semantic_decision == DisambiguationDecisionKind.AMBIGUOUS
     assert candidate.metadata["match_basis"] == "shared_contact_point"
-    assert candidate.metadata["channels"] == "email,im,phone"
+    assert candidate.metadata["channels"] == "contact,im,phone"
     assert candidate.metadata["matched_channels"] == "phone"
     assert candidate.metadata["automatic_merge"] is False
-    assert candidate.source_document_ids == ("chat-event:7", "doc:contact-email")
-    assert authorized == [("workspace-a", "chat-stream"), ("workspace-a", "mail-stream")]
+    assert candidate.source_document_ids == ("chat-event:7", "doc:contact-address")
+    assert authorized == [("workspace-a", "chat-stream"), ("workspace-a", "source-a")]
     assert "+14155550123" not in candidate.model_dump_json()
     assert "Morgan Lee" not in candidate.model_dump_json()
 
 
 def test_exact_name_candidate_is_deterministic_but_single_common_name_is_ignored() -> None:
     observations = (
-        _observation("person-1", "mail", name="Jordan Smith"),
+        _observation("person-1", "authorized-source", name="Jordan Smith"),
         _observation("person-2", "chat", name="jordan  smith"),
         _observation("person-3", "calendar", name="Jordan"),
     )
@@ -113,7 +113,7 @@ def test_unspaced_east_asian_full_names_are_reviewable_candidates(name: str) -> 
     candidates = discover_contact_match_candidates(
         (
             _observation("person-a", "contacts", name=name),
-            _observation("person-b", "mail", name=name),
+            _observation("person-b", "source", name=name),
         ),
         authorize_stream=lambda *_: True,
     )
@@ -128,7 +128,7 @@ def test_single_character_east_asian_name_stays_below_candidate_threshold() -> N
     candidates = discover_contact_match_candidates(
         (
             _observation("person-a", "contacts", name="?"),
-            _observation("person-b", "mail", name="?"),
+            _observation("person-b", "source", name="?"),
         ),
         authorize_stream=lambda *_: True,
     )
@@ -139,7 +139,7 @@ def test_single_character_east_asian_name_stays_below_candidate_threshold() -> N
 def test_similar_name_only_match_remains_review_candidate() -> None:
     candidates = discover_contact_match_candidates(
         (
-            _observation("person-1", "mail", name="Alicee Chan"),
+            _observation("person-1", "source", name="Alicee Chan"),
             _observation("person-2", "chat", name="Alice Chan"),
         ),
         authorize_stream=lambda _workspace, _stream: True,
@@ -156,10 +156,10 @@ def test_contact_point_verification_increases_candidate_score_without_auto_merge
             (
                 _observation(
                     "person-1",
-                    "mail",
+                    "source",
                     point=ContactPointClaim(
-                        channel="email",
-                        value="alice@example.test",
+                        channel="contact",
+                        value="address:alice",
                         verification=verification,  # type: ignore[arg-type]
                     ),
                 ),
@@ -167,8 +167,8 @@ def test_contact_point_verification_increases_candidate_score_without_auto_merge
                     "person-2",
                     "contacts",
                     point=ContactPointClaim(
-                        channel="email",
-                        value="alice@example.test",
+                        channel="contact",
+                        value="address:alice",
                         verification=verification,  # type: ignore[arg-type]
                     ),
                 ),
@@ -187,10 +187,10 @@ def test_contact_point_verification_increases_candidate_score_without_auto_merge
 def test_duplicate_contact_claim_order_cannot_change_match_score() -> None:
     first = _observation(
         "person-1",
-        "mail",
+        "source",
         point=ContactPointClaim(
-            channel="email",
-            value="alice@example.test",
+            channel="contact",
+            value="address:alice",
             verification="user_confirmed",
         ),
     )
@@ -202,10 +202,10 @@ def test_duplicate_contact_claim_order_cannot_change_match_score() -> None:
         evidence_revision_ids=("revision:person-2",),
         observed_at_ms=100,
         contact_points=(
-            ContactPointClaim(channel="email", value="alice@example.test"),
+            ContactPointClaim(channel="contact", value="address:alice"),
             ContactPointClaim(
-                channel="email",
-                value="alice@example.test",
+                channel="contact",
+                value="address:alice",
                 verification="provider_verified",
             ),
         ),
@@ -230,13 +230,13 @@ def test_duplicate_contact_claim_order_cannot_change_match_score() -> None:
 def test_changed_source_revision_changes_evidence_snapshot_not_candidate_identity() -> None:
     first = _observation(
         "person-1",
-        "mail",
-        point=ContactPointClaim(channel="email", value="alice@example.test"),
+        "source",
+        point=ContactPointClaim(channel="contact", value="address:alice"),
     )
     second = _observation(
         "person-2",
         "contacts",
-        point=ContactPointClaim(channel="email", value="alice@example.test"),
+        point=ContactPointClaim(channel="contact", value="address:alice"),
     )
     revised = second.model_copy(update={"evidence_revision_ids": ("revision:contacts-v2",)})
     authorize = lambda _workspace, _stream: True
@@ -255,19 +255,19 @@ def test_changed_source_revision_changes_evidence_snapshot_not_candidate_identit
 def test_changed_identity_claim_changes_evidence_snapshot_even_for_same_source_revision() -> None:
     left = _observation(
         "person-1",
-        "mail",
-        point=ContactPointClaim(channel="email", value="alice@example.test"),
+        "source",
+        point=ContactPointClaim(channel="contact", value="address:alice"),
     )
     right = _observation(
         "person-2",
         "contacts",
-        point=ContactPointClaim(channel="email", value="alice@example.test"),
+        point=ContactPointClaim(channel="contact", value="address:alice"),
     )
     changed_right = right.model_copy(
         update={
             "display_names": ("Alice Example",),
             "contact_points": (
-                ContactPointClaim(channel="email", value="alice-new@example.test"),
+                ContactPointClaim(channel="contact", value="address:alice-new"),
             ),
         }
     )
@@ -276,19 +276,19 @@ def test_changed_identity_claim_changes_evidence_snapshot_even_for_same_source_r
     after = contact_evidence_snapshot_id(left, changed_right, basis="shared_contact_point")
 
     assert before != after
-    assert "alice@example.test" not in before
+    assert "address:alice" not in before
 
 
 def test_contact_evidence_snapshot_is_workspace_scoped() -> None:
     left = _observation(
         "person-1",
-        "mail",
-        point=ContactPointClaim(channel="email", value="alice@example.test"),
+        "source",
+        point=ContactPointClaim(channel="contact", value="address:alice"),
     )
     right = _observation(
         "person-2",
         "contacts",
-        point=ContactPointClaim(channel="email", value="alice@example.test"),
+        point=ContactPointClaim(channel="contact", value="address:alice"),
     )
     other_workspace = tuple(
         observation.model_copy(update={"workspace_id": "workspace-b"})
@@ -312,16 +312,16 @@ def test_authorization_fails_closed_before_comparison() -> None:
     with pytest.raises(PermissionError, match="not authorized"):
         discover_contact_match_candidates(
             (
-                _observation("person-1", "mail", name="Jordan Smith"),
+                _observation("person-1", "authorized-source", name="Jordan Smith"),
                 _observation("person-2", "private-chat", name="Jordan Smith"),
             ),
             authorize_stream=authorize,
         )
-    assert checked == ["mail", "private-chat"]
+    assert checked == ["authorized-source", "private-chat"]
 
 
 def test_candidate_scan_rejects_mixed_workspaces_before_acl_calls() -> None:
-    first = _observation("person-1", "mail", name="Jordan Smith")
+    first = _observation("person-1", "authorized-source", name="Jordan Smith")
     second = _observation("person-2", "chat", name="Jordan Smith").model_copy(
         update={"workspace_id": "workspace-b"}
     )
@@ -344,7 +344,7 @@ def test_candidate_scan_rejects_mixed_workspaces_before_acl_calls() -> None:
         {"display_names": ("Jordan Smith\nforged",)},
         {"source_document_ids": ("doc:" + "x" * 513,)},
         {"contact_points": tuple(
-            ContactPointClaim(channel="email", value=f"u{index}@example.test")
+            ContactPointClaim(channel="contact", value=f"address:{index}")
             for index in range(129)
         )},
     ],
@@ -352,7 +352,7 @@ def test_candidate_scan_rejects_mixed_workspaces_before_acl_calls() -> None:
 def test_contact_observation_rejects_unbounded_or_controlled_identity_claims(changes) -> None:
     values = {
         "workspace_id": "workspace-a",
-        "stream_id": "mail",
+        "stream_id": "source",
         "entity_id": "person-1",
         "source_document_ids": ("doc:person-1",),
         "evidence_revision_ids": ("revision:1",),
@@ -366,7 +366,7 @@ def test_contact_observation_rejects_unbounded_or_controlled_identity_claims(cha
 
 
 def test_matcher_rejects_boolean_or_noninteger_work_bounds() -> None:
-    observation = _observation("person-1", "mail", name="Jordan Smith")
+    observation = _observation("person-1", "authorized-source", name="Jordan Smith")
     for kwargs in ({"max_observations": True}, {"max_candidates": 1.5}):
         with pytest.raises(ValueError, match="bounds must be positive"):
             discover_contact_match_candidates(
@@ -390,7 +390,7 @@ def test_candidate_scan_stops_at_bound_plus_one_before_acl_or_matching() -> None
     def observations():
         for index in range(20):
             consumed.append(index)
-            yield _observation(f"person-{index}", "mail", name="Jordan Smith")
+            yield _observation(f"person-{index}", "authorized-source", name="Jordan Smith")
 
     with pytest.raises(ValueError, match="exceeds max_observations"):
         discover_contact_match_candidates(

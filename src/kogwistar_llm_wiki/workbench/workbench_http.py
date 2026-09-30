@@ -168,6 +168,24 @@ def build_workbench_handler(
                     if body is None:
                         self._write_json({"error": "not_found"}, status=404)
                         return
+                elif parsed.path == "/api/contact-matches":
+                    workspace_id = _first(query, "workspace_id", "")
+                    if not workspace_id:
+                        raise ValueError("workspace_id is required")
+                    self._require_scope("read", workspace_id)
+                    body = api.list_contact_matches(
+                        workspace_id=workspace_id,
+                        limit=int(_first(query, "limit", "100")),
+                    )
+                elif parsed.path == "/api/address-book":
+                    workspace_id = _first(query, "workspace_id", "")
+                    if not workspace_id:
+                        raise ValueError("workspace_id is required")
+                    self._require_scope("read", workspace_id)
+                    body = api.list_address_book(
+                        workspace_id=workspace_id,
+                        limit=int(_first(query, "limit", "500")),
+                    )
                 else:
                     self._write_json({"error": "not_found"}, status=404)
                     return
@@ -185,7 +203,7 @@ def build_workbench_handler(
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
             extension_route = extension_routes.get(("POST", parsed.path))
-            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", *agent_paths}:
+            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -293,6 +311,18 @@ def build_workbench_handler(
                     status = 200
                 elif parsed.path == "/api/compose/check":
                     body = api.compose_check(payload)
+                    status = 200
+                elif parsed.path == "/api/contact-matches/decision":
+                    identity = getattr(self, "_identity_context", None)
+                    body = api.decide_contact_match(
+                        workspace_id=str(workspace_id or ""),
+                        candidate_key=payload.get("candidate_key"),
+                        evidence_snapshot_id=payload.get("evidence_snapshot_id"),
+                        expected_evidence_version=payload.get("expected_evidence_version"),
+                        decision=payload.get("decision"),
+                        confirmed=payload.get("confirmed"),
+                        actor_id=getattr(identity, "principal_id", None),
+                    )
                     status = 200
                 else:
                     body = api.validate_proposal(payload)

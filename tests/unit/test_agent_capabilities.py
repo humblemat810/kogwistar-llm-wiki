@@ -233,15 +233,15 @@ def test_agent_gateway_exposes_only_semantic_capability_names(pipeline):
 
 def test_resource_acl_is_generic_and_fails_closed(pipeline):
     api = WorkbenchApi(pipeline)
-    assert api.authorize_resource("workspace-a", "mailbox_stream", "stream-a", "read") is False
+    assert api.authorize_resource("workspace-a", "message_stream", "stream-a", "read") is False
     api._resource_authorizer = lambda workspace, kind, resource, action: (
         workspace,
         kind,
         resource,
         action,
-    ) == ("workspace-a", "mailbox_stream", "stream-a", "read")
-    assert api.authorize_resource("workspace-a", "mailbox_stream", "stream-a", "read") is True
-    assert api.authorize_resource("workspace-b", "mailbox_stream", "stream-a", "read") is False
+    ) == ("workspace-a", "message_stream", "stream-a", "read")
+    assert api.authorize_resource("workspace-a", "message_stream", "stream-a", "read") is True
+    assert api.authorize_resource("workspace-b", "message_stream", "stream-a", "read") is False
     api.close()
     pipeline.engines.close()
 
