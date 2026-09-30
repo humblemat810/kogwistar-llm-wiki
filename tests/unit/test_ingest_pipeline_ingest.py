@@ -4,7 +4,11 @@ from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.models import IngestPipelineRequest
 from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
-from kogwistar_llm_wiki.parsing.parse_views import SourceRegion, reparse_session_id
+from kogwistar_llm_wiki.parsing.parse_views import (
+    SourceRegion,
+    parse_session_id,
+    reparse_session_id,
+)
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
@@ -444,3 +448,78 @@ def test_run_hybrid_keeps_parse_but_queues_graph_patch_expansion(pipeline, inges
     jobs = pipeline.engines.conversation.jobs.list(namespace=ns.maintenance_jobs, limit=10)
     assert len(jobs) == 1
     assert jobs[0].payload["maintenance_kind"] == "document_expand_parse_children"
+
+
+def test_durable_parse_profile_can_retry_same_revision_with_new_bounded_budget(
+    pipeline,
+    ingest_request,
+) -> None:
+    base = ingest_request.model_copy(
+        update={
+            "operation_mode": "maintenance_first",
+            "parser_lane": "workflow_layered",
+            "raw_text": "AMD reported results and guidance for the quarter.",
+            "parse_limits": {
+                "wall_time_seconds": 900,
+                "token_budget": 4096,
+                "parser_profile": "bonsai-bounded",
+            },
+        }
+    )
+    first = pipeline.run(base)
+    extended = base.model_copy(
+        update={
+            "parse_limits": {
+                "wall_time_seconds": 2400,
+                "token_budget": 4096,
+                "parser_profile": "bonsai-bounded",
+            }
+        }
+    )
+    second = pipeline.run(extended)
+
+    revision = pipeline.source_revision(
+        request=base,
+        source_document_id=first.source_document_id,
+    )
+    assert first.source_document_id == second.source_document_id
+    assert revision.revision_document_id is not None
+    assert first.maintenance_job_id != second.maintenance_job_id
+
+    store = ParseSessionStore(
+        pipeline.engines.conversation.meta_sqlite,
+        workspace_id=base.workspace_id,
+    )
+    first_session = store.get(
+        parse_session_id(
+            workspace_id=base.workspace_id,
+            source_document_id=first.source_document_id,
+            source_revision_id=revision.revision_id,
+            parser_profile=pipeline._durable_parse_profile(base),
+        )
+    )
+    second_session = store.get(
+        parse_session_id(
+            workspace_id=base.workspace_id,
+            source_document_id=second.source_document_id,
+            source_revision_id=revision.revision_id,
+            parser_profile=pipeline._durable_parse_profile(extended),
+        )
+    )
+    assert first_session is not None and second_session is not None
+    assert first_session[0].revision_document_id == revision.revision_document_id
+    assert second_session[0].revision_document_id == revision.revision_document_id
+    assert first_session[0].generation_id != second_session[0].generation_id
+    assert first_session[0].wall_time_seconds == 900
+    assert second_session[0].wall_time_seconds == 2400
+
+
+def test_durable_parser_profile_is_validated(pipeline, ingest_request) -> None:
+    invalid = ingest_request.model_copy(update={"parse_limits": {"parser_profile": "  "}})
+    with pytest.raises(ValueError, match="parser_profile"):
+        pipeline._durable_parse_limits(invalid)
+    over_budget = ingest_request.model_copy(
+        update={"parse_limits": {"wall_time_seconds": 3601}}
+    )
+    with pytest.raises(ValueError, match="at most 3600"):
+        pipeline._durable_parse_limits(over_budget)

@@ -1296,3 +1296,54 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 - The local code change remains uncommitted on
   `feat/local-bonsai-maintenance`. No other feature branch needs rebasing; the
   old `feat/bonsai-maintenance-review` branch is already incorporated here.
+
+### Bonsai Durable Expansion Runtime Check (2026-10-01 23:25 UTC)
+
+- Correction to the earlier branch note: `feat/local-bonsai-maintenance` is the
+  active Bonsai branch and contains the host-side email implementation removal
+  via merge commit `6316778`; its current code commit is `bad2b40` and is pushed
+  to the matching origin branch. Do not rebase this worktree again for the
+  already-merged host change.
+- GitHub Actions for `bad2b40527c7d21c6647b692e5ab2f2bffa1c06f` completed:
+  full CI, PyPy 3.11 container smoke, experimental PyPy 3.12 beta, and slot /
+  runtime benchmark workflows all succeeded.
+- The separate provider-free full CI run in `.test/mcp2env` completed against
+  the pushed `bad2b40` code: `969 passed, 9 skipped, 130 deselected, 29
+  warnings` in 1216.52 seconds. No test failures were reported.
+- Runtime inspection shows the pinned AMD source remains unchanged and its
+  durable session (`e0026aa5-ede0-5608-a8cd-f87bfa63c72e`) is still expanding
+  with one unconsumed frontier item, zero committed parser calls, and no active
+  ParseView or parsed graph readiness. Two consecutive attempts reached the
+  parser's later stages but then failed with `TimeoutError` because the session
+  wall-time limit is 900 seconds. The third attempt is currently live.
+- Bonsai served successful completion responses, but they do not prove parser
+  output persistence: the worker checks elapsed time after `parse_source`
+  returns and raises before graph translation/persistence if 900 seconds has
+  elapsed. This repeats expensive work and leaves the durable frontier pending.
+  The current session limits are immutable and must not be edited directly in
+  the database. No additional source documents were added; graph quality,
+  crosslink quality, and follow-up/background maintenance success remain
+  unverified.
+- After the third attempt failed and immediately reclaimed the same job, the
+  maintenance container was stopped to prevent another wasted model cycle.
+  Compose could not resolve the currently missing `POSTGRES_PASSWORD` in this
+  shell, so Docker was asked to stop only `llm-wiki-maintenance-1`; it exited
+  137 after the 30-second graceful window. PostgreSQL, MCP, and Grafana remain
+  healthy/running, and no volumes were removed. The parser had not returned to
+  graph translation/persistence before termination; verify the source and
+  ParseView state again before resuming. The maintenance worker is currently
+  stopped and needs a rebuilt image plus a safely configured restart.
+- A local implementation now allows an explicitly named
+  `parse_limits.parser_profile` to create a distinct durable session/generation
+  for the unchanged source revision; request identity includes validated parse
+  limits, model, and parser lane so the retry receives a distinct job/session.
+  Explicit wall time is capped at 3,600 seconds. The current 2,400-second
+  example is within that hard bound. The final focused ingestion + durable
+  expansion regression suite passed (`19 passed`); the specifically named
+  same-revision retry test also passed, as did changed-file Ruff and
+  `git diff --check`. This code has not yet been deployed to the live stack or
+  pushed, so it is not an operational recovery yet.
+- The third live attempt ended at 23:42:57 UTC with the same post-parse
+  `TimeoutError`. The immutable source revision/digest remain unchanged; no
+  parse generation commit or ParseView activation occurred. Do not report the
+  parsing or crosslink quality requirement as met.

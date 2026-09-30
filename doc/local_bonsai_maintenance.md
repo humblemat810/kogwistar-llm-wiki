@@ -154,6 +154,20 @@ job rather than being replaced with the defaults.
 Direct parse requests retain their explicit budgets and their configured
 follow-up round limit.
 
+Durable parser requests may set `parse_limits.wall_time_seconds` (maximum
+3,600 seconds) and an explicit `parse_limits.parser_profile`. The profile is
+combined with the validated parse-limit fingerprint to form the derivation
+identity. This permits a bounded retry of the same immutable source revision
+with a larger wall-time budget without editing the existing session or
+generation. For example, a 900-second session and a 2,400-second retry are
+separate derivations even when they use the same named profile and bytes. The
+maintenance request identity also includes parse limits, so the retry is queued
+as a distinct job. Keep the original source URI and exact bytes; verify the new
+revision ID/digest is unchanged and the new session ID/generation ID differs.
+Only treat the retry as successful when its frontier is empty, the ParseView is
+active, and `parsed_graph_persisted` readiness is recorded. A model HTTP 200 or
+an exhausted wall budget is not parse success.
+
 If the configured provider reports a context-window/input-token overflow during
 an observation or parser call, the assessment/job is marked `blocked_context`,
 the current maintenance plan is terminated without retrying that job, and

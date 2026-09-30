@@ -121,7 +121,7 @@ class MaintenanceRequestMixin:
                 workspace_id=request.workspace_id,
                 source_document_id=source_document_id,
                 source_revision_id=revision.revision_id,
-                parser_profile=request.parser_lane,
+                parser_profile=self._durable_parse_profile(request),
             )
         else:
             layered_session_id = reparse_session_id(
@@ -174,6 +174,7 @@ class MaintenanceRequestMixin:
                 json.dumps(sorted(seed_node_ids), separators=(",", ":")),
                 json.dumps(bound_maintenance_context(maintenance_context), sort_keys=True),
                 target.model_dump_json() if target is not None else "",
+                json.dumps(self._durable_parse_limits(request), sort_keys=True, separators=(",", ":")),
             )
         )
         self._trace_step(

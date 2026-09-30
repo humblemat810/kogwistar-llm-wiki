@@ -65,7 +65,7 @@ class IngestPipelineRequest(ModeSlicingMixin, BaseModel):
     llm_model: DtoType[str | None] = None
     provenance_policy: DtoType[Literal["required", "optional", "disabled"]] = "optional"
     provenance: DtoType[dict[str, object] | None] = None
-    parse_limits: DtoType[dict[str, int | float]] = Field(default_factory=dict)
+    parse_limits: DtoType[dict[str, int | float | str]] = Field(default_factory=dict)
 
 
 @dataclass(slots=True)
