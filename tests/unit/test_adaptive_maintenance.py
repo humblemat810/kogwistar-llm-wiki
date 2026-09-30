@@ -93,10 +93,12 @@ def test_request_selection_excludes_inaccessible_nodes_and_edges(monkeypatch) ->
 
 
 def test_background_cycle_enqueues_fake_payload_with_recent_and_probe_halves(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_WIKI_MAINTENANCE_BACKGROUND_OBSERVATION_TOKEN_BUDGET", "1800")
+    monkeypatch.setenv("LLM_WIKI_MAINTENANCE_BACKGROUND_OBSERVATION_NEIGHBORHOOD_COUNT", "24")
     nodes = [
-        FakeNode("recent", [1.0, 0.0], updated_at_ms=20),
+        FakeNode("recent", [1.0, 0.0], workspace_id="demo", updated_at_ms=20),
         *[
-            FakeNode(f"explore-{index}", [0.0, 1.0], updated_at_ms=10 - index)
+            FakeNode(f"explore-{index}", [0.0, 1.0], workspace_id="demo", updated_at_ms=10 - index)
             for index in range(7)
         ],
     ]
@@ -131,6 +133,8 @@ def test_background_cycle_enqueues_fake_payload_with_recent_and_probe_halves(mon
     assert payload["mode"] == "background"
     assert payload["maintenance_kind"] == "review_maintenance_subject"
     assert payload["observation_subject"]["subject_id"] == payload["subject_id"]
+    assert payload["observation_token_budget"] == 1800
+    assert payload["observation_neighborhood_count"] == 24
     assert enqueued[0]["job_kind"] == "maintenance_job:review"
     assert payload["budgets"] == {"max_steps": 2, "max_llm_calls": 2}
     assert payload["embedding_exploration"]["strategy"] == "embedding_probe"
@@ -139,11 +143,66 @@ def test_background_cycle_enqueues_fake_payload_with_recent_and_probe_halves(mon
     assert any(item["reason"] == "semantic_similar" for item in payload["candidates"])
 
 
+def test_background_cycle_excludes_unscoped_and_operational_entities(monkeypatch) -> None:
+    nodes = [
+        FakeNode("knowledge", [1.0, 0.0], workspace_id="demo", entity_type="concept"),
+        FakeNode("unscoped", [0.0, 1.0], entity_type="concept"),
+        FakeNode("foreign", [0.0, 1.0], workspace_id="other", entity_type="concept"),
+        FakeNode(
+            "service_health_evt:daemon:1",
+            [0.0, 1.0],
+            workspace_id="demo",
+            entity_type="service_health_event",
+        ),
+        FakeNode(
+            "wf_run|run|abc",
+            [0.0, 1.0],
+            workspace_id="demo",
+            entity_type="workflow_run",
+        ),
+        FakeNode(
+            "step-exec",
+            [0.0, 1.0],
+            workspace_id="demo",
+            entity_type="workflow_step_exec",
+        ),
+    ]
+    enqueued: list[dict[str, object]] = []
+
+    class FakeJobs:
+        def list(self, **_kwargs):
+            return []
+
+        def enqueue(self, **kwargs):
+            enqueued.append(kwargs)
+            return str(kwargs["job_id"])
+
+    daemon = object.__new__(MaintenanceDaemon)
+    daemon.engines = SimpleNamespace(
+        kg=SimpleNamespace(read=SimpleNamespace(get_nodes=lambda **_: nodes)),
+        conversation=SimpleNamespace(jobs=FakeJobs()),
+    )
+    daemon.workspace_id = "demo"
+    daemon.background_interval = 1.0
+    daemon._last_background_cycle_at_ms = 0
+    daemon._cycle_number = 0
+    daemon._recent_background_ids = set()
+    daemon._worker = SimpleNamespace(_emit_trace=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(daemon_module, "_temporary_namespace", lambda *_args: nullcontext())
+
+    daemon._schedule_background_cycle(MaintenanceControlState(background_enabled=True))
+
+    assert len(enqueued) == 1
+    payload = enqueued[0]["payload"]
+    assert payload["subject_id"] == "knowledge"
+    assert [item["candidate_id"] for item in payload["candidates"]] == ["knowledge"]
+
+
 def test_background_cycle_identity_and_exclusions_survive_restart(tmp_path, monkeypatch) -> None:
     nodes = [
-        FakeNode("recent", [1.0, 0.0], updated_at_ms=20),
+        FakeNode("recent", [1.0, 0.0], workspace_id="demo", updated_at_ms=20),
         *[
-            FakeNode(f"explore-{index}", [0.0, 1.0], updated_at_ms=10 - index)
+            FakeNode(f"explore-{index}", [0.0, 1.0], workspace_id="demo", updated_at_ms=10 - index)
             for index in range(7)
         ],
     ]

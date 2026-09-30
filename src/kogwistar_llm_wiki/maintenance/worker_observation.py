@@ -505,22 +505,38 @@ class MaintenanceObservationWorkerMixin:
 
         ns = WorkspaceNamespaces(ctx.workspace_id)
         audit_key = f"observation:{assessment.assessment_id}"
-        with self._observation_namespace(ns.conv_bg):
-            self.engines.conversation.send_lane_message(
-                conversation_id=f"maintenance:{ctx.request_node_id}",
-                inbox_id="inbox:worker:maintenance:observation",
-                sender_id="lane:worker:maintenance",
-                recipient_id="lane:worker:maintenance-audit",
-                msg_type="maintenance.observation.assessment",
-                purpose="internal",
-                payload={
-                    "workspace_id": ctx.workspace_id,
-                    "job_id": ctx.job_id,
-                    "frame": frame.model_dump(mode="json"),
-                    "assessment": assessment.model_dump(mode="json"),
-                },
-                idempotency_key=audit_key,
-            )
+        try:
+            with self._observation_namespace(ns.conv_bg):
+                self.engines.conversation.send_lane_message(
+                    conversation_id=f"maintenance:{ctx.request_node_id}",
+                    inbox_id="inbox:worker:maintenance:observation",
+                    sender_id="lane:worker:maintenance",
+                    recipient_id="lane:worker:maintenance-audit",
+                    msg_type="maintenance.observation.assessment",
+                    purpose="internal",
+                    payload={
+                        "workspace_id": ctx.workspace_id,
+                        "job_id": ctx.job_id,
+                        "frame": frame.model_dump(mode="json"),
+                        "assessment": assessment.model_dump(mode="json"),
+                    },
+                    idempotency_key=audit_key,
+                )
+        except NotImplementedError:
+            # Some metadata stores can idempotently project messages but do not
+            # implement the optional row lookup used when replaying a message.
+            # Accept only a matching graph record in this workspace namespace.
+            with self._observation_namespace(ns.conv_bg):
+                persisted = self.engines.conversation.read.get_nodes(
+                    where={
+                        "artifact_kind": "lane_message",
+                        "idempotency_key": audit_key,
+                        "msg_type": "maintenance.observation.assessment",
+                    },
+                    limit=1,
+                )
+            if not persisted:
+                raise
 
     def _resolve_active_parse_view(self, subject: ObservationSubject) -> tuple[str | None, int | None, bool]:
         """Resolve derivation activity before allowing a subject to be reviewed."""

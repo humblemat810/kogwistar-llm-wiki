@@ -53,7 +53,9 @@ def is_context_window_error(error: BaseException) -> bool:
             )
         ).lower()
         exception_name = type(current).__name__.lower()
-        if "contextoverflow" in exception_name or any(
+        if exception_name in {"lengthfinishreasonerror", "maxoutputtokenserror"} or any(
+            marker in details for marker in ("finish_reason=length", "finish reason: length")
+        ) or "contextoverflow" in exception_name or any(
             marker in details for marker in _CONTEXT_LIMIT_MARKERS
         ):
             return True

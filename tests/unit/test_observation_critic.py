@@ -247,6 +247,13 @@ def test_provider_specific_context_overflow_exception_type_is_detected() -> None
     assert is_context_window_error(AnthropicContextOverflowError("request rejected"))
 
 
+def test_truncated_length_finish_is_treated_as_capacity_blocker() -> None:
+    class LengthFinishReasonError(Exception):
+        pass
+
+    assert is_context_window_error(LengthFinishReasonError("structured output was truncated"))
+
+
 def test_context_limit_blocks_critic_and_pauses_durable_background_control(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

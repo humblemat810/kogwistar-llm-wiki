@@ -978,16 +978,21 @@ background cycle is scheduled or that direct maintenance has been exercised.
   repair. It neither establishes the maximum context nor supports corpus
   expansion.
 
-### Runtime And CI Follow-up (2026-09-30 15:56 UTC)
+### Runtime And CI Follow-up (2026-09-30 16:13 UTC)
 
-- The maintenance container started at 13:33:53 UTC. Use 23:33:53 UTC as the
-  hard stop for this ten-hour monitoring window; do not extend it automatically.
+- The maintenance container started at 13:33:53 UTC, but scheduled background
+  maintenance was enabled at 14:48 UTC. Anchor the ten-hour observation window
+  to that activation and stop at 2026-10-01 00:48 UTC; do not extend it.
 - Scheduled cycles 694 and 695 each made two successful Bonsai calls and were
   acknowledged. Both final assessments remained `weak_label` with
   `review_parent` recommendations. Neither authorized graph mutation or source
-  expansion. Cycle 696 was scheduled at 15:54:55 UTC and had started when this
-  observation was recorded. The worker is keeping pace with the five-minute
-  cadence, though each two-call cycle takes about 5.5 minutes of dispatch time.
+  expansion. Cycle 696 also completed two calls and was acknowledged with the
+  same `weak_label`/`review_parent` outcome. Cycle 697's follow-up failed
+  closed and was deferred for human review; cycle 698's follow-up did likewise.
+  Neither created graph mutations. Cycle 699 was scheduled at 16:12:33 UTC and
+  was active at this observation. These dispatches take roughly 5.5 minutes,
+  close to the five-minute cadence; queue emptiness after completed cycles
+  indicates no accumulating backlog in the observed window.
 - The Bonsai endpoint remains responsive with the 27B model at `n_ctx=8192`.
   A point-in-time GPU sample showed 6,895 MiB of 8,192 MiB allocated and 0%
   utilization; this is an idle sample, not a peak-usage measurement. The
@@ -1002,11 +1007,163 @@ background cycle is scheduled or that direct maintenance has been exercised.
   (`16 passed`); the changed file's Ruff check, CI's `E4,E7,E9,F` selector, and
   `git diff --check` pass. A broader default Ruff run reports 65 `I001`
   import-order findings across the repository, unrelated to this socket fix.
-  GitHub CI has not yet rerun on this fix, so hosted green status remains
-  unverified.
+  Commit `35cdcd8` was pushed and hosted run
+  [36740812453](https://github.com/humblemat810/kogwistar-llm-wiki/actions/runs/36740812453)
+  completed successfully: the required CPython 3.12-3.14 and PyPy 3.11 tests,
+  lint, Rust checks, container smoke, and benchmark jobs all passed. The
+  separate optional PyPy 3.12 beta lane remains experimental and is not a
+  support gate.
 - Grafana remains stopped; failed OTLP exports are noisy but have not prevented
   local worker logs, provider calls, acknowledgements, or scheduling. Quality
   remains below the acceptance bar: keep the no-new-sources hold in place.
+
+### Runtime Follow-up (2026-09-30 16:41 UTC)
+
+- Cycles 699 and 701 completed two successful Bonsai calls each and were
+  acknowledged. Cycle 700's critic failed closed and was deferred. Cycle 701
+  assessed weak grounding, an unsupported `HAS_CHILD` relation, empty spans,
+  and missing relation provenance; it authorized no graph mutation. Cycle 702
+  was also safely deferred without a provider call because the available token
+  budget could not cover its estimated input plus the reserved completion.
+- The branch-built image `kogwistar-llm-wiki:bonsai-35cdcd8` was smoke-imported
+  successfully and initially ran as the maintenance container on the existing
+  `llm-wiki_app_data` volume. It was later replaced by the rebuilt feature
+  image described below. Postgres and MCP were not recreated.
+- Startup recovery took several minutes under the `0.20` CPU quota and Docker
+  temporarily marked the container unhealthy while waiting for its socket.
+  Temporarily raising only that container to one CPU allowed recovery to
+  complete; the report recorded 16,842 queues, 351 lane rows, 1,992
+  checkpoints, and 1,521 dead letters, with no repairs. This is evidence that
+  startup recovery cost is material for this persisted workload and should be
+  observed on future recreations; it is not evidence that the model or graph
+  is unhealthy.
+- The active feature image uses the requested Bonsai-compatible provider
+  configuration. Continue validating actual provider-call traces, not merely
+  the configured model name. No additional source documents or automatic graph
+  repairs are approved until grounding and relation provenance meet the review
+  bar. Grafana remains stopped, so OTLP export warnings persist.
+- The ten-hour monitoring deadline remains 2026-10-01 00:48 UTC, anchored to
+  background-work activation at 14:48 UTC. Do not extend it automatically.
+
+### Bonsai Runtime And Context Follow-up (2026-09-30 17:35 UTC)
+
+- The first container after the `35cdcd8` build did not receive
+  `KOGWISTAR_MAINTENANCE_API_KEY_ENV` or the configured local key. The overlay
+  now explicitly passes both through. Rendered Compose and the running
+  container confirm the Bonsai-compatible OpenAI endpoint, model, indirection
+  variable, and non-empty key; the key value is intentionally not recorded.
+- A duplicate observation-audit delivery exposed that Kogwistar's optional
+  lane-message projection lookup raises `NotImplementedError` on this backend
+  even though projection writes are idempotent. LLM-Wiki now tolerates only
+  that specific exception when it can verify the exact audit message already
+  exists in the workspace's internal conversation namespace. Missing records
+  still raise. A regression test covers both cases.
+- Cycles 704-707 made real local Bonsai calls. Cycle 704 initially failed
+  before inference because the API key was missing. Cycles 706's two requests
+  returned HTTP 200 but both ended with `LengthFinishReasonError`; the final
+  assessment was `quality_unknown`, the job was acknowledged, and no graph
+  mutations occurred. Cycle 707 returned HTTP 200 but the structured critic
+  rejected its response with `ValueError`; it also failed closed with
+  `quality_unknown` and no graph mutations. Cycle 707 survived container
+  recreation in the durable queue and was subsequently claimed and completed
+  by the replacement worker. Cycle 705's persisted assessment is also
+  `quality_unknown`. No source documents were added.
+- Cycle 706 demonstrates the 8,192-token server context can be exhausted by
+  large review prompts/responses: llama.cpp reported prompt sizes up to about
+  7,500 tokens, and GPU utilization peaked at 96% with 6,895 MiB of 8,192 MiB
+  allocated. This is not proof that the model's theoretical maximum is 8,192;
+  it is the only currently deployed context setting and the larger review
+  frames did not reliably produce valid structured output.
+- Background review settings were documented in the Bonsai env snippet but
+  were not consumed by the scheduler. The scheduler and Compose overlay now
+  honor `LLM_WIKI_MAINTENANCE_BACKGROUND_OBSERVATION_TOKEN_BUDGET` and
+  `LLM_WIKI_MAINTENANCE_BACKGROUND_OBSERVATION_NEIGHBORHOOD_COUNT`; the local
+  profile uses 1,800 evidence tokens and at most 24 neighbors to reserve more
+  room for a useful model response. These are bounded evidence limits, not a
+  reduction of the maintenance call budget.
+- The context guard now treats provider `LengthFinishReasonError` and explicit
+  `finish_reason=length` as capacity failures. It durably pauses request and
+  background maintenance rather than repeatedly spending time on truncated
+  structured responses. Cycle 707 used a payload queued before this guard and
+  before the smaller evidence limits; the next newly scheduled cycle is the
+  first production test of both changes.
+- The replacement maintenance image was built from the active feature branch
+  and deployed only to `llm-wiki-maintenance-1` on the existing
+  `llm-wiki_app_data` volume. Its socket is healthy, it has the Bonsai key and
+  the `1,800`/`24` limits, and its CPU cap is restored to `0.20`. Postgres and
+  MCP were left running. Recovery scanned 355 lanes and 16,945 queues in about
+  58 seconds when temporarily allowed one CPU; it reported no repairs. Grafana
+  remains stopped, so OTLP exporter warnings continue but have not prevented
+  scheduling or Bonsai calls.
+- A byte-for-byte verified copy of the active local `.env` was saved outside
+  the repository at `C:\Users\chanh\Documents\llm-wiki-bonsai-runtime-backup-2026-10-01.env`.
+  It contains private runtime credentials; do not commit or print it.
+- Focused verification after these changes: 54 unit tests passed, the CI Ruff
+  selector passed, and `git diff --check` passed. The ten-hour observation
+  deadline remains 2026-10-01 00:48 UTC; do not extend it.
+
+### Bonsai Runtime Follow-up (2026-09-30 17:43 UTC)
+
+- Cycle 708 was the first scheduled cycle using the reduced background review
+  frame (1,800 evidence tokens and at most 24 neighbors). The daemon scheduled
+  it, claimed it, renewed its lease during both review rounds, completed the
+  plan, and acknowledged the durable job. The container remained healthy.
+- The first model-backed observation completed with `adequate`, no findings,
+  and no recommended action. A second observation in the same bounded plan
+  failed with `ValueError`; the worker correctly recorded `quality_unknown`,
+  requested human review, and did not continue into a graph-repair action.
+  The logs intentionally record only the exception class because validation
+  errors can include untrusted model response content. The failure cause is
+  therefore not established as context overflow; unlike cycle 706, this run
+  did not report `LengthFinishReasonError`.
+- Cycle 708 took about 193 seconds from first dispatch to terminal plan
+  completion. This is materially shorter than earlier 5.5-minute cycles but is
+  still an individual sample, not a throughput guarantee. No source ingestion
+  or automatic graph mutation was authorized by the review result.
+- Host GPU utilization sampled at 0% after the cycle completed with about
+  6,895 MiB of 8,192 MiB allocated. This is an idle post-call sample and does
+  not establish peak utilization or the maximum safe context. Keep the verified
+  server context at 8,192; do not increase it based on model-card limits alone.
+- Grafana remains stopped and OTLP export continues to warn about unresolved
+  `grafana:4318`; local scheduling, inference, and durable acknowledgement were
+  unaffected in this cycle. The ten-hour observation deadline remains
+  2026-10-01 00:48 UTC; do not extend it.
+
+### Bonsai Runtime And CI Follow-up (2026-09-30 18:23 UTC)
+
+- Cycles 709-712 were all scheduled, processed, and durably acknowledged by
+  the healthy maintenance daemon. Cycle 709's two critic rounds failed closed
+  with `ValueError`; cycle 710's two rounds completed as `adequate`; cycle 711's
+  two rounds again failed closed with `ValueError`; cycle 712 had one
+  `ValueError` round and one `adequate` round. Failed rounds returned
+  `quality_unknown`/human-review findings. No cycle authorized an automatic
+  graph repair or source ingestion, and no new documents were added.
+- Cycle durations ranged from about 112 to 190 seconds across these four
+  cycles. Their outcomes show that the reduced frame can yield a valid critic
+  answer, but does not eliminate intermittent structured-output/validation
+  failures. The failures are not proven to be context overflows: their logged
+  exception class is `ValueError`, whereas known truncation is classified as a
+  context-limit failure. Keep the configured 8,192-token model context and the
+  hold on corpus expansion; do not infer a safe larger context or parsing
+  quality from a single `adequate` observation.
+- The first full local CI attempt used the host's unrelated global Python 3.13
+  installation (`mcp 1.25.0`) and failed 11 MCP 2.x tests at server
+  construction. A fresh ignored `.test/ci-venv` was then installed using the
+  exact CPython dependency sequence from `.github/workflows/ci.yml`; it
+  resolved MCP 2.2.0. The full provider-free CI marker passed there:
+  `827 passed, 6 skipped, 130 deselected` in 623.66 seconds. The focused
+  maintenance regression set, including slow persistence replay, also passed
+  (`28 passed`); the CI Ruff selector and `git diff --check` passed.
+- `git check-ignore` confirms `.test/` and its venv are ignored. The temporary
+  venv is local verification state only and must not be committed.
+- At this snapshot the maintenance container is healthy and Bonsai's
+  `/health` endpoint responds. Its `/slots` status shows server context 8,192;
+  the last host GPU sample was idle (0% utilization, 6,895 MiB allocated), so
+  it is not a peak-memory or maximum-context measurement. Grafana remains
+  stopped and OTLP export warnings persist without preventing the observed
+  provider calls or job acknowledgements.
+- Monitoring remains anchored to background-work activation at 14:48 UTC and
+  must stop at 2026-10-01 00:48 UTC, with no extension.
 
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
