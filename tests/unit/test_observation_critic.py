@@ -275,14 +275,20 @@ def test_parser_context_overflow_marks_job_final_and_does_not_retry() -> None:
         payload={"mode": "background"},
         claim_token="claim-parse-overflow",
     )
+    queued_request = SimpleNamespace(
+        job_id="job-request-after-overflow",
+        payload={"mode": "request"},
+        claim_token="claim-request-after-overflow",
+    )
     failed: list[tuple[object, ...]] = []
     retried: list[object] = []
+    requeued: list[object] = []
     paused: list[bool] = []
     traces: list[dict[str, object]] = []
 
     class Jobs:
         def __init__(self) -> None:
-            self.claims = [[job], []]
+            self.claims = [[job, queued_request], []]
 
         def require_available(self, **_kwargs: object) -> None:
             return None
@@ -295,6 +301,10 @@ def test_parser_context_overflow_marks_job_final_and_does_not_retry() -> None:
 
         def retry_or_fail(self, claimed_job: object, _error: Exception) -> None:
             retried.append(claimed_job)
+
+        def requeue_at_tail(self, queued_job: object, *, delay_seconds: int) -> None:
+            assert delay_seconds == 1
+            requeued.append(queued_job)
 
     worker = object.__new__(MaintenanceWorker)
     jobs = Jobs()
@@ -314,6 +324,7 @@ def test_parser_context_overflow_marks_job_final_and_does_not_retry() -> None:
     assert failed[0][0] == "job-parse-overflow"
     assert failed[0][2] == {"final": True, "claim_token": "claim-parse-overflow"}
     assert retried == []
+    assert requeued == [queued_request]
     assert paused == [True]
     assert worker.background_enabled is False
     assert worker.request_enabled is False

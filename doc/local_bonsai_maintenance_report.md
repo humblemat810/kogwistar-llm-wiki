@@ -601,7 +601,8 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
   Codex bridge or any future Claude adapter, remain a separate unverified item.
 - Regressions cover common context-limit wording, chained exceptions, durable
   full maintenance pause, assessment status, parser-job terminal failure, no
-  retry, claim-token fencing, provider-switch refresh, and no continuation.
+  retry, claim-token fencing, requeue of already-claimed work after abort,
+  provider-switch refresh, and no continuation.
   Focused maintenance/provider selection after the full-stop/fencing assertions:
   **63 passed**. The changed files pass Ruff `E402,E9,F` and `git diff --check`.
   A broader daemon-recovery selection was attempted but its seven persistent
