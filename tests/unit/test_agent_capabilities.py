@@ -128,6 +128,40 @@ def test_maintain_rejects_unknown_explicit_source_ids_without_partial_enqueue(pi
     pipeline.engines.close()
 
 
+def test_topic_maintenance_reuses_the_source_catalog(pipeline, monkeypatch):
+    gateway = AgentGateway(WorkbenchApi(pipeline))
+    gateway.ingest(
+        {
+            "workspace_id": "agent-maintenance-catalog",
+            "source_uri": "https://example.test/nvidia-source.txt",
+            "title": "NVIDIA source",
+            "raw_text": "NVIDIA develops GPUs for accelerated computing.",
+        }
+    )
+    original_source_documents = gateway._source_documents
+    source_document_reads = 0
+
+    def count_source_document_reads(workspace_id: str) -> list[dict[str, object]]:
+        nonlocal source_document_reads
+        source_document_reads += 1
+        return original_source_documents(workspace_id)
+
+    monkeypatch.setattr(gateway, "_source_documents", count_source_document_reads)
+    result = gateway.maintain(
+        {
+            "workspace_id": "agent-maintenance-catalog",
+            "topic": "NVIDIA",
+            "objective": "Review existing source",
+        }
+    )
+
+    assert result["status"] == "queued"
+    assert result["job_ids"]
+    assert source_document_reads == 1
+    gateway.api.close()
+    pipeline.engines.close()
+
+
 def test_required_provenance_rejects_missing_or_mismatched_evidence(pipeline):
     gateway = AgentGateway(WorkbenchApi(pipeline))
     with pytest.raises(ValueError, match="required provenance"):

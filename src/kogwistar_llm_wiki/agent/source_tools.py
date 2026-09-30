@@ -100,8 +100,10 @@ class AgentSourceMixin:
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
+        candidates: list[dict[str, object]] | None = None,
     ) -> IngestPipelineRequest | None:
-        candidates = self._source_documents(workspace_id)
+        if candidates is None:
+            candidates = self._source_documents(workspace_id)
         by_id = next(
             (item for item in candidates if source_document_id and str(item["id"]) == source_document_id),
             None,
@@ -203,10 +205,18 @@ class AgentSourceMixin:
             result.append(selected[2])
         return result
 
-    def _source_ids_for_topic(self, workspace_id: str, topic: str) -> list[str]:
+    def _source_ids_for_topic(
+        self,
+        workspace_id: str,
+        topic: str,
+        *,
+        candidates: list[dict[str, object]] | None = None,
+    ) -> list[str]:
         terms = {term.lower() for term in topic.split() if len(term) > 2}
         matches = []
-        for item in self._source_documents(workspace_id):
+        if candidates is None:
+            candidates = self._source_documents(workspace_id)
+        for item in candidates:
             haystack = " ".join(
                 [str(item["content"]), json.dumps(item["metadata"], sort_keys=True)]
             ).lower()

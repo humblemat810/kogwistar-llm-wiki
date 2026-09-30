@@ -862,6 +862,15 @@ background cycle is scheduled or that direct maintenance has been exercised.
   still stopped, so OTLP export errors continue and observability relies on
   container logs plus persisted control state. The `.test/` directory remains
   ignored (`git check-ignore .test/bonsai-runtime` succeeds).
+- The topic-based direct-request timeout was traced to repeated active-source
+  catalog scans: `maintain()` resolved topic matches by loading the full source
+  catalog, then `_load_source_request()` reloaded that catalog once per match.
+  The implementation now loads the catalog once and reuses it for topic
+  filtering and request construction. A regression test asserts exactly one
+  catalog read for a topic maintenance request; focused gateway tests pass
+  (**19 passed**) and Ruff passes. This code fix is not in the running image
+  yet, so live direct maintenance remains unverified until the updated app is
+  deployed and the same bounded MCP request returns a job ID.
 
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
