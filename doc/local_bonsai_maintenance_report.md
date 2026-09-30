@@ -867,10 +867,24 @@ background cycle is scheduled or that direct maintenance has been exercised.
   catalog, then `_load_source_request()` reloaded that catalog once per match.
   The implementation now loads the catalog once and reuses it for topic
   filtering and request construction. A regression test asserts exactly one
-  catalog read for a topic maintenance request; focused gateway tests pass
-  (**19 passed**) and Ruff passes. This code fix is not in the running image
-  yet, so live direct maintenance remains unverified until the updated app is
-  deployed and the same bounded MCP request returns a job ID.
+  catalog read for a topic maintenance request; focused gateway tests passed
+  (**19 passed**) and Ruff passed at that point. A second live probe with this
+  source change mounted read-only into the MCP container still exceeded 120
+  seconds without a tool response, HTTP inference request, or queued job. The
+  MCP container was stopped; no direct job was created. Thus the repeated scan
+  was a real inefficiency but not the only blocker.
+- Follow-up code inspection found the source enumeration itself is unbounded:
+  it calls `get_nodes(limit=None)` with default embeddings included and then
+  performs a named-projection lookup per logical source. Request token/call
+  budgets are applied only after this discovery and source hydration. The
+  feature branch now bounds topic discovery to 128 graph nodes, requests only
+  documents and metadata (not embeddings), and fails with an explicit request
+  for source IDs when the workspace exceeds the discovery limit. Explicit IDs
+  now resolve each source's active revision directly in the workspace source
+  namespace and avoid topic-catalog enumeration. Regression tests cover the
+  bound, payload selection, and direct-ID lookup without catalog scans; all 21
+  focused gateway tests pass and Ruff passes. The change is not in the running
+  image, so live direct maintenance remains unverified.
 
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0

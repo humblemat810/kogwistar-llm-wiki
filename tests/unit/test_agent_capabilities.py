@@ -128,6 +128,35 @@ def test_maintain_rejects_unknown_explicit_source_ids_without_partial_enqueue(pi
     pipeline.engines.close()
 
 
+def test_explicit_source_maintenance_resolves_revision_without_catalog_scan(pipeline, monkeypatch):
+    gateway = AgentGateway(WorkbenchApi(pipeline))
+    ingested = gateway.ingest(
+        {
+            "workspace_id": "agent-maintenance-explicit",
+            "source_uri": "https://example.test/explicit-source.txt",
+            "title": "Explicit source",
+            "raw_text": "A source should be resolved by its active revision.",
+        }
+    )
+
+    def reject_catalog_scan(_workspace_id: str) -> list[dict[str, object]]:
+        raise AssertionError("explicit IDs must not enumerate the source catalog")
+
+    monkeypatch.setattr(gateway, "_source_documents", reject_catalog_scan)
+    result = gateway.maintain(
+        {
+            "workspace_id": "agent-maintenance-explicit",
+            "source_document_ids": [ingested["artifacts"]["source_document_id"]],
+            "objective": "Review this source",
+        }
+    )
+
+    assert result["status"] == "queued"
+    assert result["job_ids"]
+    gateway.api.close()
+    pipeline.engines.close()
+
+
 def test_topic_maintenance_reuses_the_source_catalog(pipeline, monkeypatch):
     gateway = AgentGateway(WorkbenchApi(pipeline))
     gateway.ingest(
@@ -158,6 +187,25 @@ def test_topic_maintenance_reuses_the_source_catalog(pipeline, monkeypatch):
     assert result["status"] == "queued"
     assert result["job_ids"]
     assert source_document_reads == 1
+    gateway.api.close()
+    pipeline.engines.close()
+
+
+def test_source_topic_discovery_is_bounded_and_omits_embeddings(pipeline, monkeypatch):
+    gateway = AgentGateway(WorkbenchApi(pipeline))
+    read = gateway.api.pipeline.engines.kg.read
+    observed: dict[str, object] = {}
+
+    def oversized_read(**kwargs):
+        observed.update(kwargs)
+        return [object() for _ in range(129)]
+
+    monkeypatch.setattr(read, "get_nodes", oversized_read)
+    with pytest.raises(ValueError, match="pass explicit source_document_ids"):
+        gateway._source_documents("bounded-discovery")
+
+    assert observed["limit"] == 129
+    assert observed["include"] == ["documents", "metadatas"]
     gateway.api.close()
     pipeline.engines.close()
 

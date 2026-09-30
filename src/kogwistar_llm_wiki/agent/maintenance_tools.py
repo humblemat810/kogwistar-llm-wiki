@@ -53,8 +53,9 @@ class AgentMaintenanceToolsMixin:
         if not isinstance(raw_source_ids, (list, tuple, set, frozenset)):
             raise TypeError("source_document_ids must be a list of IDs")
         source_ids = [str(value) for value in raw_source_ids if str(value).strip()]
-        source_candidates = self._source_documents(workspace_id)
+        source_candidates: list[dict[str, object]] | None = None
         if not source_ids:
+            source_candidates = self._source_documents(workspace_id)
             source_ids = self._source_ids_for_topic(
                 workspace_id,
                 topic,
@@ -63,11 +64,17 @@ class AgentMaintenanceToolsMixin:
         source_requests: list[tuple[str, IngestPipelineRequest]] = []
         missing_source_ids: list[str] = []
         for source_id in source_ids:
-            request = self._load_source_request(
-                workspace_id=workspace_id,
-                source_document_id=source_id,
-                candidates=source_candidates,
-            )
+            if source_candidates is None:
+                request = self._load_source_request_by_id(
+                    workspace_id=workspace_id,
+                    source_document_id=source_id,
+                )
+            else:
+                request = self._load_source_request(
+                    workspace_id=workspace_id,
+                    source_document_id=source_id,
+                    candidates=source_candidates,
+                )
             if request is None:
                 missing_source_ids.append(source_id)
             else:
