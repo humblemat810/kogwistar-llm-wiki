@@ -12,9 +12,11 @@ job is still running now.
 - The maintenance image has since been rebuilt locally as
   `profchan/kogwistar-llm-wiki:v0.5.1`, image digest
   `a184edc272296d578b0226ba38ac3ba9b7aec4dff2d2fed710602347b90d2e55`.
-  The maintenance container was recreated from this local image and is healthy;
-  it now has a 16,000-token per-job background budget and a 4,096-token
-  reserved output cap per critic call.
+  The maintenance container was recreated from this local image and was
+  healthy at that observation; its job budget was 16,000 tokens. A 4,096-token
+  reserved output cap was believed to be configured then, but a later audit of
+  the current provider call path did not verify that the cap was actually
+  passed to the model.
 - The maintenance container is healthy and configured to use the OpenAI
   compatible adapter at `http://host.docker.internal:8181/v1`, model
   `Ternary-Bonsai-2-27B-PTQ1_0`.
@@ -155,12 +157,14 @@ evidence that Bonsai performed maintenance.
   created no automatic graph repair.
 - Cycle 497 ran the medium-effort critic but still stopped at exactly 1,024
   completion tokens with `finish_reason=length` (3,136 prompt tokens). This
-  exposed the separate provider-construction cap:
-  `KOGWISTAR_MAINTENANCE_MAX_OUTPUT_TOKENS=1024` was overriding the per-call
-  setting. At that point, the local `.env`, Compose fallback, and redacted
-  config backup were raised to 2,048. They are now at 4,096. Focused tests
-  after the diagnostic change passed (`40 passed`),
-  Ruff passed, and Compose configuration validation passed.
+  was initially attributed to the environment variable
+  `KOGWISTAR_MAINTENANCE_MAX_OUTPUT_TOKENS=1024`; the local `.env`, Compose
+  fallback, and redacted config backup were then raised to 2,048 and later
+  4,096. A subsequent source audit found no consumer of this variable in the
+  current checkout, so the historical causal attribution and claimed cap are
+  unverified and must not be relied upon. Focused tests after the then-current
+  diagnostic change passed (`40 passed`), Ruff passed, and Compose validation
+  passed.
 - Cycle 502 still stopped at exactly 4,096 completion tokens with
   `finish_reason=length`, indicating the real observation prompt can trigger
   excessive internal reasoning even with a reasoning budget. A same-sized
@@ -696,6 +700,20 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
   the matching vision projector is 629,246,976 bytes. The Windows launch script
   binds `0.0.0.0` for Docker Desktop reachability; firewall scoping remains an
   operator requirement.
+- A secret-redacted inspection of the active local `.env` confirms the
+  maintenance provider and its only provider-chain entry are `openai`, the
+  model is `Ternary-Bonsai-2-27B-PTQ1_0`, the endpoint is
+  `http://host.docker.internal:8181/v1`, and the configured background cadence
+  is 300 seconds. Secret values were not read or reported. Compose config-only
+  validation against `compose.yml`, `compose.memory-agent.yml`, and
+  `compose.embedding-clip-cpu.yml` succeeds and resolves PostgreSQL, combined
+  REST/MCP/maintenance, Grafana, and CPU CLIP services. No containers were
+  started. The environment requests background maintenance, but this does not
+  establish the durable maintenance-control state; the context circuit breaker
+  may still be latched from the prior run.
+- Removed the unused `KOGWISTAR_MAINTENANCE_MAX_OUTPUT_TOKENS` setting from the
+  Bonsai environment snippet. The current critic path does not consume it, so
+  leaving it there would imply a completion cap that is not implemented.
 
 ## Objective Acceptance Snapshot (2026-09-30)
 
