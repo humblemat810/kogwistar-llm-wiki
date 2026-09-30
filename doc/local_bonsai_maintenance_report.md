@@ -722,6 +722,39 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
   it is not evidence that Bonsai inference or live PostgreSQL persistence
   succeeds after restart.
 
+## Runtime Recheck After Host Restart (2026-09-30 12:56 UTC)
+
+- Docker Desktop is running. The Compose project had only the maintenance
+  container running; its Postgres, REST, MCP, and Grafana containers were
+  stopped. The maintenance container had restarted 83 times. Its health check
+  was green, but its startup log showed engine initialization failing because
+  the hostname `postgres` could not be resolved. A green container health
+  check therefore did not mean that maintenance was operational.
+- Started only the existing `postgres` Compose service. It became healthy and
+  reused the existing `llm-wiki_postgres_data` named volume; no volume was
+  removed or recreated. The maintenance daemon subsequently logged that it
+  started with a 10-second interval. This proves database/daemon startup only,
+  not a completed model-backed maintenance cycle.
+- The container's non-secret maintenance settings resolve to the
+  OpenAI-compatible provider with chain `openai`, the Bonsai model name,
+  `host.docker.internal:8181`, and nonzero bounded background budgets (2 calls,
+  16,000 tokens, 6 steps, 300 seconds). No secret values were inspected or
+  reported.
+- No host llama-server process was running. The custom executable and both
+  Bonsai model files are present, and the RTX 3080 Laptop GPU was idle with
+  8,192 MiB total memory. Thus no Bonsai inference or new graph writes were
+  observed during this recheck.
+- The Windows Private firewall profile currently has inbound action `Allow`.
+  The current account is not elevated. The checked-in launcher binds to
+  `0.0.0.0`, which would expose the unauthenticated local inference endpoint
+  on more than the Docker path under that firewall policy. I did not start it
+  with that exposure. The supplied `127.0.0.1` binding also cannot be assumed
+  reachable from the Compose container. A verified Docker-only host binding or
+  an appropriately scoped firewall configuration is still required before
+  model-backed maintenance can safely resume.
+- Two pytest processes belonging to an already-running unit-CI invocation
+  were present and were left untouched. No CI or runtime process was killed.
+
 ## Objective Acceptance Snapshot (2026-09-30)
 
 | Requirement | Current evidence | Status |
