@@ -608,11 +608,16 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
   Ruff and diff checks passed. It remains unmerged and is not yet pinned by
   LLM-Wiki.
 - The parser feature commit `e9c0fbe` was pushed to
-  `feat/provider-generation-bounds`. GitHub Actions has not run for that branch:
+  `feat/provider-generation-bounds`; follow-up `09aec68` adds explicit
+  Anthropic context-overflow type coverage. GitHub Actions has not run for that branch:
   the parser workflow is configured for pushes to `main` and pull requests
   targeting `main`, not arbitrary branch pushes. The branch still needs a PR
   before its remote CI status can be verified; the local full marker suite is
   green.
+- The LLM-Wiki context-stop/provider-refresh implementation was committed and
+  pushed as `9376650` on `feat/bonsai-maintenance-review`. GitHub Actions has no
+  run associated with this branch and no pull request is currently associated
+  with it; its local focused suite is green, but remote CI remains unverified.
 
 - Re-ran the focused embedding-service suites after confirming that the CPU
   CLIP encoder calls its learned text and image projection heads:
