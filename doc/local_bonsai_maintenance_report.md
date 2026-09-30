@@ -111,6 +111,24 @@ evidence that Bonsai performed maintenance.
 - These were local, offline model checks only. No service was started, no
   database/vector store was written, and the existing `vector(2)` graph remains
   unsuitable for this 512-D profile without a separately reviewed graph/profile.
+
+## Offline Feature-Branch CI Follow-Up (2026-09-30)
+
+- On `feat/bonsai-maintenance-review`, the regular provider-free CI marker ran
+  under CPython 3.13.3 against the exact Kogwistar, KG Doc Parser, and Obsidian
+  sink SHAs pinned in `.github/workflows/ci.yml`: `852 passed, 6 skipped,
+  130 deselected` in 499.88 seconds. Pytest cache was disabled, matching the
+  repository guidance for this workspace.
+- The first local attempts stopped at workflow-layout assumptions because the
+  clean feature worktree did not contain sibling dependency checkouts. After
+  checking out all three exact workflow-pinned revisions into their expected
+  paths, the full selected marker passed. These were temporary local dependency
+  worktrees, not changes to vendor pins.
+- Targeted maintenance-observation tests also passed (`30 passed`), and Ruff
+  passed for the changed implementation/tests. `.test/` remains ignored by
+  Git. The feature branch push has no GitHub check run because the regular CI
+  workflow triggers on pull requests and `main`, not feature-branch pushes;
+  this local run is not presented as hosted CI evidence.
 - The background scheduler's implicit limits remain 4 steps/180 seconds, but
   the dedicated Bonsai profile's explicit 6-step/300-second values are read and
   propagated into queued jobs. Added a regression assertion for both the
