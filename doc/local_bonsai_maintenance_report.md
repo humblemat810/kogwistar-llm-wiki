@@ -129,6 +129,11 @@ evidence that Bonsai performed maintenance.
   Git. The feature branch push has no GitHub check run because the regular CI
   workflow triggers on pull requests and `main`, not feature-branch pushes;
   this local run is not presented as hosted CI evidence.
+- A follow-up focused run on the pushed tree covered provider configuration,
+  observation assessment/persistence, continuation scheduling, adaptive
+  background maintenance, and profile state: `60 passed` in 4.64 seconds.
+  The Bonsai provider test asserts that the provider chain remains pinned to
+  the local OpenAI-compatible endpoint without Ollama fallback.
 - The background scheduler's implicit limits remain 4 steps/180 seconds, but
   the dedicated Bonsai profile's explicit 6-step/300-second values are read and
   propagated into queued jobs. Added a regression assertion for both the
