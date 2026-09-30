@@ -5,13 +5,18 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.resolvers import MappingStepResolver
 from kogwistar.runtime.runtime import WorkflowRuntime
 
 from .configuration.workspace import WorkspaceNamespaces
+from .disambiguation.contact_book import (
+    ContactScanObservationProvider,
+    compose_contact_scan_observation_providers,
+)
+from .disambiguation.contact_matching import ContactIdentityObservation
 from .maintenance import (
     MaintenanceJobExecutionContext,
     build_default_maintenance_strategy_registry,
@@ -112,6 +117,12 @@ class MaintenanceWorker(
             [object, MaintenanceJobExecutionContext], Mapping[str, object]
         ] | None = None,
         context_limit_sink: Callable[[], None] | None = None,
+        contact_observation_provider: Callable[
+            [str, Mapping[str, object]], Iterable[ContactIdentityObservation]
+        ] | None = None,
+        contact_observation_providers: Mapping[str, ContactScanObservationProvider]
+        | None = None,
+        contact_stream_authorizer: Callable[[str, str], bool] | None = None,
     ) -> None:
         """
         Initialize the MaintenanceWorker.
@@ -148,6 +159,18 @@ class MaintenanceWorker(
             self.provider_settings
         )
         self.context_limit_sink = context_limit_sink
+        if contact_observation_provider is not None and contact_observation_providers is not None:
+            raise ValueError("configure contact_observation_provider or contact_observation_providers, not both")
+        if contact_observation_providers is not None:
+            if contact_stream_authorizer is None:
+                raise ValueError("composed contact sources require an explicit stream authorizer")
+            compose = compose_contact_scan_observation_providers(contact_observation_providers)
+            self.contact_observation_provider = lambda workspace_id, payload: compose(
+                workspace_id, payload, contact_stream_authorizer
+            )
+        else:
+            self.contact_observation_provider = contact_observation_provider
+        self.contact_stream_authorizer = contact_stream_authorizer
         self.telemetry = LlmWikiTelemetry.from_environment()
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()

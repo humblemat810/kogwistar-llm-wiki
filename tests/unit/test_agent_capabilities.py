@@ -306,10 +306,25 @@ def test_agent_gateway_exposes_only_semantic_capability_names(pipeline):
     assert gateway.mcp_tool_names() == (
         "query", "search", "ingest", "source", "reingest", "maintain",
         "status", "hypergraph_search", "history", "memory_recall",
-        "memory_capture", "memory_review", "email_view", "email_propose", "email_accept", "propose", "confirm",
+        "memory_capture", "memory_review", "propose", "confirm",
     )
     assert set(gateway.mcp_tool_names()) == set(gateway.mcp_tool_descriptions())
     gateway.api.close()
+    pipeline.engines.close()
+
+
+def test_resource_acl_is_generic_and_fails_closed(pipeline):
+    api = WorkbenchApi(pipeline)
+    assert api.authorize_resource("workspace-a", "message_stream", "stream-a", "read") is False
+    api._resource_authorizer = lambda workspace, kind, resource, action: (
+        workspace,
+        kind,
+        resource,
+        action,
+    ) == ("workspace-a", "message_stream", "stream-a", "read")
+    assert api.authorize_resource("workspace-a", "message_stream", "stream-a", "read") is True
+    assert api.authorize_resource("workspace-b", "message_stream", "stream-a", "read") is False
+    api.close()
     pipeline.engines.close()
 
 

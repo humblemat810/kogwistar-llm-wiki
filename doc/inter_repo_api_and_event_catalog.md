@@ -5,9 +5,7 @@ flowchart LR
     CORE[Kogwistar events and APIs] --> PARSER[Parser contracts]
     CORE --> APP[LLM-Wiki orchestration]
     CORE --> SINK[Sink projection contracts]
-    CORE --> EMAIL[Email plugin source contracts]
     PARSER --> APP
-    EMAIL --> APP
     APP --> SINK
 ```
 
@@ -18,7 +16,6 @@ This document defines the concrete interaction surface across:
 - `kogwistar`
 - `kg-doc-parser`
 - `kogwistar-obsidian-sink`
-- `kogwistar-email-plugin`
 - `kogwistar-llm-wiki`
 
 It focuses on:
@@ -41,8 +38,6 @@ This document is intentionally implementation-oriented.
 - `kogwistar` owns authoritative graph state and event history
 - `kg-doc-parser` owns parsing and grounded extraction outputs
 - `kogwistar-obsidian-sink` owns vault materialization behavior
-- `kogwistar-email-plugin` owns mailbox adapters, MIME parsing, and the email
-  ontology package
 - `kogwistar-llm-wiki` owns product behavior and maintenance policy
 
 ### 2.2 Interaction Modes

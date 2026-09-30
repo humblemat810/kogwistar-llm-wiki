@@ -11,38 +11,29 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
 from typing import Any, cast
 
-from ..memory import MemoryService
 from ..compose.options import ComposeOptions, validate_options
 from ..compose.rendering import render_compose
 from ..compose.validation import check_compose_text
 from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
-from ..email import (
-    EmailEvidenceRecord,
-    EmailEvidenceStore,
-    EmailIngestRequest,
-    EmailMappingProposal,
-    EmailMappingProposalStore,
-    EmailMemoryPromotionService,
-    EmailOntologyCatalog,
-    EmailProposalMaterializer,
-    EmailReviewState,
-    EmailReviewStateStore,
-    EmailRuntime,
-    EmailSyncJobRequest,
-    EmailSyncJobScheduler,
-    EmailViewer,
-    InMemoryEmailMappingProposalStore,
-    InMemoryEmailReviewStateStore,
-    default_deny_email_stream,
+from ..disambiguation.contact_book import (
+    ContactObservationProvider,
+    build_address_book_projection,
 )
+from ..disambiguation.contact_matching import (
+    ContactIdentityObservation,
+    contact_evidence_snapshot_id,
+    contact_match_basis,
+)
+from ..disambiguation.disambiguation_contracts import DisambiguationDecisionKind
+from ..disambiguation.service import DisambiguationService
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from ..maintenance.maintenance_patches import MaintenancePatch
+from ..memory import MemoryService
 from ..providers.model_catalog import available_models
 from .investigation_history import InvestigationHistoryRecord
 from .semantic_lens import (
@@ -79,12 +70,9 @@ class WorkbenchApi:
         codex_worker_count: int = 0,
         trace_sink: Callable[[dict[str, object]], None] | None = None,
         settings_path: str | None = None,
-        email_evidence_store: EmailEvidenceStore | None = None,
-        email_authorize_stream: Callable[[str, str], bool] | None = None,
-        email_review_store: EmailReviewStateStore | None = None,
-        email_mapping_proposal_store: EmailMappingProposalStore | None = None,
-        email_ontology_catalog_factory: Callable[[str], EmailOntologyCatalog] | None = None,
-        email_sync_scheduler: EmailSyncJobScheduler | None = None,
+        resource_authorizer: Callable[[str, str, str, str], bool] | None = None,
+        contact_authorize_stream: Callable[[str, str], bool] | None = None,
+        contact_observation_provider: ContactObservationProvider | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = MemoryService(pipeline.engines)
@@ -95,31 +83,12 @@ class WorkbenchApi:
         )
         self.agent_responder = agent_responder
         self.cockpit_responder = cockpit_responder
-        email_authorizer = email_authorize_stream or default_deny_email_stream
-        self.email_runtime = EmailRuntime(
-            pipeline=pipeline,
-            store=email_evidence_store,
-            authorize_stream=email_authorizer,
+        self._resource_authorizer = resource_authorizer
+        self._contact_authorize_stream = contact_authorize_stream or (
+            lambda _workspace_id, _stream_id: False
         )
-        self.email_review_store = email_review_store or InMemoryEmailReviewStateStore()
-        self.email_mapping_proposal_store = (
-            email_mapping_proposal_store or InMemoryEmailMappingProposalStore()
-        )
-        self.email_viewer = EmailViewer(
-            self.email_runtime.store,
-            authorize_stream=email_authorizer,
-            review_store=self.email_review_store,
-        )
-        self.email_materializer = EmailProposalMaterializer()
-        self.email_memory_promoter = EmailMemoryPromotionService(
-            evidence_store=self.email_runtime.store,
-            review_store=self.email_review_store,
-            memory_service=self.codex_memory,
-            authorize_stream=email_authorizer,
-        )
-        self._email_ontology_catalog_factory = email_ontology_catalog_factory
-        self._email_ontology_catalogs: dict[str, EmailOntologyCatalog] = {}
-        self._email_sync_scheduler = email_sync_scheduler
+        self._contact_acl_configured = contact_authorize_stream is not None
+        self._contact_observation_provider = contact_observation_provider
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
         self._confirmation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._confirmation_locks_guard = threading.Lock()
@@ -133,6 +102,210 @@ class WorkbenchApi:
                 trace_sink=trace_sink,
             )
             self.dispatcher = CodexWorkbenchDispatcher(worker, worker_count=codex_worker_count)
+
+    def authorize_resource(
+        self, workspace_id: str, resource_type: str, resource_id: str, action: str
+    ) -> bool:
+        """Fail closed unless the host supplies an application resource ACL."""
+        authorizer = self._resource_authorizer
+        return bool(
+            authorizer
+            and authorizer(workspace_id, resource_type, resource_id, action)
+        )
+
+    def list_contact_matches(
+        self, *, workspace_id: str, limit: int = 100
+    ) -> dict[str, object]:
+        """List bounded, ACL-visible contact review suggestions."""
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise ValueError("workspace_id must not be empty")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        service = DisambiguationService(self.pipeline.engines)
+        candidates = service.list_current_contact_candidates(
+            workspace_id=workspace_id,
+            authorize_stream=self._contact_authorize_stream,
+            limit=limit,
+        )
+        observations = (
+            self._load_authorized_contact_observations(workspace_id)
+            if candidates and self._contact_acl_configured
+            else {}
+        )
+        results: list[dict[str, object]] = []
+        for candidate in candidates:
+            result = candidate.model_dump(mode="json")
+            pair = [
+                observations[entity_id]
+                for entity_id in candidate.entity_ids
+                if entity_id in observations
+            ]
+            if len(pair) == 2 and contact_match_basis(pair[0], pair[1]) != candidate.metadata.get(
+                "match_basis"
+            ):
+                continue
+            current = len(pair) == 2 and contact_evidence_snapshot_id(
+                pair[0], pair[1], basis=str(candidate.metadata.get("match_basis") or "")
+            ) == candidate.evidence_snapshot_id
+            result["evidence_available"] = current
+            result["evidence_stale"] = bool(pair) and not current
+            result["evidence"] = [
+                {
+                    "entity_id": item.entity_id,
+                    "stream_id": item.stream_id,
+                    "display_names": list(item.display_names),
+                    "contact_points": [point.model_dump(mode="json") for point in item.contact_points],
+                    "source_document_ids": list(item.source_document_ids),
+                    "evidence_revision_ids": list(item.evidence_revision_ids),
+                }
+                for item in pair
+            ] if current else []
+            results.append(result)
+        return {
+            "status": "ok",
+            "workspace_id": workspace_id,
+            "candidate_window_may_be_incomplete": len(candidates) >= limit,
+            "results": results,
+        }
+
+    def decide_contact_match(
+        self,
+        *,
+        workspace_id: str,
+        candidate_key: str,
+        evidence_snapshot_id: str,
+        expected_evidence_version: int,
+        decision: str,
+        confirmed: bool,
+        actor_id: str | None = None,
+    ) -> dict[str, object]:
+        """Record confirmed identity judgment; never apply a graph patch here."""
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise ValueError("workspace_id must not be empty")
+        if (
+            not isinstance(candidate_key, str)
+            or len(candidate_key) != 78
+            or not candidate_key.startswith("contact-match:")
+            or any(char not in "0123456789abcdef" for char in candidate_key[14:])
+        ):
+            raise ValueError("candidate_key must be a contact-match SHA-256 identifier")
+        if not isinstance(evidence_snapshot_id, str) or not evidence_snapshot_id.strip():
+            raise ValueError("evidence_snapshot_id must not be empty")
+        if type(expected_evidence_version) is not int or expected_evidence_version < 0:
+            raise ValueError("expected_evidence_version must be non-negative")
+        if decision not in {
+            DisambiguationDecisionKind.SAME_ENTITY.value,
+            DisambiguationDecisionKind.DISTINCT_ENTITIES.value,
+        }:
+            raise ValueError("decision must be same_entity or distinct_entities")
+        if confirmed is not True:
+            raise ValueError("confirmed must be true to record a contact decision")
+        if not self._contact_acl_configured:
+            raise PermissionError("contact stream authorization is not configured")
+
+        with self._confirmation_lock(workspace_id, f"contact:{candidate_key}"):
+            service = DisambiguationService(self.pipeline.engines)
+            candidates = service.list_current_contact_candidates(
+                workspace_id=workspace_id,
+                authorize_stream=self._contact_authorize_stream,
+                limit=1000,
+            )
+            candidate = next((item for item in candidates if item.candidate_key == candidate_key), None)
+            if candidate is None:
+                return {"status": "not_found", "workspace_id": workspace_id}
+            if self._contact_observation_provider is None:
+                return {"status": "unavailable", "workspace_id": workspace_id,
+                        "reason": "current_contact_evidence_provider_not_configured"}
+            observations = self._load_authorized_contact_observations(workspace_id)
+            pair = [observations[item] for item in candidate.entity_ids if item in observations]
+            current = len(pair) == 2 and contact_evidence_snapshot_id(
+                pair[0], pair[1], basis=str(candidate.metadata.get("match_basis") or "")
+            ) == candidate.evidence_snapshot_id
+            if not current:
+                return {"status": "stale", "workspace_id": workspace_id,
+                        "candidate_key": candidate_key,
+                        "current_evidence_version": candidate.last_reconciled_evidence_version,
+                        "reason": "source_evidence_changed_or_unavailable"}
+            if candidate.evidence_snapshot_id != evidence_snapshot_id or (
+                candidate.last_reconciled_evidence_version != expected_evidence_version
+            ):
+                return {"status": "stale", "workspace_id": workspace_id,
+                        "candidate_key": candidate_key,
+                        "current_evidence_snapshot_id": candidate.evidence_snapshot_id,
+                        "current_evidence_version": candidate.last_reconciled_evidence_version}
+            result = service.record_user_answer(
+                candidate,
+                evidence_version=expected_evidence_version + 1,
+                decision=DisambiguationDecisionKind(decision),
+                actor_id=actor_id,
+            )
+        return {"status": "recorded", "workspace_id": workspace_id,
+                "candidate_key": candidate_key, "evidence_snapshot_id": evidence_snapshot_id,
+                "evidence_version": result.reconciliation.new_evidence_version,
+                "decision": result.decision_kind, "decision_node_id": result.decision_node_id,
+                "patch_id": result.patch_id, "patch_intent": result.patch_intent,
+                "graph_patch_status": "not_applied"}
+
+    def _load_authorized_contact_observations(
+        self, workspace_id: str
+    ) -> dict[str, ContactIdentityObservation]:
+        provider = self._contact_observation_provider
+        if provider is None:
+            return {}
+        observations = provider(workspace_id, 1000, self._contact_authorize_stream)
+        if not isinstance(observations, Sequence) or len(observations) > 1000:
+            raise ValueError("contact observation provider must return a bounded sequence")
+        by_entity: dict[str, ContactIdentityObservation] = {}
+        for observation in observations:
+            if not isinstance(observation, ContactIdentityObservation):
+                raise TypeError("contact observation provider returned an invalid observation")
+            if observation.workspace_id != workspace_id:
+                raise ValueError("contact observation provider returned another workspace")
+            if not self._contact_authorize_stream(workspace_id, observation.stream_id):
+                raise PermissionError("contact observation source stream is not authorized")
+            if observation.entity_id in by_entity:
+                raise ValueError("contact observation provider returned duplicate entities")
+            by_entity[observation.entity_id] = observation
+        return by_entity
+
+    def list_address_book(self, *, workspace_id: str, limit: int = 500) -> dict[str, object]:
+        """Project authorized source claims plus reviewed identity decisions."""
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise ValueError("workspace_id must not be empty")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        provider = self._contact_observation_provider
+        if provider is None or not self._contact_acl_configured:
+            return {"status": "unavailable", "workspace_id": workspace_id,
+                    "reason": "authorized contact observation provider is not configured",
+                    "results": []}
+        observations = provider(workspace_id, limit, self._contact_authorize_stream)
+        if not isinstance(observations, Sequence) or len(observations) > limit:
+            raise ValueError("contact observation provider exceeded limit")
+        decisions = DisambiguationService(self.pipeline.engines).list_current_contact_candidates(
+            workspace_id=workspace_id,
+            authorize_stream=self._contact_authorize_stream,
+            limit=1000,
+        )
+        entries = build_address_book_projection(
+            observations, decisions,
+            authorize_stream=self._contact_authorize_stream,
+            max_observations=limit,
+        )
+        return {"status": "ok", "workspace_id": workspace_id,
+                "observation_window_may_be_incomplete": len(observations) >= limit,
+                "results": [{"contact_id": entry.contact_id,
+                             "entity_ids": list(entry.entity_ids),
+                             "display_names": list(entry.display_names),
+                             "contact_points": [{
+                                 "point": claim.point.model_dump(mode="json"),
+                                 "stream_id": claim.stream_id,
+                                 "entity_id": claim.entity_id,
+                                 "source_document_ids": list(claim.source_document_ids),
+                                 "evidence_revision_ids": list(claim.evidence_revision_ids),
+                                 "observed_at_ms": claim.observed_at_ms,
+                             } for claim in entry.contact_points]}
+                            for entry in entries]}
 
     def readiness(self) -> dict[str, object]:
         """Check that owned engines are open and SQL backends accept a probe."""
@@ -198,374 +371,6 @@ class WorkbenchApi:
         self, payload: Mapping[str, object] | list[Mapping[str, object]]
     ) -> dict[str, object]:
         return self.codex_memory.capture(payload)
-
-    def ingest_email(self, request: EmailIngestRequest) -> dict[str, object]:
-        """Ingest one authorized immutable RFC822 message through the plugin."""
-        result = self.email_runtime.ingest(request)
-        self.email_review_store.put(
-            EmailReviewState(
-                workspace_id=result.workspace_id,
-                stream_id=result.stream_id,
-                source_revision_id=result.source_revision_id,
-                mapping_id=result.mapping_id,
-                source_document_id=result.source_document_id,
-                updated_at_ms=int(time.time() * 1000),
-            )
-        )
-        return asdict(result)
-
-    def enqueue_email_sync(
-        self,
-        *,
-        workspace_id: str,
-        connector_id: str,
-        cycle_id: str,
-        owner_id: str,
-        title_prefix: str = "Email",
-        lease_duration_ms: int = 60_000,
-        max_retries: int = 5,
-    ) -> dict[str, object]:
-        """Queue one bounded email sync without accepting credential material."""
-
-        scheduler = self._email_sync_scheduler
-        if scheduler is None:
-            return {
-                "status": "unavailable",
-                "reason": "email synchronization scheduler is not configured",
-            }
-        request = EmailSyncJobRequest(
-            workspace_id=workspace_id,
-            connector_id=connector_id,
-            cycle_id=cycle_id,
-            owner_id=owner_id,
-            title_prefix=title_prefix,
-            lease_duration_ms=lease_duration_ms,
-            max_retries=max_retries,
-        )
-        job_id = scheduler.enqueue(request)
-        return {
-            "status": "queued",
-            "workspace_id": workspace_id,
-            "connector_id": connector_id,
-            "cycle_id": cycle_id,
-            "job_id": job_id,
-        }
-
-    def view_email(
-        self,
-        *,
-        workspace_id: str,
-        stream_id: str,
-        source_revision_id: str,
-    ) -> dict[str, object]:
-        """Return an ACL-checked, non-mutating email viewer projection."""
-
-        return self.email_viewer.get(
-            workspace_id=workspace_id,
-            stream_id=stream_id,
-            source_revision_id=source_revision_id,
-        )
-
-    def propose_email_mapping(
-        self,
-        *,
-        workspace_id: str,
-        stream_id: str,
-        source_revision_id: str,
-        source_document_id: str,
-        confidence: float = 0.75,
-    ) -> dict[str, object]:
-        if not self.email_runtime.authorize_stream(workspace_id, stream_id):
-            raise PermissionError("email stream is not authorized for workspace")
-        record = self.email_runtime.store.get(
-            workspace_id=workspace_id,
-            source_revision_id=source_revision_id,
-        )
-        if record is None or record.stream_id != stream_id:
-            return {"status": "not_found"}
-        proposal = self.email_materializer.build_patch(
-            record=record,
-            source_document_id=source_document_id,
-            confidence=confidence,
-        )
-        persisted_proposal = self._persist_email_mapping_proposal(record, confidence=confidence)
-        state = self.email_review_store.get(
-            workspace_id=workspace_id,
-            source_revision_id=source_revision_id,
-            mapping_id=proposal.mapping_id,
-        )
-        if state is not None and state.status == "accepted":
-            return {
-                "status": "accepted",
-                "idempotent": True,
-                "mapping_id": proposal.mapping_id,
-                "patch_id": state.patch_id,
-                "result": dict(state.result or {}),
-            }
-        return {
-            "status": "proposed",
-            "workspace_id": workspace_id,
-            "stream_id": stream_id,
-            "source_revision_id": source_revision_id,
-            "mapping_id": proposal.mapping_id,
-            "patch": proposal.patch.model_dump(mode="json"),
-            "proposal": persisted_proposal.payload(),
-        }
-
-    def _persist_email_mapping_proposal(
-        self,
-        record: EmailEvidenceRecord,
-        *,
-        confidence: float,
-    ) -> EmailMappingProposal:
-        mapping_id = str(record.mapping_payload.get("mapping_id") or "")
-        existing = self.email_mapping_proposal_store.get(
-            workspace_id=record.workspace_id,
-            source_revision_id=record.source_revision_id,
-            mapping_id=mapping_id,
-        )
-        if existing is not None:
-            if existing.source_document_id != record.source_document_id:
-                raise ValueError("stored email proposal is not bound to immutable evidence")
-            return existing
-        catalog = self._email_ontology_catalogs.get(record.workspace_id)
-        parsed_profile = record.parsed_payload.get("parser_profile")
-        model_revision = record.mapping_payload.get("model_revision")
-        proposal = EmailMappingProposal.from_record(
-            record,
-            confidence=confidence,
-            composition_sha256=(catalog.view.composition_sha256 if catalog is not None else None),
-            plugin_version=str(parsed_profile) if parsed_profile else None,
-            model_revision=str(model_revision) if model_revision else None,
-        )
-        self.email_mapping_proposal_store.put(proposal)
-        return proposal
-
-    def accept_email_mapping(
-        self,
-        *,
-        workspace_id: str,
-        stream_id: str,
-        source_revision_id: str,
-        source_document_id: str,
-        confirmed: bool,
-        confidence: float = 0.75,
-    ) -> dict[str, object]:
-        if not self.email_runtime.authorize_stream(workspace_id, stream_id):
-            raise PermissionError("email stream is not authorized for workspace")
-        record = self.email_runtime.store.get(
-            workspace_id=workspace_id,
-            source_revision_id=source_revision_id,
-        )
-        if record is None or record.stream_id != stream_id:
-            return {"status": "not_found"}
-        proposal = self.email_materializer.build_patch(
-            record=record,
-            source_document_id=source_document_id,
-            confidence=confidence,
-        )
-        persisted_proposal = self._persist_email_mapping_proposal(record, confidence=confidence)
-        state = self.email_review_store.get(
-            workspace_id=workspace_id,
-            source_revision_id=source_revision_id,
-            mapping_id=proposal.mapping_id,
-        )
-        if state is not None and state.status == "accepted":
-            return {
-                "status": "accepted",
-                "idempotent": True,
-                "mapping_id": proposal.mapping_id,
-                "patch_id": state.patch_id,
-                "result": dict(state.result or {}),
-                "proposal": persisted_proposal.payload(),
-            }
-        if not confirmed:
-            self.email_review_store.put(
-                EmailReviewState(
-                    workspace_id=workspace_id,
-                    stream_id=stream_id,
-                    source_revision_id=source_revision_id,
-                    mapping_id=proposal.mapping_id,
-                    source_document_id=source_document_id,
-                    updated_at_ms=int(time.time() * 1000),
-                )
-            )
-            return {
-                "status": "confirmation_required",
-                "mapping_id": proposal.mapping_id,
-                "patch": proposal.patch.model_dump(mode="json"),
-                "proposal": persisted_proposal.payload(),
-            }
-        result = self.email_materializer.accept(
-            self.pipeline.engines,
-            proposal,
-            confirmed=True,
-        )
-        assert result is not None
-        result_payload = {
-            "status": result.status.value,
-            "mapping_id": proposal.mapping_id,
-            "patch_id": result.patch_id,
-            "validation": result.validation.model_dump(mode="json"),
-            "applied_count": result.applied_count,
-            "failed_count": result.failed_count,
-            "proposal": persisted_proposal.payload(),
-        }
-        self.email_review_store.put(
-            EmailReviewState(
-                workspace_id=workspace_id,
-                stream_id=stream_id,
-                source_revision_id=source_revision_id,
-                mapping_id=proposal.mapping_id,
-                source_document_id=source_document_id,
-                status="accepted" if result.status.value == "applied" else "needs_review",
-                patch_id=result.patch_id,
-                result=result_payload,
-                updated_at_ms=int(time.time() * 1000),
-            )
-        )
-        return result_payload
-
-    def search_email_ontology(
-        self,
-        *,
-        workspace_id: str,
-        query: str,
-        principal: str = "system",
-        mode: str = "bm25",
-        limit: int = 20,
-    ) -> dict[str, object]:
-        """Search ontology descriptors without mutating graph or email evidence."""
-        if not workspace_id.strip():
-            raise ValueError("workspace_id must not be empty")
-        if not query.strip():
-            raise ValueError("query must not be empty")
-        catalog = self._email_ontology_catalogs.get(workspace_id)
-        if catalog is None:
-            if self._email_ontology_catalog_factory is None:
-                return {
-                    "status": "unavailable",
-                    "reason": "email ontology catalog is not configured",
-                }
-            catalog = self._email_ontology_catalog_factory(workspace_id)
-            if catalog.workspace_id != workspace_id:
-                raise ValueError("email ontology catalog workspace mismatch")
-            self._email_ontology_catalogs[workspace_id] = catalog
-        hits = catalog.search(
-            query,
-            principal=principal,
-            mode=mode,
-            limit=limit,
-        )
-        return {
-            "status": "ok",
-            "workspace_id": workspace_id,
-            "mode": mode,
-            "semantic": catalog.semantic_status,
-            "composition_sha256": catalog.view.composition_sha256,
-            "package_identities": [
-                item.model_dump(mode="json") for item in catalog.view.package_identities
-            ],
-            "results": [hit.payload() for hit in hits],
-        }
-
-    def propose_email_memory(
-        self,
-        *,
-        workspace_id: str,
-        stream_id: str,
-        source_revision_id: str,
-        stream_ids: Sequence[str] | None = None,
-        source_revision_ids: Sequence[str] | None = None,
-        statement: str,
-        kind: str = "finding",
-        confidence: str = "inferred",
-        session_id: str | None = None,
-        rationale: str = "",
-    ) -> dict[str, object]:
-        normalized_stream_ids, normalized_revision_ids = _email_memory_sources(
-            stream_id=stream_id,
-            source_revision_id=source_revision_id,
-            stream_ids=stream_ids,
-            source_revision_ids=source_revision_ids,
-        )
-        promotion = self.email_memory_promoter.build_from_revisions(
-            workspace_id=workspace_id,
-            expected_stream_ids=normalized_stream_ids,
-            source_revision_ids=normalized_revision_ids,
-            statement=statement,
-            kind=kind,
-            confidence=confidence,
-            session_id=session_id,
-            rationale=rationale,
-        )
-        return {
-            "status": "proposed",
-            "workspace_id": workspace_id,
-            "stream_id": stream_id,
-            "source_revision_id": source_revision_id,
-            "stream_ids": list(promotion.source_stream_ids),
-            "source_revision_ids": list(normalized_revision_ids),
-            "mapping_id": promotion.mapping_id,
-            "source_document_id": promotion.source_document_id,
-            "source_document_ids": list(promotion.source_document_ids),
-            "memory": dict(promotion.payload),
-        }
-
-    def promote_email_memory(
-        self,
-        *,
-        workspace_id: str,
-        stream_id: str,
-        source_revision_id: str,
-        stream_ids: Sequence[str] | None = None,
-        source_revision_ids: Sequence[str] | None = None,
-        statement: str,
-        confirmed: bool,
-        kind: str = "finding",
-        confidence: str = "inferred",
-        session_id: str | None = None,
-        rationale: str = "",
-    ) -> dict[str, object]:
-        normalized_stream_ids, normalized_revision_ids = _email_memory_sources(
-            stream_id=stream_id,
-            source_revision_id=source_revision_id,
-            stream_ids=stream_ids,
-            source_revision_ids=source_revision_ids,
-        )
-        promotion = self.email_memory_promoter.build_from_revisions(
-            workspace_id=workspace_id,
-            expected_stream_ids=normalized_stream_ids,
-            source_revision_ids=normalized_revision_ids,
-            statement=statement,
-            kind=kind,
-            confidence=confidence,
-            session_id=session_id,
-            rationale=rationale,
-        )
-        if not confirmed:
-            return {
-                "status": "confirmation_required",
-                "workspace_id": workspace_id,
-                "stream_ids": list(promotion.source_stream_ids),
-                "source_revision_ids": list(normalized_revision_ids),
-                "mapping_id": promotion.mapping_id,
-                "source_document_id": promotion.source_document_id,
-                "source_document_ids": list(promotion.source_document_ids),
-                "memory": dict(promotion.payload),
-            }
-        result = self.email_memory_promoter.promote(promotion, confirmed=True)
-        assert result is not None
-        return {
-            "status": "captured",
-            "workspace_id": workspace_id,
-            "stream_ids": list(promotion.source_stream_ids),
-            "source_revision_ids": list(normalized_revision_ids),
-            "mapping_id": promotion.mapping_id,
-            "source_document_id": promotion.source_document_id,
-            "source_document_ids": list(promotion.source_document_ids),
-            "result": result,
-        }
 
     def review_memory(
         self,
@@ -1082,31 +887,6 @@ def _invoke_agent_responder(
 
 def _ignore_progress() -> None:
     return
-
-
-def _email_memory_sources(
-    *,
-    stream_id: str,
-    source_revision_id: str,
-    stream_ids: Sequence[str] | None,
-    source_revision_ids: Sequence[str] | None,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Normalize legacy single-source and explicit multi-source requests."""
-    normalized_stream_ids = tuple(
-        str(value).strip() for value in (stream_ids or (stream_id,))
-    )
-    normalized_revision_ids = tuple(
-        str(value).strip() for value in (source_revision_ids or (source_revision_id,))
-    )
-    if not normalized_stream_ids or any(not value for value in normalized_stream_ids):
-        raise ValueError("stream_ids must contain at least one non-empty value")
-    if not normalized_revision_ids or any(not value for value in normalized_revision_ids):
-        raise ValueError("source_revision_ids must contain at least one non-empty value")
-    if len(normalized_stream_ids) != len(normalized_revision_ids):
-        raise ValueError("stream_ids and source_revision_ids must align")
-    if normalized_stream_ids[0] != stream_id or normalized_revision_ids[0] != source_revision_id:
-        raise ValueError("legacy stream_id/source_revision_id must match the first source")
-    return normalized_stream_ids, normalized_revision_ids
 
 
 __all__ = ["WorkbenchApi"]

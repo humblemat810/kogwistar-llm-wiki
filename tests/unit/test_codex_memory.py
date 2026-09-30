@@ -2,6 +2,7 @@ import pytest
 from kogwistar.engine_core.models import Grounding, Node, Span
 from pydantic import ValidationError
 
+from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.memory.service import (
     CodexMemoryError,
     CodexMemoryRecord,
@@ -9,7 +10,6 @@ from kogwistar_llm_wiki.memory.service import (
     MemoryDisabledError,
     MemoryEvidence,
 )
-from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
@@ -59,11 +59,11 @@ def test_memory_metadata_is_bounded_json_and_preserved():
     record = CodexMemoryRecord.model_validate(
         {
             **_record(),
-            "metadata": {"ontology": {"ontology_id": "email"}, "stream_ids": ["stream-a"]},
+            "metadata": {"ontology": {"ontology_id": "sample"}, "stream_ids": ["stream-a"]},
         }
     )
     assert record.metadata == {
-        "ontology": {"ontology_id": "email"},
+        "ontology": {"ontology_id": "sample"},
         "stream_ids": ["stream-a"],
     }
     with pytest.raises(ValueError, match="JSON-serializable"):
@@ -94,11 +94,11 @@ def test_memory_recall_hides_scoped_records_without_authorized_streams(namespace
     service = CodexMemoryService(namespace_engines, enabled=True)
     service.capture(
         {
-            **_record(statement="Mailbox-only fact"),
+            **_record(statement="Stream-only fact"),
             "metadata": {
                 "acl": {
                     "workspace_id": "project-a",
-                    "stream_ids": ["mailbox-a"],
+                    "stream_ids": ["connector-a"],
                 }
             },
         }
@@ -107,24 +107,24 @@ def test_memory_recall_hides_scoped_records_without_authorized_streams(namespace
     assert service.recall(workspace_id="project-a")["count"] == 0
     visible = service.recall(
         workspace_id="project-a",
-        authorized_stream_ids=("mailbox-a",),
+        authorized_stream_ids=("connector-a",),
     )
     assert visible["count"] == 1
     visible_records = [*visible["verified"], *visible["inferred"]]
-    assert visible_records[0]["metadata"]["acl"]["stream_ids"] == ["mailbox-a"]
+    assert visible_records[0]["metadata"]["acl"]["stream_ids"] == ["connector-a"]
     assert service.review(workspace_id="project-a")["count"] == 0
     assert service.review(
         workspace_id="project-a",
-        authorized_stream_ids=("mailbox-a",),
+        authorized_stream_ids=("connector-a",),
     )["count"] == 1
     with pytest.raises(CodexMemoryError, match="different validated payload"):
         service.capture(
             {
-                **_record(statement="Mailbox-only fact"),
+                **_record(statement="Stream-only fact"),
                 "metadata": {
                     "acl": {
                         "workspace_id": "project-a",
-                        "stream_ids": ["mailbox-b"],
+                        "stream_ids": ["connector-b"],
                     }
                 },
             }

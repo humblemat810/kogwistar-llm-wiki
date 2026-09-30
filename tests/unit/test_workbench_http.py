@@ -236,3 +236,4 @@ def test_workbench_http_auth_matrix_is_explicit_and_env_independent(monkeypatch,
         server.server_close()
         thread.join(timeout=5)
         engines.close()
+

@@ -4502,7 +4502,7 @@ def _generate_daily_life_longrun_document(*, index: int, title: str, profile: st
     medium_body = (
         f"At {location}, {helper} reviews {subject} and writes down the next concrete action. "
         "The plan names the person responsible, the expected date, and the small source of truth, "
-        "such as a receipt, calendar invite, appliance manual, email confirmation, or checklist photo. "
+        "such as a receipt, calendar invite, appliance manual, order confirmation, or checklist photo. "
         "Related notes may mention the same person, place, or household item, but the wording is varied "
         "enough that a parser should not confuse every document with every other document. If something "
         "changes, the note says whether to update the calendar, ask a neighbor, file a receipt, or move "
