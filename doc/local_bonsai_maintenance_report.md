@@ -776,6 +776,47 @@ service health. Do not infer that services or jobs are still running. Resuming
 live acceptance checks requires a new explicit runtime-verification window;
 the original ten-hour monitoring limit has been honored as a stop condition.
 
+## Runtime Recheck After Resume (2026-09-30 13:39 UTC)
+
+- The llama.cpp server session was still live. Its logs show a completed short
+  JSON-format request and `reasoning_budget=2048` activation. This verifies the
+  local endpoint can honor that explicit request parameter; it does not prove
+  the maintenance provider path supplies the same parameter by default.
+- The maintenance container uses the older `profchan/kogwistar-llm-wiki:v0.5.1`
+  image. Its scheduled cycle 680 ended `quality_unknown` after a
+  length-truncated critic response and failed closed. Cycle 681 completed a
+  critic review and one bounded follow-up round, then ended at
+  `max_rounds_reached`. The findings still called out weak/empty grounding,
+  unsupported parent-child relation evidence, and missing relation provenance.
+  No graph mutations or corpus expansion were authorized.
+- The durable control file says `background_enabled=false` and
+  `request_enabled=true`. I left background work disabled after confirming
+  cycle 681 was terminal; no new run was scheduled.
+- The container was unhealthy before restart, with a healthcheck that only
+  tests for `/var/lib/llm-wiki/maintenance/maintenance.sock`. Restarting only
+  the maintenance container preserved the Postgres volume and durable control
+  state, but the socket healthcheck remained unhealthy. The mounted directory
+  contains a stale `test.sock` from Sep 28, not the expected maintenance
+  socket, while the daemon process is alive. Therefore service health and
+  control-plane availability remain unverified; do not treat the running
+  process as a healthy scheduled worker.
+- Current host headroom is low (about 1.25 GiB free RAM; RTX 3080 Laptop GPU
+  reports 6,895 MiB used of 8,192 MiB). I did not build an image, increase
+  context, or start another background inference.
+- On `feat/bonsai-maintenance-review`, the control listener now tolerates
+  disconnected clients and stale control instances merge updates against the
+  durable state file. Focused Windows verification after the final code edit:
+  `15 passed, 1 skipped`; Ruff passed; the PowerShell launcher parsed without
+  syntax errors. The Linux socket regression had passed in an isolated
+  container before these final documentation/launcher changes. The updated
+  launcher selects the WSL virtual-network address instead of binding to
+  `0.0.0.0`; it passes a local llama.cpp reasoning effort/budget. This does
+  not alter application provider behavior for Codex, Anthropic, or remote
+  OpenAI-compatible providers.
+- No other feature branch was rebased or modified. The unrelated email test
+  relocation remains separate. This work is on the already-existing
+  `feat/bonsai-maintenance-review` branch to avoid creating another branch.
+
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB

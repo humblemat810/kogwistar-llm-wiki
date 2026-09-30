@@ -21,30 +21,34 @@ embedding encoder: maintenance chat generation and vector indexing remain
 separate model/profile responsibilities. Do not point
 `LLM_WIKI_EMBEDDING_MODEL` at this file.
 
-Start the server from PowerShell after verifying both files exist:
+Start the server from PowerShell after verifying both files exist. The helper
+discovers the WSL virtual-network address used by Docker and binds only to that
+interface, rather than exposing the unauthenticated llama.cpp endpoint on every
+host interface:
 
 ```powershell
-& 'D:\prism-llama.cpp\build\bin\Release\llama-server.exe' `
-  -m 'D:\models\bonsai2\Ternary-Bonsai-2-27B-PTQ1_0.gguf' `
-  --mmproj 'D:\models\bonsai2\Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf' `
-  -c 8192 `
-  -ngl 999 `
-  --parallel 1 `
-  --cache-type-k q4_0 `
-  --cache-type-v q4_0 `
-  -fa on `
-  --fit-target 800 `
-  --host 0.0.0.0 `
-  --port 8181 `
-  -lv 4
+./scripts/start_local_bonsai.ps1 -Context 8192 -ReasoningEffort medium -ReasoningBudget 2048
 ```
 
-The container reaches the host through `host.docker.internal`. Binding
-`0.0.0.0` is needed for Docker Desktop; restrict Windows Firewall to local
-Docker/WSL traffic if the host is not otherwise trusted. Context `8192` is
+In the current Windows/Docker Desktop setup, the WSL interface is
+`192.168.64.1`, and the maintenance container reached that address in a TCP
+probe. The `.env` value `host.docker.internal` resolved to a different Docker
+gateway address and was not the verified route for this host. Set
+`KOGWISTAR_MAINTENANCE_BASE_URL` to `http://<WSL-IPv4>:8181/v1` for the active
+Compose process; keep this host-specific override out of the committed `.env`
+and rediscover it after Docker/WSL network changes. Do not bind to `0.0.0.0`:
+the llama.cpp endpoint has no authentication configured. Context `8192` is
 verified with this exact local binary/model configuration: maintenance prompts
 of 3,167 tokens and 1,024 generated tokens completed without truncation. This
 proves an operational context size, not the model's maximum.
+
+The launch helper also sets llama.cpp's server-side reasoning effort and token
+budget. Those options affect only this local llama.cpp server. They are not
+passed through the application provider abstraction, so changing the configured
+maintenance provider to Codex, Anthropic, or another OpenAI-compatible endpoint
+does not make those providers receive llama.cpp-specific request fields. The
+2,048-token setting is a conservative trial value, not a proven maximum for
+every maintenance response.
 
 The local GGUF declares `qwen35.context_length=262144`; the upstream model card
 describes the same inherited model limit and an architecture with roughly 75%
