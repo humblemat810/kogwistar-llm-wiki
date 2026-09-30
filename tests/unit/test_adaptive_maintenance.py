@@ -129,6 +129,10 @@ def test_background_cycle_enqueues_fake_payload_with_recent_and_probe_halves(mon
 
     payload = enqueued[0]["payload"]
     assert payload["mode"] == "background"
+    assert payload["maintenance_kind"] == "review_maintenance_subject"
+    assert payload["observation_subject"]["subject_id"] == payload["subject_id"]
+    assert enqueued[0]["job_kind"] == "maintenance_job:review"
+    assert payload["budgets"] == {"max_steps": 2, "max_llm_calls": 2}
     assert payload["embedding_exploration"]["strategy"] == "embedding_probe"
     assert payload["embedding_exploration"]["probe_seed"]
     assert any(item["reason"] == "recent_interest" for item in payload["candidates"])

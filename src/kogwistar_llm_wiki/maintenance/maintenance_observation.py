@@ -66,6 +66,7 @@ class ObservationFinding(BaseModel):
     subject_id: str = Field(min_length=1)
     evidence_ids: tuple[str, ...] = ()
     message: str = Field(min_length=1, max_length=512)
+    recommended_action: RecommendedAction | None = None
 
 
 class ObservationRuntimeLimits(BaseModel):
@@ -133,9 +134,43 @@ class ParseAndGraphQualityAssessment(BaseModel):
     active_view_id: str | None = None
     active_view_version: int | None = Field(default=None, ge=1)
     evaluator_version: str = Field(default="maintenance-observation-v1", min_length=1)
-    critic_status: Literal["not_used", "succeeded", "failed"] = "not_used"
+    critic_status: Literal["not_used", "succeeded", "failed", "blocked_context"] = "not_used"
     continuation_allowed: bool = False
     watermark_expiry_seconds: int = Field(default=86_400, ge=60)
+
+
+def _assessment_identity(
+    *,
+    frame: MaintenanceObservationFrame,
+    verdict: QualityVerdict,
+    recommended_action: RecommendedAction,
+    findings: Sequence[ObservationFinding],
+    watermark_key: str,
+    critic_status: Literal["not_used", "succeeded", "failed", "blocked_context"],
+    continuation_allowed: bool,
+    watermark_expiry_seconds: int,
+) -> str:
+    """Give every distinct persisted assessment a stable idempotency identity."""
+
+    identity_payload = {
+        "frame_id": frame.frame_id,
+        "verdict": verdict,
+        "recommended_action": recommended_action,
+        "findings": [finding.model_dump(mode="json") for finding in findings],
+        "active_view_id": frame.active_view_id,
+        "active_view_version": frame.active_view_version,
+        "watermark_key": watermark_key,
+        "critic_status": critic_status,
+        "continuation_allowed": continuation_allowed,
+        "watermark_expiry_seconds": watermark_expiry_seconds,
+    }
+    canonical_payload = json.dumps(
+        identity_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical_payload).hexdigest()
+    return str(stable_id("maintenance_assessment", digest))
 
 
 def _bounded_records(
@@ -287,13 +322,13 @@ def assess_observation_frame(
     frame: MaintenanceObservationFrame,
     *,
     critic_failed: bool = False,
-    critic_status: Literal["not_used", "succeeded", "failed"] = "not_used",
+    critic_status: Literal["not_used", "succeeded", "failed", "blocked_context"] = "not_used",
     critic_findings: Sequence[ObservationFinding] = (),
     watermark_expiry_seconds: int = 86_400,
 ) -> ParseAndGraphQualityAssessment:
     """Apply bounded deterministic checks plus an optional structured critic."""
 
-    if critic_status == "failed":
+    if critic_status in {"failed", "blocked_context"}:
         critic_failed = True
     findings: list[ObservationFinding] = list(critic_findings)
     quality_action: RecommendedAction | None = None
@@ -316,6 +351,8 @@ def assess_observation_frame(
         "switch_to_excerpt": 70,
         "retry_same_strategy": 60,
         "expand_children": 50,
+        "propose_relation_patch": 45,
+        "validate_crosslinks": 44,
         "review_parent": 40,
     }
     selected_action: tuple[int, RecommendedAction] | None = None
@@ -343,6 +380,14 @@ def assess_observation_frame(
                 message=f"source interpretation is explicitly classified as {status}",
             )
         )
+    for finding in critic_findings:
+        item_action = finding.recommended_action
+        if item_action is None or item_action == "none":
+            continue
+        rank = action_priority[item_action]
+        if selected_action is None or rank > selected_action[0]:
+            selected_action = (rank, item_action)
+            selected_verdict = (rank, finding.verdict)
     uncertain_statuses = {
         "expanding",
         "quality_unknown",
@@ -414,7 +459,20 @@ def assess_observation_frame(
             )
         )
         return ParseAndGraphQualityAssessment(
-            assessment_id=str(stable_id("maintenance_assessment", frame.frame_id, verdict)),
+            assessment_id=_assessment_identity(
+                frame=frame,
+                verdict=verdict,
+                recommended_action=action,
+                findings=findings,
+                watermark_key=watermark_key,
+                critic_status=(
+                    critic_status
+                    if critic_status == "blocked_context"
+                    else "failed" if critic_failed else critic_status
+                ),
+                continuation_allowed=not critic_failed,
+                watermark_expiry_seconds=max(60, int(watermark_expiry_seconds)),
+            ),
             watermark_key=watermark_key,
             frame_id=frame.frame_id,
             subject=frame.subject,
@@ -423,7 +481,11 @@ def assess_observation_frame(
             findings=tuple(findings),
             active_view_id=frame.active_view_id,
             active_view_version=frame.active_view_version,
-            critic_status="failed" if critic_failed else critic_status,
+            critic_status=(
+                critic_status
+                if critic_status == "blocked_context"
+                else "failed" if critic_failed else critic_status
+            ),
             continuation_allowed=not critic_failed,
             watermark_expiry_seconds=max(60, int(watermark_expiry_seconds)),
         )
@@ -443,7 +505,16 @@ def assess_observation_frame(
         )
     )
     return ParseAndGraphQualityAssessment(
-        assessment_id=str(stable_id("maintenance_assessment", frame.frame_id, "adequate")),
+        assessment_id=_assessment_identity(
+            frame=frame,
+            verdict="adequate",
+            recommended_action="none",
+            findings=(),
+            watermark_key=watermark_key,
+            critic_status=critic_status,
+            continuation_allowed=False,
+            watermark_expiry_seconds=max(60, int(watermark_expiry_seconds)),
+        ),
         watermark_key=watermark_key,
         frame_id=frame.frame_id,
         subject=frame.subject,

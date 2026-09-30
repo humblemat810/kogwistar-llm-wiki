@@ -95,7 +95,11 @@ class MaintenanceBudgetMixin:
                 model=decision.level.model,
                 include_provider_chain=False,
             )
-            self._worker.provider_settings = self.provider_settings
+            set_provider_settings = getattr(self._worker, "set_provider_settings", None)
+            if callable(set_provider_settings):
+                set_provider_settings(self.provider_settings)
+            else:
+                self._worker.provider_settings = self.provider_settings
         return decision
 
     def _persist_budget_state(self) -> None:
@@ -122,6 +126,7 @@ class MaintenanceBudgetMixin:
         budget_state = getattr(self, "_budget_state", {})
         return {
             "enabled": state.enabled,
+            "status_reason": state.status_reason,
             "requested_profile": decision.requested,
             "effective_profile": decision.effective,
             "profile_reason": self._last_profile_reason if self._last_profile_reason != "configured" else decision.reason,
@@ -347,12 +352,33 @@ class MaintenanceBudgetMixin:
             {"candidate_id": str(node.safe_get_id()), "reason": "recent_interest", "score": None}
             for node in recent
         ] + [item.as_dict() for item in explored]
+        review_candidate = next(
+            (
+                item
+                for item in selected
+                if str(item.get("candidate_id") or "").strip()
+            ),
+            None,
+        )
+        if review_candidate is None:
+            self._last_profile_reason = "no_reviewable_background_candidate"
+            return
+        review_subject_id = str(review_candidate["candidate_id"])
         payload = {
             "workspace_id": self.workspace_id,
-            "maintenance_kind": "distill",
+            "maintenance_kind": "review_maintenance_subject",
             "mode": "background",
             "maintenance_origin": "background",
             "selection_strategy": "recent_interest_and_embedding_probe",
+            "subject_id": review_subject_id,
+            "subject_kind": "node",
+            "observation_subject": {
+                "kind": "node",
+                "subject_id": review_subject_id,
+                "namespace": ns.curated_kg_space,
+            },
+            "observation_token_budget": 4_000,
+            "observation_neighborhood_count": 64,
             "embedding_exploration": {
                 "profile": os.environ.get("KOGWISTAR_LLM_WIKI_EMBED_PROFILE", "unknown"),
                 "dimension": len(getattr(nodes[0], "embedding", []) or []) if nodes else None,
@@ -365,8 +391,8 @@ class MaintenanceBudgetMixin:
             "recent_selection_watermark": int(time.time() * 1000),
             "stop_reason": None,
             "maintenance_round": 0,
-            "maintenance_max_rounds": 1,
-            "budgets": {"max_steps": 1},
+            "maintenance_max_rounds": 2,
+            "budgets": {"max_steps": 2, "max_llm_calls": 2},
         }
         selected_ids = {
             str(item["candidate_id"])
@@ -390,7 +416,7 @@ class MaintenanceBudgetMixin:
             namespace=ns.maintenance_jobs,
             entity_kind="maintenance_cycle",
             entity_id=job_id,
-            job_kind="maintenance_job:distill",
+            job_kind="maintenance_job:review",
             payload=payload,
             max_retries=1,
         )

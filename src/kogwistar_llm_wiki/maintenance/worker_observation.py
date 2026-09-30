@@ -18,6 +18,7 @@ from .maintenance_observation import (
     build_observation_frame,
 )
 from .maintenance_strategies import MaintenanceJobExecutionContext
+from .observation_critic import is_context_window_error
 
 
 class MaintenanceObservationWorkerMixin:
@@ -153,6 +154,10 @@ class MaintenanceObservationWorkerMixin:
             omitted_counts=frame.omitted_counts,
         )
         self._persist_observation_audit(ctx, frame, assessment)
+        if frame.parent_context:
+            parent_id = str(frame.parent_context[0].get("id") or "").strip()
+            if parent_id:
+                ctx.payload.setdefault("parent_subject_id", parent_id)
         continuation_scheduled = self._schedule_observation_continuation(
             ctx, assessment.recommended_action, assessment.continuation_allowed
         )
@@ -168,7 +173,14 @@ class MaintenanceObservationWorkerMixin:
                 "assessment": assessment.model_dump(mode="json"),
             },
         )
-        if ctx.job_id and not continuation_scheduled and not self._advance_maintenance_plan(ctx):
+        if ctx.job_id and assessment.critic_status == "blocked_context":
+            self._emit_trace(
+                "maintenance_job_aborted_context_limit",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+            )
+            self._acknowledge_job(ctx)
+        elif ctx.job_id and not continuation_scheduled and not self._advance_maintenance_plan(ctx):
             self._acknowledge_job(ctx)
 
     def _run_observation_critic(
@@ -181,6 +193,26 @@ class MaintenanceObservationWorkerMixin:
         critic = getattr(self, "observation_critic", None)
         if not callable(critic):
             return "not_used", ()
+        budgets = ctx.payload.get("budgets")
+        budget_state = ctx.payload.get("maintenance_budget_state")
+        max_calls = int(budgets.get("max_llm_calls") or 0) if isinstance(budgets, Mapping) else 0
+        used_calls = (
+            int(budget_state.get("call_used") or 0)
+            if isinstance(budget_state, Mapping)
+            else 0
+        )
+        if max_calls > 0 and used_calls >= max_calls:
+            self._emit_trace(
+                "maintenance_observation_critic_budget_exhausted",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                call_budget=max_calls,
+                call_used=used_calls,
+            )
+            return "failed", ()
+        next_budget_state = dict(budget_state) if isinstance(budget_state, Mapping) else {}
+        next_budget_state["call_used"] = used_calls + 1
+        ctx.payload["maintenance_budget_state"] = next_budget_state
         try:
             result = critic(frame, ctx)
             if not isinstance(result, Mapping):
@@ -197,6 +229,25 @@ class MaintenanceObservationWorkerMixin:
             )
             return status, findings
         except Exception as exc:  # noqa: BLE001 - critic failure is fail-closed
+            if is_context_window_error(exc):
+                self._emit_trace(
+                    "maintenance_observation_context_limit_blocked",
+                    workspace_id=ctx.workspace_id,
+                    job_id=ctx.job_id,
+                    error_type=type(exc).__name__,
+                )
+                pause_background = getattr(self, "context_limit_sink", None)
+                if callable(pause_background):
+                    try:
+                        pause_background()
+                    except Exception as pause_error:  # noqa: BLE001 - keep assessment fail-closed
+                        self._emit_trace(
+                            "maintenance_observation_context_pause_failed",
+                            workspace_id=ctx.workspace_id,
+                            job_id=ctx.job_id,
+                            error_type=type(pause_error).__name__,
+                        )
+                return "blocked_context", ()
             self._emit_trace(
                 "maintenance_observation_critic_failed",
                 workspace_id=ctx.workspace_id,
@@ -261,6 +312,17 @@ class MaintenanceObservationWorkerMixin:
         if next_kind == "review_maintenance_subject" and not (
             ctx.payload.get("parent_subject_id") or ctx.payload.get("parent_member_id")
         ):
+            return False
+        if next_kind == "document_expand_parse_children" and not str(
+            ctx.payload.get("parse_session_id") or ""
+        ).strip():
+            self._emit_trace(
+                "maintenance_observation_continuation_blocked",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                action=action,
+                reason="durable_parse_session_missing",
+            )
             return False
         continuation_id = str(
             stable_id(

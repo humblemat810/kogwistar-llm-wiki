@@ -4,7 +4,10 @@ param(
     [string]$ModelRoot = 'D:\models\bonsai2',
     [int]$Context = 8192,
     [int]$Port = 8181,
-    [string]$HostAddress = '0.0.0.0'
+    [string]$HostAddress = '',
+    [ValidateSet('none', 'low', 'medium', 'high', 'xhigh')]
+    [string]$ReasoningEffort = 'medium',
+    [int]$ReasoningBudget = 2048
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,10 +24,26 @@ foreach ($path in @($server, $model, $mmproj)) {
 if ($Context -lt 1024) {
     throw 'Context must be at least 1024 tokens.'
 }
+if ($ReasoningBudget -lt 0) {
+    throw 'Reasoning budget cannot be negative.'
+}
+if (-not $HostAddress) {
+    $wslAddress = Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object {
+            $_.InterfaceAlias -like 'vEthernet (WSL*' -and
+            $_.IPAddress -notlike '169.254.*'
+        } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+    if (-not $wslAddress) {
+        throw 'Could not find the WSL virtual-network IPv4 address. Supply -HostAddress explicitly.'
+    }
+    $HostAddress = $wslAddress
+}
 
 Write-Host "Starting Bonsai llama-server on $HostAddress`:$Port with context $Context"
 Write-Host "Model: $model"
 Write-Host "Vision projector: $mmproj"
+Write-Host "Reasoning effort: $ReasoningEffort; reasoning budget: $ReasoningBudget tokens"
 
 & $server `
     -m $model `
@@ -36,6 +55,8 @@ Write-Host "Vision projector: $mmproj"
     --cache-type-v q4_0 `
     -fa on `
     --fit-target 800 `
+    --reasoning-effort $ReasoningEffort `
+    --reasoning-budget $ReasoningBudget `
     --host $HostAddress `
     --port $Port `
     -lv 4

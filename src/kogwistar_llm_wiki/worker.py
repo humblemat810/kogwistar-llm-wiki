@@ -24,6 +24,10 @@ from .maintenance.maintenance_designs import (
 from .maintenance.maintenance_patch_apply import (
     apply_maintenance_patch_for_scope,  # noqa: F401
 )
+from .maintenance.observation_critic import (
+    build_observation_critic,
+    is_context_window_error,
+)
 from .maintenance.state import (
     durable_maintenance_usage as _durable_maintenance_usage,  # noqa: F401 - legacy test seam
 )
@@ -107,6 +111,7 @@ class MaintenanceWorker(
         observation_critic: Callable[
             [object, MaintenanceJobExecutionContext], Mapping[str, object]
         ] | None = None,
+        context_limit_sink: Callable[[], None] | None = None,
     ) -> None:
         """
         Initialize the MaintenanceWorker.
@@ -138,7 +143,11 @@ class MaintenanceWorker(
         # immutable source evidence. Deployments can still inject a richer
         # layered parser, but absence must never be treated as completion.
         self.layered_parser = layered_parser or self._expand_durable_parse_frontier
-        self.observation_critic = observation_critic
+        self._uses_default_observation_critic = observation_critic is None
+        self.observation_critic = observation_critic or build_observation_critic(
+            self.provider_settings
+        )
+        self.context_limit_sink = context_limit_sink
         self.telemetry = LlmWikiTelemetry.from_environment()
         self.strategy_registry = build_default_maintenance_strategy_registry()
         self.resolver = MappingStepResolver()
@@ -155,6 +164,13 @@ class MaintenanceWorker(
             predicate_registry={},
             otel_enabled=self.telemetry.enabled,
         )
+
+    def set_provider_settings(self, provider_settings: WorkflowProviderSettings) -> None:
+        """Update provider routing and refresh the default lazy critic adapter."""
+
+        self.provider_settings = provider_settings
+        if self._uses_default_observation_critic:
+            self.observation_critic = build_observation_critic(provider_settings)
 
     def close(self) -> None:
         """Close runtime observers before the owning engine bundle is closed."""
@@ -202,13 +218,13 @@ class MaintenanceWorker(
                 job_ids=[str(job.job_id) for job in jobs],
             )
             for job in jobs:
+                job_payload = getattr(job, "payload", {})
+                mode = (
+                    str(job_payload.get("mode") or "request")
+                    if isinstance(job_payload, Mapping)
+                    else "request"
+                )
                 try:
-                    job_payload = getattr(job, "payload", {})
-                    mode = (
-                        str(job_payload.get("mode") or "request")
-                        if isinstance(job_payload, Mapping)
-                        else "request"
-                    )
                     mode_disabled = (
                         mode == "background"
                         and not getattr(self, "background_enabled", True)
@@ -232,6 +248,34 @@ class MaintenanceWorker(
                         "Maintenance worker failed to process claimed job for workspace %s",
                         workspace_id,
                     )
+                    if is_context_window_error(exc):
+                        self.background_enabled = False
+                        self.request_enabled = False
+                        pause_background = getattr(self, "context_limit_sink", None)
+                        if callable(pause_background):
+                            try:
+                                pause_background()
+                            except Exception as pause_error:  # noqa: BLE001
+                                self._emit_trace(
+                                    "maintenance_context_pause_failed",
+                                    workspace_id=workspace_id,
+                                    job_id=str(job.job_id),
+                                    error_type=type(pause_error).__name__,
+                                )
+                        self.engines.conversation.jobs.mark_failed(
+                            str(job.job_id),
+                            "blocked_context_window: provider rejected maintenance prompt size",
+                            final=True,
+                            claim_token=job.claim_token,
+                        )
+                        self._emit_trace(
+                            "maintenance_job_failed_context_limit",
+                            workspace_id=workspace_id,
+                            job_id=str(job.job_id),
+                            mode=mode,
+                            error_type=type(exc).__name__,
+                        )
+                        continue
                     self.engines.conversation.jobs.retry_or_fail(job, exc)
                     raise
                 if self.fair_scheduling:

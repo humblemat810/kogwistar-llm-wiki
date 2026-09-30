@@ -21,30 +21,34 @@ embedding encoder: maintenance chat generation and vector indexing remain
 separate model/profile responsibilities. Do not point
 `LLM_WIKI_EMBEDDING_MODEL` at this file.
 
-Start the server from PowerShell after verifying both files exist:
+Start the server from PowerShell after verifying both files exist. The helper
+discovers the WSL virtual-network address used by Docker and binds only to that
+interface, rather than exposing the unauthenticated llama.cpp endpoint on every
+host interface:
 
 ```powershell
-& 'D:\prism-llama.cpp\build\bin\Release\llama-server.exe' `
-  -m 'D:\models\bonsai2\Ternary-Bonsai-2-27B-PTQ1_0.gguf' `
-  --mmproj 'D:\models\bonsai2\Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf' `
-  -c 8192 `
-  -ngl 999 `
-  --parallel 1 `
-  --cache-type-k q4_0 `
-  --cache-type-v q4_0 `
-  -fa on `
-  --fit-target 800 `
-  --host 0.0.0.0 `
-  --port 8181 `
-  -lv 4
+./scripts/start_local_bonsai.ps1 -Context 8192 -ReasoningEffort medium -ReasoningBudget 2048
 ```
 
-The container reaches the host through `host.docker.internal`. Binding
-`0.0.0.0` is needed for Docker Desktop; restrict Windows Firewall to local
-Docker/WSL traffic if the host is not otherwise trusted. Context `8192` is
+In the current Windows/Docker Desktop setup, the WSL interface is
+`192.168.64.1`, and the maintenance container reached that address in a TCP
+probe. The `.env` value `host.docker.internal` resolved to a different Docker
+gateway address and was not the verified route for this host. Set
+`KOGWISTAR_MAINTENANCE_BASE_URL` to `http://<WSL-IPv4>:8181/v1` for the active
+Compose process; keep this host-specific override out of the committed `.env`
+and rediscover it after Docker/WSL network changes. Do not bind to `0.0.0.0`:
+the llama.cpp endpoint has no authentication configured. Context `8192` is
 verified with this exact local binary/model configuration: maintenance prompts
 of 3,167 tokens and 1,024 generated tokens completed without truncation. This
 proves an operational context size, not the model's maximum.
+
+The launch helper also sets llama.cpp's server-side reasoning effort and token
+budget. Those options affect only this local llama.cpp server. They are not
+passed through the application provider abstraction, so changing the configured
+maintenance provider to Codex, Anthropic, or another OpenAI-compatible endpoint
+does not make those providers receive llama.cpp-specific request fields. The
+2,048-token setting is a conservative trial value, not a proven maximum for
+every maintenance response.
 
 The local GGUF declares `qwen35.context_length=262144`; the upstream model card
 describes the same inherited model limit and an architecture with roughly 75%
@@ -131,17 +135,15 @@ evidence of a Bonsai call; look for `maintenance_observation_provider_call`
 with `provider=openai`, the Bonsai model name, and `llm_call_count=1`, alongside
 the corresponding llama-server request log.
 
-The Bonsai observation critic uses `reasoning_effort=medium` and sends a
-2,048-token `reasoning_budget_tokens` extension in the OpenAI-compatible
-request. This is intended to bound internal reasoning while leaving room for
-the structured finding response inside the configured 8,192-token context.
-The setting is unit-tested but was not deployed or verified against the live
-llama.cpp server during the previous run. The upstream [Bonsai known-issues
-guide](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/blob/main/KNOWN_ISSUES.md)
-recommends `reasoning_effort=medium` for moderate output limits and documents
-`reasoning_budget_tokens` as a top-level request field; the local Prism
-llama.cpp source supports that field. Treat successful local tests as contract
-coverage, not proof that the live model respects the budget.
+The current LLM-Wiki observation critic uses the shared provider factory and
+does not itself set provider-specific reasoning or completion-token limits.
+Earlier experiment notes about `reasoning_effort=medium`, a 2,048-token
+reasoning budget, or a 4,096-token completion cap must not be read as proof
+that those limits are present in this current call path. The configured model
+may reject an oversized request; recognized context-window failures are now
+made terminal and pause future background cycles rather than silently falling
+back to another provider. A provider-neutral generation cap still requires a
+verified adapter contract for every supported backend.
 
 The scheduler also carries explicit limits into each job. This avoids the
 previous silent no-op behavior where an omitted `max_llm_calls` became zero.
@@ -151,6 +153,31 @@ test verifies that these explicit profile values reach the queued observation
 job rather than being replaced with the defaults.
 Direct parse requests retain their explicit budgets and their configured
 follow-up round limit.
+
+If the configured provider reports a context-window/input-token overflow during
+an observation or parser call, the assessment/job is marked `blocked_context`,
+the current maintenance plan is terminated without retrying that job, and
+durable maintenance control sets both `request_enabled=false` and
+`background_enabled=false` with `status_reason=blocked_context_window`. This
+aborts the maintenance experiment as a whole, including direct/follow-up work;
+the daemon does not automatically switch providers, retry the oversized job,
+or continue with other queued jobs. After a hardware/model upgrade or deliberate
+context reduction, inspect the control state and explicitly re-enable the modes
+you want to resume:
+
+```powershell
+python -m kogwistar_llm_wiki daemon maintenance-control --status
+python -m kogwistar_llm_wiki daemon maintenance-control --request-enabled true
+python -m kogwistar_llm_wiki daemon maintenance-control --background-enabled true
+```
+
+Context-overflow classification recognizes common OpenAI-compatible, Anthropic-
+style, Google, and llama.cpp error wording; it is a fail-safe heuristic, not a
+preflight guarantee that a provider's advertised context window will fit a
+specific prompt. The current LLM-Wiki pin does not yet include the separate
+parser feature branch's optional Anthropic adapter. A profile switch rebuilds
+the default critic with the newly selected supported provider; injected custom
+critics are intentionally left untouched.
 
 After changing provider settings, recreate only the maintenance service:
 

@@ -12,9 +12,11 @@ job is still running now.
 - The maintenance image has since been rebuilt locally as
   `profchan/kogwistar-llm-wiki:v0.5.1`, image digest
   `a184edc272296d578b0226ba38ac3ba9b7aec4dff2d2fed710602347b90d2e55`.
-  The maintenance container was recreated from this local image and is healthy;
-  it now has a 16,000-token per-job background budget and a 4,096-token
-  reserved output cap per critic call.
+  The maintenance container was recreated from this local image and was
+  healthy at that observation; its job budget was 16,000 tokens. A 4,096-token
+  reserved output cap was believed to be configured then, but a later audit of
+  the current provider call path did not verify that the cap was actually
+  passed to the model.
 - The maintenance container is healthy and configured to use the OpenAI
   compatible adapter at `http://host.docker.internal:8181/v1`, model
   `Ternary-Bonsai-2-27B-PTQ1_0`.
@@ -111,6 +113,29 @@ evidence that Bonsai performed maintenance.
 - These were local, offline model checks only. No service was started, no
   database/vector store was written, and the existing `vector(2)` graph remains
   unsuitable for this 512-D profile without a separately reviewed graph/profile.
+
+## Offline Feature-Branch CI Follow-Up (2026-09-30)
+
+- On `feat/bonsai-maintenance-review`, the regular provider-free CI marker ran
+  under CPython 3.13.3 against the exact Kogwistar, KG Doc Parser, and Obsidian
+  sink SHAs pinned in `.github/workflows/ci.yml`: `852 passed, 6 skipped,
+  130 deselected` in 499.88 seconds. Pytest cache was disabled, matching the
+  repository guidance for this workspace.
+- The first local attempts stopped at workflow-layout assumptions because the
+  clean feature worktree did not contain sibling dependency checkouts. After
+  checking out all three exact workflow-pinned revisions into their expected
+  paths, the full selected marker passed. These were temporary local dependency
+  worktrees, not changes to vendor pins.
+- Targeted maintenance-observation tests also passed (`30 passed`), and Ruff
+  passed for the changed implementation/tests. `.test/` remains ignored by
+  Git. The feature branch push has no GitHub check run because the regular CI
+  workflow triggers on pull requests and `main`, not feature-branch pushes;
+  this local run is not presented as hosted CI evidence.
+- A follow-up focused run on the pushed tree covered provider configuration,
+  observation assessment/persistence, continuation scheduling, adaptive
+  background maintenance, and profile state: `60 passed` in 4.64 seconds.
+  The Bonsai provider test asserts that the provider chain remains pinned to
+  the local OpenAI-compatible endpoint without Ollama fallback.
 - The background scheduler's implicit limits remain 4 steps/180 seconds, but
   the dedicated Bonsai profile's explicit 6-step/300-second values are read and
   propagated into queued jobs. Added a regression assertion for both the
@@ -132,12 +157,14 @@ evidence that Bonsai performed maintenance.
   created no automatic graph repair.
 - Cycle 497 ran the medium-effort critic but still stopped at exactly 1,024
   completion tokens with `finish_reason=length` (3,136 prompt tokens). This
-  exposed the separate provider-construction cap:
-  `KOGWISTAR_MAINTENANCE_MAX_OUTPUT_TOKENS=1024` was overriding the per-call
-  setting. At that point, the local `.env`, Compose fallback, and redacted
-  config backup were raised to 2,048. They are now at 4,096. Focused tests
-  after the diagnostic change passed (`40 passed`),
-  Ruff passed, and Compose configuration validation passed.
+  was initially attributed to the environment variable
+  `KOGWISTAR_MAINTENANCE_MAX_OUTPUT_TOKENS=1024`; the local `.env`, Compose
+  fallback, and redacted config backup were then raised to 2,048 and later
+  4,096. A subsequent source audit found no consumer of this variable in the
+  current checkout, so the historical causal attribution and claimed cap are
+  unverified and must not be relied upon. Focused tests after the then-current
+  diagnostic change passed (`40 passed`), Ruff passed, and Compose validation
+  passed.
 - Cycle 502 still stopped at exactly 4,096 completion tokens with
   `finish_reason=length`, indicating the real observation prompt can trigger
   excessive internal reasoning even with a reasoning budget. A same-sized
@@ -169,6 +196,19 @@ evidence that Bonsai performed maintenance.
   is visible in worker logs, but this run does not prove durable audit-message
   persistence. The cause was not captured, so do not attribute it to a missing
   Postgres projection implementation or to any specific backend defect.
+- Offline investigation found an application-level idempotency hazard in
+  observation audit IDs: the prior ID depended on frame and verdict, while the
+  persisted payload also includes critic status, findings, and recommended
+  action. A repeated assessment of an unchanged frame could therefore reuse an
+  idempotency key with a changed payload, which Kogwistar correctly rejects as
+  an idempotency conflict. Assessment IDs now hash the canonical full persisted
+  assessment identity. A regression verifies exact duplicate assessments retain
+  the same ID, changed critic findings receive a different ID, and the
+  in-memory lane-message persistence stores both distinct assessments while
+  deduplicating the exact retry. Focused tests passed (`30 passed`) and Ruff
+  passed. This is a confirmed local correctness fix, but it is not proof that
+  this was the cause of the historical Postgres `ValueError`; Postgres-backed
+  audit persistence still requires a separately authorized runtime verification.
 - Cycle 506 used the new environment but the structured response still reached
   the 4,096-token per-call output ceiling (`finish_reason=length`, 3,102 prompt
   tokens, 4,096 completion tokens). It failed closed as `quality_unknown` and
@@ -548,6 +588,49 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 
 ## Offline verification update (2026-09-30)
 
+- Added a provider-agnostic context-overflow stop path for read-only maintenance
+  reviews. Recognized overflow errors persist `critic_status=blocked_context`,
+  suppress continuation/remaining job steps, and durably disable autonomous
+  and request maintenance with `status_reason=blocked_context_window`, aborting
+  the maintenance experiment rather than leaving direct/follow-up requests
+  available. Final job failure includes the claim token to prevent stale-worker
+  writes. Provider wording is heuristically
+  classified, so unrecognized provider errors remain ordinary fail-closed critic
+  failures and are not claimed to trigger the persistent stop.
+- Source audit correction: the current LLM-Wiki observation critic constructs
+  its model through the shared provider factory without setting an output-token
+  cap or Bonsai reasoning budget. Earlier report entries describe prior runtime
+  observations/experiments and are not evidence that those limits exist in the
+  current source path. Provider-specific generation caps, especially across a
+  Codex bridge or any future Claude adapter, remain a separate unverified item.
+- Regressions cover common context-limit wording, chained exceptions, durable
+  full maintenance pause, assessment status, parser-job terminal failure, no
+  retry, claim-token fencing, requeue of already-claimed work after abort,
+  provider-switch refresh, and no continuation.
+  Focused maintenance/provider selection after the full-stop/fencing assertions:
+  **63 passed**. The changed files pass Ruff `E402,E9,F` and `git diff --check`.
+  A broader daemon-recovery selection was attempted but its seven persistent
+  backend cases could not initialize because this isolated environment lacks
+  optional `chromadb`; this does not count as a pass for those integration
+  tests. This is offline code evidence only; it does not establish current
+  Bonsai runtime health.
+- The separate KG Doc Parser provider-bounds feature branch's full `ci` marker
+  selection completed after adding the optional Anthropic adapter: **66 passed,
+  1 skipped, 166 deselected**; provider-limit
+  Ruff and diff checks passed. It remains unmerged and is not yet pinned by
+  LLM-Wiki.
+- The parser feature commit `e9c0fbe` was pushed to
+  `feat/provider-generation-bounds`; follow-up `09aec68` adds explicit
+  Anthropic context-overflow type coverage. GitHub Actions has not run for that branch:
+  the parser workflow is configured for pushes to `main` and pull requests
+  targeting `main`, not arbitrary branch pushes. The branch still needs a PR
+  before its remote CI status can be verified; the local full marker suite is
+  green.
+- The LLM-Wiki context-stop/provider-refresh implementation was committed and
+  pushed as `9376650` on `feat/bonsai-maintenance-review`. GitHub Actions has no
+  run associated with this branch and no pull request is currently associated
+  with it; its local focused suite is green, but remote CI remains unverified.
+
 - Re-ran the focused embedding-service suites after confirming that the CPU
   CLIP encoder calls its learned text and image projection heads:
   `python -m pytest tests/unit/test_embedding_service.py
@@ -600,6 +683,78 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
   no Compose service was started and no graph was mutated. They do not change
   the outstanding live-verification statuses below.
 
+## Post-restart Local Readiness Snapshot (2026-09-30)
+
+- The custom llama-server executable and both Bonsai files are present at the
+  documented D-drive paths. The executable reports llama.cpp
+  `0.2.0-dev`/build `10706`, commit `1a07bfa5f`, MSVC `19.42.34438.0`, x64.
+- `scripts/start_local_bonsai.ps1` defaults to `-c 8192`. This is the
+  conservative previously exercised operating point, not a proven maximum;
+  the actual host maximum remains unknown pending an explicitly authorized
+  controlled memory/context ladder.
+- A read-only `nvidia-smi` snapshot reports an 8-GiB RTX 3080 Laptop GPU with
+  8,016 MiB free and 0% utilization. This is consistent with the user-reported
+  post-restart unloaded state, not evidence of successful inference. No server,
+  Docker service, or database was started or queried for this snapshot.
+- The required assets are present: the language GGUF is 5,946,648,928 bytes and
+  the matching vision projector is 629,246,976 bytes. The Windows launch script
+  binds `0.0.0.0` for Docker Desktop reachability; firewall scoping remains an
+  operator requirement.
+- A secret-redacted inspection of the active local `.env` confirms the
+  maintenance provider and its only provider-chain entry are `openai`, the
+  model is `Ternary-Bonsai-2-27B-PTQ1_0`, the endpoint is
+  `http://host.docker.internal:8181/v1`, and the configured background cadence
+  is 300 seconds. Secret values were not read or reported. Compose config-only
+  validation against `compose.yml`, `compose.memory-agent.yml`, and
+  `compose.embedding-clip-cpu.yml` succeeds and resolves PostgreSQL, combined
+  REST/MCP/maintenance, Grafana, and CPU CLIP services. No containers were
+  started. The environment requests background maintenance, but this does not
+  establish the durable maintenance-control state; the context circuit breaker
+  may still be latched from the prior run.
+- Removed the unused `KOGWISTAR_MAINTENANCE_MAX_OUTPUT_TOKENS` setting from the
+  Bonsai environment snippet. The current critic path does not consume it, so
+  leaving it there would imply a completion cap that is not implemented.
+- Expanded offline regression verification across
+  `test_worker_runtime_orchestration.py`, `test_maintenance_job_lowering.py`,
+  adaptive scheduling, observation execution/persistence, context abort, and
+  provider configuration: **94 passed in 83.34s**. This covers the control and
+  queue paths for direct, follow-up, and scheduled work with test providers;
+  it is not evidence that Bonsai inference or live PostgreSQL persistence
+  succeeds after restart.
+
+## Runtime Recheck After Host Restart (2026-09-30 12:56 UTC)
+
+- Docker Desktop is running. The Compose project had only the maintenance
+  container running; its Postgres, REST, MCP, and Grafana containers were
+  stopped. The maintenance container had restarted 83 times. Its health check
+  was green, but its startup log showed engine initialization failing because
+  the hostname `postgres` could not be resolved. A green container health
+  check therefore did not mean that maintenance was operational.
+- Started only the existing `postgres` Compose service. It became healthy and
+  reused the existing `llm-wiki_postgres_data` named volume; no volume was
+  removed or recreated. The maintenance daemon subsequently logged that it
+  started with a 10-second interval. This proves database/daemon startup only,
+  not a completed model-backed maintenance cycle.
+- The container's non-secret maintenance settings resolve to the
+  OpenAI-compatible provider with chain `openai`, the Bonsai model name,
+  `host.docker.internal:8181`, and nonzero bounded background budgets (2 calls,
+  16,000 tokens, 6 steps, 300 seconds). No secret values were inspected or
+  reported.
+- No host llama-server process was running. The custom executable and both
+  Bonsai model files are present, and the RTX 3080 Laptop GPU was idle with
+  8,192 MiB total memory. Thus no Bonsai inference or new graph writes were
+  observed during this recheck.
+- The Windows Private firewall profile currently has inbound action `Allow`.
+  The current account is not elevated. The checked-in launcher binds to
+  `0.0.0.0`, which would expose the unauthenticated local inference endpoint
+  on more than the Docker path under that firewall policy. I did not start it
+  with that exposure. The supplied `127.0.0.1` binding also cannot be assumed
+  reachable from the Compose container. A verified Docker-only host binding or
+  an appropriately scoped firewall configuration is still required before
+  model-backed maintenance can safely resume.
+- Two pytest processes belonging to an already-running unit-CI invocation
+  were present and were left untouched. No CI or runtime process was killed.
+
 ## Objective Acceptance Snapshot (2026-09-30)
 
 | Requirement | Current evidence | Status |
@@ -620,6 +775,144 @@ Runtime statuses above refer to the last authorized observation, not current
 service health. Do not infer that services or jobs are still running. Resuming
 live acceptance checks requires a new explicit runtime-verification window;
 the original ten-hour monitoring limit has been honored as a stop condition.
+
+## Runtime Recheck After Resume (2026-09-30 13:39 UTC)
+
+- The llama.cpp server session was still live. Its logs show a completed short
+  JSON-format request and `reasoning_budget=2048` activation. This verifies the
+  local endpoint can honor that explicit request parameter; it does not prove
+  the maintenance provider path supplies the same parameter by default.
+- The maintenance container uses the older `profchan/kogwistar-llm-wiki:v0.5.1`
+  image. Its scheduled cycle 680 ended `quality_unknown` after a
+  length-truncated critic response and failed closed. Cycle 681 completed a
+  critic review and one bounded follow-up round, then ended at
+  `max_rounds_reached`. The findings still called out weak/empty grounding,
+  unsupported parent-child relation evidence, and missing relation provenance.
+  No graph mutations or corpus expansion were authorized.
+- The durable control file says `background_enabled=false` and
+  `request_enabled=true`. I left background work disabled after confirming
+  cycle 681 was terminal; no new run was scheduled.
+- The container was unhealthy before restart, with a healthcheck that only
+  tests for `/var/lib/llm-wiki/maintenance/maintenance.sock`. Restarting only
+  the maintenance container preserved the Postgres volume and durable control
+  state, but the socket healthcheck remained unhealthy. The mounted directory
+  contains a stale `test.sock` from Sep 28, not the expected maintenance
+  socket, while the daemon process is alive. Therefore service health and
+  control-plane availability remain unverified; do not treat the running
+  process as a healthy scheduled worker.
+- Current host headroom is low (about 1.25 GiB free RAM; RTX 3080 Laptop GPU
+  reports 6,895 MiB used of 8,192 MiB). I did not build an image, increase
+  context, or start another background inference.
+- On `feat/bonsai-maintenance-review`, the control listener now tolerates
+  disconnected clients and stale control instances merge updates against the
+  durable state file. Focused Windows verification after the final code edit:
+  `15 passed, 1 skipped`; Ruff passed; the PowerShell launcher parsed without
+  syntax errors. The Linux socket regression had passed in an isolated
+  container before these final documentation/launcher changes. The updated
+  launcher selects the WSL virtual-network address instead of binding to
+  `0.0.0.0`; it passes a local llama.cpp reasoning effort/budget. This does
+  not alter application provider behavior for Codex, Anthropic, or remote
+  OpenAI-compatible providers.
+- No other feature branch was rebased or modified. The unrelated email test
+  relocation remains separate. This work is on the already-existing
+  `feat/bonsai-maintenance-review` branch to avoid creating another branch.
+
+### Control Socket Recovery (2026-09-30 13:44 UTC)
+
+The daemon finished startup after the earlier 13:39 snapshot. The container is
+now `healthy`; both `maintenance.sock` and the stale `test.sock` exist. A
+read-only `maintenance-control --status` request received a successful socket
+response (`ok=true`), confirming the listener works after startup. Durable
+background mode remains disabled and direct-request mode remains enabled. This
+corrects the transient health state above; it does not establish that another
+background cycle is scheduled or that direct maintenance has been exercised.
+
+## Bounded Background Recheck And Direct-Request Probe (2026-09-30 14:07 UTC)
+
+- The local llama.cpp endpoint returned HTTP 200 from `/v1/models` when called
+  inside the Compose network. It identified the Bonsai GGUF, advertised active
+  `n_ctx=8192`, and declared multimodal capability. The live maintenance
+  container had provider `openai`, a single-entry `openai` chain, model
+  `Ternary-Bonsai-2-27B-PTQ1_0`, and the WSL endpoint
+  `192.168.64.1:8181/v1`.
+- I enabled one five-minute background interval. Cycle 682 selected the same
+  existing weakly grounded finance concept, made two actual HTTP
+  `/v1/chat/completions` calls to Bonsai (3,102+3,887 tokens in 131 seconds,
+  then 3,102+1,990 tokens in 65 seconds), completed its single bounded
+  follow-up, and was acknowledged at `max_rounds_reached`. No context overflow
+  or output-length truncation occurred in this cycle.
+- The cycle's assessment remained `weak_label`/`review_parent`; its findings
+  again include empty or unverified mention grounding, missing parent context,
+  and an unsupported `HAS_CHILD` relation without provenance. This confirms
+  successful Bonsai execution and follow-up scheduling, but not successful
+  parsing/cross-link quality or graph repair. I disabled future background
+  scheduling after the cycle; no additional source documents were added.
+- The subject's assessment `source_document_id` did not resolve through the
+  MCP `source` tool (`exists=false`). A bounded topic-based `maintain` request
+  then timed out during source-catalog resolution and returned no job ID.
+  Maintenance logs show no resulting direct request job. The read-only
+  `status` tool also exceeded the client stream timeout. MCP startup itself
+  reached healthy, but its 384-MiB container rose to about 350 MiB during the
+  catalog/status work. I stopped MCP after those probes to release memory;
+  Postgres and the maintenance daemon remain running. Direct request execution
+  against an existing source is therefore still UNVERIFIED, and source
+  catalog resolution is a concrete blocker to that acceptance test.
+- Durable maintenance state after the cycle is `background_enabled=false`,
+  `request_enabled=true`; the maintenance container is healthy. Grafana is
+  still stopped, so OTLP export errors continue and observability relies on
+  container logs plus persisted control state. The `.test/` directory remains
+  ignored (`git check-ignore .test/bonsai-runtime` succeeds).
+- The topic-based direct-request timeout was traced to repeated active-source
+  catalog scans: `maintain()` resolved topic matches by loading the full source
+  catalog, then `_load_source_request()` reloaded that catalog once per match.
+  The implementation now loads the catalog once and reuses it for topic
+  filtering and request construction. A regression test asserts exactly one
+  catalog read for a topic maintenance request; focused gateway tests passed
+  (**19 passed**) and Ruff passed at that point. A second live probe with this
+  source change mounted read-only into the MCP container still exceeded 120
+  seconds without a tool response, HTTP inference request, or queued job. The
+  MCP container was stopped; no direct job was created. Thus the repeated scan
+  was a real inefficiency but not the only blocker.
+- Follow-up code inspection found the source enumeration itself is unbounded:
+  it calls `get_nodes(limit=None)` with default embeddings included and then
+  performs a named-projection lookup per logical source. Request token/call
+  budgets are applied only after this discovery and source hydration. The
+  feature branch now bounds topic discovery to 128 graph nodes, requests only
+  documents and metadata (not embeddings), and fails with an explicit request
+  for source IDs when the workspace exceeds the discovery limit. Explicit IDs
+  now resolve each source's active revision directly in the workspace source
+  namespace and avoid topic-catalog enumeration. Regression tests cover the
+  bound, payload selection, and direct-ID lookup without catalog scans; all 21
+  focused gateway tests pass and Ruff passes. The change is not in the running
+  image, so live direct maintenance remains unverified.
+
+## Scheduled Bonsai Follow-up (2026-09-30 14:48 UTC)
+
+- Durable control was changed to `background_enabled=true` and
+  `request_enabled=true`. The daemon scheduled and claimed cycles 683, 684, and
+  685 at its configured five-minute cadence, using only the local Bonsai model
+  and existing stock-knowledge nodes. No new source documents were added.
+- Cycle 683's first critic call returned HTTP 200 after 99 seconds and
+  assessed `weak_label`; its second critic response hit the 4,096-token output
+  cap and failed closed as `quality_unknown`. No graph change was authorized.
+- Cycle 684 made two successful Bonsai calls (2,136 and 3,000 output tokens),
+  completed its follow-up at `max_rounds_reached`, and was acknowledged. Its
+  verdict remained `weak_label` due to unverified grounding, unsupported
+  `HAS_CHILD` relation provenance, and granularity concerns. No graph change
+  was authorized.
+- Cycle 685's critic response again hit the 4,096-token output cap, failed
+  closed, and was deferred for human review. These observations establish that
+  an 8,192-token context can complete successful critic calls and one
+  successful follow-up; they do not establish the maximum usable context or
+  acceptable parse/crosslink quality. The fail-closed behavior prevented
+  unsupported automatic repair.
+- The feature branch now limits critic output to four findings, each at most
+  200 characters, and asks for no reasoning trace or preamble. Its focused
+  regressions pass, but the running container still uses the older v0.5.1
+  image, so the change has not yet been tested against Bonsai live.
+- Grafana is stopped; OTLP export failures are observability noise and did not
+  prevent the maintenance jobs from completing. Direct MCP execution remains
+  unverified pending a request against a known source ID.
 
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0

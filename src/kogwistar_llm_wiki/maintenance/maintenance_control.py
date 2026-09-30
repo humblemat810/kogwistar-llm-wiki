@@ -139,9 +139,9 @@ class MaintenanceControl:
         self._lock = threading.RLock()
         self._state = self._read()
         try:
-            self._state_mtime_ns = self.path.stat().st_mtime_ns
+            self._state_snapshot: bytes | None = self.path.read_bytes()
         except OSError:
-            self._state_mtime_ns = None
+            self._state_snapshot = None
 
     def _read(self) -> MaintenanceControlState:
         try:
@@ -156,12 +156,12 @@ class MaintenanceControl:
     def get(self) -> MaintenanceControlState:
         with self._lock:
             try:
-                mtime_ns: int | None = self.path.stat().st_mtime_ns
+                snapshot: bytes | None = self.path.read_bytes()
             except OSError:
-                mtime_ns = None
-            if mtime_ns != self._state_mtime_ns:
+                snapshot = None
+            if snapshot != self._state_snapshot:
                 self._state = self._read()
-                self._state_mtime_ns = mtime_ns
+                self._state_snapshot = snapshot
             return self._state
 
     def update(
@@ -180,7 +180,10 @@ class MaintenanceControl:
         persist: bool = True,
     ) -> MaintenanceControlState:
         with self._lock:
-            current = self._state
+            # A separate CLI process may have changed control.json since this
+            # instance last read it. Merge updates against durable state so a
+            # later usage/spend write cannot undo an operator mode change.
+            current = self.get()
             values: dict[str, object] = {"updated_by": actor}
             if request_enabled is not None:
                 values["request_enabled"] = _bool_value(request_enabled, default=current.request_enabled)
@@ -221,9 +224,9 @@ class MaintenanceControl:
                 temporary.write_text(json.dumps(asdict(self._state), sort_keys=True) + "\n", encoding="utf-8")
                 temporary.replace(self.path)
                 try:
-                    self._state_mtime_ns = self.path.stat().st_mtime_ns
+                    self._state_snapshot = self.path.read_bytes()
                 except OSError:
-                    self._state_mtime_ns = None
+                    self._state_snapshot = None
             return self._state
 
     def serve(self, stop_event: threading.Event) -> threading.Thread:
@@ -268,7 +271,13 @@ class MaintenanceControl:
                                 response = {"ok": True, **asdict(result)}
                         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                             response = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-                        connection.sendall((json.dumps(response) + "\n").encode("utf-8"))
+                        try:
+                            connection.sendall((json.dumps(response) + "\n").encode("utf-8"))
+                        except OSError:
+                            # A client may disconnect while a malformed or
+                            # incomplete request is being handled. Keep the
+                            # daemon's control listener alive for later calls.
+                            continue
             finally:
                 server.close()
                 try:
