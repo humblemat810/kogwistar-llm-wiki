@@ -914,6 +914,57 @@ background cycle is scheduled or that direct maintenance has been exercised.
   prevent the maintenance jobs from completing. Direct MCP execution remains
   unverified pending a request against a known source ID.
 
+## Direct MCP And Scheduled Follow-up (2026-09-30 15:03 UTC)
+
+- The MCP container was started with the feature-branch source mounted read-only
+  and the existing Postgres data volume. A direct `maintain` request for the
+  known logical source `6c0d8870-93b5-5b5b-a43d-51ba8c011787` returned a queued
+  job ID (`d2e2142b-a018-5e89-91ef-d083d64853f0`). The maintenance worker later
+  claimed it and emitted the terminal acknowledgement; this confirms the MCP
+  enqueue-to-worker path, not a successful crosslink mutation. The queue row's
+  final persisted status was not independently queried.
+- The direct request found no eligible related candidate and completed at
+  `max_rounds_reached` without invoking the model or changing the graph. This is
+  a successful bounded no-op, not evidence of a newly created relation.
+- Scheduled cycle 686 used Bonsai for two critic calls (1,850 and 3,340 output
+  tokens). It completed its follow-up and remained `review_required` due to
+  empty source grounding, a truncated label, unsupported `HAS_CHILD`, and
+  missing relation provenance. Scheduled cycle 687 also completed two Bonsai
+  calls (2,954 and 2,306 output tokens), reached `max_rounds_reached`, and was
+  acknowledged. Its verdict remained `weak_label` for weak grounding, weak
+  labels, and unsupported relation provenance. No graph repair or source
+  expansion was authorized.
+- Cycle 688 was claimed at 15:02 UTC and was still running at the end of this
+  observation window. Durable background and direct-request modes remain
+  enabled. This provides evidence that scheduled follow-up and a direct request
+  both reach terminal handling, while knowledge quality remains below the
+  acceptance bar.
+- The active maintenance container still runs the published v0.5.1 image; the
+  branch fixes for bounded source discovery and critic output are mounted only
+  into the MCP service and have not been deployed to maintenance. Grafana remains
+  stopped, so trace-export errors continue; the worker's local logs and durable
+  job state are the evidence source.
+- The checked-in environment example now reflects the observed scheduled-work
+  setup (`background_enabled=true`) and the verified WSL-to-Docker endpoint.
+  Scheduled work is limited to reviewing existing sources; add no new source
+  documents until parsing and crosslink quality pass review.
+
+## Subsequent Scheduled Cycles (2026-09-30 15:10 UTC)
+
+- Cycle 688's critic response hit the 4,096-token completion ceiling after a
+  3,102-token prompt. It failed closed as `quality_unknown`, was deferred for
+  human review, and authorized no graph mutation.
+- The daemon continued scheduling work: cycle 689 was claimed at 15:08 UTC and
+  was still running at this check. This verifies that the deployed v0.5.1 worker
+  continues after a critic truncation; the feature branch's context-overflow
+  circuit breaker is not yet deployed to that maintenance container.
+- Direct MCP maintenance was confirmed through worker logs, but the result was
+  a bounded no-candidate completion. Background maintenance is genuinely
+  model-backed and scheduled, yet repeated reviews still report weak grounding,
+  unsupported relations, or truncated output. Quality therefore remains on
+  hold; do not add more stock documents or treat these runs as successful
+  parsing/crosslink repair.
+
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB
