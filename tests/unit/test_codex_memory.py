@@ -59,11 +59,11 @@ def test_memory_metadata_is_bounded_json_and_preserved():
     record = CodexMemoryRecord.model_validate(
         {
             **_record(),
-            "metadata": {"ontology": {"ontology_id": "email"}, "stream_ids": ["stream-a"]},
+            "metadata": {"ontology": {"ontology_id": "sample"}, "stream_ids": ["stream-a"]},
         }
     )
     assert record.metadata == {
-        "ontology": {"ontology_id": "email"},
+        "ontology": {"ontology_id": "sample"},
         "stream_ids": ["stream-a"],
     }
     with pytest.raises(ValueError, match="JSON-serializable"):

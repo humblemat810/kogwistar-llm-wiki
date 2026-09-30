@@ -138,8 +138,10 @@ Does not own:
 - `kg-doc-parser` depends on `kogwistar`
 - `kogwistar-obsidian-sink` depends on `kogwistar`
 - `kogwistar-email-plugin` depends on `kogwistar` contracts and optional
-  transport libraries
-- `kogwistar-llm-wiki` composes all others
+  transport libraries, and may optionally register through LLM-Wiki's generic
+  workbench extension contract
+- `kogwistar-llm-wiki` composes required components; optional plugins remain
+  disabled unless explicitly allowlisted
 
 ---
 

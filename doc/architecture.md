@@ -39,29 +39,6 @@ flowchart LR
     G --> I[Obsidian sink<br/>projection]
 ```
 
-### Email Intelligence Extension
-
-Email is an optional source adapter, not a replacement for the document
-pipeline or a new graph engine:
-
-```mermaid
-flowchart LR
-    MAIL["mailbox event stream"] --> PLUGIN["email plugin\nparse + ontology mapping"]
-    PLUGIN --> RAW["immutable source revision"]
-    PLUGIN --> DERIVED["mapping derivation\npending"]
-    RAW --> VIEW["email plugin viewer\nACL-checked projection"]
-    DERIVED --> REVIEW["review state"]
-    REVIEW -->|confirmed| PATCH["maintenance patch fence"]
-    PATCH --> KG["curated_kg\nexisting nodes + edges"]
-    PATCH --> MEM["optional intelligence memory"]
-    PATCH -. never rewrites .-> RAW
-```
-
-The connector binding, not the `From`/`To` headers, determines workspace,
-namespace, and ACL scope. Raw bytes are immutable; parser output, ontology
-mapping, and memory candidates are derivations that require provenance and
-explicit acceptance before curated graph mutation.
-
 ---
 
 ## 2. System Components

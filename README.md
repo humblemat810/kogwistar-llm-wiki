@@ -506,9 +506,6 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/release_0.5.3.md](doc/release_0.5.3.md) | Version 0.5.3 Kogwistar 0.6 downstream alignment |
 | [doc/release_0.5.4.md](doc/release_0.5.4.md) | Version 0.5.4 email-boundary hardening and current pins |
 | [doc/mcp_v2_migration.md](doc/mcp_v2_migration.md) | MCP V2 migration, compatibility, and upgrade order |
-| [doc/adr_composable_ontology_email_intelligence.md](doc/adr_composable_ontology_email_intelligence.md) | Composable ontology, email plugin boundaries, ACLs, and evidence invariants |
-| [doc/email_viewer_plugin.md](doc/email_viewer_plugin.md) | Email evidence runtime, viewer, review state, and explicit acceptance |
-| [doc/composable_ontology_email_implementation_plan.md](doc/composable_ontology_email_implementation_plan.md) | Staged email ontology and intelligence delivery plan |
 | [doc/glossary.md](doc/glossary.md) | Term definitions |
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
 | [STATUS.md](STATUS.md) | Implementation status |

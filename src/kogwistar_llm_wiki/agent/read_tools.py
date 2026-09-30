@@ -17,7 +17,9 @@ class AgentReadToolsMixin:
             raise ValueError("memory stream_ids must be a list of non-empty strings")
         stream_ids = tuple(str(stream_id).strip() for stream_id in raw_stream_ids)
         if any(
-            not self.api.email_runtime.authorize_stream(workspace_id, stream_id)
+            not self.api.authorize_resource(
+                workspace_id, "memory_stream", stream_id, "read"
+            )
             for stream_id in stream_ids
         ):
             raise PermissionError("memory stream is not authorized for workspace")
@@ -72,22 +74,6 @@ class AgentReadToolsMixin:
             lifecycle_status=str(arguments.get("lifecycle_status") or "").strip() or None,
             limit=int(arguments.get("limit") or 50),
             authorized_stream_ids=self._authorized_memory_stream_ids(arguments, workspace_id),
-        )
-
-    def email_view(self, arguments: Mapping[str, Any]) -> dict[str, object]:
-        return self.api.view_email(
-            workspace_id=str(arguments.get("workspace_id") or "").strip(),
-            stream_id=str(arguments.get("stream_id") or "").strip(),
-            source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
-        )
-
-    def email_propose(self, arguments: Mapping[str, Any]) -> dict[str, object]:
-        return self.api.propose_email_mapping(
-            workspace_id=str(arguments.get("workspace_id") or "").strip(),
-            stream_id=str(arguments.get("stream_id") or "").strip(),
-            source_revision_id=str(arguments.get("source_revision_id") or "").strip(),
-            source_document_id=str(arguments.get("source_document_id") or "").strip(),
-            confidence=float(arguments.get("confidence", 0.75)),
         )
 
     def hypergraph_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:

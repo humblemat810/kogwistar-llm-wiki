@@ -226,19 +226,6 @@ test("a live Codex lens failure stays visible instead of replacing the graph wit
   await expect(page.getByText("Verifier").first()).toBeVisible();
 });
 
-test("workbench mounts the email plugin viewer route", async ({ page }) => {
-  await page.route("**/email/viewer**", async (route) => {
-    await route.fulfill({
-      contentType: "text/html",
-      body: "<!doctype html><html><body><h1>Email evidence plugin viewer</h1><p>Email topology route.</p></body></html>",
-    });
-  });
-  await page.goto("/?workspace_id=team-alpha");
-  const emailViewer = page.frameLocator('iframe[title="Email evidence plugin viewer"]');
-  await expect(emailViewer.getByRole("heading", { name: "Email evidence plugin viewer" })).toBeVisible();
-  await expect(emailViewer.getByText("Email topology route.")).toBeVisible();
-});
-
 test("a newer Codex query cancels stale polling and owns the visible answer", async ({ page }) => {
   let submission = 0;
   await page.route("**/api/interactions**", async (route) => {
