@@ -138,6 +138,40 @@ class ParseAndGraphQualityAssessment(BaseModel):
     watermark_expiry_seconds: int = Field(default=86_400, ge=60)
 
 
+def _assessment_identity(
+    *,
+    frame: MaintenanceObservationFrame,
+    verdict: QualityVerdict,
+    recommended_action: RecommendedAction,
+    findings: Sequence[ObservationFinding],
+    watermark_key: str,
+    critic_status: Literal["not_used", "succeeded", "failed"],
+    continuation_allowed: bool,
+    watermark_expiry_seconds: int,
+) -> str:
+    """Give every distinct persisted assessment a stable idempotency identity."""
+
+    identity_payload = {
+        "frame_id": frame.frame_id,
+        "verdict": verdict,
+        "recommended_action": recommended_action,
+        "findings": [finding.model_dump(mode="json") for finding in findings],
+        "active_view_id": frame.active_view_id,
+        "active_view_version": frame.active_view_version,
+        "watermark_key": watermark_key,
+        "critic_status": critic_status,
+        "continuation_allowed": continuation_allowed,
+        "watermark_expiry_seconds": watermark_expiry_seconds,
+    }
+    canonical_payload = json.dumps(
+        identity_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical_payload).hexdigest()
+    return str(stable_id("maintenance_assessment", digest))
+
+
 def _bounded_records(
     records: Sequence[Mapping[str, object]],
     *,
@@ -414,7 +448,16 @@ def assess_observation_frame(
             )
         )
         return ParseAndGraphQualityAssessment(
-            assessment_id=str(stable_id("maintenance_assessment", frame.frame_id, verdict)),
+            assessment_id=_assessment_identity(
+                frame=frame,
+                verdict=verdict,
+                recommended_action=action,
+                findings=findings,
+                watermark_key=watermark_key,
+                critic_status="failed" if critic_failed else critic_status,
+                continuation_allowed=not critic_failed,
+                watermark_expiry_seconds=max(60, int(watermark_expiry_seconds)),
+            ),
             watermark_key=watermark_key,
             frame_id=frame.frame_id,
             subject=frame.subject,
@@ -443,7 +486,16 @@ def assess_observation_frame(
         )
     )
     return ParseAndGraphQualityAssessment(
-        assessment_id=str(stable_id("maintenance_assessment", frame.frame_id, "adequate")),
+        assessment_id=_assessment_identity(
+            frame=frame,
+            verdict="adequate",
+            recommended_action="none",
+            findings=(),
+            watermark_key=watermark_key,
+            critic_status=critic_status,
+            continuation_allowed=False,
+            watermark_expiry_seconds=max(60, int(watermark_expiry_seconds)),
+        ),
         watermark_key=watermark_key,
         frame_id=frame.frame_id,
         subject=frame.subject,

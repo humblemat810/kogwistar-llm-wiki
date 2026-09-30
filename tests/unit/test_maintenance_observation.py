@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from kogwistar_llm_wiki.maintenance.maintenance_observation import (
+    ObservationFinding,
     ObservationSubject,
     assess_observation_frame,
     build_observation_frame,
@@ -419,6 +420,42 @@ def test_observation_watermark_changes_with_active_parse_view() -> None:
 
     assert first.watermark_key != second.watermark_key
     assert first.assessment_id != second.assessment_id
+
+
+def test_observation_identity_tracks_critic_content_and_is_repeatable() -> None:
+    subject = ObservationSubject(
+        kind="node",
+        subject_id="node-1",
+        workspace_id="demo",
+        namespace="ws:demo:g:curated_kg",
+    )
+    frame = build_observation_frame(subject)
+    finding = ObservationFinding(
+        code="weak_label",
+        verdict="weak_label",
+        severity="warning",
+        subject_id=subject.subject_id,
+        message="label needs a more specific concept name",
+    )
+
+    first = assess_observation_frame(
+        frame,
+        critic_status="succeeded",
+        critic_findings=(finding,),
+    )
+    duplicate = assess_observation_frame(
+        frame,
+        critic_status="succeeded",
+        critic_findings=(finding,),
+    )
+    changed = assess_observation_frame(
+        frame,
+        critic_status="succeeded",
+        critic_findings=(finding.model_copy(update={"message": "use the issuer's full name"}),),
+    )
+
+    assert first.assessment_id == duplicate.assessment_id
+    assert first.assessment_id != changed.assessment_id
 
 
 def test_uncertain_parse_never_becomes_adequate_or_auto_repaired() -> None:

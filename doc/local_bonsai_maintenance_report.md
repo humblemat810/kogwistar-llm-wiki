@@ -169,6 +169,19 @@ evidence that Bonsai performed maintenance.
   is visible in worker logs, but this run does not prove durable audit-message
   persistence. The cause was not captured, so do not attribute it to a missing
   Postgres projection implementation or to any specific backend defect.
+- Offline investigation found an application-level idempotency hazard in
+  observation audit IDs: the prior ID depended on frame and verdict, while the
+  persisted payload also includes critic status, findings, and recommended
+  action. A repeated assessment of an unchanged frame could therefore reuse an
+  idempotency key with a changed payload, which Kogwistar correctly rejects as
+  an idempotency conflict. Assessment IDs now hash the canonical full persisted
+  assessment identity. A regression verifies exact duplicate assessments retain
+  the same ID, changed critic findings receive a different ID, and the
+  in-memory lane-message persistence stores both distinct assessments while
+  deduplicating the exact retry. Focused tests passed (`30 passed`) and Ruff
+  passed. This is a confirmed local correctness fix, but it is not proof that
+  this was the cause of the historical Postgres `ValueError`; Postgres-backed
+  audit persistence still requires a separately authorized runtime verification.
 - Cycle 506 used the new environment but the structured response still reached
   the 4,096-token per-call output ceiling (`finish_reason=length`, 3,102 prompt
   tokens, 4,096 completion tokens). It failed closed as `quality_unknown` and

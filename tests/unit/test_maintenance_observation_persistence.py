@@ -8,6 +8,7 @@ from kogwistar_llm_wiki.configuration.identity import durable_claims_context
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import build_in_memory_namespace_engines
 from kogwistar_llm_wiki.maintenance.maintenance_observation import (
+    ObservationFinding,
     ObservationSubject,
     assess_observation_frame,
     build_observation_frame,
@@ -42,6 +43,20 @@ def test_observation_assessment_persists_once_on_duplicate_delivery(tmp_path) ->
         with durable_claims_context({"storage_ns": namespaces.conv_bg}):
             worker._persist_observation_audit(ctx, frame, assessment)
             worker._persist_observation_audit(ctx, frame, assessment)
+            revised_assessment = assess_observation_frame(
+                frame,
+                critic_status="succeeded",
+                critic_findings=(
+                    ObservationFinding(
+                        code="weak_label",
+                        verdict="weak_label",
+                        severity="warning",
+                        subject_id=subject.subject_id,
+                        message="label needs a more specific concept name",
+                    ),
+                ),
+            )
+            worker._persist_observation_audit(ctx, frame, revised_assessment)
 
         with worker._observation_namespace(namespaces.conv_bg):
             messages = engines.conversation.read.get_nodes(
@@ -52,10 +67,12 @@ def test_observation_assessment_persists_once_on_duplicate_delivery(tmp_path) ->
             node
             for node in messages
             if node.metadata.get("msg_type") == "maintenance.observation.assessment"
-            and node.metadata.get("idempotency_key")
-            == f"observation:{assessment.assessment_id}"
         ]
-        assert len(audit_messages) == 1
-        assert audit_messages[0].metadata["namespace"] == namespaces.conv_bg
+        assert len(audit_messages) == 2
+        assert {node.metadata["idempotency_key"] for node in audit_messages} == {
+            f"observation:{assessment.assessment_id}",
+            f"observation:{revised_assessment.assessment_id}",
+        }
+        assert all(node.metadata["namespace"] == namespaces.conv_bg for node in audit_messages)
     finally:
         engines.close()
