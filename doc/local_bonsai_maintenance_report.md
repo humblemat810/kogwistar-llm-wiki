@@ -1165,6 +1165,21 @@ background cycle is scheduled or that direct maintenance has been exercised.
 - Monitoring remains anchored to background-work activation at 14:48 UTC and
   must stop at 2026-10-01 00:48 UTC, with no extension.
 
+### Bonsai Runtime Follow-up (2026-09-30 18:34 UTC)
+
+- Cycle 713 completed and was acknowledged by the healthy daemon. Its first
+  critic round returned `ValueError` and was converted to `quality_unknown`;
+  the second round returned `adequate` with no findings. The bounded plan
+  ended at `max_rounds_reached`, without authorizing graph repair or source
+  ingestion. Total dispatch duration was about 189 seconds.
+- This further confirms that the current 1,800-token/24-neighbor frame can
+  produce valid critic results, while validation failures remain intermittent.
+  Because the failed round is only classified as `ValueError`, do not label it
+  a context overflow or infer a context-window fix. Continue to require
+  evidence-grounded quality before corpus expansion; leave model context at
+  the verified 8,192 tokens.
+- Commit `2a7335c` passed every triggered GitHub workflow: [required CI](https://github.com/humblemat810/kogwistar-llm-wiki/actions/runs/36758349718), [PyPy 3.11 container smoke](https://github.com/humblemat810/kogwistar-llm-wiki/actions/runs/36758349710), [slot/runtime benchmarks](https://github.com/humblemat810/kogwistar-llm-wiki/actions/runs/36758349749), and [optional PyPy 3.12 beta](https://github.com/humblemat810/kogwistar-llm-wiki/actions/runs/36758350064).
+
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB
