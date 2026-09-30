@@ -827,6 +827,42 @@ background mode remains disabled and direct-request mode remains enabled. This
 corrects the transient health state above; it does not establish that another
 background cycle is scheduled or that direct maintenance has been exercised.
 
+## Bounded Background Recheck And Direct-Request Probe (2026-09-30 14:07 UTC)
+
+- The local llama.cpp endpoint returned HTTP 200 from `/v1/models` when called
+  inside the Compose network. It identified the Bonsai GGUF, advertised active
+  `n_ctx=8192`, and declared multimodal capability. The live maintenance
+  container had provider `openai`, a single-entry `openai` chain, model
+  `Ternary-Bonsai-2-27B-PTQ1_0`, and the WSL endpoint
+  `192.168.64.1:8181/v1`.
+- I enabled one five-minute background interval. Cycle 682 selected the same
+  existing weakly grounded finance concept, made two actual HTTP
+  `/v1/chat/completions` calls to Bonsai (3,102+3,887 tokens in 131 seconds,
+  then 3,102+1,990 tokens in 65 seconds), completed its single bounded
+  follow-up, and was acknowledged at `max_rounds_reached`. No context overflow
+  or output-length truncation occurred in this cycle.
+- The cycle's assessment remained `weak_label`/`review_parent`; its findings
+  again include empty or unverified mention grounding, missing parent context,
+  and an unsupported `HAS_CHILD` relation without provenance. This confirms
+  successful Bonsai execution and follow-up scheduling, but not successful
+  parsing/cross-link quality or graph repair. I disabled future background
+  scheduling after the cycle; no additional source documents were added.
+- The subject's assessment `source_document_id` did not resolve through the
+  MCP `source` tool (`exists=false`). A bounded topic-based `maintain` request
+  then timed out during source-catalog resolution and returned no job ID.
+  Maintenance logs show no resulting direct request job. The read-only
+  `status` tool also exceeded the client stream timeout. MCP startup itself
+  reached healthy, but its 384-MiB container rose to about 350 MiB during the
+  catalog/status work. I stopped MCP after those probes to release memory;
+  Postgres and the maintenance daemon remain running. Direct request execution
+  against an existing source is therefore still UNVERIFIED, and source
+  catalog resolution is a concrete blocker to that acceptance test.
+- Durable maintenance state after the cycle is `background_enabled=false`,
+  `request_enabled=true`; the maintenance container is healthy. Grafana is
+  still stopped, so OTLP export errors continue and observability relies on
+  container logs plus persisted control state. The `.test/` directory remains
+  ignored (`git check-ignore .test/bonsai-runtime` succeeds).
+
 Model-size comparison sources: Apple's [MobileCLIP repository](https://github.com/apple-aiml-research/ml-mobileclip)
 describes the image/text model family and inference stack; the [MobileCLIP-S0
 checkpoint page](https://huggingface.co/apple/MobileCLIP-S0) reports a 216 MB
