@@ -13,6 +13,7 @@ from typing import Literal
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
+    WorkflowProviderSettings,
     build_embedding_function,
 )
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -294,6 +295,7 @@ class IngestPipeline(
         debug_run_dir: str | Path | None = None,
         live_trace: bool | None = None,
         conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+        parser_provider_settings: WorkflowProviderSettings | None = None,
         multimodal_projection_store: MultimodalProjectionStore | None = None,
         multimodal_encoder: MultimodalEncoder | None = None,
     ) -> None:
@@ -315,6 +317,7 @@ class IngestPipeline(
         self.live_trace_printer = LiveTracePrinter(prefix="llm-wiki.ingest") if self.live_trace else None
         self.telemetry = LlmWikiTelemetry.from_environment()
         self.conversation_persistence_mode = conversation_persistence_mode
+        self.parser_provider_settings = parser_provider_settings
         self.multimodal_projection_store = multimodal_projection_store
         self.multimodal_encoder = multimodal_encoder
         if self.multimodal_encoder is None and multimodal_projection_store is not None:

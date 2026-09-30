@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
     parser_llm_cache_transaction,
 )
+from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.engine_core.models import GraphExtractionWithIDs
 from kogwistar.id_provider import stable_id
 
@@ -39,6 +40,7 @@ from ..parsing.parse_views import (
     generation_member_id,
 )
 from ..utils import _temporary_namespace
+from ..providers.role_config import normalize_provider_name
 from .state import semantic_fingerprint as _semantic_fingerprint
 
 
@@ -46,6 +48,53 @@ def _metadata_flag(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _build_maintenance_parse_request(
+    *,
+    workspace_id: str,
+    source_document_id: str,
+    raw_text: str,
+    metadata: Mapping[str, object],
+    provider_settings: WorkflowProviderSettings | None,
+) -> tuple[IngestPipelineRequest, WorkflowProviderSettings | None]:
+    """Use the maintenance model for reparsing without rewriting source metadata."""
+
+    parser_settings = provider_settings.parser if provider_settings is not None else None
+    provider = normalize_provider_name(parser_settings.provider) if parser_settings else None
+    model = str(parser_settings.model or "").strip() if parser_settings else ""
+    if provider and model:
+        return (
+            IngestPipelineRequest(
+                workspace_id=workspace_id,
+                source_uri=str(metadata.get("source_uri") or source_document_id),
+                title=str(metadata.get("title") or source_document_id),
+                raw_text=raw_text,
+                source_format=str(metadata.get("source_format") or "text"),
+                operation_mode="parse_first",
+                parser_mode="llm",
+                parser_lane="workflow_layered",
+                promotion_mode=str(metadata.get("promotion_mode") or "pending"),
+                llm_provider=provider,
+                llm_model=model,
+            ),
+            provider_settings,
+        )
+
+    request = IngestPipelineRequest(
+        workspace_id=workspace_id,
+        source_uri=str(metadata.get("source_uri") or source_document_id),
+        title=str(metadata.get("title") or source_document_id),
+        raw_text=raw_text,
+        source_format=str(metadata.get("source_format") or "text"),
+        operation_mode="parse_first",
+        parser_mode=str(metadata.get("parser_mode") or "heuristic"),
+        parser_lane=str(metadata.get("parser_lane") or "page_index"),
+        promotion_mode=str(metadata.get("promotion_mode") or "pending"),
+        llm_provider=(str(metadata["llm_provider"]) if metadata.get("llm_provider") else None),
+        llm_model=(str(metadata["llm_model"]) if metadata.get("llm_model") else None),
+    )
+    return request, None
 
 
 def select_affected_crosslink_ids(
@@ -1232,20 +1281,17 @@ class DurableParseMaintenanceWorkerMixin:
         with _temporary_namespace(self.engines.kg, ns.source_space):
             document = self.engines.kg.read.get_document(revision_document_id)
         metadata = dict(document.metadata or {})
-        request = IngestPipelineRequest(
+        request, parser_provider_settings = _build_maintenance_parse_request(
             workspace_id=ctx.workspace_id,
-            source_uri=str(metadata.get("source_uri") or source_document_id),
-            title=str(metadata.get("title") or source_document_id),
+            source_document_id=source_document_id,
             raw_text=str(document.content or ""),
-            source_format=str(metadata.get("source_format") or "text"),
-            operation_mode="parse_first",
-            parser_mode=str(metadata.get("parser_mode") or "heuristic"),
-            parser_lane=str(metadata.get("parser_lane") or "page_index"),
-            promotion_mode=str(metadata.get("promotion_mode") or "pending"),
-            llm_provider=(str(metadata["llm_provider"]) if metadata.get("llm_provider") else None),
-            llm_model=(str(metadata["llm_model"]) if metadata.get("llm_model") else None),
+            metadata=metadata,
+            provider_settings=getattr(self, "provider_settings", None),
         )
-        pipeline = IngestPipeline(self.engines)
+        pipeline = IngestPipeline(
+            self.engines,
+            parser_provider_settings=parser_provider_settings,
+        )
         accepted_candidate = self.engines.conversation.jobs.accepted_candidate(ctx.job)
         accepted_extraction = None
         if isinstance(accepted_candidate, dict) and accepted_candidate.get("kind") == "document_parse":

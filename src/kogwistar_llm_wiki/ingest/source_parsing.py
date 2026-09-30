@@ -12,9 +12,10 @@ from types import SimpleNamespace
 from typing import Protocol
 
 from kogwistar.runtime.budget import budget_event_from_dict
+from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 
 from ..models import IngestPipelineRequest
-from ..providers.role_config import resolve_parser_provider_settings
+from ..providers.role_config import normalize_provider_name, resolve_parser_provider_settings
 from ..usage.events import persist_usage_events
 
 
@@ -86,10 +87,20 @@ class SourceParsingMixin:
         if provider is None:
             raise ValueError(f"missing llm provider for parser_mode={request.parser_mode!r}")
 
-        provider_settings = resolve_parser_provider_settings(
-            provider=provider,
-            model=model,
-        )
+        provider_settings = getattr(self, "parser_provider_settings", None)
+        if provider_settings is None:
+            provider_settings = resolve_parser_provider_settings(
+                provider=provider,
+                model=model,
+            )
+        else:
+            provider_settings = WorkflowProviderSettings.model_validate(provider_settings)
+            configured = provider_settings.parser
+            if (
+                normalize_provider_name(configured.provider) != normalize_provider_name(provider)
+                or configured.model != model
+            ):
+                raise ValueError("injected parser provider settings do not match the parse request")
         engine_dir = Path(tempfile.mkdtemp(prefix="kogwistar-workflow-layered-"))
         self._trace_event(
             "workflow_layered_parse_start",

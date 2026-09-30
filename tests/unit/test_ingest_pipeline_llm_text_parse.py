@@ -3,6 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 
@@ -218,3 +222,56 @@ def test_parse_source_uses_workflow_layered_lane(namespace_engines, monkeypatch)
     assert captured["provider_settings"].parser.model == "gpt4o"
     assert result.semantic_tree.title == "Acme Contract"
     assert result.layer_log[0]["stage"] == "workflow_layered_parse_start"
+
+
+def test_workflow_layered_lane_uses_injected_maintenance_provider_settings(
+    namespace_engines, monkeypatch
+):
+    captured: dict[str, object] = {}
+    settings = WorkflowProviderSettings(
+        parser=ProviderEndpointConfig(
+            provider="openai",
+            model="bonsai-test-model",
+            base_url="http://model.example/v1",
+            api_key_env="MAINTENANCE_MODEL_KEY",
+        )
+    )
+
+    def fake_run_workflow_layered_parse(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            semantic_tree=SimpleNamespace(title=kwargs["title"]),
+            graph_payload={"nodes": [], "edges": []},
+            evaluation={"basic_sense_verdict": "good"},
+            diagnostics={"parser_lane": "workflow_layered"},
+            usage_summary={},
+            layer_log=[],
+            parse_session={"mode": "workflow_layered"},
+        )
+
+    monkeypatch.setattr(
+        "kogwistar_llm_wiki.ingest_pipeline.run_workflow_layered_parse",
+        fake_run_workflow_layered_parse,
+    )
+    pipeline = IngestPipeline(
+        namespace_engines,
+        parser_provider_settings=settings,
+    )
+    request = IngestPipelineRequest(
+        workspace_id="demo",
+        source_uri="https://example.test/article",
+        title="Article",
+        raw_text="Pinned source text",
+        parser_mode="llm",
+        parser_lane="workflow_layered",
+        llm_provider="openai",
+        llm_model="bonsai-test-model",
+    )
+
+    pipeline.parse_source(request=request, source_document_id="source-revision-1")
+
+    parsed_settings = captured["provider_settings"]
+    assert parsed_settings.parser.provider == "openai"
+    assert parsed_settings.parser.model == "bonsai-test-model"
+    assert parsed_settings.parser.base_url == "http://model.example/v1"
+    assert parsed_settings.parser.api_key_env == "MAINTENANCE_MODEL_KEY"
