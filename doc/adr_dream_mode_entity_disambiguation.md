@@ -386,3 +386,33 @@ separate operation; candidate discovery alone cannot produce canonical links.
 No core schema change is required for the first implementation. Core changes
 should be considered only if repeated app behavior reveals a genuinely reusable
 primitive.
+
+### Current Scan Bound And Scale-Up Contract
+
+The current automatic maintenance scan is intentionally fail-closed at 250
+observations and 500 generated candidates. An oversized result is rejected
+before any candidate snapshot is written or the job acknowledged; it is never
+truncated into an apparently complete scan. The separately paged contact
+directory API may read up to 5,000 observations, but that limit does not apply
+to automatic matching. These are distinct capabilities.
+
+The current matcher compares observation pairs, so merely raising the scan
+bound would increase worst-case work quadratically and risk producing an
+unreviewable candidate flood. Large-workspace support therefore requires a
+separate scale-up before changing these bounds:
+
+- source providers expose stable, ACL-scoped snapshot/page cursors and an
+  explicit completion signal; partial pages are never treated as full input;
+- durable continuation covers every required page-pair comparison, with a
+  stable source watermark/fingerprint so changes during a scan invalidate or
+  restart affected work rather than silently mixing revisions;
+- candidate writes remain idempotent immutable review snapshots, with current
+  evidence freshness rechecked before persistence and before completion;
+- the worker records progress and resumes after lease loss/crash without
+  acknowledging an incomplete scan; and
+- tests prove cross-page matches are found, denied pages are not read, and
+  interrupted scans converge without omissions or duplicate decisions.
+
+Until that contract exists, scans above the bound fail visibly and require
+operator/application action; the 5,000-entry contact browsing/search API is
+not evidence that automatic matching supports 5,000 contacts.
