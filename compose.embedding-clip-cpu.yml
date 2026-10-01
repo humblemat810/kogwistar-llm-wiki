@@ -1,0 +1,33 @@
+# Optional standalone CPU CLIP encoder. This does not attach it to the app's
+# existing graph/profile; use only with a separately isolated 512-D profile.
+services:
+  embedding-clip-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.embedding-service
+      args:
+        LLM_WIKI_EMBEDDING_TORCH_BACKEND: cpu
+    image: llm-wiki-embedding-clip-cpu:local
+    mem_limit: ${LLM_WIKI_CLIP_MEMORY_LIMIT:-2g}
+    cpus: ${LLM_WIKI_CLIP_CPU_LIMIT:-1.0}
+    environment:
+      LLM_WIKI_EMBEDDING_ENCODER: clip-vit-b32
+      LLM_WIKI_EMBEDDING_MODEL: sentence-transformers/clip-ViT-B-32
+      LLM_WIKI_EMBEDDING_MODEL_REVISION: 327ab6726d33c0e22f920c83f2ff9e4bd38ca37f
+      LLM_WIKI_EMBEDDING_MODEL_PATH: /models/clip
+      LLM_WIKI_EMBEDDING_DIMENSION: "512"
+      LLM_WIKI_EMBEDDING_DEVICE: cpu
+      LLM_WIKI_EMBEDDING_TORCH_BACKEND: cpu
+      LLM_WIKI_EMBEDDING_BATCH_SIZE: "1"
+      LLM_WIKI_EMBEDDING_TOKEN: ${LLM_WIKI_CLIP_TOKEN:-}
+      HF_HOME: /var/lib/huggingface
+      LLM_WIKI_EMBEDDING_HOST: 0.0.0.0
+      LLM_WIKI_EMBEDDING_PORT: "8790"
+    volumes:
+      - type: bind
+        source: ${LLM_WIKI_CLIP_MODEL_HOST_PATH:-D:/models/sentence-transformers-clip-vit-b32-327ab672}
+        target: /models/clip
+        read_only: true
+    ports:
+      - "127.0.0.1:${LLM_WIKI_CLIP_PORT:-8792}:8790"
+    restart: unless-stopped

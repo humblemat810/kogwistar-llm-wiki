@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import socket
+import tempfile
 import threading
+import time
+import uuid
+from pathlib import Path
 
 import pytest
 
@@ -106,13 +111,45 @@ def test_profile_ladder_survives_socket_fallback(tmp_path, monkeypatch) -> None:
 def test_live_control_socket_returns_without_waiting_for_client_close(tmp_path) -> None:
     control = MaintenanceControl(tmp_path)
     stop_event = threading.Event()
-    control.serve(stop_event)
+    server_thread = control.serve(stop_event)
     try:
         result = send_control_command(tmp_path, background_enabled=False)
         assert result["ok"] is True
         assert result["background_enabled"] is False
     finally:
         stop_event.set()
+        server_thread.join(timeout=1)
+
+
+def test_disconnected_control_client_does_not_kill_server(tmp_path) -> None:
+    if not hasattr(socket, "AF_UNIX"):
+        pytest.skip("Unix-domain sockets are unavailable on this platform")
+    # GitHub's nested pytest basetemp can exceed the Unix socket path limit.
+    socket_path = Path(tempfile.gettempdir()) / f"mc-{uuid.uuid4().hex}.sock"
+    control = MaintenanceControl(tmp_path, socket_path=str(socket_path))
+    stop_event = threading.Event()
+    server_thread = control.serve(stop_event)
+    try:
+        deadline = time.monotonic() + 2
+        disconnected = False
+        while time.monotonic() < deadline:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                client.connect(str(control.socket_path))
+                disconnected = True
+                break
+            except OSError:
+                client.close()
+            time.sleep(0.01)
+        assert disconnected, "maintenance control socket did not become connectable"
+
+        client.close()
+
+        result = send_control_command(tmp_path, status=True)
+        assert result["ok"] is True
+    finally:
+        stop_event.set()
+        server_thread.join(timeout=1)
 
 
 def test_budget_caps_are_independent_and_checked_across_windows() -> None:
@@ -147,6 +184,19 @@ def test_profile_and_budget_updates_are_durable_and_status_is_read_only(tmp_path
     assert status["ok"] is True
     assert status["profile"] == "budgeted"
     assert status["budget"] == {"daily": {"output_tokens": 20.0}}
+
+
+def test_stale_control_instance_merges_updates_with_newer_durable_state(tmp_path) -> None:
+    daemon_control = MaintenanceControl(tmp_path)
+    operator_control = MaintenanceControl(tmp_path)
+
+    daemon_control.update(background_enabled=True)
+    operator_control.update(background_enabled=False)
+    daemon_control.update(spend={"daily": {"tokens": 7}})
+
+    state = MaintenanceControl(tmp_path).get()
+    assert state.background_enabled is False
+    assert state.spend == {"daily": {"tokens": 7.0}}
 
 
 def test_rolling_spend_resets_only_expired_windows() -> None:

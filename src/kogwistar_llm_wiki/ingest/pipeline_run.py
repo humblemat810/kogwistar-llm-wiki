@@ -66,7 +66,8 @@ class IngestRunMixin:
                 source_document_id=source_document_id,
                 revision_document_id=parse_document_id,
                 revision=revision,
-                **parse_limits,
+                parser_profile=self._durable_parse_profile(request),
+                **{key: value for key, value in parse_limits.items() if key != "parser_profile"},
             )
         if operation_mode == "maintenance_first":
             self.seed_source_map(

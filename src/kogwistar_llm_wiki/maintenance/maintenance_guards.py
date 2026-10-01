@@ -154,3 +154,24 @@ def evaluate_maintenance_guard(
         source_digest=requested_digest,
         required_stage=required_stage,
     )
+
+
+def evaluate_parse_session_guard(
+    decision: MaintenanceGuardDecision,
+    *,
+    requested_session_id: str,
+    active_session_id: str | None,
+) -> MaintenanceGuardDecision:
+    """Fence queued parse work to the source's CAS-selected active derivation."""
+    if decision.status != "ready" or not active_session_id:
+        return decision
+    if requested_session_id == active_session_id:
+        return decision
+    return MaintenanceGuardDecision(
+        status="stale",
+        reason="parse_session_superseded",
+        source_document_id=decision.source_document_id,
+        source_revision_id=decision.source_revision_id,
+        source_digest=decision.source_digest,
+        required_stage=decision.required_stage,
+    )

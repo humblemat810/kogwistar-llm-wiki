@@ -31,6 +31,7 @@ from ..parsing.parse_views import (
     parse_session_id,
     reparse_session_id,
 )
+from ..parsing.parse_session_store import parse_session_scope_id
 from ..utils import _temporary_namespace
 
 
@@ -121,7 +122,7 @@ class MaintenanceRequestMixin:
                 workspace_id=request.workspace_id,
                 source_document_id=source_document_id,
                 source_revision_id=revision.revision_id,
-                parser_profile=request.parser_lane,
+                parser_profile=self._durable_parse_profile(request),
             )
         else:
             layered_session_id = reparse_session_id(
@@ -174,6 +175,7 @@ class MaintenanceRequestMixin:
                 json.dumps(sorted(seed_node_ids), separators=(",", ":")),
                 json.dumps(bound_maintenance_context(maintenance_context), sort_keys=True),
                 target.model_dump_json() if target is not None else "",
+                json.dumps(self._durable_parse_limits(request), sort_keys=True, separators=(",", ":")),
             )
         )
         self._trace_step(
@@ -286,12 +288,6 @@ class MaintenanceRequestMixin:
                 idempotency_key=lane_idempotency_key,
             )
         lane_message_id = existing_lane_message_id or lane_message.message_id
-        self._supersede_stale_maintenance_jobs(
-            namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
-            source_document_id=source_document_id,
-            maintenance_kind=maintenance_kind,
-            current_revision_id=revision.revision_id,
-        )
         if not self._job_exists(
             namespace=self.namespaces_for(request.workspace_id).maintenance_jobs,
             entity_kind="maintenance_job",
@@ -825,6 +821,9 @@ class MaintenanceRequestMixin:
                 source_revision_id=source_revision_id,
                 parser_profile=request.parser_lane,
             ),
+            "parse_session_scope": parse_session_scope_id(
+                parse_target.region if parse_target is not None else None
+            ),
             "required_stage": required_stage,
             "objective": objective,
             "budgets": dict(budgets or {}),
@@ -856,37 +855,6 @@ class MaintenanceRequestMixin:
             payload=payload,
         )
         return job_id
-
-    def _supersede_stale_maintenance_jobs(
-        self,
-        *,
-        namespace: str,
-        source_document_id: str,
-        maintenance_kind: str,
-        current_revision_id: str,
-    ) -> None:
-        """Fence queued work from an older ingestion attempt.
-
-        The queue remains append-only/auditable: an old job is terminally
-        failed as superseded rather than deleted or reused for a new source
-        revision.
-        """
-        for job in self.engines.conversation.jobs.list(
-            namespace=namespace,
-            status="PENDING",
-            limit=10_000,
-        ):
-            if (
-                str(job.entity_id) != source_document_id
-                or str(job.job_kind) != f"maintenance_job:{maintenance_kind}"
-                or str(job.payload.get("source_revision_id") or "") == current_revision_id
-            ):
-                continue
-            self.engines.conversation.jobs.mark_failed(
-                job.job_id,
-                f"superseded_by_source_revision:{current_revision_id}",
-                final=True,
-            )
 
     def _enqueue_projection_job(
         self,

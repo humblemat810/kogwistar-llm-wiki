@@ -3,9 +3,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
 
+import kogwistar_llm_wiki.maintenance.worker_parse as worker_parse_module
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
-from kogwistar_llm_wiki.ingest_pipeline import IngestPipelineRequest
+from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
+from kogwistar_llm_wiki.models import NamespaceEngines
 from kogwistar_llm_wiki.parsing.parse_generation_store import ParseGenerationStore
 from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
 from kogwistar_llm_wiki.parsing.parse_views import (
@@ -28,6 +34,7 @@ from kogwistar_llm_wiki.worker import MaintenanceWorker
 def test_durable_frontier_write_is_member_tagged_before_view_activation(
     pipeline,
     ingest_request: IngestPipelineRequest,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = ingest_request.model_copy(
         update={"operation_mode": "maintenance_first", "parser_lane": "page_index"}
@@ -52,7 +59,23 @@ def test_durable_frontier_write_is_member_tagged_before_view_activation(
     ).get(session.session_id)
     assert stored is not None
 
-    worker = MaintenanceWorker(pipeline.engines)
+    provider_settings = WorkflowProviderSettings(
+        parser=ProviderEndpointConfig(
+            provider="openai",
+            model="local-bonsai-test",
+            base_url="http://127.0.0.1:8181/v1",
+            api_key_env="LLM_WIKI_LOCAL_MODEL_API_KEY",
+        )
+    )
+    captured_settings: list[WorkflowProviderSettings | None] = []
+    original_pipeline_type = worker_parse_module.IngestPipeline
+
+    def capture_pipeline(engines: NamespaceEngines, **kwargs: object) -> IngestPipeline:
+        captured_settings.append(kwargs.get("parser_provider_settings"))
+        return original_pipeline_type(engines, **kwargs)
+
+    monkeypatch.setattr(worker_parse_module, "IngestPipeline", capture_pipeline)
+    worker = MaintenanceWorker(pipeline.engines, provider_settings=provider_settings)
     result = worker._expand_durable_parse_frontier(
         SimpleNamespace(workspace_id=request.workspace_id, job_id="job-1", maintenance_kind="document_expand_parse_children"),
         stored[0],
@@ -64,6 +87,7 @@ def test_durable_frontier_write_is_member_tagged_before_view_activation(
     assert member_payload["frontier_id"]
     assert "diagnostics" in member_payload
     assert member_payload["parser_strategy"]
+    assert captured_settings == [provider_settings]
     assert result["members"][0]["parent_member_id"] is None
     with _temporary_namespace(pipeline.engines.kg, namespaces.source_space):
         nodes = pipeline.engines.kg.read.get_nodes(
@@ -91,6 +115,100 @@ def test_durable_frontier_write_is_member_tagged_before_view_activation(
             limit=10,
         )
     assert readiness
+
+
+def test_late_parse_output_is_persisted_inactive_and_stopped_for_review(
+    pipeline,
+    ingest_request: IngestPipelineRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = ingest_request.model_copy(
+        update={"operation_mode": "maintenance_first", "parser_lane": "page_index"}
+    )
+    source_document_id = pipeline._source_document_id(request)
+    namespaces = WorkspaceNamespaces(request.workspace_id)
+    pipeline.register_source(
+        request=request,
+        source_document_id=source_document_id,
+        namespace=namespaces.conv_bg,
+    )
+    revision = pipeline.source_revision(request=request, source_document_id=source_document_id)
+    session = pipeline.initialize_durable_parse_session(
+        request=request,
+        source_document_id=source_document_id,
+        revision_document_id=revision.revision_document_id or source_document_id,
+        revision=revision,
+        wall_time_seconds=1e-12,
+    )
+    stored = ParseSessionStore(
+        pipeline.engines.conversation.meta_sqlite,
+        workspace_id=request.workspace_id,
+    ).get(session.session_id)
+    assert stored is not None
+
+    worker = MaintenanceWorker(pipeline.engines)
+    parse_result = worker._expand_durable_parse_frontier(
+        SimpleNamespace(
+            workspace_id=request.workspace_id,
+            job_id="late-parse-job",
+            maintenance_kind="document_expand_parse_children",
+        ),
+        stored[0],
+        stored[1],
+    )
+    assert parse_result["wall_time_budget_exceeded"] is True
+    assert parse_result["review_required"] is True
+    assert parse_result["review_reason"] == "parse_wall_time_budget_exceeded"
+    assert "parse_view" not in parse_result
+    assert parse_result["members"][0]["payload"]["diagnostics"][
+        "wall_time_budget_exceeded"
+    ] is True
+
+    # Exercise the durable commit boundary with the returned parser result.
+    worker.layered_parser = lambda _ctx, _session, _frontier: parse_result
+    monkeypatch.setattr(
+        worker,
+        "_evaluate_maintenance_guard",
+        lambda _ctx: SimpleNamespace(status="ready"),
+    )
+    acknowledgements: list[str] = []
+    monkeypatch.setattr(
+        worker,
+        "_acknowledge_job",
+        lambda ctx: acknowledgements.append(ctx.job_id) or True,
+    )
+    ctx = SimpleNamespace(
+        workspace_id=request.workspace_id,
+        job=SimpleNamespace(claim_token="claim-late-parse"),
+        job_id="late-parse-job",
+        payload={
+            "parse_session_id": session.session_id,
+            "source_document_id": source_document_id,
+        },
+        request_node_id="request-late-parse",
+        maintenance_kind="document_expand_parse_children",
+    )
+    worker._handle_document_expand_parse_children_strategy(ctx)
+
+    persisted = ParseSessionStore(
+        pipeline.engines.conversation.meta_sqlite,
+        workspace_id=request.workspace_id,
+    ).get(session.session_id)
+    assert persisted is not None
+    assert persisted[0].phase == ParseSessionPhase.REVIEW_REQUIRED
+    assert persisted[0].failure_reason == "parse_wall_time_budget_exceeded"
+    assert acknowledgements == ["late-parse-job"]
+    generation = ParseGenerationStore(
+        pipeline.engines.conversation.meta_sqlite,
+        workspace_id=request.workspace_id,
+    ).get(session.generation_id)
+    assert generation is not None
+    assert len(generation[1]) == 1
+    assert len(generation[2]) == 1
+    assert ParseViewStore(
+        pipeline.engines.conversation.meta_sqlite,
+        workspace_id=request.workspace_id,
+    ).get(source_document_id) is None
 
 
 def test_duplicate_frontier_delivery_reuses_generation_event_identity(

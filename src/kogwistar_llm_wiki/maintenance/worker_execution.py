@@ -30,6 +30,7 @@ from ..maintenance.maintenance_guards import (
     MaintenanceGuardDecision,
     SourceRevision,
     evaluate_maintenance_guard,
+    evaluate_parse_session_guard,
     required_stage_for_maintenance,
 )
 from ..maintenance.maintenance_patch_apply import (
@@ -262,7 +263,7 @@ class MaintenanceExecutionWorkerMixin:
             str(metadata(node).get("source_revision_id") or "")
             for node in readiness_nodes
         }
-        return evaluate_maintenance_guard(
+        decision = evaluate_maintenance_guard(
             source_revision=current_revision,
             requested_revision_id=requested_revision_id,
             requested_digest=requested_digest,
@@ -270,6 +271,29 @@ class MaintenanceExecutionWorkerMixin:
             required_stage=required_stage,
             ready_revision_ids=ready_revision_ids,
         )
+        if ctx.maintenance_kind in {
+            "document_seed_graph",
+            "document_parse_graph",
+            "document_expand_parse_children",
+            "document_reparse_region",
+        }:
+            requested_session_id = str(ctx.payload.get("parse_session_id") or "")
+            if requested_session_id:
+                from ..parsing.parse_session_store import ParseSessionStore
+
+                active_session_id = ParseSessionStore(
+                    self.engines.conversation.meta_sqlite,
+                    workspace_id=ctx.workspace_id,
+                ).active_session_id(
+                    source_document_id,
+                    scope_id=str(ctx.payload.get("parse_session_scope") or "full"),
+                )
+                decision = evaluate_parse_session_guard(
+                    decision,
+                    requested_session_id=requested_session_id,
+                    active_session_id=active_session_id,
+                )
+        return decision
 
     def _block_guarded_job(
         self,

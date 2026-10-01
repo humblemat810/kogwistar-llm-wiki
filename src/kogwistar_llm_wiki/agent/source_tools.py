@@ -18,6 +18,8 @@ from .gateway_source import (
     validate_supplied_provenance,
 )
 
+_MAX_SOURCE_DISCOVERY_NODES = 128
+
 
 class AgentSourceMixin:
     """Keep source discovery and queue inspection out of the protocol façade."""
@@ -100,8 +102,10 @@ class AgentSourceMixin:
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
+        candidates: list[dict[str, object]] | None = None,
     ) -> IngestPipelineRequest | None:
-        candidates = self._source_documents(workspace_id)
+        if candidates is None:
+            candidates = self._source_documents(workspace_id)
         by_id = next(
             (item for item in candidates if source_document_id and str(item["id"]) == source_document_id),
             None,
@@ -119,12 +123,66 @@ class AgentSourceMixin:
         candidate = by_id or by_uri
         if candidate is None:
             return None
-        metadata = dict(candidate["metadata"])
+        return self._source_request_from_candidate(
+            workspace_id=workspace_id,
+            source_id=str(candidate["id"]),
+            metadata=dict(candidate["metadata"]),
+            content=str(candidate["content"] or ""),
+        )
+
+    def _load_source_request_by_id(
+        self, *, workspace_id: str, source_document_id: str
+    ) -> IngestPipelineRequest | None:
+        """Resolve a requested source through its active revision, without catalog scans."""
+        ns = self.api.pipeline.namespaces_for(workspace_id)
+        resolver = ParseViewResolver(
+            self.api.pipeline.engines.conversation.meta_sqlite,
+            workspace_id=workspace_id,
+        )
+        with _temporary_namespace(self.api.pipeline.engines.kg, ns.source_space):
+            resolution = resolver.resolve(
+                source_document_id,
+                fallback_revision_document_id=source_document_id,
+            )
+            if not resolution.revision_document_id:
+                return None
+            try:
+                document = self.api.pipeline.engines.kg.read.get_document(
+                    resolution.revision_document_id
+                )
+            except ValueError:
+                return None
+        metadata = dict(document.metadata or {})
+        declared_workspace = str(metadata.get("workspace_id") or "").strip()
+        if declared_workspace and declared_workspace != workspace_id:
+            return None
+        declared_source_id = str(
+            metadata.get("logical_source_document_id")
+            or metadata.get("source_document_id")
+            or ""
+        ).strip()
+        if declared_source_id and declared_source_id != source_document_id:
+            return None
+        return self._source_request_from_candidate(
+            workspace_id=workspace_id,
+            source_id=source_document_id,
+            metadata=metadata,
+            content=str(document.content or ""),
+        )
+
+    @staticmethod
+    def _source_request_from_candidate(
+        *,
+        workspace_id: str,
+        source_id: str,
+        metadata: dict[str, object],
+        content: str,
+    ) -> IngestPipelineRequest:
         return IngestPipelineRequest(
             workspace_id=workspace_id,
-            source_uri=str(metadata.get("source_uri") or source_uri),
-            title=str(metadata.get("title") or candidate["id"]),
-            raw_text=str(candidate["content"] or ""),
+            source_uri=str(metadata.get("source_uri") or ""),
+            title=str(metadata.get("title") or source_id),
+            raw_text=content,
             source_format=str(metadata.get("source_format") or "text"),
             operation_mode=str(metadata.get("operation_mode") or "parse_first"),
             parser_mode=str(metadata.get("parser_mode") or "heuristic"),
@@ -138,7 +196,16 @@ class AgentSourceMixin:
     def _source_documents(self, workspace_id: str) -> list[dict[str, object]]:
         ns = self.api.pipeline.namespaces_for(workspace_id)
         with _temporary_namespace(self.api.pipeline.engines.kg, ns.source_space):
-            nodes = self.api.pipeline.engines.kg.read.get_nodes(limit=None)
+            nodes = self.api.pipeline.engines.kg.read.get_nodes(
+                limit=_MAX_SOURCE_DISCOVERY_NODES + 1,
+                include=["documents", "metadatas"],
+            )
+        if len(nodes) > _MAX_SOURCE_DISCOVERY_NODES:
+            raise ValueError(
+                "topic-based maintenance source discovery is limited to "
+                f"{_MAX_SOURCE_DISCOVERY_NODES} source-graph nodes; pass explicit "
+                "source_document_ids to target a larger workspace"
+            )
         resolver = ParseViewResolver(
             self.api.pipeline.engines.conversation.meta_sqlite,
             workspace_id=workspace_id,
@@ -203,10 +270,18 @@ class AgentSourceMixin:
             result.append(selected[2])
         return result
 
-    def _source_ids_for_topic(self, workspace_id: str, topic: str) -> list[str]:
+    def _source_ids_for_topic(
+        self,
+        workspace_id: str,
+        topic: str,
+        *,
+        candidates: list[dict[str, object]] | None = None,
+    ) -> list[str]:
         terms = {term.lower() for term in topic.split() if len(term) > 2}
         matches = []
-        for item in self._source_documents(workspace_id):
+        if candidates is None:
+            candidates = self._source_documents(workspace_id)
+        for item in candidates:
             haystack = " ".join(
                 [str(item["content"]), json.dumps(item["metadata"], sort_keys=True)]
             ).lower()

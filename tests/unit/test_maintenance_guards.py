@@ -1,7 +1,9 @@
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.maintenance.maintenance_guards import (
+    MaintenanceGuardDecision,
     build_source_revision,
     evaluate_maintenance_guard,
+    evaluate_parse_session_guard,
 )
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
@@ -92,6 +94,31 @@ def test_guard_rejects_a_different_revision_document_even_with_matching_digest()
 
     assert decision.status == "stale"
     assert decision.reason == "source_revision_document_mismatch"
+
+
+def test_parse_guard_rejects_a_superseded_session_for_the_same_revision():
+    decision = MaintenanceGuardDecision(
+        status="ready",
+        reason="source_revision_and_readiness_verified",
+        source_document_id="doc-1",
+        source_revision_id="rev-1",
+        source_digest="digest",
+        required_stage="source_map_seeded",
+    )
+
+    stale = evaluate_parse_session_guard(
+        decision,
+        requested_session_id="older-session",
+        active_session_id="newer-session",
+    )
+
+    assert stale.status == "stale"
+    assert stale.reason == "parse_session_superseded"
+    assert evaluate_parse_session_guard(
+        decision,
+        requested_session_id="newer-session",
+        active_session_id="newer-session",
+    ) is decision
 
 
 def test_worker_fails_closed_when_seed_job_has_no_source_map_readiness(

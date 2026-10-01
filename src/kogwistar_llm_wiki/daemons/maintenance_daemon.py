@@ -84,9 +84,30 @@ class MaintenanceDaemonRuntime(MaintenanceBudgetMixin):
             fair_scheduling=bool(self._effective_profile_ladder(self.control_state)),
             trace_sink=self.telemetry.instrument_event,
             usage_sink=self._record_profile_usage,
+            context_limit_sink=self._stop_for_context_limit,
         )
         self._stop_event = threading.Event()
         self._instance_id = f"maintenance-{uuid.uuid4().hex}"
+
+    def _stop_for_context_limit(self) -> None:
+        """Persistently stop all maintenance modes when the model cannot fit a request."""
+
+        if self.control is not None:
+            self.control_state = self.control.update(
+                request_enabled=False,
+                background_enabled=False,
+                status_reason="blocked_context_window",
+                actor="maintenance-context-guard",
+            )
+        else:
+            self.control_state = self.control_state.changed(
+                request_enabled=False,
+                background_enabled=False,
+                status_reason="blocked_context_window",
+                updated_by="maintenance-context-guard",
+            )
+        self._worker.request_enabled = False
+        self._worker.background_enabled = False
 
     def stop(self) -> None:
         """Signal the daemon to exit after the current poll cycle."""

@@ -18,7 +18,11 @@ from ..maintenance.maintenance_guards import (
     source_revision_document_id,
 )
 from ..models import IngestPipelineRequest
-from ..parsing.parse_session_store import ParseSessionStore, ParseSessionStoreConflict
+from ..parsing.parse_session_store import (
+    ParseSessionStore,
+    ParseSessionStoreConflict,
+    parse_session_scope_id,
+)
 from ..parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
@@ -68,7 +72,7 @@ class SourceLifecycleMixin:
         return "distill"
 
     @staticmethod
-    def _durable_parse_limits(request: IngestPipelineRequest) -> dict[str, int | float | None]:
+    def _durable_parse_limits(request: IngestPipelineRequest) -> dict[str, int | float | str | None]:
         """Validate persisted parser bounds before any worker can consume them."""
 
         raw = dict(request.parse_limits or {})
@@ -78,10 +82,14 @@ class SourceLifecycleMixin:
             "max_parser_calls": 1000,
             "max_region_chars": 16_384,
         }
-        unknown = set(raw) - set(integer_defaults) - {"token_budget", "wall_time_seconds"}
+        unknown = set(raw) - set(integer_defaults) - {
+            "token_budget",
+            "wall_time_seconds",
+            "parser_profile",
+        }
         if unknown:
             raise ValueError("unsupported parse_limits: " + ", ".join(sorted(unknown)))
-        limits: dict[str, int | float | None] = {}
+        limits: dict[str, int | float | str | None] = {}
         for name, default in integer_defaults.items():
             value = raw.get(name, default)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -98,10 +106,41 @@ class SourceLifecycleMixin:
                 isinstance(wall_time_seconds, bool)
                 or not isinstance(wall_time_seconds, (int, float))
                 or wall_time_seconds <= 0
+                or wall_time_seconds > 3_600
             ):
-                raise ValueError("parse_limits.wall_time_seconds must be positive")
+                raise ValueError("parse_limits.wall_time_seconds must be positive and at most 3600")
             limits["wall_time_seconds"] = float(wall_time_seconds)
+        parser_profile = raw.get("parser_profile")
+        if parser_profile is not None:
+            if (
+                not isinstance(parser_profile, str)
+                or not parser_profile.strip()
+                or len(parser_profile) > 256
+            ):
+                raise ValueError("parse_limits.parser_profile must be a non-empty string of at most 256 characters")
+            limits["parser_profile"] = parser_profile.strip()
         return limits
+
+    @classmethod
+    def _durable_parse_profile(cls, request: IngestPipelineRequest) -> str:
+        """Give explicit bounded profiles distinct identities without changing legacy IDs."""
+
+        limits = cls._durable_parse_limits(request)
+        requested_profile = limits.pop("parser_profile", None)
+        if requested_profile is None:
+            return request.parser_lane
+        limits_fingerprint = json.dumps(
+            {
+                "limits": limits,
+                "parser_lane": request.parser_lane,
+                "parser_mode": request.parser_mode,
+                "llm_provider": request.llm_provider,
+                "llm_model": request.llm_model,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return f"{requested_profile}@{stable_id('kogwistar_llm_wiki.parse_profile_limits', limits_fingerprint)}"
 
     def source_revision(
         self,
@@ -303,8 +342,10 @@ class SourceLifecycleMixin:
             self.engines.conversation.meta_sqlite,
             workspace_id=request.workspace_id,
         )
+        session_scope_id = parse_session_scope_id(initial_region)
         existing = store.get(session_id)
         if existing is not None:
+            store.activate(existing[0], scope_id=session_scope_id)
             return existing[0]
         source_namespace = self.namespaces_for(request.workspace_id).source_space
         with _temporary_namespace(self.engines.kg, source_namespace):
@@ -368,7 +409,9 @@ class SourceLifecycleMixin:
             existing = store.get(session_id)
             if existing is None:
                 raise
+            store.activate(existing[0], scope_id=session_scope_id)
             return existing[0]
+        store.activate(session, scope_id=session_scope_id)
         generation_evidence = ParseGeneration(
             generation_id=generation,
             workspace_id=request.workspace_id,

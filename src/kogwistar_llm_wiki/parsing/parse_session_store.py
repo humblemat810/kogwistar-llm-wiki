@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from kogwistar.engine_core import NamedProjectionStore
 
-from .parse_views import ParseFrontierItem, ParseSessionState
+from .parse_views import ParseFrontierItem, ParseSessionState, SourceRegion
 
 
 class ParseSessionStoreConflict(RuntimeError):
     """Another worker committed this session first."""
+
+
+def parse_session_scope_id(region: SourceRegion | None = None) -> str:
+    """Group full-source retries together and targeted retries by exact region."""
+    if region is None:
+        return "full"
+    return f"region:{region.start_char}:{region.end_char}"
 
 
 class ParseSessionStore:
@@ -24,6 +31,76 @@ class ParseSessionStore:
 
     def key(self, session_id: str) -> str:
         return f"parse_session:{session_id}"
+
+    def active_key(self, source_document_id: str, scope_id: str = "full") -> str:
+        return f"active_parse_session:{source_document_id}:{scope_id}"
+
+    def active_session_id(
+        self,
+        source_document_id: str,
+        *,
+        scope_id: str = "full",
+    ) -> str | None:
+        row = self.metadata.get_named_projection(
+            self.namespace,
+            self.active_key(source_document_id, scope_id),
+        )
+        if row is None:
+            return None
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            raise TypeError("active parse session projection payload must be an object")
+        if (
+            str(payload.get("workspace_id") or "") != self.workspace_id
+            or str(payload.get("source_document_id") or "") != source_document_id
+        ):
+            raise ValueError("active parse session projection identity mismatch")
+        session_id = str(payload.get("active_session_id") or "").strip()
+        return session_id or None
+
+    def activate(self, session: ParseSessionState, *, scope_id: str = "full") -> None:
+        """CAS-switch the active derivation for this logical source."""
+        if session.workspace_id != self.workspace_id:
+            raise ValueError("parse session workspace does not match store workspace")
+        if not session.source_document_id or not session.session_id:
+            raise ValueError("active parse session requires stable source and session IDs")
+        stored = self.get(session.session_id)
+        if stored is None:
+            raise ValueError("cannot activate a parse session that is not persisted")
+        if stored[0].source_document_id != session.source_document_id:
+            raise ValueError("active parse session source does not match persisted session")
+
+        if not scope_id or len(scope_id) > 256:
+            raise ValueError("parse session scope must be a non-empty string of at most 256 characters")
+        key = self.active_key(session.source_document_id, scope_id)
+        for _ in range(8):
+            row = self.metadata.get_named_projection(self.namespace, key)
+            if row is not None:
+                if self.active_session_id(session.source_document_id, scope_id=scope_id) == session.session_id:
+                    return
+                expected_authoritative = int(row.get("last_authoritative_seq", 0))
+                expected_materialized = int(row.get("last_materialized_seq", 0))
+            else:
+                expected_authoritative = None
+                expected_materialized = None
+            next_version = (expected_authoritative or 0) + 1
+            if self.metadata.compare_and_swap_named_projection(
+                self.namespace,
+                key,
+                {
+                    "workspace_id": self.workspace_id,
+                    "source_document_id": session.source_document_id,
+                    "active_session_id": session.session_id,
+                },
+                expected_last_authoritative_seq=expected_authoritative,
+                expected_last_materialized_seq=expected_materialized,
+                last_authoritative_seq=next_version,
+                last_materialized_seq=next_version,
+                projection_schema_version=self.schema_version,
+                materialization_status="ready",
+            ):
+                return
+        raise ParseSessionStoreConflict("active parse session CAS repeatedly lost a race")
 
     def get(self, session_id: str) -> tuple[ParseSessionState, list[ParseFrontierItem], int] | None:
         row = self.metadata.get_named_projection(self.namespace, self.key(session_id))

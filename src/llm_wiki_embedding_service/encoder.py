@@ -12,7 +12,13 @@ from llm_wiki_embedding_contract import (
     validate_dense_vectors,
 )
 
-from .config import MAX_DIMENSION, MIN_DIMENSION, EmbeddingServiceConfig
+from .config import (
+    BGE_QUERY_INSTRUCTION,
+    BGE_SMALL_MAX_SEQUENCE_LENGTH,
+    MAX_DIMENSION,
+    MIN_DIMENSION,
+    EmbeddingServiceConfig,
+)
 
 
 class EmbeddingInferenceError(ValueError):
@@ -42,13 +48,14 @@ class Qwen3VLDenseEncoder:
         except ImportError as exc:
             raise RuntimeError("embedding service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
         _validate_torch(torch, config)
+        model_source = config.model_path or config.model
         kwargs: dict[str, object] = {"trust_remote_code": True, "revision": config.revision}
         if config.device == "cuda":
             kwargs.update({"torch_dtype": torch.float16, "device_map": "auto"})
         else:
             kwargs["torch_dtype"] = torch.float32
-        model = AutoModelForMultimodalLM.from_pretrained(config.model, **kwargs).eval()
-        processor = AutoProcessor.from_pretrained(config.model, trust_remote_code=True, revision=config.revision, padding_side="right")
+        model = AutoModelForMultimodalLM.from_pretrained(model_source, **kwargs).eval()
+        processor = AutoProcessor.from_pretrained(model_source, trust_remote_code=True, revision=config.revision, padding_side="right")
         return cls(model, processor, profile=config.profile, device=config.device, batch_size=config.batch_size, vision_processor=process_vision_info, instruction=config.instruction)
 
     def _conversation(self, item: Mapping[str, object], *, value: object | None = None) -> list[dict[str, object]]:
@@ -116,6 +123,100 @@ class Qwen3VLDenseEncoder:
                 value.close()
 
 
+class BgeSmallTextEncoder:
+    """CPU-friendly, text-only BGE encoder with retrieval query prompting."""
+
+    def __init__(
+        self,
+        model: object,
+        tokenizer: object,
+        *,
+        profile: EmbeddingProfile,
+        device: str,
+    ) -> None:
+        self._model = model
+        self._tokenizer = tokenizer
+        self.profile = profile
+        self.device = device
+
+    @classmethod
+    def from_pretrained(cls, config: EmbeddingServiceConfig) -> BgeSmallTextEncoder:
+        if config.encoder != "bge-small-en-v1.5":
+            raise ValueError("BGE encoder requires the bge-small-en-v1.5 profile")
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+        except ImportError as exc:
+            raise RuntimeError("BGE embedding service requires Torch and Transformers") from exc
+        _validate_torch(torch, config)
+        model_source = config.model_path or config.model
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_source,
+            revision=config.revision,
+            cache_dir=config.model_cache_dir,
+            token=config.token,
+        )
+        model = AutoModel.from_pretrained(
+            model_source,
+            revision=config.revision,
+            cache_dir=config.model_cache_dir,
+            token=config.token,
+        ).to(config.device).eval()
+        return cls(model, tokenizer, profile=config.profile, device=config.device)
+
+    def encode(self, items: Sequence[Mapping[str, object]]) -> list[tuple[tuple[float, ...], ...]]:
+        import torch
+
+        texts: list[str] = []
+        for item in items:
+            if item.get("asset") is not None:
+                raise ContractValidationError("BGE text encoder does not support assets")
+            text = str(item.get("text") or "").strip()
+            if not text:
+                raise ContractValidationError("BGE text encoder requires non-empty text")
+            operation = item.get("operation", "document")
+            if operation == "query":
+                text = BGE_QUERY_INSTRUCTION + text
+            elif operation != "document":
+                raise ContractValidationError("embedding operation must be query or document")
+            texts.append(text)
+
+        encoded = self._tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=BGE_SMALL_MAX_SEQUENCE_LENGTH,
+            return_tensors="pt",
+        )
+        encoded = {
+            key: value.to(self.device) if hasattr(value, "to") else value
+            for key, value in encoded.items()
+        }
+        with torch.inference_mode():
+            output = self._model(**encoded)
+        hidden = getattr(output, "last_hidden_state", None)
+        if getattr(hidden, "ndim", None) != 3:
+            raise EmbeddingInferenceError("BGE model did not return token hidden states")
+        if hidden.shape[-1] != self.profile.dimension:
+            raise EmbeddingInferenceError("BGE model output dimension does not match its profile")
+        vectors = torch.nn.functional.normalize(hidden[:, 0, :], p=2, dim=-1).detach().cpu().tolist()
+        if len(vectors) != len(items):
+            raise EmbeddingInferenceError("model returned a different number of vectors")
+        return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in vectors]
+
+
+def build_dense_encoder(config: EmbeddingServiceConfig) -> object:
+    """Select a standalone encoder from the explicit service profile."""
+
+    if config.encoder == "clip-vit-b32":
+        from .clip_encoder import CLIPDualProjectionEncoder
+
+        return CLIPDualProjectionEncoder.from_pretrained(config)
+    if config.encoder == "bge-small-en-v1.5":
+        return BgeSmallTextEncoder.from_pretrained(config)
+    return Qwen3VLDenseEncoder.from_pretrained(config)
+
+
 def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
     version = str(torch.__version__).partition("+")[0]
     if version != "2.8.0":
@@ -135,4 +236,4 @@ def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
             raise RuntimeError("CUDA embedding requires accelerate") from exc
 
 
-__all__ = ["EmbeddingInferenceError", "Qwen3VLDenseEncoder"]
+__all__ = ["BgeSmallTextEncoder", "EmbeddingInferenceError", "Qwen3VLDenseEncoder", "build_dense_encoder"]

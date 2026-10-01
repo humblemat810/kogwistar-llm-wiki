@@ -34,6 +34,57 @@ from ..utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)
 
+_BACKGROUND_NON_KNOWLEDGE_ENTITY_TYPES = frozenset(
+    {
+        "maintenance_job",
+        "maintenance_assessment",
+        "service_health_event",
+        "workflow_cancelled",
+        "workflow_checkpoint",
+        "workflow_completed",
+        "workflow_failed",
+        "workflow_run",
+        "workflow_step",
+        "workflow_step_exec",
+    }
+)
+_BACKGROUND_NON_KNOWLEDGE_ID_PREFIXES = (
+    "service_health_evt:",
+    "wf_ckpt|",
+    "wf_run|",
+    "wf_step|",
+)
+
+
+def _is_background_knowledge_candidate(node: object, workspace_id: str) -> bool:
+    """Exclude operational history and unscoped legacy nodes from review."""
+    metadata = getattr(node, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return False
+    if str(metadata.get("workspace_id") or "").strip() != workspace_id:
+        return False
+    entity_type = str(metadata.get("entity_type") or "").strip().lower()
+    if entity_type in _BACKGROUND_NON_KNOWLEDGE_ENTITY_TYPES:
+        return False
+    safe_get_id = getattr(node, "safe_get_id", None)
+    node_id = str(safe_get_id() if callable(safe_get_id) else "").strip()
+    return bool(node_id) and not node_id.startswith(_BACKGROUND_NON_KNOWLEDGE_ID_PREFIXES)
+
+
+def _bounded_background_int(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using %d", name, raw, default)
+        return default
+    bounded = min(maximum, max(minimum, value))
+    if bounded != value:
+        logger.warning("Clamped %s=%d to %d", name, value, bounded)
+    return bounded
+
 
 class MaintenanceBudgetMixin:
     def _load_background_state(self) -> dict[str, Any]:
@@ -95,7 +146,11 @@ class MaintenanceBudgetMixin:
                 model=decision.level.model,
                 include_provider_chain=False,
             )
-            self._worker.provider_settings = self.provider_settings
+            set_provider_settings = getattr(self._worker, "set_provider_settings", None)
+            if callable(set_provider_settings):
+                set_provider_settings(self.provider_settings)
+            else:
+                self._worker.provider_settings = self.provider_settings
         return decision
 
     def _persist_budget_state(self) -> None:
@@ -122,6 +177,7 @@ class MaintenanceBudgetMixin:
         budget_state = getattr(self, "_budget_state", {})
         return {
             "enabled": state.enabled,
+            "status_reason": state.status_reason,
             "requested_profile": decision.requested,
             "effective_profile": decision.effective,
             "profile_reason": self._last_profile_reason if self._last_profile_reason != "configured" else decision.reason,
@@ -312,17 +368,10 @@ class MaintenanceBudgetMixin:
         except Exception as exc:  # noqa: BLE001 - backend failures degrade exploration only
             logger.warning("Background maintenance selection degraded: %s", exc)
             nodes = []
-        scoped_nodes = []
-        for node in nodes:
-            metadata = getattr(node, "metadata", {})
-            declared_workspace = (
-                str(metadata.get("workspace_id") or "").strip()
-                if isinstance(metadata, Mapping)
-                else ""
-            )
-            if not declared_workspace or declared_workspace == self.workspace_id:
-                scoped_nodes.append(node)
-        nodes = scoped_nodes
+        nodes = [
+            node for node in nodes
+            if _is_background_knowledge_candidate(node, self.workspace_id)
+        ]
         recent = sorted(
             (node for node in nodes if getattr(node, "safe_get_id", lambda: "")()),
             key=lambda node: str(getattr(node, "metadata", {}).get("updated_at_ms", "")),
@@ -347,12 +396,43 @@ class MaintenanceBudgetMixin:
             {"candidate_id": str(node.safe_get_id()), "reason": "recent_interest", "score": None}
             for node in recent
         ] + [item.as_dict() for item in explored]
+        review_candidate = next(
+            (
+                item
+                for item in selected
+                if str(item.get("candidate_id") or "").strip()
+            ),
+            None,
+        )
+        if review_candidate is None:
+            self._last_profile_reason = "no_reviewable_background_candidate"
+            return
+        review_subject_id = str(review_candidate["candidate_id"])
         payload = {
             "workspace_id": self.workspace_id,
-            "maintenance_kind": "distill",
+            "maintenance_kind": "review_maintenance_subject",
             "mode": "background",
             "maintenance_origin": "background",
             "selection_strategy": "recent_interest_and_embedding_probe",
+            "subject_id": review_subject_id,
+            "subject_kind": "node",
+            "observation_subject": {
+                "kind": "node",
+                "subject_id": review_subject_id,
+                "namespace": ns.curated_kg_space,
+            },
+            "observation_token_budget": _bounded_background_int(
+                "LLM_WIKI_MAINTENANCE_BACKGROUND_OBSERVATION_TOKEN_BUDGET",
+                default=4_000,
+                minimum=256,
+                maximum=100_000,
+            ),
+            "observation_neighborhood_count": _bounded_background_int(
+                "LLM_WIKI_MAINTENANCE_BACKGROUND_OBSERVATION_NEIGHBORHOOD_COUNT",
+                default=64,
+                minimum=1,
+                maximum=512,
+            ),
             "embedding_exploration": {
                 "profile": os.environ.get("KOGWISTAR_LLM_WIKI_EMBED_PROFILE", "unknown"),
                 "dimension": len(getattr(nodes[0], "embedding", []) or []) if nodes else None,
@@ -365,8 +445,8 @@ class MaintenanceBudgetMixin:
             "recent_selection_watermark": int(time.time() * 1000),
             "stop_reason": None,
             "maintenance_round": 0,
-            "maintenance_max_rounds": 1,
-            "budgets": {"max_steps": 1},
+            "maintenance_max_rounds": 2,
+            "budgets": {"max_steps": 2, "max_llm_calls": 2},
         }
         selected_ids = {
             str(item["candidate_id"])
@@ -390,7 +470,7 @@ class MaintenanceBudgetMixin:
             namespace=ns.maintenance_jobs,
             entity_kind="maintenance_cycle",
             entity_id=job_id,
-            job_kind="maintenance_job:distill",
+            job_kind="maintenance_job:review",
             payload=payload,
             max_retries=1,
         )

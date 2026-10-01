@@ -9,6 +9,7 @@ from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..parsing.parse_views import ParseTarget, ParseViewResolver, ParseViewStore
+from ..utils import _temporary_namespace
 from .maintenance_context import append_maintenance_round
 from .maintenance_observation import (
     ObservationFinding,
@@ -18,6 +19,14 @@ from .maintenance_observation import (
     build_observation_frame,
 )
 from .maintenance_strategies import MaintenanceJobExecutionContext
+from .observation_critic import (
+    is_context_window_error,
+    safe_observation_critic_error_code,
+)
+from .observation_evidence import (
+    build_authoritative_source_evidence,
+    compact_entity_record,
+)
 
 
 class MaintenanceObservationWorkerMixin:
@@ -83,6 +92,10 @@ class MaintenanceObservationWorkerMixin:
                 or ""
             ).strip()
             or None,
+            source_digest=str(
+                subject_data.get("source_digest") or ctx.payload.get("source_digest") or ""
+            ).strip()
+            or None,
             parse_member_id=parse_member_id or None,
             acl_scope=str(subject_data.get("acl_scope") or ctx.payload.get("acl_scope") or "") or None,
             embedding_profile_fingerprint=str(
@@ -136,8 +149,30 @@ class MaintenanceObservationWorkerMixin:
             token_budget=limits.token_budget,
             active_view_id=active_view_id,
             active_view_version=active_view_version,
+            source_evidence_required=True,
         )
-        critic_status, critic_findings = self._run_observation_critic(ctx, frame)
+        source_evidence_verified = any(
+            item.get("evidence_role") == "authoritative_source"
+            and item.get("source_evidence_status") == "span_verified"
+            for item in frame.source_context
+        )
+        if source_evidence_verified and frame.omitted_counts.get("source", 0) == 0:
+            critic_status, critic_findings = self._run_observation_critic(ctx, frame)
+        else:
+            critic_status, critic_findings = "not_used", ()
+            self._emit_trace(
+                "maintenance_observation_critic_skipped_no_verified_source",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                source_evidence_status=next(
+                    (
+                        str(item.get("source_evidence_status"))
+                        for item in frame.source_context
+                        if item.get("evidence_role") == "authoritative_source"
+                    ),
+                    "source_evidence_omitted",
+                ),
+            )
         assessment = assess_observation_frame(
             frame,
             critic_status=critic_status,
@@ -153,6 +188,10 @@ class MaintenanceObservationWorkerMixin:
             omitted_counts=frame.omitted_counts,
         )
         self._persist_observation_audit(ctx, frame, assessment)
+        if frame.parent_context:
+            parent_id = str(frame.parent_context[0].get("id") or "").strip()
+            if parent_id:
+                ctx.payload.setdefault("parent_subject_id", parent_id)
         continuation_scheduled = self._schedule_observation_continuation(
             ctx, assessment.recommended_action, assessment.continuation_allowed
         )
@@ -164,11 +203,18 @@ class MaintenanceObservationWorkerMixin:
             status="completed",
             payload={
                 "maintenance_kind": ctx.maintenance_kind,
-                "observation_frame": frame.model_dump(mode="json"),
+                "observation_frame": _redacted_frame_payload(frame),
                 "assessment": assessment.model_dump(mode="json"),
             },
         )
-        if ctx.job_id and not continuation_scheduled and not self._advance_maintenance_plan(ctx):
+        if ctx.job_id and assessment.critic_status == "blocked_context":
+            self._emit_trace(
+                "maintenance_job_aborted_context_limit",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+            )
+            self._acknowledge_job(ctx)
+        elif ctx.job_id and not continuation_scheduled and not self._advance_maintenance_plan(ctx):
             self._acknowledge_job(ctx)
 
     def _run_observation_critic(
@@ -181,6 +227,26 @@ class MaintenanceObservationWorkerMixin:
         critic = getattr(self, "observation_critic", None)
         if not callable(critic):
             return "not_used", ()
+        budgets = ctx.payload.get("budgets")
+        budget_state = ctx.payload.get("maintenance_budget_state")
+        max_calls = int(budgets.get("max_llm_calls") or 0) if isinstance(budgets, Mapping) else 0
+        used_calls = (
+            int(budget_state.get("call_used") or 0)
+            if isinstance(budget_state, Mapping)
+            else 0
+        )
+        if max_calls > 0 and used_calls >= max_calls:
+            self._emit_trace(
+                "maintenance_observation_critic_budget_exhausted",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                call_budget=max_calls,
+                call_used=used_calls,
+            )
+            return "failed", ()
+        next_budget_state = dict(budget_state) if isinstance(budget_state, Mapping) else {}
+        next_budget_state["call_used"] = used_calls + 1
+        ctx.payload["maintenance_budget_state"] = next_budget_state
         try:
             result = critic(frame, ctx)
             if not isinstance(result, Mapping):
@@ -197,11 +263,31 @@ class MaintenanceObservationWorkerMixin:
             )
             return status, findings
         except Exception as exc:  # noqa: BLE001 - critic failure is fail-closed
+            if is_context_window_error(exc):
+                self._emit_trace(
+                    "maintenance_observation_context_limit_blocked",
+                    workspace_id=ctx.workspace_id,
+                    job_id=ctx.job_id,
+                    error_type=type(exc).__name__,
+                )
+                pause_background = getattr(self, "context_limit_sink", None)
+                if callable(pause_background):
+                    try:
+                        pause_background()
+                    except Exception as pause_error:  # noqa: BLE001 - keep assessment fail-closed
+                        self._emit_trace(
+                            "maintenance_observation_context_pause_failed",
+                            workspace_id=ctx.workspace_id,
+                            job_id=ctx.job_id,
+                            error_type=type(pause_error).__name__,
+                        )
+                return "blocked_context", ()
             self._emit_trace(
                 "maintenance_observation_critic_failed",
                 workspace_id=ctx.workspace_id,
                 job_id=ctx.job_id,
                 error_type=type(exc).__name__,
+                error_code=safe_observation_critic_error_code(exc),
             )
             return "failed", ()
 
@@ -261,6 +347,17 @@ class MaintenanceObservationWorkerMixin:
         if next_kind == "review_maintenance_subject" and not (
             ctx.payload.get("parent_subject_id") or ctx.payload.get("parent_member_id")
         ):
+            return False
+        if next_kind == "document_expand_parse_children" and not str(
+            ctx.payload.get("parse_session_id") or ""
+        ).strip():
+            self._emit_trace(
+                "maintenance_observation_continuation_blocked",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                action=action,
+                reason="durable_parse_session_missing",
+            )
             return False
         continuation_id = str(
             stable_id(
@@ -378,9 +475,10 @@ class MaintenanceObservationWorkerMixin:
     ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]], list[Mapping[str, object]], list[Mapping[str, object]]]:
         """Read the review frame from scoped graph state, never job payloads."""
 
-        namespace = WorkspaceNamespaces(ctx.workspace_id).curated_kg_space
+        namespaces = WorkspaceNamespaces(ctx.workspace_id)
+        namespace = namespaces.curated_kg_space
         engine = self.engines.kg
-        with self._observation_namespace(namespace):
+        with _temporary_namespace(engine, namespace):
             if subject.kind == "node":
                 subject_entities = list(engine.read.get_nodes(ids=[subject.subject_id], limit=1))
                 all_edges = list(engine.read.get_edges(limit=512))
@@ -391,7 +489,9 @@ class MaintenanceObservationWorkerMixin:
                 raise ValueError("observation subject is not an active entity in the workspace graph")
             subject_entity = subject_entities[0]
             _validate_entity_scope(subject_entity, workspace_id=ctx.workspace_id)
-            subject_record = _entity_record(subject_entity, workspace_id=ctx.workspace_id, namespace=namespace)
+            subject_record = compact_entity_record(
+                subject_entity, workspace_id=ctx.workspace_id, namespace=namespace
+            )
 
             related_edges = [
                 edge for edge in all_edges
@@ -416,25 +516,37 @@ class MaintenanceObservationWorkerMixin:
             )[: limits.neighborhood_count]
             neighbors = list(engine.read.get_nodes(ids=neighbor_ids, limit=len(neighbor_ids))) if neighbor_ids else []
 
-        source_context: list[Mapping[str, object]] = [subject_record]
+        source_evidence = build_authoritative_source_evidence(
+            engine,
+            subject_entity,
+            workspace_id=ctx.workspace_id,
+            source_namespace=namespaces.source_space,
+            expected_source_document_id=subject.source_document_id,
+            expected_revision_id=subject.revision_id,
+            expected_revision_document_id=subject.revision_document_id,
+            expected_source_digest=subject.source_digest,
+        )
+        source_context: list[Mapping[str, object]] = [source_evidence, subject_record]
         relation_context = [
-            _entity_record(edge, workspace_id=ctx.workspace_id, namespace=namespace)
+            compact_entity_record(edge, workspace_id=ctx.workspace_id, namespace=namespace)
             for edge in related_edges[:64]
         ]
         neighborhood_context = [
-            _entity_record(node, workspace_id=ctx.workspace_id, namespace=namespace)
+            compact_entity_record(node, workspace_id=ctx.workspace_id, namespace=namespace)
             for node in neighbors
             if _validate_entity_scope(node, workspace_id=ctx.workspace_id)
         ]
         parent_context: list[Mapping[str, object]] = []
         parent_id = str((subject_record.get("metadata") or {}).get("parent_member_id") or "").strip()
         if limits.ancestor_hops and parent_id:
-            with self._observation_namespace(namespace):
+            with _temporary_namespace(engine, namespace):
                 parent_nodes = list(engine.read.get_nodes(ids=[parent_id], limit=1))
             if parent_nodes:
                 _validate_entity_scope(parent_nodes[0], workspace_id=ctx.workspace_id)
                 parent_context = [
-                    _entity_record(parent_nodes[0], workspace_id=ctx.workspace_id, namespace=namespace)
+                    compact_entity_record(
+                        parent_nodes[0], workspace_id=ctx.workspace_id, namespace=namespace
+                    )
                 ]
         return source_context, relation_context, neighborhood_context, parent_context
 
@@ -443,22 +555,38 @@ class MaintenanceObservationWorkerMixin:
 
         ns = WorkspaceNamespaces(ctx.workspace_id)
         audit_key = f"observation:{assessment.assessment_id}"
-        with self._observation_namespace(ns.conv_bg):
-            self.engines.conversation.send_lane_message(
-                conversation_id=f"maintenance:{ctx.request_node_id}",
-                inbox_id="inbox:worker:maintenance:observation",
-                sender_id="lane:worker:maintenance",
-                recipient_id="lane:worker:maintenance-audit",
-                msg_type="maintenance.observation.assessment",
-                purpose="internal",
-                payload={
-                    "workspace_id": ctx.workspace_id,
-                    "job_id": ctx.job_id,
-                    "frame": frame.model_dump(mode="json"),
-                    "assessment": assessment.model_dump(mode="json"),
-                },
-                idempotency_key=audit_key,
-            )
+        try:
+            with self._observation_namespace(ns.conv_bg):
+                self.engines.conversation.send_lane_message(
+                    conversation_id=f"maintenance:{ctx.request_node_id}",
+                    inbox_id="inbox:worker:maintenance:observation",
+                    sender_id="lane:worker:maintenance",
+                    recipient_id="lane:worker:maintenance-audit",
+                    msg_type="maintenance.observation.assessment",
+                    purpose="internal",
+                    payload={
+                        "workspace_id": ctx.workspace_id,
+                        "job_id": ctx.job_id,
+                        "frame": _redacted_frame_payload(frame),
+                        "assessment": assessment.model_dump(mode="json"),
+                    },
+                    idempotency_key=audit_key,
+                )
+        except NotImplementedError:
+            # Some metadata stores can idempotently project messages but do not
+            # implement the optional row lookup used when replaying a message.
+            # Accept only a matching graph record in this workspace namespace.
+            with self._observation_namespace(ns.conv_bg):
+                persisted = self.engines.conversation.read.get_nodes(
+                    where={
+                        "artifact_kind": "lane_message",
+                        "idempotency_key": audit_key,
+                        "msg_type": "maintenance.observation.assessment",
+                    },
+                    limit=1,
+                )
+            if not persisted:
+                raise
 
     def _resolve_active_parse_view(self, subject: ObservationSubject) -> tuple[str | None, int | None, bool]:
         """Resolve derivation activity before allowing a subject to be reviewed."""
@@ -498,34 +626,6 @@ class MaintenanceObservationWorkerMixin:
         return _temporary_namespace(self.engines.conversation, namespace)
 
 
-def _records(
-    value: object,
-    *,
-    workspace_id: str,
-    namespace: str,
-    limit: int,
-) -> list[Mapping[str, object]]:
-    if not isinstance(value, list):
-        return []
-    records: list[Mapping[str, object]] = []
-    for item in value:
-        if not isinstance(item, Mapping):
-            continue
-        record = dict(item)
-        record_workspace = str(record.get("workspace_id") or "").strip()
-        record_namespace = str(record.get("namespace") or "").strip()
-        if record_workspace != workspace_id:
-            continue
-        if record_namespace != namespace:
-            continue
-        if record.get("acl_authorized") is not True or record.get("authorized") is not True:
-            continue
-        if record.get("profile_compatible") is False:
-            continue
-        records.append(record)
-    return records[: max(0, int(limit))]
-
-
 def _validate_entity_scope(entity: object, *, workspace_id: str) -> bool:
     """Fail closed when a graph entity lacks the worker's ACL boundary."""
 
@@ -542,20 +642,17 @@ def _validate_entity_scope(entity: object, *, workspace_id: str) -> bool:
     return True
 
 
-def _entity_record(entity: object, *, workspace_id: str, namespace: str) -> dict[str, object]:
-    metadata = dict(getattr(entity, "metadata", None) or {})
-    return {
-        "id": str(getattr(entity, "id", "") or ""),
-        "kind": type(entity).__name__.lower(),
-        "workspace_id": workspace_id,
-        "namespace": namespace,
-        "authorized": True,
-        "acl_authorized": True,
-        "metadata": metadata,
-        "quality_status": metadata.get("quality_status") or metadata.get("parse_status"),
-        "source_revision_id": metadata.get("source_revision_id") or metadata.get("revision_id"),
-        "revision_document_id": metadata.get("revision_document_id"),
-    }
+def _redacted_frame_payload(frame: object) -> dict[str, object]:
+    """Persist source identifiers and hashes, never transient source excerpts."""
+
+    model_dump = getattr(frame, "model_dump", None)
+    payload = model_dump(mode="json") if callable(model_dump) else {}
+    source_context = payload.get("source_context")
+    if isinstance(source_context, list):
+        for record in source_context:
+            if isinstance(record, dict):
+                record.pop("source_excerpt", None)
+    return payload
 
 
 __all__ = ["MaintenanceObservationWorkerMixin"]
