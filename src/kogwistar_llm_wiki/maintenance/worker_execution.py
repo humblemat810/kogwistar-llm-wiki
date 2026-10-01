@@ -284,7 +284,10 @@ class MaintenanceExecutionWorkerMixin:
                 active_session_id = ParseSessionStore(
                     self.engines.conversation.meta_sqlite,
                     workspace_id=ctx.workspace_id,
-                ).active_session_id(source_document_id)
+                ).active_session_id(
+                    source_document_id,
+                    scope_id=str(ctx.payload.get("parse_session_scope") or "full"),
+                )
                 decision = evaluate_parse_session_guard(
                     decision,
                     requested_session_id=requested_session_id,

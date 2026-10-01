@@ -74,6 +74,9 @@ def test_active_parse_session_switch_is_cas_persisted_and_source_scoped() -> Non
     store.activate(second)
     assert store.active_session_id("source-1") == "session-2"
     assert store.active_session_id("another-source") is None
+    store.activate(first, scope_id="region:0:3")
+    assert store.active_session_id("source-1", scope_id="region:0:3") == "session-1"
+    assert store.active_session_id("source-1", scope_id="region:3:5") is None
 
     with pytest.raises(ValueError, match="workspace"):
         store.activate(second.model_copy(update={"workspace_id": "other"}))

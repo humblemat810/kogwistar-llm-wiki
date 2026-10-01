@@ -18,7 +18,11 @@ from ..maintenance.maintenance_guards import (
     source_revision_document_id,
 )
 from ..models import IngestPipelineRequest
-from ..parsing.parse_session_store import ParseSessionStore, ParseSessionStoreConflict
+from ..parsing.parse_session_store import (
+    ParseSessionStore,
+    ParseSessionStoreConflict,
+    parse_session_scope_id,
+)
 from ..parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
@@ -338,9 +342,10 @@ class SourceLifecycleMixin:
             self.engines.conversation.meta_sqlite,
             workspace_id=request.workspace_id,
         )
+        session_scope_id = parse_session_scope_id(initial_region)
         existing = store.get(session_id)
         if existing is not None:
-            store.activate(existing[0])
+            store.activate(existing[0], scope_id=session_scope_id)
             return existing[0]
         source_namespace = self.namespaces_for(request.workspace_id).source_space
         with _temporary_namespace(self.engines.kg, source_namespace):
@@ -404,9 +409,9 @@ class SourceLifecycleMixin:
             existing = store.get(session_id)
             if existing is None:
                 raise
-            store.activate(existing[0])
+            store.activate(existing[0], scope_id=session_scope_id)
             return existing[0]
-        store.activate(session)
+        store.activate(session, scope_id=session_scope_id)
         generation_evidence = ParseGeneration(
             generation_id=generation,
             workspace_id=request.workspace_id,

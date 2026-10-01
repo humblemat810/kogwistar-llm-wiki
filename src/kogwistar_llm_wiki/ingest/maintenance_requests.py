@@ -31,6 +31,7 @@ from ..parsing.parse_views import (
     parse_session_id,
     reparse_session_id,
 )
+from ..parsing.parse_session_store import parse_session_scope_id
 from ..utils import _temporary_namespace
 
 
@@ -819,6 +820,9 @@ class MaintenanceRequestMixin:
                 source_document_id=source_document_id,
                 source_revision_id=source_revision_id,
                 parser_profile=request.parser_lane,
+            ),
+            "parse_session_scope": parse_session_scope_id(
+                parse_target.region if parse_target is not None else None
             ),
             "required_stage": required_stage,
             "objective": objective,

@@ -1352,8 +1352,9 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 
 - Fixed the retry-path assumption that queued work could be cancelled through
   Kogwistar's `mark_failed`: that operation only transitions claimed (`DOING`)
-  jobs. Pending jobs remain auditable in the queue; a per-source CAS active
-  parse-session pointer now makes an old claimed job stale before parser work.
+  jobs. Pending jobs remain auditable in the queue; a CAS active parse-session
+  pointer now makes an old claimed job stale before parser work. Whole-source
+  retries share one scope, while targeted reparses use region-specific scopes.
 - Added worker-path coverage showing a pending expansion job for the 900-second
   profile is rejected as `parse_session_superseded` after the 2,400-second
   profile becomes active. The source revision and revision document remain
@@ -1370,6 +1371,10 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   quality evaluation has occurred. The existing stock source remains the only
   authorized experiment input, and parsing/crosslink quality is still
   unverified.
+- Region-scope hardening follow-up: the active session key includes the
+  derivation scope, so distinct targeted regions do not supersede each other.
+  The 15 focused tests and CI-selected Ruff pass after this adjustment; a new
+  GitHub run is required for the latest follow-up commit.
 - Update: commit `5451bae` is pushed to `feat/local-bonsai-maintenance`.
   GitHub CI, PyPy 3.11 container smoke, and experimental PyPy 3.12 beta are
   running; slot/runtime benchmarks have passed. The local `v0.5.1` maintenance

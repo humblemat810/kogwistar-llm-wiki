@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from kogwistar.engine_core import NamedProjectionStore
 
-from .parse_views import ParseFrontierItem, ParseSessionState
+from .parse_views import ParseFrontierItem, ParseSessionState, SourceRegion
 
 
 class ParseSessionStoreConflict(RuntimeError):
     """Another worker committed this session first."""
+
+
+def parse_session_scope_id(region: SourceRegion | None = None) -> str:
+    """Group full-source retries together and targeted retries by exact region."""
+    if region is None:
+        return "full"
+    return f"region:{region.start_char}:{region.end_char}"
 
 
 class ParseSessionStore:
@@ -25,13 +32,18 @@ class ParseSessionStore:
     def key(self, session_id: str) -> str:
         return f"parse_session:{session_id}"
 
-    def active_key(self, source_document_id: str) -> str:
-        return f"active_parse_session:{source_document_id}"
+    def active_key(self, source_document_id: str, scope_id: str = "full") -> str:
+        return f"active_parse_session:{source_document_id}:{scope_id}"
 
-    def active_session_id(self, source_document_id: str) -> str | None:
+    def active_session_id(
+        self,
+        source_document_id: str,
+        *,
+        scope_id: str = "full",
+    ) -> str | None:
         row = self.metadata.get_named_projection(
             self.namespace,
-            self.active_key(source_document_id),
+            self.active_key(source_document_id, scope_id),
         )
         if row is None:
             return None
@@ -46,7 +58,7 @@ class ParseSessionStore:
         session_id = str(payload.get("active_session_id") or "").strip()
         return session_id or None
 
-    def activate(self, session: ParseSessionState) -> None:
+    def activate(self, session: ParseSessionState, *, scope_id: str = "full") -> None:
         """CAS-switch the active derivation for this logical source."""
         if session.workspace_id != self.workspace_id:
             raise ValueError("parse session workspace does not match store workspace")
@@ -58,11 +70,13 @@ class ParseSessionStore:
         if stored[0].source_document_id != session.source_document_id:
             raise ValueError("active parse session source does not match persisted session")
 
-        key = self.active_key(session.source_document_id)
+        if not scope_id or len(scope_id) > 256:
+            raise ValueError("parse session scope must be a non-empty string of at most 256 characters")
+        key = self.active_key(session.source_document_id, scope_id)
         for _ in range(8):
             row = self.metadata.get_named_projection(self.namespace, key)
             if row is not None:
-                if self.active_session_id(session.source_document_id) == session.session_id:
+                if self.active_session_id(session.source_document_id, scope_id=scope_id) == session.session_id:
                     return
                 expected_authoritative = int(row.get("last_authoritative_seq", 0))
                 expected_materialized = int(row.get("last_materialized_seq", 0))
