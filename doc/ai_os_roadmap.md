@@ -269,7 +269,7 @@ capability governance surface.
   - Debounces rapid changes (1-second window)
 - `kogwistar_llm_wiki/sensors/webhook_receiver.py`
   - Minimal FastAPI app that receives POST to `/event` and publishes to the bus
-  - Can receive events from: GitHub webhooks, email relay, calendar notifications
+  - Can receive events from: GitHub webhooks, calendar notifications, and other explicitly configured external relays
 - `kogwistar_llm_wiki/daemon.py` â€” add `FilesystemWatcherDaemon` to the daemon roster
 - `scripts/kogwistar-llm-wiki.service` (from A4) includes the watcher daemon
 

@@ -31,7 +31,8 @@ duplicate ID, route collision, or invalid namespace fails server startup rather
 than silently disabling the requested integration.
 
 Host workspace authorization is necessary but not sufficient for resources
-inside an extension. Extensions must still enforce their domain ACLs (for
-example, connector/mailbox authorization) before reading or mutating data.
+inside an extension. Extensions must still enforce their resource ACLs (for
+example, authorization for an externally connected source) before reading or
+mutating data.
 Kogwistar remains canonical graph authority; extension handlers must use
 application services and must not create a parallel graph truth.

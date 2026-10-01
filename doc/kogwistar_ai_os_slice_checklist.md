@@ -115,7 +115,7 @@ sequenceDiagram
 - [ ] graph-native message bus over CDC oplog
   - lane messages and durable jobs exist, but there is no general topic/subscription bus
 - [ ] perception/sensor layer
-  - no filesystem watcher, webhook receiver, RSS/email/calendar adapter, or timer-triggered ingestion loop
+  - no filesystem watcher, webhook receiver, external stream adapter, or timer-triggered ingestion loop
 - [ ] workflow self-modification loop
   - `execution_wisdom` is written, but no proposal/approval/replay flow applies workflow revisions from it
 - [ ] unified resource namespace / virtual filesystem
