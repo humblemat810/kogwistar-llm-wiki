@@ -124,6 +124,74 @@ def test_indexed_candidate_generation_matches_exhaustive_pair_semantics() -> Non
     assert actual == expected
 
 
+@pytest.mark.parametrize("threshold", (0.7, 0.86, 0.92, 1.0))
+def test_indexed_candidates_match_exhaustive_alias_and_contact_pairs(threshold: float) -> None:
+    names = (
+        "Alexandra Chen",
+        "Alex Chen",
+        "Alexandre Chen",
+        "A. Chen",
+        "Alexandra Chan",
+        "Morgan Li",
+        "Morgan Lee",
+        "Jo",
+        "Priya Raman",
+        "Priya Ramanan",
+        "Priya R.",
+        "Jordan Smith",
+        "Jordan Smyth",
+    )
+    observations = []
+    for index in range(26):
+        base = _observation(
+            f"person-{index:02d}",
+            f"source:{index:02d}",
+            name=names[index % len(names)],
+        )
+        aliases = (
+            names[(index * 5 + 3) % len(names)],
+            names[(index * 7 + 8) % len(names)],
+        )
+        points = (
+            ContactPointClaim(channel="email", value=f"group-{index % 6}@example.test"),
+            ContactPointClaim(
+                channel="chat",
+                provider="matrix",
+                value=f"user-{index % 9}",
+            ),
+        )
+        observations.append(
+            base.model_copy(
+                update={
+                    "display_names": tuple(dict.fromkeys((base.display_names[0], *aliases))),
+                    "contact_points": points,
+                }
+            )
+        )
+
+    ordered = sorted(observations, key=lambda item: item.entity_id)
+    expected = {}
+    for left_index, left in enumerate(ordered):
+        for right in ordered[left_index + 1 :]:
+            basis = contact_match_basis(
+                left, right, fuzzy_name_threshold=threshold
+            )
+            if basis is not None:
+                expected[(left.entity_id, right.entity_id)] = basis
+
+    for batch in (observations, reversed(observations)):
+        discovered = discover_contact_match_candidates(
+            batch,
+            authorize_stream=lambda _workspace, _stream: True,
+            fuzzy_name_threshold=threshold,
+        )
+        actual = {
+            candidate.entity_ids: candidate.metadata["match_basis"]
+            for candidate in discovered
+        }
+        assert actual == expected
+
+
 def test_name_length_bound_skips_impossible_fuzzy_comparisons(monkeypatch) -> None:
     import kogwistar_llm_wiki.disambiguation.contact_matching as matching
 
