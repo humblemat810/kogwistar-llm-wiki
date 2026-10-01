@@ -1593,3 +1593,18 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   stopped and was not probed, restarted, or inspected. No new ingestion,
   direct request, follow-up, background model call, or parse/crosslink quality
   result is claimed here.
+
+### Latest Pushed Commit CI (2026-10-01)
+
+- Commit `8e77a16667d05dc142a677d58e1529bbc71f7455` passed hosted regular CI
+  run `36819047458`: CPython 3.12, 3.13, and 3.14 provider-free suites; PyPy
+  3.11 provider-free suite; Kogwistar Rust checks; Python lint; and resource
+  report comparison all completed successfully. All 13 check runs on the
+  commit reported success.
+- Same-host benchmark run `36819047449` and PyPy 3.11 image smoke run
+  `36819047465` completed successfully.
+- Experimental PyPy 3.12 beta run `36819047491` has an overall success
+  conclusion due to its non-blocking policy, but its `Install bounded NumPy-free
+  source profile` step failed. Treat PyPy 3.12 beta as unverified, not passed.
+- These checks validate the pushed code/documentation only. They do not change
+  the outstanding Bonsai runtime and knowledge-quality status above.
