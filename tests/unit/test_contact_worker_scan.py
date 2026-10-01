@@ -177,6 +177,37 @@ def test_contact_scan_worker_without_provider_does_not_acknowledge_job() -> None
 
 
 @pytest.mark.ci
+def test_contact_scan_overflow_fails_before_partial_candidate_persistence() -> None:
+    engines = build_in_memory_namespace_engines()
+    try:
+        _enqueue_scan(engines, job_id="scan-overflow", streams=["mailbox:one"])
+        observations = tuple(
+            _observation(f"contact:{index:03d}", "mailbox:one")
+            for index in range(251)
+        )
+        worker = MaintenanceWorker(
+            engines,
+            contact_observation_provider=lambda *_: observations,
+            contact_stream_authorizer=lambda *_: True,
+        )
+        with pytest.raises(ValueError, match="observation limit"):
+            worker.process_pending_jobs("contact-scan-worker")
+
+        assert DisambiguationService(engines).list_current_contact_candidates(
+            workspace_id="contact-scan-worker",
+            authorize_stream=lambda *_: True,
+        ) == ()
+        job_rows = engines.conversation.meta_sqlite.list_index_jobs(
+            namespace=WorkspaceNamespaces("contact-scan-worker").maintenance_jobs
+        )
+        assert len(job_rows) == 1
+        assert job_rows[0].status == "PENDING"
+        worker.close()
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
 def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> None:
     engines = build_in_memory_namespace_engines()
     try:
