@@ -1494,3 +1494,18 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 - This exercises the common configured parser/maintenance paths; it does not
   establish Bonsai model quality or a live graph-maintenance outcome. No local
   model, database, Compose service, or capped session was started or inspected.
+
+### Local Bonsai Artifact And CLI Check (2026-10-01)
+
+- Confirmed the custom executable exists at
+  `D:\prism-llama.cpp\build\bin\Release\llama-server.exe`; the Bonsai GGUF
+  and mmproj files both exist under `D:\models\bonsai2`.
+- Ran only `llama-server.exe --help` (exit 0), without loading weights or
+  starting a listener. The help output recognizes every flag used by
+  `scripts/start_local_bonsai.ps1`: model/mmproj, context, GPU layers,
+  parallelism, K/V cache type, flash attention, fit target, reasoning settings,
+  host/port, and log verbosity.
+- This establishes that the installed custom binary and launcher argument
+  surface agree. It does not verify model loading, available context, GPU fit,
+  inference quality, or maintenance connectivity; no capped runtime/session
+  was started or inspected.
