@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-
-from kogwistar.engine_core.models import Edge, Grounding, Node, Span
+from kogwistar.engine_core import VectorSearchHit
+from kogwistar.engine_core.models import Document, Edge, Grounding, Node, Span
 
 from kogwistar_llm_wiki import (
     GraphSpace,
@@ -109,6 +109,263 @@ def test_semantic_lens_is_deterministic_and_keeps_grounding():
         assert all(node.grounding for node in first.nodes)
         assert first.selection_explanations[0].reason == "query_match"
         assert first.omitted_summary["candidate_nodes"] == 1
+    finally:
+        engines.close()
+
+
+def test_retrieval_status_defaults_to_graph_mode():
+    engines, workspace_id = _seed_graph()
+    try:
+        snapshot = SemanticLensService(engines).resolve(
+            SemanticLensRequest(workspace_id=workspace_id, query_text="verifier")
+        )
+        assert snapshot.retrieval.mode == "graph"
+        assert snapshot.retrieval.semantic_available is False
+        assert snapshot.retrieval.degraded_reason is None
+    finally:
+        engines.close()
+
+
+def test_auto_mode_activates_the_requested_vector_controls():
+    assert SemanticLensRequest(
+        workspace_id="w", similarity_threshold=0.5
+    ).retrieval_mode == "auto"
+    assert SemanticLensRequest(
+        workspace_id="w", source_evidence_required=True
+    ).retrieval_mode == "auto"
+    with pytest.raises(ValueError, match="requires flat retrieval_mode"):
+        SemanticLensRequest(
+            workspace_id="w",
+            retrieval_mode="semantic",
+            source_evidence_required=True,
+        )
+    with pytest.raises(ValueError, match="requires semantic or flat"):
+        SemanticLensRequest(
+            workspace_id="w",
+            retrieval_mode="graph",
+            similarity_threshold=0.5,
+        )
+
+
+def test_semantic_degradation_is_visible_and_strict_mode_fails(monkeypatch: pytest.MonkeyPatch):
+    engines, workspace_id = _seed_graph()
+    try:
+        read_type = type(engines.kg.read)
+
+        def unavailable(*_args, **_kwargs):
+            raise NotImplementedError("no embedding function configured")
+
+        monkeypatch.setattr(read_type, "search_nodes_as_of", unavailable, raising=False)
+        monkeypatch.setattr(read_type, "search_nodes_as_of_scored", unavailable, raising=False)
+
+        service = SemanticLensService(engines)
+        degraded = service.resolve(
+            SemanticLensRequest(
+                workspace_id=workspace_id,
+                query_text="verifier",
+                retrieval_mode="semantic",
+            )
+        )
+        assert degraded.retrieval.semantic_available is False
+        assert "no embedding function" in (degraded.retrieval.degraded_reason or "")
+
+        with pytest.raises(ValueError, match="no embedding function"):
+            service.resolve(
+                SemanticLensRequest(
+                    workspace_id=workspace_id,
+                    query_text="verifier",
+                    retrieval_mode="flat",
+                    retrieval_required=True,
+                )
+            )
+    finally:
+        engines.close()
+
+
+def test_flat_mode_returns_flat_hit_envelope_without_graph_hops():
+    engines, workspace_id = _seed_graph()
+    try:
+        read_type = type(engines.kg.read)
+
+        def scored(*_args, **_kwargs):
+            return [
+                (_node(workspace_id, "n:flat-1", "flat result 1"), 0.125),
+                (_node(workspace_id, "n:flat-2", "flat result 2"), 0.25),
+                (_node(workspace_id, "n:flat-3", "flat result 3"), 0.5),
+            ]
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(read_type, "search_nodes_as_of_scored", scored, raising=False)
+        try:
+            snapshot = SemanticLensService(engines).resolve(
+                SemanticLensRequest(
+                    workspace_id=workspace_id,
+                    query_text="flat",
+                    retrieval_mode="flat",
+                    hop_limit=0,
+                    max_nodes=2,
+                )
+            )
+        finally:
+            monkeypatch.undo()
+        assert snapshot.nodes == ()
+        assert [item["node_id"] for item in snapshot.flat_hits] == [
+            "n:flat-1", "n:flat-2"
+        ]
+        assert snapshot.flat_hits[0]["score"] == 0.125
+        assert snapshot.retrieval.semantic_available is True
+    finally:
+        engines.close()
+
+
+def test_flat_mode_applies_similarity_threshold_and_reports_normalized_score(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    engines, workspace_id = _seed_graph()
+    try:
+        read_type = type(engines.kg.read)
+        calls: list[float | None] = []
+
+        def scored(*_args, similarity_threshold=None, **_kwargs):
+            calls.append(similarity_threshold)
+            return [
+                VectorSearchHit(
+                    node=_node(workspace_id, "n:high", "high result"),
+                    raw_distance=0.1,
+                    similarity=0.9,
+                    metric="cosine",
+                    distance_kind="distance",
+                ),
+                VectorSearchHit(
+                    node=_node(workspace_id, "n:low", "low result"),
+                    raw_distance=0.8,
+                    similarity=0.2,
+                    metric="cosine",
+                    distance_kind="distance",
+                ),
+            ]
+
+        monkeypatch.setattr(read_type, "search_nodes_as_of_scored", scored, raising=False)
+        snapshot = SemanticLensService(engines).resolve(
+            SemanticLensRequest(
+                workspace_id=workspace_id,
+                query_text="result",
+                retrieval_mode="flat",
+                similarity_threshold=0.5,
+                max_nodes=5,
+            )
+        )
+        assert calls == [0.5]
+        assert [hit["node_id"] for hit in snapshot.flat_hits] == ["n:high"]
+        assert snapshot.flat_hits[0]["score"] == 0.9
+        assert snapshot.retrieval.metric == "cosine"
+        assert snapshot.retrieval.semantic_available is True
+    finally:
+        engines.close()
+
+
+def test_flat_mode_verifies_source_revision_excerpt_in_source_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    engines, workspace_id = _seed_graph()
+    source_namespace = WorkspaceNamespaces(workspace_id).source_space
+    try:
+        with _temporary_namespace(engines.kg, source_namespace):
+            engines.kg.write.add_document(
+                Document(
+                    id="fixture-doc",
+                    content="flat result 1",
+                    type="text",
+                    metadata={
+                        "workspace_id": workspace_id,
+                        "logical_source_document_id": "source-1",
+                        "source_revision_id": "revision-1",
+                    },
+                )
+            )
+        read_type = type(engines.kg.read)
+
+        def scored(*_args, **_kwargs):
+            return [(_node(workspace_id, "n:source", "flat result 1"), 0.1)]
+
+        monkeypatch.setattr(read_type, "search_nodes_as_of_scored", scored, raising=False)
+        snapshot = SemanticLensService(engines).resolve(
+            SemanticLensRequest(
+                workspace_id=workspace_id,
+                query_text="rabbit",
+                retrieval_mode="flat",
+                source_evidence_required=True,
+            )
+        )
+        assert len(snapshot.flat_hits) == 1
+        evidence = snapshot.flat_hits[0]["source_evidence"]
+        assert evidence["status"] == "verified"
+        assert evidence["source_id"] == "source-1"
+        assert evidence["source_revision_id"] == "revision-1"
+        assert evidence["excerpt"] == "flat result 1"
+    finally:
+        engines.close()
+
+
+def test_flat_mode_rejects_stale_source_revision_and_excerpt(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    engines, workspace_id = _seed_graph()
+    source_namespace = WorkspaceNamespaces(workspace_id).source_space
+    try:
+        with _temporary_namespace(engines.kg, source_namespace):
+            engines.kg.write.add_document(
+                Document(
+                    id="fixture-doc",
+                    content="new source revision",
+                    type="text",
+                    metadata={
+                        "workspace_id": workspace_id,
+                        "source_revision_id": "revision-2",
+                    },
+                )
+            )
+        read_type = type(engines.kg.read)
+
+        def scored(*_args, **_kwargs):
+            stale = _node(workspace_id, "n:stale", "old source")
+            stale.metadata["source_revision_id"] = "revision-1"
+            return [(stale, 0.1)]
+
+        monkeypatch.setattr(read_type, "search_nodes_as_of_scored", scored, raising=False)
+        snapshot = SemanticLensService(engines).resolve(
+            SemanticLensRequest(
+                workspace_id=workspace_id,
+                query_text="source",
+                retrieval_mode="flat",
+                source_evidence_required=True,
+            )
+        )
+        assert snapshot.flat_hits == ()
+        assert snapshot.retrieval.degraded_reason == "no_verified_source_evidence"
+    finally:
+        engines.close()
+
+
+def test_zero_hop_semantic_mode_keeps_vector_only_hits(monkeypatch: pytest.MonkeyPatch):
+    engines, workspace_id = _seed_graph()
+    try:
+        read_type = type(engines.kg.read)
+
+        def scored(*_args, **_kwargs):
+            return [(_node(workspace_id, "n:vector", "unmatched label"), 0.125)]
+
+        monkeypatch.setattr(read_type, "search_nodes_as_of_scored", scored, raising=False)
+        snapshot = SemanticLensService(engines).resolve(
+            SemanticLensRequest(
+                workspace_id=workspace_id,
+                query_text="rabbit",
+                retrieval_mode="semantic",
+                hop_limit=0,
+                max_nodes=1,
+            )
+        )
+        assert [node.id for node in snapshot.nodes] == ["n:vector"]
     finally:
         engines.close()
 

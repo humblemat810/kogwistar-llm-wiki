@@ -60,6 +60,10 @@ def request_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     for key in (
         "graph_spaces",
         "semantic_retrieval",
+        "retrieval_mode",
+        "retrieval_required",
+        "similarity_threshold",
+        "source_evidence_required",
         "explicit_anchor_ids",
         "hop_limit",
         "max_nodes",

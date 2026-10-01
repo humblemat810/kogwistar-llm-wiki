@@ -69,3 +69,31 @@ membership, plugin enablement, or sender-provided message fields.
 
 Kogwistar remains canonical graph authority; extension handlers must use
 application services and must not create a parallel graph truth.
+
+### Retrieval Controls
+
+The `query`, `search`, and `hypergraph_search` MCP tools accept an optional
+`retrieval_mode`:
+
+- `auto` preserves the default graph lens behavior. The legacy
+  `semantic_retrieval=true` flag still selects semantic mode when this field
+  is omitted.
+- `graph` uses lexical anchors and bounded graph hops only.
+- `semantic` adds vector candidates to the graph lens, then applies the
+  existing lexical, anchor, and topology bounds.
+- `flat` returns backend-ordered vector hits and ignores graph hop limits.
+
+When `retrieval_mode` is omitted, a similarity threshold selects semantic
+mode and `source_evidence_required=true` selects flat mode. An explicit graph
+mode cannot accept a similarity threshold, and source-evidence verification is
+available only for flat source-RAG hits.
+
+Every lens response includes `retrieval` with the resolved mode, semantic
+availability, backend, metric, and any degradation reason. Set
+`retrieval_required=true` when silently falling back is unacceptable; the
+request then fails if the semantic tier cannot run. Flat hits expose source
+IDs, revisions, and locators when those values are present in authoritative
+node metadata. Set `source_evidence_required=true` for pure source RAG; only
+hits whose locator exactly matches the immutable source revision are returned,
+with the verified excerpt and a `source_evidence.status` of `verified`.
+Retrieval scores are projections, not graph truth.

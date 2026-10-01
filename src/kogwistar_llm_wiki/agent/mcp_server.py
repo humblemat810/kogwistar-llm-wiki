@@ -19,7 +19,6 @@ from typing import Any
 from mcp import types
 from mcp.server.lowlevel import Server
 
-from ..memory import MemoryRecord
 from ..configuration.identity import (
     LlmWikiIdentity,
     auth_mode,
@@ -27,6 +26,7 @@ from ..configuration.identity import (
     authorize,
     claims_context,
 )
+from ..memory import MemoryRecord
 from .gateway import AgentGateway
 
 _MCP_REQUEST_HEADERS: ContextVar[dict[str, str] | None] = ContextVar(
@@ -131,6 +131,10 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "query_text": string(),
                     "session_id": string(default="default"),
                     "mode": string(default="deterministic"),
+                    "retrieval_mode": {"enum": ["auto", "graph", "semantic", "flat"], "default": "auto", "type": "string"},
+                    "retrieval_required": {"default": False, "type": "boolean"},
+                    "similarity_threshold": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": None},
+                    "source_evidence_required": {"default": False, "type": "boolean"},
                 },
                 required=("workspace_id", "query_text"),
             ),
@@ -144,6 +148,10 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "query_text": string(),
                     "hop_limit": {"default": 1, "type": "integer"},
                     "max_nodes": {"default": 40, "type": "integer"},
+                    "retrieval_mode": {"enum": ["auto", "graph", "semantic", "flat"], "default": "auto", "type": "string"},
+                    "retrieval_required": {"default": False, "type": "boolean"},
+                    "similarity_threshold": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": None},
+                    "source_evidence_required": {"default": False, "type": "boolean"},
                 },
                 required=("workspace_id", "query_text"),
             ),
@@ -229,6 +237,10 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "max_edges": {"default": 80, "type": "integer"},
                     "max_hyperedges": {"default": 12, "type": "integer"},
                     "include_tombstones": {"default": False, "type": "boolean"},
+                    "retrieval_mode": {"enum": ["auto", "graph", "semantic", "flat"], "default": "auto", "type": "string"},
+                    "retrieval_required": {"default": False, "type": "boolean"},
+                    "similarity_threshold": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": None},
+                    "source_evidence_required": {"default": False, "type": "boolean"},
                 },
                 required=("workspace_id",),
             ),
@@ -324,14 +336,12 @@ class AgentMcpServer:
 
     def __init__(self, gateway: AgentGateway) -> None:
         self.gateway = gateway
-        # MCP 2.x registers low-level handlers through the constructor.  Keep
-        # the handlers on the adapter so request authentication remains at the
+        # Register through the official low-level V2 decorators.  The handler
+        # API is deliberately kept here so authentication stays at the
         # protocol boundary rather than in the gateway.
-        self.server = Server(
-            "llm-wiki",
-            on_list_tools=self._handle_list_tools,
-            on_call_tool=self._handle_call_tool,
-        )
+        self.server = Server("llm-wiki")
+        self.server.list_tools()(self._server_list_tools)
+        self.server.call_tool(validate_input=False)(self._server_call_tool)
         self._tools = tuple(
             types.Tool(name=name, description=description, inputSchema=schema)
             for name, description, schema in _tool_specs()
@@ -388,6 +398,26 @@ class AgentMcpServer:
                 params.arguments or {},
                 identity=identity,
             )
+        except Exception as exc:  # noqa: BLE001 - expose failures as tool results
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=str(exc))],
+                isError=True,
+            )
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
+            structuredContent=result,
+        )
+
+    async def _server_list_tools(self) -> list[types.Tool]:
+        self._authenticate_request()
+        return list(self._tools)
+
+    async def _server_call_tool(
+        self, name: str, arguments: dict[str, object]
+    ) -> types.CallToolResult:
+        try:
+            identity = self._authenticate_request()
+            result = self._dispatch(name, arguments, identity=identity)
         except Exception as exc:  # noqa: BLE001 - expose failures as tool results
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=str(exc))],
