@@ -1,0 +1,13 @@
+# Provider-free CPython CI dependencies.
+# Keep this file stable so uv's GitHub cache invalidates when the dependency
+# contract changes. Chroma belongs to the scheduled full suite because the
+# default provider-free selector excludes requires_chroma tests.
+mcp>=2.2.0,<3
+langchain-openai>=0.3
+langchain-ollama>=0.3
+sqlalchemy[asyncio]>=2.0
+opentelemetry-api>=1.25
+opentelemetry-sdk>=1.25
+opentelemetry-exporter-otlp-proto-http>=1.25
+pytest>=8
+pytest-anyio

@@ -52,6 +52,12 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.21"
+          enable-cache: true
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -67,22 +73,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e ./kogwistar
-          python -m pip install -e ./kg-doc-parser
-          python -m pip install -e ./kogwistar-obsidian-sink
-          python -m pip install -e ".[test,otel,agent]" --no-deps
-          python -m pip install \
-            "chromadb>=0.6" \
-            "mcp>=2.2.0,<3" \
-            "langchain-openai>=0.3" \
-            "langchain-ollama>=0.3" \
-            "sqlalchemy[asyncio]>=2.0" \
-            "opentelemetry-api>=1.25" \
-            "opentelemetry-sdk>=1.25" \
-            "opentelemetry-exporter-otlp-proto-http>=1.25" \
-            "pytest>=8" \
-            "pytest-anyio"
+          uv pip install --system \
+            -e ./kogwistar \
+            -e ./kg-doc-parser \
+            -e ./kogwistar-obsidian-sink
+          uv pip install --system --no-deps -e ".[test,otel,agent]"
+          uv pip install --system -r requirements/ci-cpython.txt "chromadb>=0.6"
 
       - name: Run full deterministic suite
         shell: bash
@@ -102,3 +98,7 @@ jobs:
           name: full-suite-diagnostics
           path: test-results/
           if-no-files-found: warn
+
+      - name: Prune uv cache
+        if: always()
+        run: uv cache prune --ci
