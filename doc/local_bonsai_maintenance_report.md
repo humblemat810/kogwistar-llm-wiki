@@ -1608,3 +1608,31 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   source profile` step failed. Treat PyPy 3.12 beta as unverified, not passed.
 - These checks validate the pushed code/documentation only. They do not change
   the outstanding Bonsai runtime and knowledge-quality status above.
+
+### New-Main Combined-Tree Validation (2026-10-01)
+
+- Commit `91beb98a669c4b8afffecda549a59cbde6491204` has successful main CI
+  run `36820315038`, PyPy 3.11 image smoke `36820315230`, and benchmark run
+  `36820315198`. The public Actions pages show all checks on those runs
+  completed successfully.
+- The optional PyPy 3.12 beta workflow `36820315022` is not a pass: its overall
+  conclusion is success only because the beta job is non-blocking, while
+  `Install bounded NumPy-free source profile` failed with exit code 1.
+- To assess the newer `origin/main` without rewriting the feature branch, Git
+  built a conflict-free combined tree (`adf29f1b326d36cb41fb9bb92079ed00b247b49d`).
+  A disposable merge commit (`c7a5f3ac1e2275884b1d69be6352c2f12fb321d0`) was
+  checked out in an ignored `.test/` worktree. Focused maintenance observation,
+  critic, scheduler, provider configuration, workbench extension, and agent
+  capability tests passed: `97 passed in 44.29s`.
+- Before running those tests, import-path checks confirmed LLM-Wiki came from
+  the combined tree, Kogwistar from the exact CI-pinned revision
+  `3a9dfb8951175a35f7be9299208ac31d849c288f`, and KG Doc Parser from the
+  exact CI-pinned revision `70bc77f2a3a3f8b7c95be51a2605e3a0a33b1135`.
+  An initial test attempt loaded code from the unrelated root checkout and was
+  discarded; only the corrected 97-test result is evidence. All three
+  disposable worktrees were removed afterward and the feature branch remains
+  clean.
+- This focused combined-tree check is not a full rebase or full CI run on the
+  merged tree. It does not authorize a force-push, and it does not provide any
+  new Bonsai runtime, direct/follow-up/background maintenance, or graph-quality
+  evidence.
