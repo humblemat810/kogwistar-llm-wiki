@@ -148,6 +148,49 @@ def test_address_book_pages_resolved_groups_and_rejects_stale_cursor():
         engines.close()
 
 
+@pytest.mark.ci
+def test_registered_contact_source_uses_unique_owner_and_source_acl():
+    engines = build_in_memory_namespace_engines()
+    try:
+        api = WorkbenchApi(IngestPipeline(engines))
+        observation = ContactIdentityObservation(
+            workspace_id="registered-source",
+            stream_id="email-stream-a",
+            entity_id="email:person-a",
+            source_document_ids=("doc:person-a",),
+            evidence_revision_ids=("revision:person-a",),
+            observed_at_ms=1,
+            display_names=("Alex Example",),
+            contact_points=(
+                ContactPointClaim(channel="email", provider="email", value="alex@example.test"),
+            ),
+        )
+        api.register_contact_observation_source(
+            "email",
+            provider=lambda workspace, limit, authorize: (
+                (observation,) if authorize(workspace, "email-stream-a") else ()
+            ),
+            owns_stream=lambda _workspace, stream: stream == "email-stream-a",
+            authorize_stream=lambda workspace, stream: (
+                workspace == "registered-source" and stream == "email-stream-a"
+            ),
+        )
+        result = api.list_address_book(workspace_id="registered-source")
+        assert result["status"] == "ok"
+        assert result["results"][0]["display_names"] == ["Alex Example"]
+        assert api._authorize_contact_stream("registered-source", "unowned-stream") is False
+
+        api.register_contact_observation_source(
+            "other-channel",
+            provider=lambda *_args: (),
+            owns_stream=lambda _workspace, stream: stream == "email-stream-a",
+            authorize_stream=lambda _workspace, _stream: True,
+        )
+        assert api._authorize_contact_stream("registered-source", "email-stream-a") is False
+    finally:
+        engines.close()
+
+
 def test_workbench_api_returns_serializable_bounded_lens():
     engines = build_in_memory_namespace_engines()
     try:

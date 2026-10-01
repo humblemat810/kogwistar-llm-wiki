@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 from ..compose.options import ComposeOptions, validate_options
@@ -25,6 +26,7 @@ from ..configuration.workspace import GraphSpace
 from ..disambiguation.contact_book import (
     ContactObservationProvider,
     build_address_book_projection,
+    compose_contact_observation_providers,
 )
 from ..disambiguation.contact_matching import (
     ContactIdentityObservation,
@@ -68,6 +70,13 @@ _MAX_CONTACT_PAGE_SIZE = 1000
 _MAX_CONTACT_SNAPSHOT_ITEMS = 5000
 _MAX_CONTACT_CURSOR_CHARS = 4096
 _MAX_CONTACT_QUERY_CHARS = 200
+
+
+@dataclass(frozen=True, slots=True)
+class _ContactObservationSource:
+    provider: ContactObservationProvider
+    owns_stream: Callable[[str, str], bool]
+    authorize_stream: Callable[[str, str], bool]
 
 
 def _normalize_contact_query(query: str) -> str:
@@ -171,6 +180,8 @@ class WorkbenchApi:
         )
         self._contact_acl_configured = contact_authorize_stream is not None
         self._contact_observation_provider = contact_observation_provider
+        self._contact_observation_sources: dict[str, _ContactObservationSource] = {}
+        self._composed_contact_observation_provider: ContactObservationProvider | None = None
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
         self._confirmation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._confirmation_locks_guard = threading.Lock()
@@ -231,6 +242,77 @@ class WorkbenchApi:
         )
         return {"status": "ok", "workspace_id": workspace_id, "results": results}
 
+    def register_contact_observation_source(
+        self,
+        source_id: str,
+        *,
+        provider: ContactObservationProvider,
+        owns_stream: Callable[[str, str], bool],
+        authorize_stream: Callable[[str, str], bool],
+    ) -> None:
+        """Register a trusted channel adapter without adding channel policy here."""
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise ValueError("contact source_id must not be empty")
+        if not callable(provider) or not callable(owns_stream) or not callable(authorize_stream):
+            raise TypeError("contact source provider and callbacks must be callable")
+        normalized_id = source_id.strip()
+        if normalized_id in self._contact_observation_sources:
+            raise ValueError(f"contact observation source is already registered: {normalized_id}")
+        self._contact_observation_sources[normalized_id] = _ContactObservationSource(
+            provider=provider,
+            owns_stream=owns_stream,
+            authorize_stream=authorize_stream,
+        )
+        self._composed_contact_observation_provider = None
+
+    def _authorize_contact_stream(self, workspace_id: str, stream_id: str) -> bool:
+        sources = self._contact_observation_sources
+        if not sources:
+            return bool(
+                self._contact_acl_configured
+                and self._contact_authorize_stream(workspace_id, stream_id)
+            )
+        owners = [
+            source
+            for source in sources.values()
+            if source.owns_stream(workspace_id, stream_id)
+        ]
+        if len(owners) > 1:
+            return False
+        if not owners:
+            return bool(
+                self._contact_acl_configured
+                and self._contact_authorize_stream(workspace_id, stream_id)
+            )
+        source_allowed = bool(owners[0].authorize_stream(workspace_id, stream_id))
+        host_allowed = (
+            self._contact_authorize_stream(workspace_id, stream_id)
+            if self._contact_acl_configured
+            else True
+        )
+        return bool(source_allowed and host_allowed)
+
+    def _contact_provider(self) -> ContactObservationProvider | None:
+        if self._contact_observation_provider is not None and not self._contact_observation_sources:
+            return self._contact_observation_provider
+        if not self._contact_observation_sources and self._contact_observation_provider is None:
+            return None
+        if self._composed_contact_observation_provider is None:
+            providers = {
+                source_id: source.provider
+                for source_id, source in self._contact_observation_sources.items()
+            }
+            if self._contact_observation_provider is not None:
+                providers["host-configured"] = self._contact_observation_provider
+            self._composed_contact_observation_provider = compose_contact_observation_providers(
+                providers
+            )
+        return self._composed_contact_observation_provider
+
+    @property
+    def _contact_acl_available(self) -> bool:
+        return self._contact_acl_configured or bool(self._contact_observation_sources)
+
     def list_contact_matches(
         self, *, workspace_id: str, limit: int = 100, cursor: str | None = None
     ) -> dict[str, object]:
@@ -242,12 +324,12 @@ class WorkbenchApi:
         service = DisambiguationService(self.pipeline.engines)
         candidates = service.list_current_contact_candidates(
             workspace_id=workspace_id,
-            authorize_stream=self._contact_authorize_stream,
+            authorize_stream=self._authorize_contact_stream,
             limit=_MAX_CONTACT_SNAPSHOT_ITEMS,
         )
         observations = (
             self._load_authorized_contact_observations(workspace_id)
-            if candidates and self._contact_acl_configured
+            if candidates and self._contact_acl_available
             else {}
         )
         results: list[dict[str, object]] = []
@@ -341,20 +423,20 @@ class WorkbenchApi:
             raise ValueError("decision must be same_entity or distinct_entities")
         if confirmed is not True:
             raise ValueError("confirmed must be true to record a contact decision")
-        if not self._contact_acl_configured:
+        if not self._contact_acl_available:
             raise PermissionError("contact stream authorization is not configured")
 
         with self._confirmation_lock(workspace_id, f"contact:{candidate_key}"):
             service = DisambiguationService(self.pipeline.engines)
             candidates = service.list_current_contact_candidates(
                 workspace_id=workspace_id,
-                authorize_stream=self._contact_authorize_stream,
+                authorize_stream=self._authorize_contact_stream,
                 limit=_MAX_CONTACT_SNAPSHOT_ITEMS,
             )
             candidate = next((item for item in candidates if item.candidate_key == candidate_key), None)
             if candidate is None:
                 return {"status": "not_found", "workspace_id": workspace_id}
-            if self._contact_observation_provider is None:
+            if self._contact_provider() is None:
                 return {"status": "unavailable", "workspace_id": workspace_id,
                         "reason": "current_contact_evidence_provider_not_configured"}
             observations = self._load_authorized_contact_observations(workspace_id)
@@ -390,11 +472,11 @@ class WorkbenchApi:
     def _load_authorized_contact_observations(
         self, workspace_id: str
     ) -> dict[str, ContactIdentityObservation]:
-        provider = self._contact_observation_provider
+        provider = self._contact_provider()
         if provider is None:
             return {}
         observations = provider(
-            workspace_id, _MAX_CONTACT_SNAPSHOT_ITEMS, self._contact_authorize_stream
+            workspace_id, _MAX_CONTACT_SNAPSHOT_ITEMS, self._authorize_contact_stream
         )
         if (
             not isinstance(observations, Sequence)
@@ -407,7 +489,7 @@ class WorkbenchApi:
                 raise TypeError("contact observation provider returned an invalid observation")
             if observation.workspace_id != workspace_id:
                 raise ValueError("contact observation provider returned another workspace")
-            if not self._contact_authorize_stream(workspace_id, observation.stream_id):
+            if not self._authorize_contact_stream(workspace_id, observation.stream_id):
                 raise PermissionError("contact observation source stream is not authorized")
             if observation.entity_id in by_entity:
                 raise ValueError("contact observation provider returned duplicate entities")
@@ -428,13 +510,13 @@ class WorkbenchApi:
         normalized_query = _normalize_contact_query(query)
         if type(limit) is not int or not 1 <= limit <= _MAX_CONTACT_PAGE_SIZE:
             raise ValueError("limit must be between 1 and 1000")
-        provider = self._contact_observation_provider
-        if provider is None or not self._contact_acl_configured:
+        provider = self._contact_provider()
+        if provider is None or not self._contact_acl_available:
             return {"status": "unavailable", "workspace_id": workspace_id,
                     "reason": "authorized contact observation provider is not configured",
                     "results": []}
         observations = provider(
-            workspace_id, _MAX_CONTACT_SNAPSHOT_ITEMS, self._contact_authorize_stream
+            workspace_id, _MAX_CONTACT_SNAPSHOT_ITEMS, self._authorize_contact_stream
         )
         if (
             not isinstance(observations, Sequence)
@@ -443,12 +525,12 @@ class WorkbenchApi:
             raise ValueError("contact observation provider exceeded limit")
         decisions = DisambiguationService(self.pipeline.engines).list_current_contact_candidates(
             workspace_id=workspace_id,
-            authorize_stream=self._contact_authorize_stream,
+            authorize_stream=self._authorize_contact_stream,
             limit=_MAX_CONTACT_SNAPSHOT_ITEMS,
         )
         entries = build_address_book_projection(
             observations, decisions,
-            authorize_stream=self._contact_authorize_stream,
+            authorize_stream=self._authorize_contact_stream,
             max_observations=_MAX_CONTACT_SNAPSHOT_ITEMS,
             max_decisions=_MAX_CONTACT_SNAPSHOT_ITEMS,
         )

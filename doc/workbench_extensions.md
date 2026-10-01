@@ -34,5 +34,27 @@ Host workspace authorization is necessary but not sufficient for resources
 inside an extension. Extensions must still enforce their resource ACLs (for
 example, authorization for an externally connected source) before reading or
 mutating data.
+
+### Channel-Neutral Contact Sources
+
+An extension that owns contact observations may register a bounded provider
+with `WorkbenchApi.register_contact_observation_source(...)`. Registration
+requires a stable source ID, an observation provider, a stream-ownership check,
+and a source-specific ACL callback. The host composes registered providers for
+its generic address-book and contact-review APIs; it does not import source
+domain code.
+
+For every stream access, the host requires exactly one registered owner and a
+positive source ACL decision. Ambiguous ownership, missing authorization, or a
+provider returning an out-of-scope observation is rejected. The constructor's
+existing generic provider remains supported and can coexist with registered
+sources; its configured authorizer remains required for streams not owned by a
+registered adapter. Registration is intended during explicit extension
+bootstrap, before serving requests.
+
+The combined CLI does not invent resource permissions. Applications must
+inject a resource authorizer; without one, extension resource access remains
+denied even when workspace-level HTTP access succeeds.
+
 Kogwistar remains canonical graph authority; extension handlers must use
 application services and must not create a parallel graph truth.
