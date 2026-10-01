@@ -1347,3 +1347,26 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   `TimeoutError`. The immutable source revision/digest remain unchanged; no
   parse generation commit or ParseView activation occurred. Do not report the
   parsing or crosslink quality requirement as met.
+
+### Active Parse-Session Fencing (2026-10-01 00:42 UTC)
+
+- Fixed the retry-path assumption that queued work could be cancelled through
+  Kogwistar's `mark_failed`: that operation only transitions claimed (`DOING`)
+  jobs. Pending jobs remain auditable in the queue; a per-source CAS active
+  parse-session pointer now makes an old claimed job stale before parser work.
+- Added worker-path coverage showing a pending expansion job for the 900-second
+  profile is rejected as `parse_session_superseded` after the 2,400-second
+  profile becomes active. The source revision and revision document remain
+  unchanged. Focused durable expansion/session/guard/ingest tests pass:
+  `33 passed` (and the retry-specific group: `15 passed`).
+- The first full local run (`973 passed`) was discarded as evidence because the
+  shell's inherited `PYTHONPATH` loaded Kogwistar from the unrelated root
+  checkout. The authoritative rerun explicitly placed this worktree's pinned
+  Kogwistar, parser, sink, and `src` paths first and passed:
+  `973 passed, 9 skipped, 130 deselected, 29 warnings` in 722.60 seconds.
+  CI lint selection `ruff check src tests scripts --select E4,E7,E9,F` and
+  `git diff --check` also pass.
+- This session-fencing fix has not yet been pushed or deployed. The maintenance
+  container remains stopped; no additional ingestion or quality evaluation has
+  occurred. The existing stock source remains the only authorized experiment
+  input, and parsing/crosslink quality is still unverified.

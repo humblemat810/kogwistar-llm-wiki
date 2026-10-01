@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 
@@ -10,6 +12,7 @@ from kogwistar_llm_wiki.parsing.parse_views import (
     reparse_session_id,
 )
 from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar_llm_wiki.worker import MaintenanceWorker
 
 
 def test_run_invokes_kogwistar_ingest(pipeline, ingest_request, monkeypatch):
@@ -467,6 +470,12 @@ def test_durable_parse_profile_can_retry_same_revision_with_new_bounded_budget(
         }
     )
     first = pipeline.run(base)
+    old_expansion_job_id = pipeline.create_maintenance_request(
+        request=base,
+        source_document_id=first.source_document_id,
+        namespace=WorkspaceNamespaces(base.workspace_id).conv_bg,
+        maintenance_kind="document_expand_parse_children",
+    )
     extended = base.model_copy(
         update={
             "parse_limits": {
@@ -485,27 +494,45 @@ def test_durable_parse_profile_can_retry_same_revision_with_new_bounded_budget(
     assert first.source_document_id == second.source_document_id
     assert revision.revision_document_id is not None
     assert first.maintenance_job_id != second.maintenance_job_id
-
     store = ParseSessionStore(
         pipeline.engines.conversation.meta_sqlite,
         workspace_id=base.workspace_id,
     )
-    first_session = store.get(
-        parse_session_id(
+    first_session_id = parse_session_id(
+        workspace_id=base.workspace_id,
+        source_document_id=first.source_document_id,
+        source_revision_id=revision.revision_id,
+        parser_profile=pipeline._durable_parse_profile(base),
+    )
+    second_session_id = parse_session_id(
+        workspace_id=base.workspace_id,
+        source_document_id=second.source_document_id,
+        source_revision_id=revision.revision_id,
+        parser_profile=pipeline._durable_parse_profile(extended),
+    )
+    assert store.active_session_id(first.source_document_id) == second_session_id
+    pending_jobs = pipeline.engines.conversation.jobs.list(
+        namespace=WorkspaceNamespaces(base.workspace_id).maintenance_jobs,
+        status="PENDING",
+        limit=100,
+    )
+    pending_job_ids = {str(job.job_id) for job in pending_jobs}
+    assert str(first.maintenance_job_id) in pending_job_ids
+    assert str(old_expansion_job_id) in pending_job_ids
+
+    old_job = next(job for job in pending_jobs if str(job.job_id) == str(old_expansion_job_id))
+    decision = MaintenanceWorker(pipeline.engines)._evaluate_maintenance_guard(
+        SimpleNamespace(
             workspace_id=base.workspace_id,
-            source_document_id=first.source_document_id,
-            source_revision_id=revision.revision_id,
-            parser_profile=pipeline._durable_parse_profile(base),
+            payload=old_job.payload,
+            maintenance_kind="document_expand_parse_children",
         )
     )
-    second_session = store.get(
-        parse_session_id(
-            workspace_id=base.workspace_id,
-            source_document_id=second.source_document_id,
-            source_revision_id=revision.revision_id,
-            parser_profile=pipeline._durable_parse_profile(extended),
-        )
-    )
+    assert decision.status == "stale"
+    assert decision.reason == "parse_session_superseded"
+
+    first_session = store.get(first_session_id)
+    second_session = store.get(second_session_id)
     assert first_session is not None and second_session is not None
     assert first_session[0].revision_document_id == revision.revision_document_id
     assert second_session[0].revision_document_id == revision.revision_document_id

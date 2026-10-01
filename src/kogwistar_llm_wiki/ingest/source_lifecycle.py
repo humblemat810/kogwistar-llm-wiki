@@ -340,6 +340,7 @@ class SourceLifecycleMixin:
         )
         existing = store.get(session_id)
         if existing is not None:
+            store.activate(existing[0])
             return existing[0]
         source_namespace = self.namespaces_for(request.workspace_id).source_space
         with _temporary_namespace(self.engines.kg, source_namespace):
@@ -403,7 +404,9 @@ class SourceLifecycleMixin:
             existing = store.get(session_id)
             if existing is None:
                 raise
+            store.activate(existing[0])
             return existing[0]
+        store.activate(session)
         generation_evidence = ParseGeneration(
             generation_id=generation,
             workspace_id=request.workspace_id,

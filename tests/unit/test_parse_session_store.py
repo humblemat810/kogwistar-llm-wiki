@@ -56,6 +56,29 @@ def test_session_store_round_trips_and_retries_with_cas() -> None:
         store.save(session, frontier, expected_version=1)
 
 
+def test_active_parse_session_switch_is_cas_persisted_and_source_scoped() -> None:
+    metadata = InMemoryMetaStore()
+    store = ParseSessionStore(metadata, workspace_id="demo")
+    first, first_frontier = _state()
+    store.save(first, first_frontier, expected_version=None)
+    store.activate(first)
+    assert store.active_session_id("source-1") == "session-1"
+
+    second = first.model_copy(update={"session_id": "session-2", "generation_id": "generation-2"})
+    second_frontier = [
+        first_frontier[0].model_copy(
+            update={"session_id": "session-2", "generation_id": "generation-2"}
+        )
+    ]
+    store.save(second, second_frontier, expected_version=None)
+    store.activate(second)
+    assert store.active_session_id("source-1") == "session-2"
+    assert store.active_session_id("another-source") is None
+
+    with pytest.raises(ValueError, match="workspace"):
+        store.activate(second.model_copy(update={"workspace_id": "other"}))
+
+
 def test_session_store_rejects_cross_workspace_state() -> None:
     store = ParseSessionStore(InMemoryMetaStore(), workspace_id="demo")
     session, frontier = _state()
