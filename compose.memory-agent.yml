@@ -136,6 +136,12 @@ services:
       - "127.0.0.1:${LLM_WIKI_GRAFANA_PORT:-3000}:3000"
     expose:
       - "4318"
+    healthcheck:
+      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
 
   # Optional local OAuth/OIDC provider for integration testing.
   # Uncomment the whole service to run Keycloak, then configure the app's

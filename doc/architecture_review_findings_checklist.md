@@ -1,12 +1,17 @@
 # Architecture Review Findings Traceability Checklist
 
+> Historical execution/traceability record. Checked items record evidence
+> collected for the May 2026 review; they do not certify that current `main`
+> remains unchanged or that later CI passes. Revalidate the relevant contract
+> and tests before using this as a current release gate.
+
 ## Overview
 
 This checklist operationalizes the deep architecture review in
-[current_branch_deep_architecture_review.md](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md).
-It is the execution tracker for follow-up work on the current branch.
-Current branch findings have been reconciled as of 2026-05-15; this document is
-retained as a traceability record and ongoing search ledger.
+[current_branch_deep_architecture_review.md](./current_branch_deep_architecture_review.md).
+It records follow-up work for the reviewed branch. Findings were reconciled as
+of 2026-05-15; this document is retained for traceability and as a search
+ledger, not as an active status board.
 
 This document is intentionally stricter than a normal backlog:
 
@@ -82,7 +87,7 @@ Required search themes for this branch:
 
 - Severity: High
 - Source review reference:
-  [F1 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F1 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F2`, `F6`, `F15`
 - Problem summary:
   repeat ingest, retry, or crash-before-ack can create duplicate promoted
@@ -119,7 +124,7 @@ Required search themes for this branch:
 
 - Severity: High
 - Source review reference:
-  [F2 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F2 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F1`, `F6`, `F7`
 - Problem summary:
   a crash after reply send but before job completion can redeliver the same work
@@ -154,7 +159,7 @@ Required search themes for this branch:
 
 - Severity: High
 - Source review reference:
-  [F3 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F3 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F8`, `F9`, `F10`, `F11`
 - Problem summary:
   recovery reports are meant to be workspace-aware, but run-history inspection
@@ -184,7 +189,7 @@ Required search themes for this branch:
 
 - Severity: High
 - Source review reference:
-  [F4 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F4 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F13`, `F14`
 - Problem summary:
   install metadata, bootstrap assumptions, and import-time dependencies are not
@@ -223,7 +228,7 @@ Required search themes for this branch:
 
 - Severity: High
 - Source review reference:
-  [F5 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F5 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F8`, `F12`, `F18`
 - Problem summary:
   service-health visibility and workflow-backed service supervision are both in
@@ -259,7 +264,7 @@ Required search themes for this branch:
 
 - Severity: Medium/High
 - Source review reference:
-  [F6 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F6 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F1`, `F2`, `F15`
 - Problem summary:
   projection manifest state currently overclaims readiness and can treat a
@@ -289,7 +294,7 @@ Required search themes for this branch:
 
 - Severity: Medium/High
 - Source review reference:
-  [F7 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F7 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F2`, `F9`
 - Problem summary:
   narrow fallback behavior is correct, but unexpected lookup failures still skip
@@ -320,7 +325,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F8 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F8 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F3`, `F5`, `F18`
 - Problem summary:
   recovery is allowed to repair service-health latest rows, but the resulting
@@ -350,7 +355,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F9 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F9 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F3`, `F7`
 - Problem summary:
   checkpoint inspection currently catches too broadly, which can hide real
@@ -381,7 +386,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F10 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F10 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F3`, `F11`
 - Problem summary:
   wisdom derivation mostly relies on namespace scoping today, but it lacks cheap
@@ -412,7 +417,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F11 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F11 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F3`, `F10`
 - Problem summary:
   endpoint filtering protects correctness today, but the current edge scan is
@@ -440,7 +445,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F12 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F12 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F5`, `F20`
 - Problem summary:
   some planning docs still point contributors toward the broader actor/agent
@@ -471,7 +476,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F13 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F13 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F4`, `F14`
 - Problem summary:
   CLI docs claim an env-var fallback that the current implementation does not
@@ -501,7 +506,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F14 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F14 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F4`, `F13`
 - Problem summary:
   the programmatic API example no longer matches the actual constructor contract.
@@ -527,7 +532,7 @@ Required search themes for this branch:
 
 - Severity: Medium
 - Source review reference:
-  [F15 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F15 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F1`, `F6`
 - Problem summary:
   demo ingest intentionally materializes a richer KG-visible shortcut than
@@ -563,7 +568,7 @@ Required search themes for this branch:
 
 - Severity: Low/Medium
 - Source review reference:
-  [F16 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F16 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F1`
 - Problem summary:
   core policy defaults are now mostly generic, but promotion still keys off an
@@ -591,7 +596,7 @@ Required search themes for this branch:
 
 - Severity: Low/Medium
 - Source review reference:
-  [F17 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F17 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F7`
 - Problem summary:
   silent no-op behavior is convenient for optional subsystems but too weak for
@@ -620,7 +625,7 @@ Required search themes for this branch:
 
 - Severity: Low/Medium
 - Source review reference:
-  [F18 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F18 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F5`, `F8`
 - Problem summary:
   repair from sparse lifecycle facts is semantically correct, but it cannot
@@ -651,7 +656,7 @@ Required search themes for this branch:
 
 - Severity: Low
 - Source review reference:
-  [F19 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F19 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F12`
 - Problem summary:
   a leftover helper can invite new callers to bypass the newer projection policy path.
@@ -678,7 +683,7 @@ Required search themes for this branch:
 
 - Severity: Low
 - Source review reference:
-  [F20 in architecture review](/c:/Users/chanh/Documents/kogwistar-llm-wiki/doc/current_branch_deep_architecture_review.md)
+  [F20 in architecture review](./current_branch_deep_architecture_review.md)
 - Related findings: `F12`
 - Problem summary:
   the current wording is local and historical, but it can confuse contributors
@@ -707,7 +712,7 @@ Required search themes for this branch:
 - Source review reference:
   Discovered during `F7` implementation while tracing the workflow-design lookup
   path and the narrow `"Missing Embeddings"` fallback in
-  [worker.py](/c:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py).
+  [worker.py](../src/kogwistar_llm_wiki/worker.py).
 - Related findings: `F7`, `F9`
 - Problem summary:
   some callers use `get_nodes(...)` as an existence or control-flow probe, but

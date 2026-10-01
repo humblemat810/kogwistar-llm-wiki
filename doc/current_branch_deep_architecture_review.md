@@ -2,6 +2,11 @@
 
 Review date: 2026-05-10
 
+> Historical branch review, not a statement of the current `main` contract.
+> Status claims, file paths, and risks below are frozen to the reviewed branch
+> and date. Recheck current code and regression tests before treating a finding
+> as open or resolved.
+
 Scope:
 
 - `kogwistar` core substrate in `kogwistar/`

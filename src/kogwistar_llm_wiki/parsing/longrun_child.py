@@ -22,6 +22,11 @@ from ..parsing.longrun_support import write_json_file as _write_json_file
 from ..parsing.parse_quality import (
     basic_sense_eval_from_graph_payload as _basic_sense_eval_from_graph_payload,
 )
+from ..usage.provider import (
+    ProviderUsageCallback,
+    provider_call_count,
+    resolve_token_pricing,
+)
 
 
 def run_longrun_parser_child(
@@ -125,6 +130,19 @@ def run_longrun_parser_child(
                 source_format=str(payload["source_format"]),
                 mode=str(payload["parser_mode"]),
                 provider_settings=provider_settings,
+                callbacks=[
+                    ProviderUsageCallback(
+                        ledger=budget_ledger,
+                        run_id=str(payload.get("parser_workflow_run_id") or f"parser:{source_document_id}"),
+                        source_document_id=source_document_id,
+                        provider=provider_settings.parser.provider,
+                        model=provider_settings.parser.model,
+                        pricing=resolve_token_pricing(
+                            provider=provider_settings.parser.provider,
+                            model=provider_settings.parser.model,
+                        ),
+                    )
+                ],
                 trace_log=lambda message: _trace(f"page_index::{message}"),
             )
             _trace("child_page_index_parse_call_returned")
@@ -195,6 +213,12 @@ def run_longrun_parser_child(
             diagnostics = dict(result.diagnostics)
         else:
             raise ValueError(f"unsupported long-run parser lane: {parser_lane!r}")
+        if parser_lane == "page_index":
+            usage_summary = summarize_budget_events(
+                budget_ledger.events,
+                provider_settings=provider_settings,
+            )
+            usage_summary["llm_call_count"] = provider_call_count(budget_ledger.events)
         workflow_status = str(diagnostics.get("workflow_status") or "").strip().lower()
         result_ok = workflow_status not in {"failure", "failed", "error"}
         _trace("child_write_result_json")
@@ -210,7 +234,11 @@ def run_longrun_parser_child(
                 "graph_payload": graph_payload,
                 "evaluation": evaluation,
                 "usage_summary": usage_summary,
-                "usage_events": list(getattr(result, "usage_events", []) or []),
+                "usage_events": (
+                    [budget_event_to_dict(event) for event in budget_ledger.events]
+                    if parser_lane == "page_index"
+                    else list(getattr(result, "usage_events", []) or [])
+                ),
                 "diagnostics": diagnostics,
                 "workflow_status": workflow_status or None,
                 "layer_log": getattr(result, "layer_log", None) if parser_lane == "workflow_layered" else None,

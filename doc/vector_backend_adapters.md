@@ -19,10 +19,12 @@ pip install "kogwistar-llm-wiki[vector-qdrant]"
 pip install "kogwistar-llm-wiki[vector-all]"
 ```
 
-The normal image does not include the two external SDKs. This avoids forcing
+The standard image does not include the two external SDKs. This avoids forcing
 credentials, network clients, and transitive dependencies on users who use
-PostgreSQL or Chroma. A future all-adapters image can install the `vector-all`
-extra only after the adapter packages have immutable released versions.
+PostgreSQL or Chroma. The separately tagged all-adapters image installs the
+`vector-all` extra from immutable adapter source revisions during release
+builds; it is published alongside the standard image for version-tagged
+releases.
 
 The Dockerfile exposes the same opt-in without changing the normal image:
 
@@ -48,11 +50,11 @@ flowchart LR
     QDRANT --> PROFILE
 ```
 
-Versioned Docker releases are gated by the all-adapters build. The release
-workflow builds this variant without publishing it, verifies both optional
-adapter imports, and only then publishes the standard release image. If an
-adapter package is missing or incompatible, the release job stops before any
-release image is pushed.
+Versioned Docker releases first build the all-adapters variant and verify both
+optional adapter imports, then publish both the standard and all-adapters
+images. This tag workflow is a release-specific build/import gate, not a
+substitute for the repository's full test CI. If an adapter package is missing
+or incompatible, release publication stops.
 
 ## Configuration
 

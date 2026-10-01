@@ -179,25 +179,25 @@ Recommended classification for existing behavior:
 ## Current Code Anchors
 
 - Working-memory to maintenance/review to promotion flow:
-  [ingest_pipeline.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/ingest_pipeline.py:245)
+  [ingest pipeline facade](../src/kogwistar_llm_wiki/ingest_pipeline.py)
 - Promotion rule and promoted KG write:
-  [ingest_pipeline.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/ingest_pipeline.py:264)
-  [ingest_pipeline.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/ingest_pipeline.py:653)
+  [base KG projection](../src/kogwistar_llm_wiki/ingest/base_kg_projection.py)
+  [promotion and maintenance execution](../src/kogwistar_llm_wiki/maintenance/worker_execution.py)
 - Artifact metadata policy:
-  [ingest_pipeline.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/ingest_pipeline.py:760)
+  [artifact construction](../src/kogwistar_llm_wiki/ingest/artifacts.py)
 - Maintenance kind routing:
-  [maintenance_policy.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/maintenance/maintenance_policy.py:3)
+  [maintenance policy](../src/kogwistar_llm_wiki/maintenance/maintenance_policy.py)
 - Derived knowledge synthesis policy:
-  [worker.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py:276)
-  [worker.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py:401)
+  [derived maintenance worker](../src/kogwistar_llm_wiki/maintenance/worker_derived.py)
 - Execution wisdom extraction policy:
-  [worker.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/worker.py:417)
+  [wisdom maintenance strategy](../src/kogwistar_llm_wiki/maintenance/maintenance_strategies.py)
+  [execution-history distillation](../src/kogwistar_llm_wiki/maintenance/worker_derived.py)
 - KG visibility policy:
-  [namespaces.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/namespaces.py:55)
+  [application visibility policy](../src/kogwistar_llm_wiki/policies/rules.py)
 - Projection filtering behavior:
-  [projection.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/projection.py:29)
+  [graph snapshot filtering](../src/kogwistar_llm_wiki/projections/snapshot.py)
 - Review query helper:
-  [review_query.py](C:/Users/chanh/Documents/kogwistar-llm-wiki/src/kogwistar_llm_wiki/review_query.py:1)
+  [review-chain query helper](../src/kogwistar_llm_wiki/workbench/review_query.py)
 
 ## Follow-Up
 

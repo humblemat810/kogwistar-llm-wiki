@@ -1,90 +1,111 @@
-"""Public facade for product-owned embedding and multimodal boundaries.
+"""Lazy public facade for application-owned embedding adapters."""
 
-Kogwistar owns generic embedding profiles and vector-store primitives.  This
-package owns the LLM-Wiki adapters, source-unit handling, and projection
-interfaces.
-"""
+from __future__ import annotations
 
-from .embedding_config_resolver import (
-    EMBEDDING_SPACES,
-    TinyEmbeddingFunction,
-    embedding_profile,
-    resolve_embedding_function,
-    resolve_embedding_functions,
-    validate_shared_postgres_embedding_profile,
-)
-from .multimodal_grounding import (
-    EvidenceClosureResolver,
-    EvidenceClosureValidator,
-    EvidencePack,
-    EvidencePackReference,
-    GroundingComposition,
-    GroundingValidationError,
-    HigherOrderGrounding,
-    PinnedEntityRef,
-    ResolvedEntityGrounding,
-    SourceEvidenceRef,
-)
-from .multimodal_dereference import (
-    DereferenceStatus,
-    EmbeddingDereferenceResult,
-    EmbeddingReferenceDereferencer,
-    EmbeddingReferenceResolver,
-)
-from .multimodal_projection import (
-    AssetResolver,
-    ChromaMultimodalProjectionStore,
-    ColQwenNativeEncoder,
-    EmbeddingProfileMismatch,
-    EmbeddingSet,
-    FakeMultimodalEncoder,
-    InMemoryMultimodalProjectionStore,
-    MultimodalEmbeddingProfile,
-    MultimodalEncoder,
-    MultimodalImageQueryEncoder,
-    MultimodalProjectionStore,
-    MultimodalSearchHit,
-    MultimodalSourceUnit,
-    PgVectorMultimodalProjectionStore,
-    ProjectionIntegrityError,
-    SQLiteMultimodalProjectionStore,
-    embed_pending,
-    score_embedding_sets,
-    to_core_embedding_profile,
-)
-from .multimodal_remote import (
-    EmbeddingProtocolError,
-    EmbeddingServiceError,
-    EmbeddingServiceSettings,
-    EmbeddingServiceUnavailable,
-    RemoteMultimodalEncoder,
-)
-from .multimodal_sources import (
-    LocalFileAssetResolver,
-    MappingAssetResolver,
-    MultimodalSourceBundle,
-    build_source_bundle,
-    manifest_units,
-    pdf_manifest_units,
-    split_text_units,
-    webpage_units,
-    audio_interval_unit,
-    video_interval_unit,
-    video_region_track_unit,
-)
-from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
+from importlib import import_module
+
+_EXPORT_MODULES = {
+    **dict.fromkeys(
+        (
+            "EMBEDDING_SPACES",
+            "TinyEmbeddingFunction",
+            "embedding_profile",
+            "resolve_embedding_function",
+            "resolve_embedding_functions",
+            "validate_shared_postgres_embedding_profile",
+        ),
+        ".embedding_config_resolver",
+    ),
+    **dict.fromkeys(
+        (
+            "EvidenceClosureResolver",
+            "EvidenceClosureValidator",
+            "EvidencePack",
+            "EvidencePackReference",
+            "GroundingComposition",
+            "GroundingValidationError",
+            "HigherOrderGrounding",
+            "PinnedEntityRef",
+            "ResolvedEntityGrounding",
+            "SourceEvidenceRef",
+        ),
+        ".multimodal_grounding",
+    ),
+    **dict.fromkeys(
+        (
+            "DereferenceStatus",
+            "EmbeddingDereferenceResult",
+            "EmbeddingReferenceDereferencer",
+            "EmbeddingReferenceResolver",
+        ),
+        ".multimodal_dereference",
+    ),
+    **dict.fromkeys(
+        (
+            "AssetResolver",
+            "ChromaMultimodalProjectionStore",
+            "ColQwenNativeEncoder",
+            "EmbeddingProfileMismatch",
+            "EmbeddingSet",
+            "FakeMultimodalEncoder",
+            "InMemoryMultimodalProjectionStore",
+            "MultimodalEmbeddingProfile",
+            "MultimodalEncoder",
+            "MultimodalImageQueryEncoder",
+            "MultimodalProjectionStore",
+            "MultimodalSearchHit",
+            "MultimodalSourceUnit",
+            "PgVectorMultimodalProjectionStore",
+            "ProjectionIntegrityError",
+            "SQLiteMultimodalProjectionStore",
+            "embed_pending",
+            "score_embedding_sets",
+            "to_core_embedding_profile",
+        ),
+        ".multimodal_projection",
+    ),
+    **dict.fromkeys(
+        (
+            "EmbeddingProtocolError",
+            "EmbeddingServiceError",
+            "EmbeddingServiceSettings",
+            "EmbeddingServiceUnavailable",
+            "RemoteMultimodalEncoder",
+        ),
+        ".multimodal_remote",
+    ),
+    **dict.fromkeys(
+        (
+            "LocalFileAssetResolver",
+            "MappingAssetResolver",
+            "MultimodalSourceBundle",
+            "build_source_bundle",
+            "manifest_units",
+            "pdf_manifest_units",
+            "split_text_units",
+            "webpage_units",
+            "audio_interval_unit",
+            "video_interval_unit",
+            "video_region_track_unit",
+        ),
+        ".multimodal_sources",
+    ),
+    **dict.fromkeys(
+        ("VllmEmbeddingSettings", "VllmMultimodalEncoder"), ".vllm_remote"
+    ),
+}
 
 __all__ = [
     "EMBEDDING_SPACES",
     "AssetResolver",
     "ChromaMultimodalProjectionStore",
     "ColQwenNativeEncoder",
-    "EmbeddingProfileMismatch",
     "DereferenceStatus",
     "EmbeddingDereferenceResult",
+    "EmbeddingProfileMismatch",
+    "EmbeddingProtocolError",
     "EmbeddingReferenceDereferencer",
     "EmbeddingReferenceResolver",
-    "EmbeddingProtocolError",
     "EmbeddingServiceError",
     "EmbeddingServiceSettings",
     "EmbeddingServiceUnavailable",
@@ -117,6 +138,7 @@ __all__ = [
     "TinyEmbeddingFunction",
     "VllmEmbeddingSettings",
     "VllmMultimodalEncoder",
+    "audio_interval_unit",
     "build_source_bundle",
     "embed_pending",
     "embedding_profile",
@@ -125,11 +147,23 @@ __all__ = [
     "resolve_embedding_function",
     "resolve_embedding_functions",
     "score_embedding_sets",
+    "split_text_units",
     "to_core_embedding_profile",
-    "audio_interval_unit",
+    "validate_shared_postgres_embedding_profile",
     "video_interval_unit",
     "video_region_track_unit",
-    "split_text_units",
-    "validate_shared_postgres_embedding_profile",
     "webpage_units",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

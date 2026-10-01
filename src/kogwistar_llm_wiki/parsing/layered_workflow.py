@@ -18,7 +18,11 @@ from kogwistar.runtime.budget_adapters import summarize_budget_events
 
 from ..diagnostics.debug_helpers import summarize_stage_timings
 from ..providers.role_config import provider_config_summary
-from ..usage.provider import ProviderUsageCallback, resolve_token_pricing
+from ..usage.provider import (
+    ProviderUsageCallback,
+    provider_call_count,
+    resolve_token_pricing,
+)
 from .longrun_support import close_resources_quietly as _close_resources_quietly
 from .longrun_support import dump_model as _dump_model
 from .longrun_support import now_ms as _now_ms
@@ -40,12 +44,7 @@ def _summarize_budget_events(events: list[object], *, provider_settings: Workflo
         "location": provider_summary.get("location"),
         "max_retries": provider_summary.get("max_retries"),
     } | summarize_budget_events(events)
-    provider_run_ids = {
-        str(getattr(event, "meta", {}).get("provider_run_id"))
-        for event in events
-        if getattr(event, "meta", {}).get("provider_run_id")
-    }
-    summary["llm_call_count"] = len(provider_run_ids)
+    summary["llm_call_count"] = provider_call_count(events)
     cost_events = [
         event for event in events
         if getattr(event, "kind", None) == "cost" or getattr(event, "unit", None) == "total_cost"

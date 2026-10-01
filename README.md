@@ -304,10 +304,12 @@ embedding image is also a separate image and is not included in this release;
 see [`doc/docker_deployment.md`](doc/docker_deployment.md) for its deployment
 overlays and tags.
 
-Application releases publish only the Torch-free `profchan/kogwistar-llm-wiki`
-image. CPU and CUDA embedding images are published independently after their
-own runtime checks; see [`doc/docker_hub_publishing.md`](doc/docker_hub_publishing.md)
-for the explicit targets and commands.
+Application release tags publish both the Torch-free
+`profchan/kogwistar-llm-wiki:vX.Y.Z` image and its `all-vX.Y.Z` optional-adapter
+variant. CPU and CUDA embedding images are published independently after
+their own runtime checks; see
+[`doc/docker_hub_publishing.md`](doc/docker_hub_publishing.md) for the exact
+tag workflow and targets.
 
 ### Codex project memory
 
@@ -485,9 +487,10 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/core_workflows.md](doc/core_workflows.md) | Workflow graph designs |
 | [doc/adr_conversation_two_stage_materialization.md](doc/adr_conversation_two_stage_materialization.md) | Optional two-stage conversation materialization, ownership boundaries, and benchmark contract |
 | [doc/agent_gateway_quickstart.md](doc/agent_gateway_quickstart.md) | Agent integration quickstart for OpenAI-shaped, A2A, MCP, and OTel usage |
+| [doc/tutorial_progressive_rag_to_graph.md](doc/tutorial_progressive_rag_to_graph.md) | Stage-by-stage source-map RAG, parser, multimodal projection, and maintenance walkthrough |
 | [doc/adr_agent_gateway_and_otel.md](doc/adr_agent_gateway_and_otel.md) | Agent gateway architecture, safety boundaries, and optional OpenTelemetry |
 | [skills/llm-wiki-knowledge/SKILL.md](skills/llm-wiki-knowledge/SKILL.md) | Portable grounded knowledge-management and proposal-review instructions for compatible agents |
-| [doc/implementation_plan_observability_staged_materialization_goal_mode.md](doc/implementation_plan_observability_staged_materialization_goal_mode.md) | Historical dependency-order reference and remaining goal-mode delivery gates |
+| [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Implemented and deferred boundaries for moving generic maintenance mechanics into Kogwistar core |
 | [doc/testing_guide.md](doc/testing_guide.md) | Local test-running pitfalls and pytest cache guidance |
 | [doc/lane_namespace_convention.md](doc/lane_namespace_convention.md) | Namespace/lane conventions |
 | [doc/maintenance_job_taxonomy.md](doc/maintenance_job_taxonomy.md) | Maintenance job types |
