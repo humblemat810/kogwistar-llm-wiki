@@ -1544,6 +1544,9 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   returned normalized 384-D vectors using CPU. Cold load took 16.291 seconds;
   five document encodings took 4.667 seconds; five query encodings took 0.215
   seconds total. Process peak RSS was 459.8 MiB under the container limits.
+- The local Hugging Face snapshot metadata names the same immutable revision.
+  The `model.safetensors` metadata ETag matches the independently computed
+  file SHA-256: `3c9f31665447c8911517620762200d2245a2518d6e7208acc78cd9db317e21ad`.
 - On five deliberately small finance-topic query/document pairs, expected
   documents ranked first for all five (MRR 1.0). This is only a smoke sanity
   check, not a representative finance retrieval benchmark or proof of useful
