@@ -604,9 +604,14 @@ The base `postgres`, `rest`, and `mcp` services provide the memory-agent
 interfaces. `compose.multimodal.yml` adds the private Qwen3-VL embedding
 service, while `compose.memory-agent.yml` enables the OTel sink and exposes
 Grafana on `http://127.0.0.1:3000`. The application traces are disabled or
-enabled with `LLM_WIKI_OTEL_ENABLED`; the Settings panel can toggle the sink
-for the current process after confirmation, but it does not start or stop
-Docker services.
+enabled with `LLM_WIKI_OTEL_ENABLED`. The Settings panel can toggle
+app-owned `LlmWikiTelemetry` spans for the current process after confirmation,
+but it does not start or stop Docker services. Core workflow telemetry is
+configured when the maintenance worker constructs `WorkflowRuntime`; changing
+the setting does not reconfigure that existing core sink. Recreate the worker
+to apply the new setting to core workflow spans. See
+[`adr_agent_gateway_and_otel.md`](adr_agent_gateway_and_otel.md) for the
+distinction and current limitation.
 
 The example contains a commented Keycloak OAuth/OIDC service. Uncommenting it
 only starts the identity provider; it does not change application auth. To use

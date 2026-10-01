@@ -527,8 +527,8 @@ Rust, Cargo, GCC, Maturin, and package source checkouts exist only in builder
 stages. BuildKit cache mounts reuse Python and Rust downloads between builds,
 while the final runtime stages contain only the installed runtime environment.
 Model checkpoints are never baked into either image; keep Hugging Face caches
-in the Compose volume. Application tags publish only the application image,
-and embedding images use the explicit targets documented in
+in the Compose volume. Version tags publish the standard application image and
+the separate all-adapters variant; embedding images use the explicit targets documented in
 [`Docker Hub publishing`](docker_hub_publishing.md).
 
 Do not run an overlay alone. Compose does not have a built-in way for an

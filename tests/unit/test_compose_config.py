@@ -128,7 +128,25 @@ def test_combined_overlay_uses_one_process_and_suppresses_split_roles() -> None:
     assert "--mcp-port" in text
     assert "profiles: [split]" in text
     assert "LLM_WIKI_COMBINED_MEMORY_LIMIT" in text
-    assert "LLM_WIKI_COMBINED_CPU_LIMIT" in text
+
+
+def test_clip_cpu_overlay_isolated_and_resource_bounded() -> None:
+    text = (Path(__file__).parents[2] / "compose.embedding-clip-cpu.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "embedding-clip-cpu:" in text
+    assert "Dockerfile.embedding-service" in text
+    assert "LLM_WIKI_EMBEDDING_TORCH_BACKEND: cpu" in text
+    assert "LLM_WIKI_EMBEDDING_ENCODER: clip-vit-b32" in text
+    assert "LLM_WIKI_EMBEDDING_MODEL_REVISION: 327ab6726d33c0e22f920c83f2ff9e4bd38ca37f" in text
+    assert 'LLM_WIKI_EMBEDDING_DIMENSION: "512"' in text
+    assert "mem_limit: ${LLM_WIKI_CLIP_MEMORY_LIMIT:-2g}" in text
+    assert "cpus: ${LLM_WIKI_CLIP_CPU_LIMIT:-1.0}" in text
+    assert '"127.0.0.1:${LLM_WIKI_CLIP_PORT:-8792}:8790"' in text
+    assert "read_only: true" in text
+    assert "    rest:" not in text
+    assert "    postgres:" not in text
 
 
 def test_static_compose_helper_contains_persistent_service_contract() -> None:

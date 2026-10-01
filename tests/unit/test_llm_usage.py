@@ -13,6 +13,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from kogwistar_llm_wiki.usage.provider import (
     ProviderUsageCallback,
     extract_provider_usage,
+    provider_call_count,
     resolve_token_pricing,
 )
 
@@ -77,6 +78,7 @@ def test_provider_usage_callback_emits_attributed_budget_events() -> None:
     callback.on_llm_end(response, run_id="provider-call-1")
     callback.on_llm_error(RuntimeError("provider rejected request"), run_id="provider-call-2")
 
+    assert provider_call_count(ledger.events) == 2
     summary = summarize_budget_events(ledger.events)
     assert summary["input_tokens"] == 120
     assert summary["output_tokens"] == 35

@@ -160,3 +160,19 @@ def test_primary_codex_provider_uses_codex_specific_model(monkeypatch) -> None:
     assert settings.parser.model == "gpt-5.6-luna"
     assert settings.parser.base_url == "http://bridge:8791"
     assert settings.parser.api_key_env == "BRIDGE_TOKEN"
+
+
+def test_local_bonsai_maintenance_chain_has_no_ollama_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER", "openai")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN", "openai")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_MODEL", "Ternary-Bonsai-2-27B-PTQ1_0")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_BASE_URL", "http://host.docker.internal:8181/v1")
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_API_KEY_ENV", "LLM_WIKI_LOCAL_MODEL_API_KEY")
+
+    settings = resolve_maintenance_provider_settings()
+
+    assert settings.parser.provider == "openai"
+    assert settings.parser.model == "Ternary-Bonsai-2-27B-PTQ1_0"
+    assert settings.parser.base_url == "http://host.docker.internal:8181/v1"
+    assert settings.parser.api_key_env == "LLM_WIKI_LOCAL_MODEL_API_KEY"
+    assert settings.parser.fallback_specs == []

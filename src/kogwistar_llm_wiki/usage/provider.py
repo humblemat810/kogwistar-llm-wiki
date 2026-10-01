@@ -20,6 +20,18 @@ from langchain_core.callbacks import BaseCallbackHandler
 _USAGE_KEYS = ("usage_metadata", "token_usage", "usage")
 
 
+def provider_call_count(events: Sequence[BudgetEvent]) -> int:
+    """Count unique provider attempts represented by usage-ledger events."""
+
+    return len(
+        {
+            str(provider_run_id)
+            for event in events
+            if (provider_run_id := event.meta.get("provider_run_id"))
+        }
+    )
+
+
 _REFERENCE_TOKEN_PRICING: dict[tuple[str, str], TokenPricing] = {
     # Public OpenAI standard rates, expressed per 1K tokens. Azure deployments
     # may differ by region/SKU; explicit environment rates always take priority.

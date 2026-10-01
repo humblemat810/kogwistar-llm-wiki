@@ -4,6 +4,28 @@
 **Audience:** Kogwistar engine contributors
 **Date:** 2026-04-16
 
+### Implementation status snapshot (2026-09-28)
+
+This migration note is a proposal/tracking document, not a claim that every
+listed core capability has shipped. Current repository inspection confirms:
+
+- Phases 2-4 are implemented in the bundled Kogwistar source: the generic
+  `engine.jobs` facade, `scoped_namespace`, and `engine.recovery` exist.
+- Phase 5 is not implemented in core. LLM-Wiki still owns and materializes its
+  derived-knowledge workflow design and app-specific resolvers.
+- Phase 6 is not implemented in core; no `WorkflowAnalyticsSubsystem` exists.
+- Execution-wisdom authoring remains app policy over the reusable
+  `kogwistar.wisdom.template` helper. The app defines and materializes an
+  execution-wisdom workflow design/resolver, while maintenance dispatch also
+  has a dedicated execution-wisdom strategy. Do not infer that every history
+  extraction job runs through `WorkflowRuntime`.
+- Phase 7 remains deferred. No core solution is documented here for reading
+  execution history from inside the same runtime trace lane.
+
+This snapshot describes inspected source, not live production/deployment
+verification. Recheck tests and the selected installed Kogwistar revision
+before changing the phase statuses.
+
 ---
 
 ## Background
