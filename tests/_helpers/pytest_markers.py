@@ -12,6 +12,8 @@ _DEFAULT_CI_BLOCKERS = {
     "requires_ollama",
     "requires_chroma",
     "slow",
+    "integration",
+    "e2e",
 }
 
 

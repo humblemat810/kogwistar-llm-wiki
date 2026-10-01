@@ -27,6 +27,8 @@ from kogwistar_llm_wiki.maintenance.maintenance_designs import (
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 
+pytestmark = pytest.mark.ci_full
+
 
 @dataclass
 class _RuntimeLaneNode:

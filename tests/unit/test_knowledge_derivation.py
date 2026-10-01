@@ -17,6 +17,8 @@ from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 from tests.conftest import _build_engine
 
+pytestmark = pytest.mark.ci_full
+
 
 def _decode_metadata_json(value):
     if isinstance(value, dict):

@@ -20,6 +20,8 @@ from kogwistar_llm_wiki.maintenance.maintenance_planner import (
     decide_next_maintenance_phase,
 )
 
+pytestmark = pytest.mark.ci_full
+
 
 @pytest.fixture(autouse=True)
 def _isolated_smoke_environment(monkeypatch):

@@ -1,0 +1,104 @@
+name: Full CI
+
+on:
+  schedule:
+    - cron: "30 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KOGWISTAR_REVISION: 5923ea69d859512525b6ee3a7f682db884bea8ff
+  KG_DOC_PARSER_REVISION: 82910e1e3db0f49ddf10cc90580d2f47488b7466
+  OBSIDIAN_SINK_REVISION: 2fcea33c34bfb2d09445fe587fa25f25ef8bc6d4
+
+jobs:
+  full-python:
+    name: Full Python suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Kogwistar
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar
+          ref: ${{ env.KOGWISTAR_REVISION }}
+          path: kogwistar
+          persist-credentials: false
+
+      - name: Checkout pinned parser
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kg-doc-parser
+          ref: ${{ env.KG_DOC_PARSER_REVISION }}
+          path: kg-doc-parser
+          persist-credentials: false
+
+      - name: Checkout pinned Obsidian sink
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-sink
+          ref: ${{ env.OBSIDIAN_SINK_REVISION }}
+          path: kogwistar-obsidian-sink
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.91.1
+
+      - name: Expose checked-out package sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/kogwistar:$GITHUB_WORKSPACE/kg-doc-parser:$GITHUB_WORKSPACE/kogwistar-obsidian-sink:$GITHUB_WORKSPACE/src" >> "$GITHUB_ENV"
+
+      - name: Install full-suite dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ./kogwistar
+          python -m pip install -e ./kg-doc-parser
+          python -m pip install -e ./kogwistar-obsidian-sink
+          python -m pip install -e ".[test,otel,agent]" --no-deps
+          python -m pip install \
+            "chromadb>=0.6" \
+            "mcp>=2.2.0,<3" \
+            "langchain-openai>=0.3" \
+            "langchain-ollama>=0.3" \
+            "sqlalchemy[asyncio]>=2.0" \
+            "opentelemetry-api>=1.25" \
+            "opentelemetry-sdk>=1.25" \
+            "opentelemetry-exporter-otlp-proto-http>=1.25" \
+            "pytest>=8" \
+            "pytest-anyio"
+
+      - name: Run full deterministic suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          python -m pytest \
+            -m "not manual and not llm_real and not longrun and not requires_ollama" \
+            tests -q --durations=25 --durations-min=0 \
+            --junitxml test-results/junit-full.xml \
+            -p no:cacheprovider 2>&1 | tee test-results/pytest-full.log
+
+      - name: Upload full-suite diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: full-suite-diagnostics
+          path: test-results/
+          if-no-files-found: warn
