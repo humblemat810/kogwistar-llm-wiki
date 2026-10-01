@@ -1509,3 +1509,26 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   surface agree. It does not verify model loading, available context, GPU fit,
   inference quality, or maintenance connectivity; no capped runtime/session
   was started or inspected.
+
+### Feature-Branch CI Follow-Up (2026-10-01)
+
+- GitHub Actions run `36811311353` for the pushed feature-branch head
+  `b469a60be5f592b119e9e6b858bf06dc0fa51f47` completed successfully. The run
+  summary lists Python lint, Rust checks, resource comparison, and the normal
+  provider-free Python suites for PyPy 3.11 and CPython 3.12, 3.13, and 3.14.
+  This is hosted CI evidence for that exact commit; it does not verify the
+  stopped local Bonsai runtime or any live graph-maintenance outcome.
+- The same-host benchmark run `36811311312` and PyPy 3.11 container smoke run
+  `36811311359` completed successfully.
+- Optional PyPy 3.12 beta run `36811311341` has a non-blocking install-step
+  failure for the bounded NumPy-free source profile. Its evidence artifact
+  `pypy312-profile-evidence` (artifact ID `11138869928`, 10.7 KB) was uploaded.
+  The exact pip failure remains undiagnosed: the unauthenticated GitHub API was
+  rate-limited and the public UI download route did not yield the artifact.
+  The workflow's `continue-on-error` policy means its overall success status is
+  not evidence that this install step passed. This optional beta failure does
+  not invalidate the successful stable PyPy 3.11 and CPython matrix.
+- No model server, maintenance worker, container, or database was started or
+  inspected during this follow-up. The previously capped local runtime remains
+  outside this verification window; a fresh authorized runtime window is still
+  required for the outstanding direct/follow-up/background Bonsai checks.
