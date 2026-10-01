@@ -258,6 +258,227 @@ def test_review_decisions_are_durable_idempotent_and_group_scoped(pipeline) -> N
         service._decide_one(workspace_id, "user:reviewer", opposite)
 
 
+def _fake_proposal_worker(
+    evidence: list[CrosslinkEvidence],
+    proposal: object,
+    critic: object,
+    *,
+    approval_mode: str = "automatic",
+    parse_quality: str | None = None,
+) -> tuple[object, dict[str, list[object]]]:
+    class Worker(MaintenanceExecutionWorkerMixin):
+        pass
+
+    worker = object.__new__(Worker)
+    records: dict[str, list[object]] = {
+        "critic_calls": [],
+        "reviews": [],
+        "apply_jobs": [],
+        "finished": [],
+        "traces": [],
+    }
+    worker._collect_crosslink_evidence = lambda _ctx: evidence
+    worker._invoke_crosslink_proposer = lambda _evidence, _ctx: proposal
+
+    def run_critic(group, group_evidence, _ctx):
+        records["critic_calls"].append((group, group_evidence))
+        return critic(group, group_evidence) if callable(critic) else critic
+
+    worker._invoke_crosslink_critic = run_critic
+    worker._validate_crosslink_authority = lambda *_args: None
+    worker._persist_crosslink_group_review = (
+        lambda _ctx, group_id, patch, group, review, *, status: (
+            records["reviews"].append({
+                "group_id": group_id,
+                "patch": patch,
+                "group": group,
+                "critic": review,
+                "status": status,
+            })
+            or f"artifact:{group_id}"
+        )
+    )
+    worker._enqueue_crosslink_group_apply = (
+        lambda _ctx, group_id, patch: records["apply_jobs"].append((group_id, patch))
+    )
+    worker._finish_crosslink_proposal = (
+        lambda _ctx, **result: records["finished"].append(result)
+    )
+    worker._emit_trace = lambda event, **fields: records["traces"].append(
+        {"event": event, **fields}
+    )
+    worker._claim_lost = threading.Event()
+    worker.provider_settings = None
+    payload: dict[str, object] = {"crosslink_approval_mode": approval_mode}
+    if parse_quality is not None:
+        payload["parse_quality_status"] = parse_quality
+    ctx = MaintenanceJobExecutionContext(
+        workspace_id="proposal-unit",
+        job=None,
+        job_id="proposal-unit-job",
+        payload=payload,
+        request_node=None,
+        request_node_id="proposal-unit-request",
+        lane_message_id="",
+        maintenance_kind="document_propose_crosslinks",
+    )
+    records["context"] = [ctx]
+    return worker, records
+
+
+def _evidence_pair() -> list[CrosslinkEvidence]:
+    return [
+        CrosslinkEvidence(
+            evidence_id=f"evidence-{index}",
+            node_id=f"node-{index}",
+            source_document_id=f"logical-{index}",
+            source_revision_id=f"revision-{index}",
+            revision_document_id=f"revision-document-{index}",
+            source_digest=str(index) * 64,
+            start_char=0,
+            end_char=5,
+            excerpt="proof",
+        )
+        for index in range(4)
+    ]
+
+
+def _proposal_group(
+    group_id: str,
+    left_evidence_id: str = "evidence-0",
+    right_evidence_id: str = "evidence-1",
+) -> dict[str, object]:
+    return {
+        "group_id": group_id,
+        "rationale": "Independent source evidence supports the relationship.",
+        "indivisible": False,
+        "operations": [{
+            "left_evidence_id": left_evidence_id,
+            "right_evidence_id": right_evidence_id,
+            "relation": "supports",
+            "rationale": "Both excerpts support the same claim.",
+        }],
+    }
+
+
+def _critic_reply(
+    evidence: list[CrosslinkEvidence | dict[str, object]], verdict: str
+) -> dict[str, object]:
+    return {
+        "verdict": verdict,
+        "explanation": "The cited source excerpts support this review decision.",
+        "evidence_ids": [
+            item["evidence_id"] if isinstance(item, dict) else item.evidence_id
+            for item in evidence
+        ],
+    }
+
+
+def test_background_provider_empty_result_finishes_without_critic_or_graph_write() -> None:
+    worker, records = _fake_proposal_worker(_evidence_pair(), {"groups": []}, {})
+    worker._propose_background_crosslink_groups(records["context"][0])
+
+    assert records["finished"] == [{
+        "groups": 0,
+        "status": "no_candidate",
+        "pending": 0,
+        "automatic": 0,
+        "rejected": 0,
+    }]
+    assert records["critic_calls"] == []
+    assert records["reviews"] == []
+    assert records["apply_jobs"] == []
+
+
+@pytest.mark.parametrize(
+    "proposal, error_match",
+    [
+        ({"groups": [{"group_id": "bad", "operations": []}]}, "rationale|operations"),
+        ({"groups": [_proposal_group("unknown", "missing", "evidence-1")]}, "unknown evidence"),
+        (
+            {"groups": [{
+                **_proposal_group("duplicate"),
+                "operations": [
+                    _proposal_group("duplicate")["operations"][0],
+                    _proposal_group("duplicate")["operations"][0],
+                ],
+            }]},
+            "duplicate operation",
+        ),
+    ],
+)
+def test_background_provider_rejects_malformed_unknown_and_duplicate_operations(
+    proposal: object, error_match: str
+) -> None:
+    worker, records = _fake_proposal_worker(
+        _evidence_pair(), proposal, _critic_reply(_evidence_pair()[:2], "approve")
+    )
+    with pytest.raises((ValueError, ValidationError), match=error_match):
+        worker._propose_background_crosslink_groups(records["context"][0])
+    assert records["apply_jobs"] == []
+
+
+@pytest.mark.parametrize(
+    "approval_mode, verdict, expected_status, should_enqueue",
+    [
+        ("automatic", "approve", "ready", True),
+        ("automatic", "reject", "rejected", False),
+        ("automatic", "review", "pending", False),
+        ("human", "approve", "pending", False),
+    ],
+)
+def test_provider_critic_verdict_and_approval_policy_route_independently(
+    approval_mode: str,
+    verdict: str,
+    expected_status: str,
+    should_enqueue: bool,
+) -> None:
+    evidence = _evidence_pair()
+    worker, records = _fake_proposal_worker(
+        evidence,
+        {"groups": [_proposal_group("route")]},
+        lambda _group, group_evidence: _critic_reply(group_evidence, verdict),
+        approval_mode=approval_mode,
+    )
+    worker._propose_background_crosslink_groups(records["context"][0])
+
+    assert len(records["critic_calls"]) == 1
+    assert records["reviews"][0]["status"] == expected_status
+    assert bool(records["apply_jobs"]) is should_enqueue
+    assert records["finished"][-1]["groups"] == 1
+
+
+def test_parse_quality_blocks_provider_and_crosslink_generation() -> None:
+    worker, records = _fake_proposal_worker(
+        _evidence_pair(), {"groups": []}, {}, parse_quality="quality_unknown"
+    )
+    worker._propose_background_crosslink_groups(records["context"][0])
+
+    assert records["finished"] == [{"groups": 0, "status": "blocked_parse_quality"}]
+    assert records["critic_calls"] == []
+    assert records["reviews"] == []
+    assert records["apply_jobs"] == []
+
+
+def test_provider_groups_get_independent_critic_and_review_artifacts() -> None:
+    evidence = _evidence_pair()
+    worker, records = _fake_proposal_worker(
+        evidence,
+        {"groups": [
+            _proposal_group("first", "evidence-0", "evidence-1"),
+            _proposal_group("second", "evidence-2", "evidence-3"),
+        ]},
+        lambda _group, group_evidence: _critic_reply(group_evidence, "approve"),
+        approval_mode="human",
+    )
+    worker._propose_background_crosslink_groups(records["context"][0])
+
+    assert len(records["critic_calls"]) == len(records["reviews"]) == 2
+    assert len(records["apply_jobs"]) == 0
+    assert len({str(review["group_id"]) for review in records["reviews"]}) == 2
+    assert [review["status"] for review in records["reviews"]] == ["pending", "pending"]
+
+
 @pytest.mark.parametrize("max_calls, expected_critic_calls", [(2, 1), (1, 0)])
 def test_fake_provider_human_review_pins_every_source_and_queues_fenced_revalidation(
     pipeline, max_calls: int, expected_critic_calls: int
