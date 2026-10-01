@@ -1403,6 +1403,11 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   experimental PyPy 3.12 beta, and slot/runtime benchmarks.
 - Re-ran the relevant local durable-expansion, parse-session, and configured
   parser-provider regression suites: `18 passed` in 26.70 seconds.
+- Ran the direct/background maintenance, observation critic, one-follow-up,
+  scheduler, and worker-orchestration suites with `PYTHONPATH` explicitly
+  pointing at this worktree's vendored Kogwistar, parser, sink, and `src`;
+  import-path output confirmed the intended Kogwistar and app. Result:
+  `93 passed, 4 warnings` in 102.29 seconds.
 - These checks validate code and CI only; they do not change the experiment
   outcome. No Bonsai parse generation, active ParseView, crosslink quality, or
   follow-up/background maintenance success has been verified.
