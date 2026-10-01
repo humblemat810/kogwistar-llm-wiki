@@ -1434,3 +1434,16 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   dimension was changed. BGE is text-only; CLIP remains the optional shared
   text/image space. CPU retrieval quality on the actual finance corpus remains
   to be evaluated after the Bonsai parsing/crosslink quality gate succeeds.
+
+### BGE Change CI Completion (2026-10-01)
+
+- Commit `3696a6d` (`feat: add isolated BGE CPU embedding profile`) completed
+  all four GitHub workflow runs successfully: `36803810016`, `36803809998`,
+  `36803809982`, and `36803809959`.
+- The previously queued run `36803809998` is now terminal-success. The branch
+  worktree is clean at this verification point.
+- This is code/CI verification only. BGE remains an isolated CPU embedding
+  service and has not been connected to the finance graph. The Bonsai source
+  parsing, active ParseView, graph cross-links, and background/follow-up
+  maintenance outcomes remain unverified; the capped maintenance runtime was
+  not restarted.
