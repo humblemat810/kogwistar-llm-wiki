@@ -1366,7 +1366,13 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   `973 passed, 9 skipped, 130 deselected, 29 warnings` in 722.60 seconds.
   CI lint selection `ruff check src tests scripts --select E4,E7,E9,F` and
   `git diff --check` also pass.
-- This session-fencing fix has not yet been pushed or deployed. The maintenance
-  container remains stopped; no additional ingestion or quality evaluation has
-  occurred. The existing stock source remains the only authorized experiment
-  input, and parsing/crosslink quality is still unverified.
+- The maintenance container remains stopped; no additional ingestion or
+  quality evaluation has occurred. The existing stock source remains the only
+  authorized experiment input, and parsing/crosslink quality is still
+  unverified.
+- Update: commit `5451bae` is pushed to `feat/local-bonsai-maintenance`.
+  GitHub CI, PyPy 3.11 container smoke, and experimental PyPy 3.12 beta are
+  running; slot/runtime benchmarks have passed. The local `v0.5.1` maintenance
+  image rebuilt successfully from this worktree, but the service is still
+  stopped pending activation of a new bounded session. Do not treat the image
+  build or green benchmark workflow as a successful parse.
