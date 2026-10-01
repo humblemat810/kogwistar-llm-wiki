@@ -2,22 +2,35 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import replace
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
-from kogwistar.runtime.budget import StateBackedBudgetLedger
+from kogwistar.runtime.budget import (
+    BudgetEvent,
+    BudgetExhaustedError,
+    StateBackedBudgetLedger,
+)
 from kogwistar.runtime.models import RunSuccess
 from kogwistar.server.auth_middleware import can_access_security_scope
+from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 
 from ..configuration.identity import runtime_authority_context
 from ..configuration.workspace import WorkspaceNamespaces
 from ..maintenance import (
     MaintenanceJobExecutionContext,
     workflow_id_for_maintenance_kind,
+)
+from ..maintenance.crosslink_proposals import (
+    CrosslinkCriticResponse,
+    CrosslinkEvidence,
+    CrosslinkProposalResponse,
 )
 from ..maintenance.maintenance_context import (
     append_maintenance_round,
@@ -32,6 +45,7 @@ from ..maintenance.maintenance_guards import (
     evaluate_maintenance_guard,
     evaluate_parse_session_guard,
     required_stage_for_maintenance,
+    source_digest,
 )
 from ..maintenance.maintenance_patch_apply import (
     apply_maintenance_patch_for_scope as _default_apply_maintenance_patch_for_scope,
@@ -45,6 +59,7 @@ from ..maintenance.maintenance_patches import (
     MaintenanceScope,
 )
 from ..maintenance.maintenance_planner import decide_next_maintenance_phase
+from ..usage.provider import ProviderUsageCallback, resolve_token_pricing
 from ..utils import _temporary_namespace
 from .dependency_planning import (
     DependencyInvalidationPlan,
@@ -62,6 +77,7 @@ from .state import (
 from .state import (
     persisted_budget_state as _persisted_budget_state,
 )
+from .state import metadata_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -560,6 +576,9 @@ class MaintenanceExecutionWorkerMixin:
                 "document_revalidate_crosslinks",
             }:
                 if not isinstance(ctx.payload.get("crosslink_candidate"), Mapping):
+                    if ctx.maintenance_kind == "document_propose_crosslinks":
+                        self._propose_background_crosslink_groups(ctx)
+                        return
                     if ctx.maintenance_kind == "document_revalidate_crosslinks":
                         edge_id = str(
                             ctx.payload.get("crosslink_edge_id")
@@ -646,7 +665,9 @@ class MaintenanceExecutionWorkerMixin:
                 )
             self._validate_crosslink_authority(ctx, patch)
             if ctx.maintenance_kind == "document_validate_crosslinks":
-                patch = self._promote_crosslink_candidate(ctx, patch)
+                patch = self._promote_crosslink_candidate(
+                    ctx, patch, authority_validated=True
+                )
             elif (
                 ctx.maintenance_kind == "document_retract_crosslinks"
                 and patch.intent != MaintenanceIntent.RETRACT_CROSSLINK
@@ -681,7 +702,7 @@ class MaintenanceExecutionWorkerMixin:
                 patch_id=patch.patch_id,
                 lifecycle=next_payload["crosslink_lifecycle"],
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - durable job boundary must record provider/backend failures
             if self._claim_lost.is_set():
                 self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_crosslink")
                 return
@@ -707,7 +728,7 @@ class MaintenanceExecutionWorkerMixin:
     def _build_crosslink_candidate_patch(self, ctx: MaintenanceJobExecutionContext) -> MaintenancePatch:
         candidate = ctx.payload.get("crosslink_candidate")
         if not isinstance(candidate, Mapping):
-            raise ValueError("crosslink proposal requires crosslink_candidate evidence")
+            raise TypeError("crosslink proposal requires crosslink_candidate evidence")
         left_id = str(candidate.get("left_node_id") or "").strip()
         right_id = str(candidate.get("right_node_id") or "").strip()
         relation = str(candidate.get("relation") or "related_to").strip()
@@ -799,6 +820,668 @@ class MaintenanceExecutionWorkerMixin:
             ],
         )
 
+    def _propose_background_crosslink_groups(self, ctx: MaintenanceJobExecutionContext) -> None:
+        """Generate, ground, critique, and route bounded background groups."""
+        self._trace_crosslink_workflow_stage(ctx, "select", "started")
+        blocked_parse_statuses = {
+            "expanding",
+            "quality_unknown",
+            "review_required",
+            "stale",
+            "inactive",
+            "historical",
+            "failed",
+            "unknown",
+        }
+        for field_name in (
+            "crosslink_parse_quality",
+            "parse_quality_status",
+            "source_region_status",
+            "source_view_status",
+        ):
+            if str(ctx.payload.get(field_name) or "").strip().lower() in blocked_parse_statuses:
+                self._emit_trace(
+                    "maintenance_crosslink_proposal_blocked",
+                    workspace_id=ctx.workspace_id,
+                    job_id=ctx.job_id,
+                    reason="parse_quality_not_ready",
+                    status_field=field_name,
+                )
+                self._finish_crosslink_proposal(
+                    ctx, groups=0, status="blocked_parse_quality"
+                )
+                self._trace_crosslink_workflow_stage(ctx, "continue", "blocked_parse_quality")
+                return
+        evidence = self._collect_crosslink_evidence(ctx)
+        self._trace_crosslink_workflow_stage(
+            ctx, "select", "completed", evidence_count=len(evidence)
+        )
+        self._trace_crosslink_workflow_stage(
+            ctx, "evidence", "ready" if len(evidence) >= 2 else "insufficient",
+            evidence_count=len(evidence),
+        )
+        if len(evidence) < 2:
+            self._finish_crosslink_proposal(ctx, groups=0, status="no_candidate")
+            self._trace_crosslink_workflow_stage(ctx, "propose", "no_candidate")
+            self._trace_crosslink_workflow_stage(ctx, "continue", "no_candidate")
+            return
+        self._trace_crosslink_workflow_stage(ctx, "propose", "started")
+        try:
+            raw = self._invoke_crosslink_proposer(evidence, ctx)
+        except BudgetExhaustedError:
+            self._finish_crosslink_proposal(ctx, groups=0, status="budget_exhausted")
+            self._trace_crosslink_workflow_stage(ctx, "propose", "budget_exhausted")
+            self._trace_crosslink_workflow_stage(ctx, "continue", "budget_exhausted")
+            return
+        response = CrosslinkProposalResponse.model_validate(raw)
+        self._trace_crosslink_workflow_stage(
+            ctx, "propose", "groups_proposed" if response.groups else "no_candidate",
+            group_count=len(response.groups),
+        )
+        evidence_by_id = {item.evidence_id: item for item in evidence}
+        seen_operations: set[tuple[str, str, str]] = set()
+        pending = automatic = rejected = 0
+        for group in response.groups:
+            group_json = json.dumps(
+                group.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            )
+            stable_group_id = str(
+                stable_id(
+                    "crosslink_review_group",
+                    ctx.workspace_id,
+                    str(ctx.job_id or ctx.request_node_id),
+                    group.group_id,
+                    hashlib.sha256(group_json.encode("utf-8")).hexdigest(),
+                )
+            )
+            patches: list[MaintenancePatchOperation] = []
+            group_evidence: dict[str, CrosslinkEvidence] = {}
+            for operation in group.operations:
+                left = evidence_by_id.get(operation.left_evidence_id)
+                right = evidence_by_id.get(operation.right_evidence_id)
+                if left is None or right is None:
+                    raise ValueError("crosslink provider cited an unknown evidence ID")
+                if left.node_id == right.node_id:
+                    raise ValueError("crosslink operation endpoints must be different nodes")
+                if left.source_document_id == right.source_document_id:
+                    raise ValueError("crosslink operation requires evidence from two source documents")
+                key = (left.node_id, right.node_id, operation.relation)
+                if key in seen_operations:
+                    raise ValueError("crosslink provider returned a duplicate operation")
+                seen_operations.add(key)
+                group_evidence[left.evidence_id] = left
+                group_evidence[right.evidence_id] = right
+                patch_operation = self._crosslink_patch_operation(
+                    ctx, stable_group_id, operation, left, right
+                )
+                patches.append(patch_operation)
+                if operation.supersedes_edge_id:
+                    patches.append(
+                        MaintenancePatchOperation(
+                            operation_id=f"retract:{operation.supersedes_edge_id}",
+                            kind=MaintenanceOperationKind.TOMBSTONE_EDGE,
+                            edge_id=operation.supersedes_edge_id,
+                            reason=operation.rationale,
+                            provenance=patch_operation.provenance,
+                        )
+                    )
+            if not patches:
+                continue
+            patch = MaintenancePatch(
+                patch_id=str(stable_id("crosslink_group_patch", ctx.workspace_id, stable_group_id)),
+                intent=MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
+                scope=MaintenanceScope(workspace_id=ctx.workspace_id),
+                rationale=group.rationale,
+                operations=patches,
+                requires_atomic_group=group.indivisible or any(
+                    operation.supersedes_edge_id for operation in group.operations
+                ),
+            )
+            self._trace_crosslink_workflow_stage(
+                ctx, "validate", "started", group_id=stable_group_id
+            )
+            self._validate_crosslink_authority(ctx, patch)
+            self._trace_crosslink_workflow_stage(
+                ctx, "validate", "passed", group_id=stable_group_id,
+                operation_count=len(patches),
+            )
+            self._trace_crosslink_workflow_stage(
+                ctx, "critic", "started", group_id=stable_group_id
+            )
+            try:
+                critic_raw = self._invoke_crosslink_critic(
+                    group.model_dump(mode="json"),
+                    [item.model_dump(mode="json") for item in group_evidence.values()],
+                    ctx,
+                )
+                critic = CrosslinkCriticResponse.model_validate(critic_raw)
+            except BudgetExhaustedError:
+                critic = CrosslinkCriticResponse(
+                    verdict="review",
+                    explanation="Human review required because the provider-call budget is exhausted.",
+                    evidence_ids=tuple(group_evidence),
+                )
+            self._trace_crosslink_workflow_stage(
+                ctx, "critic", critic.verdict, group_id=stable_group_id
+            )
+            if not critic.evidence_ids:
+                raise ValueError("crosslink critic must cite at least one supplied evidence ID")
+            if set(critic.evidence_ids) - set(group_evidence):
+                raise ValueError("crosslink critic cited evidence outside its reviewed group")
+            mode = str(ctx.payload.get("crosslink_approval_mode") or "automatic").strip().lower()
+            if mode not in {"automatic", "human"}:
+                raise ValueError("crosslink_approval_mode must be automatic or human")
+            artifact_id = self._persist_crosslink_group_review(
+                ctx, stable_group_id, patch, group.model_dump(mode="json"),
+                critic.model_dump(mode="json"), status=(
+                    "pending" if critic.verdict == "review" or mode == "human" and critic.verdict == "approve"
+                    else "rejected" if critic.verdict == "reject"
+                    else "ready"
+                ),
+            )
+            self._trace_crosslink_workflow_stage(
+                ctx, "route", critic.verdict, group_id=stable_group_id,
+                approval_mode=mode,
+            )
+            if critic.verdict == "review" or mode == "human" and critic.verdict == "approve":
+                pending += 1
+                self._trace_crosslink_workflow_stage(
+                    ctx, "pending", "persisted", group_id=stable_group_id,
+                    artifact_id=artifact_id,
+                )
+            elif mode == "automatic" and critic.verdict == "approve":
+                self._trace_crosslink_workflow_stage(
+                    ctx, "apply", "queued", group_id=stable_group_id
+                )
+                self._enqueue_crosslink_group_apply(ctx, stable_group_id, patch)
+                automatic += 1
+            else:
+                rejected += 1
+            self._emit_trace(
+                "maintenance_crosslink_group_reviewed",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                group_id=stable_group_id,
+                artifact_id=artifact_id,
+                critic_verdict=critic.verdict,
+                policy=mode,
+                operation_count=len(patches),
+            )
+            self._trace_crosslink_workflow_stage(
+                ctx, "outcome", "pending" if critic.verdict == "review" or mode == "human" and critic.verdict == "approve" else critic.verdict,
+                group_id=stable_group_id,
+                artifact_id=artifact_id,
+            )
+        self._finish_crosslink_proposal(
+            ctx,
+            groups=len(response.groups),
+            status="no_candidate" if not response.groups else "groups_reviewed",
+            pending=pending, automatic=automatic, rejected=rejected,
+        )
+        self._trace_crosslink_workflow_stage(
+            ctx, "continue", "completed", group_count=len(response.groups)
+        )
+
+    def _trace_crosslink_workflow_stage(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        stage: str,
+        outcome: str,
+        **fields: object,
+    ) -> None:
+        """Attach real worker transitions to their materialized workflow nodes."""
+        workflow_id = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
+        workflow_node_id = str(stable_id("wf_node", workflow_id, stage))
+        self._emit_trace(
+            "maintenance_crosslink_workflow_stage",
+            workspace_id=ctx.workspace_id,
+            job_id=ctx.job_id,
+            request_node_id=ctx.request_node_id,
+            maintenance_kind=ctx.maintenance_kind,
+            workflow_id=workflow_id,
+            workflow_node_id=workflow_node_id,
+            workflow_stage=stage,
+            outcome=outcome,
+            **fields,
+        )
+
+    def _collect_crosslink_evidence(
+        self, ctx: MaintenanceJobExecutionContext
+    ) -> list[CrosslinkEvidence]:
+        raw_candidates = ctx.payload.get("maintenance_candidates")
+        candidate_ids = {
+            str(item.get("candidate_id") or "").strip()
+            for item in raw_candidates if isinstance(item, Mapping)
+        } if isinstance(raw_candidates, list) else set()
+        if not candidate_ids:
+            candidate_ids.update(str(item).strip() for item in ctx.payload.get("seed_node_ids", []) if str(item).strip())
+        else:
+            candidate_ids.update(str(item).strip() for item in ctx.payload.get("seed_node_ids", []) if str(item).strip())
+        namespace = WorkspaceNamespaces(ctx.workspace_id)
+        with _temporary_namespace(self.engines.kg, namespace.curated_kg_space):
+            nodes = self.engines.kg.read.get_nodes(ids=sorted(candidate_ids), limit=min(24, len(candidate_ids)))
+        evidence: list[CrosslinkEvidence] = []
+        with _temporary_namespace(self.engines.kg, namespace.source_space):
+            for node in nodes:
+                node_metadata = metadata_mapping(node)
+                if str(node_metadata.get("workspace_id") or "") != ctx.workspace_id:
+                    continue
+                if not self._is_active_source_derivation(node, ctx.workspace_id):
+                    continue
+                acl = str(node_metadata.get("acl_scope") or node_metadata.get("security_scope") or "").strip()
+                if acl and not can_access_security_scope(acl):
+                    continue
+                for grounding in list(getattr(node, "mentions", None) or [])[:2]:
+                    for span in list(getattr(grounding, "spans", None) or [])[:2]:
+                        doc_id = str(getattr(span, "doc_id", "") or "").strip()
+                        start = getattr(span, "start_char", None)
+                        end = getattr(span, "end_char", None)
+                        if not doc_id or type(start) is not int or type(end) is not int:
+                            continue
+                        try:
+                            source = self.engines.kg.read.get_document(doc_id)
+                        except (KeyError, ValueError):
+                            continue
+                        source_metadata = metadata_mapping(source)
+                        if str(source_metadata.get("workspace_id") or "") != ctx.workspace_id:
+                            continue
+                        source_acl = str(source_metadata.get("acl_scope") or source_metadata.get("security_scope") or "").strip()
+                        if source_acl and not can_access_security_scope(source_acl):
+                            continue
+                        revision_id = str(source_metadata.get("source_revision_id") or source_metadata.get("revision_id") or "").strip()
+                        revision_doc = str(
+                            source_metadata.get("revision_document_id")
+                            or source_metadata.get("source_revision_document_id")
+                            or ""
+                        ).strip()
+                        if not revision_id or revision_doc != doc_id:
+                            continue
+                        raw_text = str(getattr(source, "content", None) or "")
+                        digest = source_digest(raw_text)
+                        recorded_digest = str(source_metadata.get("source_digest") or "").strip()
+                        if recorded_digest and recorded_digest != digest:
+                            continue
+                        excerpt = raw_text[start:end]
+                        if not excerpt or len(excerpt) > 1200:
+                            continue
+                        pointer = {
+                            "doc_id": doc_id,
+                            "source_cluster_id": doc_id,
+                            "source_revision_id": revision_id,
+                            "start_char": start,
+                            "end_char": end,
+                            "excerpt": excerpt,
+                        }
+                        if not source_pointer_has_character_span(pointer):
+                            continue
+                        validate_source_pointer(
+                            pointer,
+                            source_text_by_cluster={doc_id: raw_text},
+                            end_mode="exclusive",
+                            require_source_text=True,
+                            require_text_match=True,
+                        )
+                        evidence_id = str(stable_id(
+                            "crosslink_evidence", ctx.workspace_id, node.id, revision_id, start, end
+                        ))
+                        evidence.append(CrosslinkEvidence(
+                            evidence_id=evidence_id,
+                            node_id=str(node.id),
+                            source_document_id=str(
+                                source_metadata.get("logical_source_document_id")
+                                or source_metadata.get("source_document_id")
+                                or doc_id
+                            ),
+                            source_revision_id=revision_id,
+                            revision_document_id=revision_doc,
+                            source_digest=digest,
+                            start_char=start,
+                            end_char=end,
+                            excerpt=excerpt,
+                        ))
+                        if len(evidence) >= 48:
+                            return evidence
+        return evidence
+
+    def _invoke_crosslink_proposer(
+        self, evidence: list[CrosslinkEvidence], ctx: MaintenanceJobExecutionContext
+    ) -> Mapping[str, object]:
+        usage_callback = self._reserve_crosslink_provider_call(ctx, "crosslink_proposal")
+        callback = getattr(self, "crosslink_proposer", None)
+        if callable(callback):
+            return callback([item.model_dump(mode="json") for item in evidence], ctx)
+        from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
+
+        model = build_chat_model_for_role("parser", self.provider_settings)
+        structured = model.with_structured_output(CrosslinkProposalResponse)
+        prompt = {
+            "task": "Propose only evidence-supported cross-document semantic links.",
+            "constraints": [
+                "Use only supplied evidence IDs; never invent node, document, or span IDs.",
+                "Each relation must be supported by excerpts from two different source documents.",
+                "Return an empty groups list when no defensible link exists.",
+                "Do not emit hidden reasoning; rationale must be concise and evidence-based.",
+            ],
+            "evidence": [item.model_dump(mode="json") for item in evidence],
+        }
+        result = structured.invoke([
+            ("system", "You produce bounded graph-link candidates, not authoritative facts."),
+            ("human", json.dumps(prompt, ensure_ascii=False, sort_keys=True)),
+        ], config={"callbacks": [usage_callback]})
+        parsed = result.get("parsed") if isinstance(result, Mapping) and "parsed" in result else result
+        if hasattr(parsed, "model_dump"):
+            return parsed.model_dump(mode="json")
+        if isinstance(parsed, Mapping):
+            return parsed
+        raise TypeError("crosslink proposer returned an invalid structured result")
+
+    def _invoke_crosslink_critic(
+        self, group: Mapping[str, object], evidence: list[Mapping[str, object]],
+        ctx: MaintenanceJobExecutionContext,
+    ) -> Mapping[str, object]:
+        usage_callback = self._reserve_crosslink_provider_call(ctx, "crosslink_group_critic")
+        callback = getattr(self, "crosslink_critic", None)
+        if callable(callback):
+            return callback({"group": dict(group), "evidence": evidence}, ctx)
+        from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
+
+        model = build_chat_model_for_role("parser", self.provider_settings)
+        structured = model.with_structured_output(CrosslinkCriticResponse)
+        result = structured.invoke([
+            ("system", "Independently review this cross-link group. Return only a verdict, concise explanation, and cited evidence IDs. Reject unsupported, redundant, or ambiguous links."),
+            ("human", json.dumps({"group": dict(group), "evidence": evidence}, ensure_ascii=False, sort_keys=True)),
+        ], config={"callbacks": [usage_callback]})
+        parsed = result.get("parsed") if isinstance(result, Mapping) and "parsed" in result else result
+        if hasattr(parsed, "model_dump"):
+            return parsed.model_dump(mode="json")
+        if isinstance(parsed, Mapping):
+            return parsed
+        raise TypeError("crosslink critic returned an invalid structured result")
+
+    def _reserve_crosslink_provider_call(
+        self, ctx: MaintenanceJobExecutionContext, reason: str
+    ) -> ProviderUsageCallback:
+        """Debit and durably record one bounded provider call before invoking it."""
+        from kogwistar.runtime import BudgetAttribution
+        from ..usage.events import persist_usage_events
+
+        request_budgets = ctx.payload.get("budgets")
+        request_budgets = request_budgets if isinstance(request_budgets, Mapping) else {}
+        request_limit = int(request_budgets.get("max_llm_calls") or 0)
+        hard_limit = 13  # One proposal and at most one critic call for each of 12 groups.
+        limit = min(request_limit, hard_limit) if request_limit > 0 else hard_limit
+        job_id = str(ctx.job_id or ctx.request_node_id)
+        namespace = WorkspaceNamespaces(ctx.workspace_id).usage_events
+        durable_usage = _durable_maintenance_usage(
+            self.engines.conversation.meta_sqlite,
+            namespace=namespace,
+            maintenance_job_id=job_id,
+        )
+        raw_state = ctx.payload.get("maintenance_budget_state")
+        state = _maintenance_budget_state(
+            ctx.payload,
+            fair_scheduling=bool(getattr(self, "fair_scheduling", False)),
+            maintenance_steps_per_slice=int(getattr(self, "maintenance_steps_per_slice", 8)),
+            maintenance_llm_calls_per_slice=int(getattr(self, "maintenance_llm_calls_per_slice", 2)),
+            maintenance_seconds_per_slice=int(getattr(self, "maintenance_seconds_per_slice", 30)),
+            durable_usage=durable_usage,
+        )
+        if isinstance(raw_state, Mapping):
+            state.update({
+                key: value
+                for key, value in raw_state.items()
+                if key in {"token_budget", "step_budget", "time_budget_ms", "cost_budget"}
+            })
+        used = max(
+            int(state.get("call_used") or 0),
+            int(durable_usage.get("call_used") or 0),
+        )
+        provider_config = getattr(getattr(self, "provider_settings", None), "parser", None)
+        provider = str(getattr(provider_config, "provider", "") or "")
+        model = str(getattr(provider_config, "model", "") or "")
+        ledger = StateBackedBudgetLedger({
+            **state,
+            "call_budget": limit,
+            "call_used": used,
+            "budget_scope": "maintenance_job",
+        })
+        ledger.debit_call(
+            reason=reason,
+            run_id=job_id,
+            attribution=BudgetAttribution(
+                workspace_id=ctx.workspace_id,
+                operation_id=job_id,
+                operation_kind=ctx.maintenance_kind,
+                maintenance_job_id=job_id,
+                provider=provider or None,
+                model=model or None,
+            ),
+        )
+        ctx.payload["maintenance_budget_state"] = _persisted_budget_state(ledger.state)
+        event = ledger.events[-1]
+        persist_usage_events(
+            self.engines.conversation.meta_sqlite,
+            namespace=namespace,
+            events=[event],
+            workspace_id=ctx.workspace_id,
+            attempt_id=str(stable_id("crosslink_provider_call", job_id, ledger.call_used)),
+            operation_id=job_id,
+            operation_kind=reason,
+            maintenance_job_id=job_id,
+            provider=provider or None,
+            model=model or None,
+        )
+        self._emit_trace(
+            "maintenance_crosslink_provider_call_reserved",
+            workspace_id=ctx.workspace_id,
+            job_id=ctx.job_id,
+            reason=reason,
+            call_used=ledger.call_used,
+            call_budget=limit,
+        )
+
+        def persist_provider_event(event: BudgetEvent) -> None:
+            # The pre-call reservation already counts this attempted provider
+            # invocation, so retain its failure record without double-counting.
+            if event.unit == "llm_call":
+                event = replace(event, unit="provider_failure")
+            persist_usage_events(
+                self.engines.conversation.meta_sqlite,
+                namespace=namespace,
+                events=[event],
+                workspace_id=ctx.workspace_id,
+                attempt_id=str(stable_id(
+                    "crosslink_provider_usage",
+                    job_id,
+                    str(getattr(event, "event_id", "") or ledger.call_used),
+                )),
+                operation_id=job_id,
+                operation_kind=reason,
+                maintenance_job_id=job_id,
+                provider=provider or None,
+                model=model or None,
+            )
+
+        return ProviderUsageCallback(
+            ledger=ledger,
+            run_id=str(stable_id("crosslink_provider_run", job_id, ledger.call_used)),
+            source_document_id=str(ctx.payload.get("source_document_id") or ""),
+            provider=provider,
+            model=model,
+            pricing=resolve_token_pricing(provider=provider, model=model),
+            event_sink=persist_provider_event,
+        )
+
+    def _crosslink_patch_operation(
+        self, ctx: MaintenanceJobExecutionContext, group_id: str, operation: object,
+        left: CrosslinkEvidence, right: CrosslinkEvidence,
+    ) -> MaintenancePatchOperation:
+        relation = str(operation.relation)
+        edge_id = str(stable_id(
+            "kogwistar_llm_wiki.derived_crosslink", ctx.workspace_id,
+            left.node_id, right.node_id, relation,
+            left.source_document_id, right.source_document_id,
+            str(getattr(operation, "supersedes_edge_id", None) or ""),
+        ))
+        pointers = [
+            {
+                "doc_id": item.revision_document_id,
+                "source_cluster_id": item.revision_document_id,
+                "source_document_id": item.source_document_id,
+                "source_revision_id": item.source_revision_id,
+                "source_digest": item.source_digest,
+                "workspace_id": ctx.workspace_id,
+                "start_char": item.start_char,
+                "end_char": item.end_char,
+                "excerpt": item.excerpt,
+            }
+            for item in (left, right)
+        ]
+        provenance = MaintenanceProvenance(
+            source_document_id=left.revision_document_id,
+            source_pointers=pointers,
+            maintenance_run_id=str(ctx.job_id or ctx.request_node_id),
+            confidence=1.0,
+        )
+        properties: dict[str, str | int | float | bool | None] = {
+            "crosslink_status": "candidate",
+            "left_source_document_id": left.source_document_id,
+            "right_source_document_id": right.source_document_id,
+            "crosslink_group_id": group_id,
+            "candidate_rationale": str(operation.rationale),
+        }
+        supersedes_edge_id = getattr(operation, "supersedes_edge_id", None)
+        if supersedes_edge_id:
+            properties["supersedes_edge_id"] = str(supersedes_edge_id)
+        return MaintenancePatchOperation(
+            operation_id=f"group:{group_id}:edge:{edge_id}",
+            kind=MaintenanceOperationKind.ADD_EDGE,
+            edge_id=edge_id,
+            from_node_id=left.node_id,
+            to_node_id=right.node_id,
+            relation=relation,
+            properties=properties,
+            provenance=provenance,
+        )
+
+    def _persist_crosslink_group_review(
+        self, ctx: MaintenanceJobExecutionContext, group_id: str, patch: MaintenancePatch,
+        group: Mapping[str, object], critic: Mapping[str, object], *, status: str,
+    ) -> str:
+        artifact_id = str(stable_id("crosslink_group_review", ctx.workspace_id, group_id))
+        fences = self._source_revision_fences_for_patch(patch)
+        metadata = {
+            "artifact_kind": "crosslink_group_review",
+            "workspace_id": ctx.workspace_id,
+            "conversation_lane": "background",
+            "group_id": group_id,
+            "review_status": status,
+            "source_revision_fences": json.dumps(fences, sort_keys=True, separators=(",", ":")),
+            "source_revision_id": fences[0]["source_revision_id"],
+            "revision_document_id": fences[0]["revision_document_id"],
+            "source_document_id": fences[0]["source_document_id"],
+            "source_digest": fences[0]["source_digest"],
+            **{
+                key: str(ctx.payload.get(key) or "")
+                for key in (
+                    "crosslink_parse_quality",
+                    "parse_quality_status",
+                    "source_region_status",
+                    "source_view_status",
+                )
+                if ctx.payload.get(key) is not None
+            },
+            "patch_json": json.dumps(patch.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
+            "group_json": json.dumps(dict(group), sort_keys=True, separators=(",", ":")),
+            "critic_json": json.dumps(dict(critic), sort_keys=True, separators=(",", ":")),
+            "decision_version": 1,
+            "created_by_job_id": ctx.job_id,
+        }
+        node = Node(
+            id=artifact_id,
+            label=f"Cross-link review {group_id}",
+            type="entity",
+            summary=str(group.get("rationale") or "Background cross-link candidate group"),
+            doc_id=str(ctx.payload.get("source_document_id") or group_id),
+            mentions=[Grounding(spans=[Span.from_dummy_for_workflow(artifact_id)])],
+            metadata=metadata,
+        )
+        with _temporary_namespace(self.engines.conversation, WorkspaceNamespaces(ctx.workspace_id).conv_bg):
+            self.engines.conversation.write.add_node(node)
+        return artifact_id
+
+    def _enqueue_crosslink_group_apply(
+        self, ctx: MaintenanceJobExecutionContext, group_id: str, patch: MaintenancePatch
+    ) -> None:
+        payload = dict(ctx.payload)
+        payload.update({
+            "workspace_id": ctx.workspace_id,
+            "request_node_id": str(stable_id("crosslink_apply_request", ctx.workspace_id, group_id)),
+            "maintenance_kind": "document_validate_crosslinks",
+            "crosslink_candidate_group_id": group_id,
+            "patch": patch.model_dump(mode="json"),
+            "accepted_confidence": 0.8,
+            "required_stage": "parsed_graph_persisted",
+        })
+        payload["source_revision_fences"] = self._source_revision_fences_for_patch(patch)
+        self.engines.conversation.jobs.enqueue(
+            job_id=str(stable_id("crosslink_apply_job", ctx.workspace_id, group_id)),
+            namespace=WorkspaceNamespaces(ctx.workspace_id).maintenance_jobs,
+            entity_kind="maintenance_job",
+            entity_id=str(ctx.payload.get("source_document_id") or group_id),
+            job_kind="maintenance_job:document_validate_crosslinks",
+            op="UPSERT",
+            payload=payload,
+        )
+
+    @staticmethod
+    def _source_revision_fences_for_patch(patch: MaintenancePatch) -> list[dict[str, str]]:
+        fences = {
+            (
+                str(pointer.get("source_document_id") or ""),
+                str(pointer.get("source_revision_id") or ""),
+                str(pointer.get("doc_id") or ""),
+                str(pointer.get("source_digest") or ""),
+            )
+            for operation in patch.operations
+            if operation.provenance is not None
+            for pointer in operation.provenance.source_pointers
+        }
+        if not fences or any(not all(item) for item in fences):
+            raise ValueError("cross-link patch requires complete immutable source revision fences")
+        return [
+            {
+                "source_document_id": source_id,
+                "source_revision_id": revision_id,
+                "revision_document_id": revision_document_id,
+                "source_digest": digest,
+            }
+            for source_id, revision_id, revision_document_id, digest in sorted(fences)
+        ]
+
+    def _finish_crosslink_proposal(
+        self, ctx: MaintenanceJobExecutionContext, *, groups: int, status: str,
+        pending: int = 0, automatic: int = 0, rejected: int = 0,
+    ) -> None:
+        self._emit_lane_reply(
+            workspace_id=ctx.workspace_id,
+            source_document_id=str(ctx.payload.get("source_document_id") or ""),
+            request_node_id=ctx.request_node_id,
+            reply_to_message_id=ctx.lane_message_id or None,
+            status="completed",
+            payload={
+                "maintenance_kind": ctx.maintenance_kind,
+                "crosslink_lifecycle": status,
+                "groups": groups,
+                "pending_groups": pending,
+                "automatic_groups": automatic,
+                "rejected_groups": rejected,
+                "graph_mutation": False,
+            },
+        )
+        if ctx.job_id and not self._advance_maintenance_plan(ctx):
+            self._acknowledge_job(ctx)
+
     def _validate_crosslink_authority(
         self,
         ctx: MaintenanceJobExecutionContext,
@@ -822,7 +1505,9 @@ class MaintenanceExecutionWorkerMixin:
             if found != endpoint_ids:
                 raise ValueError("crosslink endpoints must be existing workspace nodes")
             for node in nodes:
-                metadata = dict(node.metadata or {})
+                metadata = metadata_mapping(node)
+                if not self._is_active_source_derivation(node, ctx.workspace_id):
+                    raise ValueError("crosslink endpoint is not selected by the active ParseView")
                 if str(metadata.get("workspace_id") or "") != ctx.workspace_id:
                     raise ValueError("crosslink endpoints are not owned by the claimed workspace")
                 security_scope = str(
@@ -839,6 +1524,31 @@ class MaintenanceExecutionWorkerMixin:
             if operation.provenance is not None
             for pointer in operation.provenance.source_pointers
         ]
+        expected_fences_raw = ctx.payload.get("source_revision_fences")
+        if expected_fences_raw is not None:
+            if not isinstance(expected_fences_raw, list):
+                raise ValueError("crosslink source revision fences must be a list")
+            expected_fences = {
+                (
+                    str(item.get("source_document_id") or ""),
+                    str(item.get("source_revision_id") or ""),
+                    str(item.get("revision_document_id") or ""),
+                    str(item.get("source_digest") or ""),
+                )
+                for item in expected_fences_raw
+                if isinstance(item, Mapping)
+            }
+            actual_fences = {
+                (
+                    str(pointer.get("source_document_id") or ""),
+                    str(pointer.get("source_revision_id") or pointer.get("revision_id") or ""),
+                    str(pointer.get("doc_id") or pointer.get("source_document_id") or ""),
+                    str(pointer.get("source_digest") or ""),
+                )
+                for pointer in pointers
+            }
+            if not expected_fences or expected_fences != actual_fences:
+                raise ValueError("crosslink evidence does not match the reviewed source revision fences")
         if pointers:
             source_namespace = WorkspaceNamespaces(ctx.workspace_id).source_space
             document_ids = {
@@ -850,7 +1560,7 @@ class MaintenanceExecutionWorkerMixin:
             with _temporary_namespace(self.engines.kg, source_namespace):
                 for document_id in sorted(document_ids):
                     document = self.engines.kg.read.get_document(document_id)
-                    metadata = dict(document.metadata or {})
+                    metadata = metadata_mapping(document)
                     if str(metadata.get("workspace_id") or "") != ctx.workspace_id:
                         raise ValueError("crosslink evidence is outside the claimed workspace")
                     security_scope = str(
@@ -861,6 +1571,16 @@ class MaintenanceExecutionWorkerMixin:
                     if security_scope and not can_access_security_scope(security_scope):
                         raise PermissionError("crosslink evidence is outside the current security scope")
                     revision_id = str(metadata.get("source_revision_id") or metadata.get("revision_id") or "")
+                    logical_source_id = str(
+                        metadata.get("logical_source_document_id")
+                        or metadata.get("source_document_id")
+                        or ""
+                    )
+                    revision_document_id = str(
+                        metadata.get("revision_document_id")
+                        or metadata.get("source_revision_document_id")
+                        or ""
+                    )
                     for pointer in pointers:
                         pointer_document = str(pointer.get("doc_id") or pointer.get("source_document_id") or "").strip()
                         if pointer_document != document_id:
@@ -868,11 +1588,75 @@ class MaintenanceExecutionWorkerMixin:
                         pointer_revision = str(pointer.get("source_revision_id") or pointer.get("revision_id") or "")
                         if pointer_revision and revision_id and pointer_revision != revision_id:
                             raise ValueError("crosslink evidence is pinned to a stale source revision")
+                        if str(pointer.get("source_document_id") or "") != logical_source_id:
+                            raise ValueError("crosslink evidence is pinned to a different logical source")
+                        if revision_document_id != document_id:
+                            raise ValueError("crosslink evidence must resolve to its immutable revision document")
+                        pointer_digest = str(pointer.get("source_digest") or "").strip()
+                        actual_digest = source_digest(str(document.content or ""))
+                        stored_digest = str(metadata.get("source_digest") or "").strip()
+                        if (
+                            not pointer_digest
+                            or pointer_digest != actual_digest
+                            or stored_digest and stored_digest != actual_digest
+                        ):
+                            raise ValueError("crosslink evidence is not pinned to the current immutable source digest")
+                        if source_pointer_has_character_span(pointer):
+                            validate_source_pointer(
+                                pointer,
+                                source_text_by_cluster={
+                                    document_id: str(document.content or ""),
+                                    str(pointer.get("source_cluster_id") or ""): str(document.content or ""),
+                                },
+                                end_mode="exclusive",
+                                require_source_text=True,
+                                require_text_match=True,
+                            )
+
+        superseded_edge_ids = {
+            str(operation.properties.get("supersedes_edge_id") or "").strip()
+            for operation in patch.operations
+            if operation.kind == MaintenanceOperationKind.ADD_EDGE
+            and operation.properties.get("supersedes_edge_id")
+        }
+        if superseded_edge_ids:
+            namespace = WorkspaceNamespaces(ctx.workspace_id).curated_kg_space
+            with _temporary_namespace(self.engines.kg, namespace):
+                edges = self.engines.kg.read.get_edges(
+                    ids=sorted(superseded_edge_ids), limit=len(superseded_edge_ids)
+                )
+            edges_by_id = {str(edge.id): edge for edge in edges}
+            if set(edges_by_id) != superseded_edge_ids:
+                raise ValueError("crosslink replacement must target existing workspace edges")
+            for operation in patch.operations:
+                target_id = str(operation.properties.get("supersedes_edge_id") or "").strip()
+                if not target_id:
+                    continue
+                edge = edges_by_id[target_id]
+                metadata = metadata_mapping(edge)
+                status = str(metadata.get("crosslink_status") or "").strip().lower()
+                edge_kind = str(metadata.get("edge_kind") or "").strip().lower()
+                if (
+                    str(metadata.get("workspace_id") or "") != ctx.workspace_id
+                    or bool(metadata.get("source_native"))
+                    or edge_kind in {"source_native", "has_child", "source_map"}
+                    or status not in {"candidate", "accepted", "stale", "needs_revalidation"}
+                ):
+                    raise ValueError("crosslink replacement may supersede only a derived crosslink")
+                edge_scope = str(metadata.get("acl_scope") or metadata.get("security_scope") or "").strip()
+                if edge_scope and not can_access_security_scope(edge_scope):
+                    raise PermissionError("superseded crosslink is outside the current security scope")
+                endpoints = set(map(str, [*(edge.source_ids or []), *(edge.target_ids or [])]))
+                proposed = {str(operation.from_node_id or ""), str(operation.to_node_id or "")}
+                if endpoints != proposed:
+                    raise ValueError("crosslink replacement must preserve the superseded edge endpoints")
 
     @staticmethod
     def _promote_crosslink_candidate(
         ctx: MaintenanceJobExecutionContext,
         patch: MaintenancePatch,
+        *,
+        authority_validated: bool = False,
     ) -> MaintenancePatch:
         if patch.intent != MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE:
             raise ValueError("crosslink validation requires a derived candidate patch")
@@ -900,15 +1684,8 @@ class MaintenanceExecutionWorkerMixin:
             status = str(ctx.payload.get(field_name) or "").strip().lower()
             if status in blocked_statuses:
                 raise ValueError(f"crosslink acceptance blocked by {field_name}={status}")
-        required_attestations = (
-            "crosslink_acl_authorized",
-            "crosslink_scope_valid",
-            "crosslink_profile_compatible",
-            "crosslink_source_revision_current",
-        )
-        for field_name in required_attestations:
-            if ctx.payload.get(field_name) is not True:
-                raise ValueError(f"crosslink acceptance requires {field_name}=true")
+        if not authority_validated:
+            raise ValueError("crosslink acceptance requires host-side current authority and evidence validation")
         accepted_confidence = float(ctx.payload.get("accepted_confidence") or 0.0)
         if accepted_confidence < 0.8:
             raise ValueError("crosslink acceptance requires accepted_confidence >= 0.8")

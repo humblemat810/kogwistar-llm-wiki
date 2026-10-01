@@ -3,6 +3,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_designs import (
     build_graph_patch_proposal_design,
 )
 from kogwistar_llm_wiki.maintenance.maintenance_policy import (
+    CROSSLINK_GROUP_WORKFLOW_ID,
     DERIVED_KNOWLEDGE_WORKFLOW_ID,
     EXECUTION_WISDOM_WORKFLOW_ID,
     GRAPH_PATCH_APPLY_WORKFLOW_ID,
@@ -33,7 +34,7 @@ def test_workflow_id_for_maintenance_kind_defaults_to_derived_knowledge():
 
 def test_workflow_id_for_maintenance_kind_routes_graph_patch_jobs():
     assert workflow_id_for_maintenance_kind("document_seed_graph") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
-    assert workflow_id_for_maintenance_kind("document_propose_crosslinks") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
+    assert workflow_id_for_maintenance_kind("document_propose_crosslinks") == CROSSLINK_GROUP_WORKFLOW_ID
     assert workflow_id_for_maintenance_kind("conversation_promote_to_kg") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
     assert workflow_id_for_maintenance_kind("entity_merge_candidate") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID
     assert workflow_id_for_maintenance_kind("entity_disambiguation_scan") == GRAPH_PATCH_PROPOSAL_WORKFLOW_ID

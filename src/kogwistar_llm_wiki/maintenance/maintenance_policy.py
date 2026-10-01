@@ -5,6 +5,13 @@ EXECUTION_WISDOM_WORKFLOW_ID = "maintenance.execution_wisdom.v1"
 GRAPH_PATCH_PROPOSAL_WORKFLOW_ID = "maintenance.graph_patch_proposal.v1"
 GRAPH_PATCH_APPLY_WORKFLOW_ID = "maintenance.graph_patch_apply.v1"
 MAINTENANCE_OBSERVATION_WORKFLOW_ID = "maintenance.observation.v1"
+CROSSLINK_GROUP_WORKFLOW_ID = "maintenance.crosslink_group.v1"
+CROSSLINK_GROUP_KINDS = {
+    "document_propose_crosslinks",
+    "document_validate_crosslinks",
+    "document_revalidate_crosslinks",
+    "document_retract_crosslinks",
+}
 
 EXECUTION_WISDOM_KINDS = {
     "execution_wisdom",
@@ -49,6 +56,8 @@ def normalize_maintenance_kind(maintenance_kind: str | None) -> str:
 
 def workflow_id_for_maintenance_kind(maintenance_kind: str | None) -> str:
     normalized = normalize_maintenance_kind(maintenance_kind)
+    if normalized in CROSSLINK_GROUP_KINDS:
+        return CROSSLINK_GROUP_WORKFLOW_ID
     if normalized == "review_maintenance_subject":
         return MAINTENANCE_OBSERVATION_WORKFLOW_ID
     if normalized in EXECUTION_WISDOM_KINDS:

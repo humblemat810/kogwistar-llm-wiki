@@ -24,11 +24,29 @@ def and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]
 def belongs_to_workspace(node: object, workspace_id: str) -> bool:
     """Apply a metadata boundary check after namespace/ACL filtering."""
 
-    metadata = getattr(node, "metadata", None)
-    if not isinstance(metadata, Mapping):
+    metadata = metadata_mapping(node)
+    if not metadata:
         return True
     declared_workspace = str(metadata.get("workspace_id") or "").strip()
     return not declared_workspace or declared_workspace == str(workspace_id)
+
+
+def metadata_mapping(entity: object) -> dict[str, object]:
+    """Normalize graph metadata, including backends that wrap it as JSON."""
+
+    raw = getattr(entity, "metadata", None)
+    if not isinstance(raw, Mapping):
+        return {}
+    metadata = {str(key): value for key, value in raw.items()}
+    nested = metadata.get("metadata")
+    if isinstance(nested, str) and nested:
+        try:
+            nested = json.loads(nested)
+        except json.JSONDecodeError:
+            nested = None
+    if isinstance(nested, Mapping):
+        metadata.update({str(key): value for key, value in nested.items()})
+    return metadata
 
 
 def semantic_fingerprint(extraction: GraphExtractionWithIDs) -> str:
