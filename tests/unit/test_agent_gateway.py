@@ -389,31 +389,32 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                 ) as http_client,
                 streamable_http_client(
                     "http://testserver/mcp", http_client=http_client
-                ) as (read_stream, write_stream, _session_id),
-                ClientSession(read_stream, write_stream) as session,
+                ) as streams,
             ):
-                await session.initialize()
-                tools = await session.list_tools()
-                assert {tool.name for tool in tools.tools} == {
-                    "query",
-                    "search",
-                    "ingest",
-                    "source",
-                    "reingest",
-                    "maintain",
-                    "status",
-                    "hypergraph_search",
-                    "history",
-                    "memory_recall",
-                    "memory_capture",
-                    "memory_review",
-                    "propose",
-                    "confirm",
-                }
-                result = await session.call_tool(
-                    "query",
-                    {"workspace_id": "w", "query_text": "hello"},
-                )
+                read_stream, write_stream = streams[:2]
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools = await session.list_tools()
+                    assert {tool.name for tool in tools.tools} == {
+                        "query",
+                        "search",
+                        "ingest",
+                        "source",
+                        "reingest",
+                        "maintain",
+                        "status",
+                        "hypergraph_search",
+                        "history",
+                        "memory_recall",
+                        "memory_capture",
+                        "memory_review",
+                        "propose",
+                        "confirm",
+                    }
+                    result = await session.call_tool(
+                        "query",
+                        {"workspace_id": "w", "query_text": "hello"},
+                    )
             assert (getattr(result, "isError", None) or getattr(result, "is_error", False)) is False
             structured_content = getattr(result, "structuredContent", None) or getattr(
                 result, "structured_content", None

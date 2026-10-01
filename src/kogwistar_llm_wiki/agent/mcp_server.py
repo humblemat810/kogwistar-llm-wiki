@@ -336,16 +336,33 @@ class AgentMcpServer:
 
     def __init__(self, gateway: AgentGateway) -> None:
         self.gateway = gateway
-        # Register through the official low-level V2 decorators.  The handler
-        # API is deliberately kept here so authentication stays at the
-        # protocol boundary rather than in the gateway.
-        self.server = Server("llm-wiki")
-        self.server.list_tools()(self._server_list_tools)
-        self.server.call_tool(validate_input=False)(self._server_call_tool)
         self._tools = tuple(
             types.Tool(name=name, description=description, inputSchema=schema)
             for name, description, schema in _tool_specs()
         )
+        # MCP V2 registers low-level handlers through the Server constructor.
+        # Keep the decorator fallback only for older local SDKs so the same
+        # adapter remains usable while downstream environments converge.
+        try:
+            self.server = Server(
+                "llm-wiki",
+                on_list_tools=self._handle_list_tools,
+                on_call_tool=self._handle_call_tool,
+            )
+        except TypeError:
+            self.server = Server("llm-wiki")
+
+            @self.server.list_tools()
+            async def _list_tools(*_args: Any) -> types.ListToolsResult:
+                return await self._handle_list_tools(None, None)
+
+            @self.server.call_tool(validate_input=False)
+            async def _call_tool(
+                name: str, arguments: dict[str, object]
+            ) -> types.CallToolResult:
+                return await self._server_call_tool(name, arguments)
+
+            del _list_tools, _call_tool
         selected_mode = auth_mode()
         required = _truthy(
             _env_value("LLM_WIKI_MCP_AUTH_REQUIRED", "LLM_WIKI_AUTH_REQUIRED")
