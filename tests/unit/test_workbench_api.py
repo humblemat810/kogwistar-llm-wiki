@@ -81,6 +81,23 @@ def test_address_book_pages_resolved_groups_and_rejects_stale_cursor():
             contact_authorize_stream=authorize,
             contact_observation_provider=provide,
         )
+        searched = api.list_address_book(
+            workspace_id="directory-paging", limit=1, query="  SHARED@example.test "
+        )
+        assert len(searched["results"]) == 1
+        assert set(searched["results"][0]["entity_ids"]) == {"person-a", "person-b"}
+
+        broad_search = api.list_address_book(
+            workspace_id="directory-paging", limit=1, query="person"
+        )
+        with pytest.raises(ValueError, match="cursor is stale"):
+            api.list_address_book(
+                workspace_id="directory-paging",
+                limit=1,
+                query="son",
+                cursor=broad_search["next_cursor"],
+            )
+
         first = api.list_address_book(workspace_id="directory-paging", limit=1)
         assert len(first["results"]) == 1
         assert set(first["results"][0]["entity_ids"]) == {"person-a", "person-b"}

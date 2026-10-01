@@ -197,6 +197,7 @@ def build_workbench_handler(
                         workspace_id=workspace_id,
                         limit=int(_first(query, "limit", "500")),
                         cursor=_first(query, "cursor", "") or None,
+                        query=_first(query, "query", ""),
                     )
                 else:
                     self._write_json({"error": "not_found"}, status=404)

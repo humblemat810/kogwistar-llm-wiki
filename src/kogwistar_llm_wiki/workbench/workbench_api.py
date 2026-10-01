@@ -67,11 +67,25 @@ ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, Pr
 _MAX_CONTACT_PAGE_SIZE = 1000
 _MAX_CONTACT_SNAPSHOT_ITEMS = 5000
 _MAX_CONTACT_CURSOR_CHARS = 4096
+_MAX_CONTACT_QUERY_CHARS = 200
 
 
-def _contact_snapshot_fingerprint(items: Sequence[Mapping[str, object]]) -> str:
+def _normalize_contact_query(query: str) -> str:
+    if not isinstance(query, str):
+        raise TypeError("contact query must be a string")
+    if len(query) > _MAX_CONTACT_QUERY_CHARS:
+        raise ValueError(f"contact query must be at most {_MAX_CONTACT_QUERY_CHARS} characters")
+    return " ".join(query.casefold().split())
+
+
+def _contact_snapshot_fingerprint(
+    items: Sequence[Mapping[str, object]], *, query: str = ""
+) -> str:
     payload = json.dumps(
-        items, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        {"query": query, "results": items},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
@@ -401,11 +415,17 @@ class WorkbenchApi:
         return by_entity
 
     def list_address_book(
-        self, *, workspace_id: str, limit: int = 500, cursor: str | None = None
+        self,
+        *,
+        workspace_id: str,
+        limit: int = 500,
+        cursor: str | None = None,
+        query: str = "",
     ) -> dict[str, object]:
         """Page complete, resolved address-book groups from one bounded snapshot."""
         if not isinstance(workspace_id, str) or not workspace_id.strip():
             raise ValueError("workspace_id must not be empty")
+        normalized_query = _normalize_contact_query(query)
         if type(limit) is not int or not 1 <= limit <= _MAX_CONTACT_PAGE_SIZE:
             raise ValueError("limit must be between 1 and 1000")
         provider = self._contact_observation_provider
@@ -451,7 +471,29 @@ class WorkbenchApi:
             }
             for entry in entries
         ]
-        fingerprint = _contact_snapshot_fingerprint(results)
+        if normalized_query:
+            results = [
+                result
+                for result in results
+                if normalized_query
+                in " ".join(
+                    [
+                        *(str(name) for name in result["display_names"]),
+                        *(
+                            " ".join(
+                                str(value)
+                                for value in (
+                                    claim["point"].get("channel", ""),
+                                    claim["point"].get("provider", ""),
+                                    claim["point"].get("value", ""),
+                                )
+                            )
+                            for claim in result["contact_points"]
+                        ),
+                    ]
+                ).casefold()
+            ]
+        fingerprint = _contact_snapshot_fingerprint(results, query=normalized_query)
         offset = _decode_contact_cursor(
             cursor,
             workspace_id=workspace_id,
