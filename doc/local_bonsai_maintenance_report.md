@@ -1483,3 +1483,14 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 - This image has not been started as the maintenance service. No database or
   model was accessed; a fresh, bounded runtime validation is still required to
   prove that Bonsai parsing persists and passes finance-source quality review.
+
+### Provider-Neutral Regression Rerun (2026-10-01)
+
+- Re-ran the durable parse expansion, worker runtime orchestration,
+  maintenance observation, observation persistence, and observation critic
+  suites on the current feature commit using `-p no:cacheprovider`.
+- Result: `89 passed, 4 warnings` in 144.78 seconds. The warnings are the
+  existing reserved workflow-state-key warnings in Kogwistar runtime tests.
+- This exercises the common configured parser/maintenance paths; it does not
+  establish Bonsai model quality or a live graph-maintenance outcome. No local
+  model, database, Compose service, or capped session was started or inspected.
