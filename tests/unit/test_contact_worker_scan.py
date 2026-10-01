@@ -28,9 +28,9 @@ def _observation(entity_id: str, stream_id: str) -> ContactIdentityObservation:
         display_names=("Jordan Lee",),
         contact_points=(
             ContactPointClaim(
-                channel="email",
+                channel="contact",
                 provider="test",
-                value="jordan@example.test",
+                value="contact:jordan",
                 verification="provider_verified",
             ),
         ),
@@ -62,7 +62,7 @@ def test_contact_scan_worker_authorizes_then_persists_review_only_candidate() ->
     try:
         events: list[tuple[str, str]] = []
         observations = (
-            _observation("contact:mail", "mailbox:one"),
+            _observation("contact:source-a", "source-a:one"),
             _observation("contact:chat", "chat:one"),
         )
 
@@ -73,15 +73,15 @@ def test_contact_scan_worker_authorizes_then_persists_review_only_candidate() ->
 
         def provide(workspace_id: str, payload):
             assert workspace_id == "contact-scan-worker"
-            assert events == [("authorize", "mailbox:one")]
-            assert payload["source_stream_ids"] == ("mailbox:one",)
+            assert events == [("authorize", "source-a:one")]
+            assert payload["source_stream_ids"] == ("source-a:one",)
             # Cross-channel providers authorize their own read scope before retrieval.
             assert authorize(workspace_id, "chat:one")
-            assert authorize(workspace_id, "mailbox:one")
+            assert authorize(workspace_id, "source-a:one")
             events.append(("provider", "called"))
             return observations
 
-        _enqueue_scan(engines, job_id="scan-success", streams=["mailbox:one"])
+        _enqueue_scan(engines, job_id="scan-success", streams=["source-a:one"])
         worker = MaintenanceWorker(
             engines,
             contact_observation_provider=provide,
@@ -94,13 +94,13 @@ def test_contact_scan_worker_authorizes_then_persists_review_only_candidate() ->
             authorize_stream=authorize,
         )
         assert len(candidates) == 1
-        assert candidates[0].entity_ids == ("contact:chat", "contact:mail")
+        assert candidates[0].entity_ids == ("contact:chat", "contact:source-a")
         assert candidates[0].artifact_status.value == "pending"
         assert candidates[0].metadata["automatic_merge"] is False
         assert events[:4] == [
-            ("authorize", "mailbox:one"),
+            ("authorize", "source-a:one"),
             ("authorize", "chat:one"),
-            ("authorize", "mailbox:one"),
+            ("authorize", "source-a:one"),
             ("provider", "called"),
         ]
         job_rows = engines.conversation.meta_sqlite.list_index_jobs(
@@ -154,7 +154,7 @@ def test_contact_scan_worker_fails_closed_before_provider_and_writes() -> None:
 def test_contact_scan_worker_without_provider_does_not_acknowledge_job() -> None:
     engines = build_in_memory_namespace_engines()
     try:
-        _enqueue_scan(engines, job_id="scan-unconfigured", streams=["mailbox:one"])
+        _enqueue_scan(engines, job_id="scan-unconfigured", streams=["source-a:one"])
         worker = MaintenanceWorker(
             engines,
             contact_stream_authorizer=lambda *_: True,
@@ -180,9 +180,9 @@ def test_contact_scan_worker_without_provider_does_not_acknowledge_job() -> None
 def test_contact_scan_overflow_fails_before_partial_candidate_persistence() -> None:
     engines = build_in_memory_namespace_engines()
     try:
-        _enqueue_scan(engines, job_id="scan-overflow", streams=["mailbox:one"])
+        _enqueue_scan(engines, job_id="scan-overflow", streams=["source-a:one"])
         observations = tuple(
-            _observation(f"contact:{index:03d}", "mailbox:one")
+            _observation(f"contact:{index:03d}", "source-a:one")
             for index in range(251)
         )
         worker = MaintenanceWorker(
@@ -216,9 +216,9 @@ def test_contact_scan_fuzzy_work_overflow_keeps_job_pending_and_writes_nothing(
     monkeypatch.setattr(worker_contacts, "_MAX_CONTACT_SCAN_FUZZY_NAME_COMPARISONS", 1)
     engines = build_in_memory_namespace_engines()
     try:
-        _enqueue_scan(engines, job_id="scan-fuzzy-overflow", streams=["mailbox:one"])
+        _enqueue_scan(engines, job_id="scan-fuzzy-overflow", streams=["source-a:one"])
         observations = tuple(
-            _observation(f"contact:{index}", "mailbox:one").model_copy(
+            _observation(f"contact:{index}", "source-a:one").model_copy(
                 update={
                     "display_names": (name,),
                     "contact_points": (),
@@ -260,29 +260,29 @@ def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> 
             resource_authorizer=lambda *_: True,
         )
         observations = (
-            _observation("contact:mail", "mailbox:registered"),
-            _observation("contact:slack", "slack:registered"),
+            _observation("contact:source-a", "source-a:registered"),
+            _observation("contact:source-b", "source-b:registered"),
         )
         observed_authorizers: list[tuple[str, str]] = []
 
         def authorize(workspace_id: str, stream_id: str) -> bool:
             observed_authorizers.append((workspace_id, stream_id))
             return workspace_id == "contact-scan-worker" and stream_id in {
-                "mailbox:registered",
-                "slack:registered",
+                "source-a:registered",
+                "source-b:registered",
             }
 
         def scan_source_for(stream_id: str, observation: ContactIdentityObservation):
             def scan_source(workspace_id: str, payload, authorize_stream):
-                # Trigger is only the new email stream; each adapter reads its
+                # Trigger is one source stream; each adapter reads its
                 # own registered stream after authorizing it.
-                assert payload["source_stream_ids"] == ("mailbox:registered",)
+                assert payload["source_stream_ids"] == ("source-a:registered",)
                 assert authorize_stream(workspace_id, stream_id)
                 return (observation,)
 
             return scan_source
 
-        for source_id, observation in zip(("email", "slack"), observations, strict=True):
+        for source_id, observation in zip(("source-a", "source-b"), observations, strict=True):
             stream_id = observation.stream_id
             api.register_contact_observation_source(
                 source_id,
@@ -293,8 +293,8 @@ def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> 
                 authorize_stream=authorize,
                 scan_provider=scan_source_for(stream_id, observation),
             )
-        assert set(api.contact_scan_observation_providers()) == {"email", "slack"}
-        _enqueue_scan(engines, job_id="scan-registered", streams=["mailbox:registered"])
+        assert set(api.contact_scan_observation_providers()) == {"source-a", "source-b"}
+        _enqueue_scan(engines, job_id="scan-registered", streams=["source-a:registered"])
         worker = MaintenanceWorker(
             engines,
             contact_observation_providers=api.contact_scan_observation_providers(),
@@ -307,11 +307,11 @@ def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> 
             authorize_stream=api.authorize_contact_stream,
         )
         assert len(candidates) == 1
-        assert candidates[0].entity_ids == ("contact:mail", "contact:slack")
+        assert candidates[0].entity_ids == ("contact:source-a", "contact:source-b")
         assert candidates[0].metadata["automatic_merge"] is False
         assert {stream for _workspace, stream in observed_authorizers} == {
-            "mailbox:registered",
-            "slack:registered",
+            "source-a:registered",
+            "source-b:registered",
         }
         worker.close()
         api.close()
@@ -328,7 +328,7 @@ def test_maintenance_daemon_accepts_optional_registered_scan_sources(tmp_path) -
             engines,
             "contact-scan-worker",
             data_dir=tmp_path,
-            contact_observation_providers={"email": lambda *_: ()},
+            contact_observation_providers={"source-a": lambda *_: ()},
             contact_stream_authorizer=lambda *_: True,
         )
         assert callable(daemon._worker.contact_observation_provider)

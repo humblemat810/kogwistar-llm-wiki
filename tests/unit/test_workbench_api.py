@@ -35,7 +35,7 @@ def _contact_observation(entity_id: str, stream_id: str, point: str):
         observed_at_ms=1,
         display_names=(entity_id,),
         contact_points=(
-            ContactPointClaim(channel="email", provider="test", value=point),
+            ContactPointClaim(channel="contact", provider="test", value=point),
         ),
     )
 
@@ -45,11 +45,11 @@ def test_address_book_pages_resolved_groups_and_rejects_stale_cursor():
     engines = build_in_memory_namespace_engines()
     try:
         observations = [
-            _contact_observation("person-a", "mailbox-a", "shared@example.test"),
-            _contact_observation("person-b", "slack-a", "shared@example.test"),
-            _contact_observation("person-c", "mailbox-c", "second@example.test"),
-            _contact_observation("person-d", "slack-d", "second@example.test"),
-            _contact_observation("person-e", "mailbox-e", "other@example.test"),
+            _contact_observation("person-a", "source-a", "shared-identity"),
+            _contact_observation("person-b", "source-b", "shared-identity"),
+            _contact_observation("person-c", "source-a", "second-identity"),
+            _contact_observation("person-d", "source-b", "second-identity"),
+            _contact_observation("person-e", "source-a", "other-identity"),
         ]
         def authorize(_workspace: str, _stream: str) -> bool:
             return True
@@ -83,7 +83,7 @@ def test_address_book_pages_resolved_groups_and_rejects_stale_cursor():
             contact_observation_provider=provide,
         )
         searched = api.list_address_book(
-            workspace_id="directory-paging", limit=1, query="  SHARED@example.test "
+            workspace_id="directory-paging", limit=1, query="  SHARED-IDENTITY "
         )
         assert len(searched["results"]) == 1
         assert set(searched["results"][0]["entity_ids"]) == {"person-a", "person-b"}
@@ -138,7 +138,7 @@ def test_address_book_pages_resolved_groups_and_rejects_stale_cursor():
             )
 
         observations.append(
-            _contact_observation("person-f", "matrix-f", "new@example.test")
+            _contact_observation("person-f", "source-c", "new-identity")
         )
         with pytest.raises(ValueError, match="cursor is stale"):
             api.list_address_book(
@@ -155,24 +155,24 @@ def test_registered_contact_source_uses_unique_owner_and_source_acl():
         api = WorkbenchApi(IngestPipeline(engines))
         observation = ContactIdentityObservation(
             workspace_id="registered-source",
-            stream_id="email-stream-a",
-            entity_id="email:person-a",
+            stream_id="source-a:stream-a",
+            entity_id="contact:person-a",
             source_document_ids=("doc:person-a",),
             evidence_revision_ids=("revision:person-a",),
             observed_at_ms=1,
             display_names=("Alex Example",),
             contact_points=(
-                ContactPointClaim(channel="email", provider="email", value="alex@example.test"),
+                ContactPointClaim(channel="contact", provider="source-a", value="contact:alex"),
             ),
         )
         api.register_contact_observation_source(
-            "email",
+            "source-a",
             provider=lambda workspace, limit, authorize: (
-                (observation,) if authorize(workspace, "email-stream-a") else ()
+                (observation,) if authorize(workspace, "source-a:stream-a") else ()
             ),
-            owns_stream=lambda _workspace, stream: stream == "email-stream-a",
+            owns_stream=lambda _workspace, stream: stream == "source-a:stream-a",
             authorize_stream=lambda workspace, stream: (
-                workspace == "registered-source" and stream == "email-stream-a"
+                workspace == "registered-source" and stream == "source-a:stream-a"
             ),
         )
         result = api.list_address_book(workspace_id="registered-source")
@@ -183,16 +183,16 @@ def test_registered_contact_source_uses_unique_owner_and_source_acl():
         api.register_contact_observation_source(
             "other-channel",
             provider=lambda *_args: (),
-            owns_stream=lambda _workspace, stream: stream == "email-stream-a",
+            owns_stream=lambda _workspace, stream: stream == "source-a:stream-a",
             authorize_stream=lambda _workspace, _stream: True,
         )
-        assert api._authorize_contact_stream("registered-source", "email-stream-a") is False
+        assert api._authorize_contact_stream("registered-source", "source-a:stream-a") is False
 
         denied_api = WorkbenchApi(IngestPipeline(engines))
         denied_api.register_contact_observation_source(
             "denied",
             provider=lambda *_args: (observation,),
-            owns_stream=lambda _workspace, stream: stream == "email-stream-a",
+            owns_stream=lambda _workspace, stream: stream == "source-a:stream-a",
             authorize_stream=lambda _workspace, _stream: False,
         )
         with pytest.raises(PermissionError, match="unauthorized"):

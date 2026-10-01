@@ -28,7 +28,7 @@ def test_resource_authorizer_is_explicit_and_uses_authenticated_claim_context(
             claims
             and claims.get("sub") == "alice"
             and (workspace, kind, resource, action)
-            == ("workspace-a", "mailbox_stream", "stream-a", "read")
+            == ("workspace-a", "source_stream", "stream-a", "read")
         )
 
     module.authorize = authorize
@@ -64,15 +64,15 @@ def test_resource_authorizer_is_explicit_and_uses_authenticated_claim_context(
             auth_mode="test",
         )
         assert api.authorize_resource(
-            "workspace-a", "mailbox_stream", "stream-a", "read"
+            "workspace-a", "source_stream", "stream-a", "read"
         ) is False
         with claims_context(alice):
             assert api.authorize_resource(
-                "workspace-a", "mailbox_stream", "stream-a", "read"
+                "workspace-a", "source_stream", "stream-a", "read"
             ) is True
         with claims_context(bob):
             assert api.authorize_resource(
-                "workspace-a", "mailbox_stream", "stream-a", "read"
+                "workspace-a", "source_stream", "stream-a", "read"
             ) is False
     finally:
         engines.close()

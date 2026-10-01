@@ -87,16 +87,16 @@ def test_shared_claim_links_distinct_channels_as_pending_candidate() -> None:
 
 
 def test_indexed_candidate_generation_matches_exhaustive_pair_semantics() -> None:
-    shared = ContactPointClaim(channel="email", value="shared@example.test")
+    shared = ContactPointClaim(channel="external_id", value="shared-contact-id")
     observations = (
-        _observation("person-a", "email:one", name="Alice Wong"),
+        _observation("person-a", "source-a:one", name="Alice Wong"),
         _observation("person-b", "chat:one", name="Alicia Wong"),
-        _observation("person-c", "email:two", point=shared),
+        _observation("person-c", "source-a:two", point=shared),
         _observation(
             "person-d",
             "chat:two",
             name="Different Person",
-            point=ContactPointClaim(channel="email", value="shared@example.test"),
+            point=ContactPointClaim(channel="external_id", value="shared-contact-id"),
         ),
         _observation("person-e", "directory:one", name="Jordan Lee"),
         _observation("person-f", "directory:two", name="Jordan Lee"),
@@ -153,7 +153,7 @@ def test_indexed_candidates_match_exhaustive_alias_and_contact_pairs(threshold: 
             names[(index * 7 + 8) % len(names)],
         )
         points = (
-            ContactPointClaim(channel="email", value=f"group-{index % 6}@example.test"),
+            ContactPointClaim(channel="external_id", value=f"group-{index % 6}"),
             ContactPointClaim(
                 channel="chat",
                 provider="matrix",
