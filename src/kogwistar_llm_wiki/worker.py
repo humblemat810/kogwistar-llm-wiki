@@ -117,6 +117,12 @@ class MaintenanceWorker(
             [object, MaintenanceJobExecutionContext], Mapping[str, object]
         ] | None = None,
         context_limit_sink: Callable[[], None] | None = None,
+        crosslink_proposer: Callable[
+            [list[Mapping[str, object]], MaintenanceJobExecutionContext], Mapping[str, object]
+        ] | None = None,
+        crosslink_critic: Callable[
+            [Mapping[str, object], MaintenanceJobExecutionContext], Mapping[str, object]
+        ] | None = None,
         contact_observation_provider: Callable[
             [str, Mapping[str, object]], Iterable[ContactIdentityObservation]
         ] | None = None,
@@ -159,6 +165,8 @@ class MaintenanceWorker(
             self.provider_settings
         )
         self.context_limit_sink = context_limit_sink
+        self.crosslink_proposer = crosslink_proposer
+        self.crosslink_critic = crosslink_critic
         if contact_observation_provider is not None and contact_observation_providers is not None:
             raise ValueError("configure contact_observation_provider or contact_observation_providers, not both")
         if contact_observation_providers is not None:

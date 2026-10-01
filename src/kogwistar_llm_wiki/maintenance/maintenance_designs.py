@@ -6,6 +6,7 @@ from kogwistar.id_provider import stable_id
 from kogwistar.runtime.models import WorkflowDesignArtifact, WorkflowEdge, WorkflowNode
 
 from .maintenance_policy import (
+    CROSSLINK_GROUP_WORKFLOW_ID,
     DERIVED_KNOWLEDGE_WORKFLOW_ID,
     EXECUTION_WISDOM_WORKFLOW_ID,
     GRAPH_PATCH_APPLY_WORKFLOW_ID,
@@ -276,6 +277,79 @@ def build_graph_patch_apply_design(
     )
 
 
+def build_crosslink_group_design(
+    workflow_id: str = CROSSLINK_GROUP_WORKFLOW_ID,
+) -> WorkflowDesignArtifact:
+    """Graph-native lifecycle map for provider-backed cross-link groups."""
+    stages = (
+        ("select", "Select Bounded Candidates", "Select active, authorized workspace concepts."),
+        ("evidence", "Assemble Source Evidence", "Resolve immutable revisions and exact source spans."),
+        ("propose", "Propose Cross-Link Groups", "Generate bounded groups using supplied evidence IDs only."),
+        ("validate", "Validate Groups", "Check endpoints, scope, ACL, ParseView, and grounding."),
+        ("critic", "Critic Review Per Group", "Review each group independently; store verdict and citations."),
+        ("route", "Route By Approval Policy", "Require critic approval for automatic application or human review."),
+        ("pending", "Persist Pending Review", "Persist a workspace-scoped evaluation artifact and continue exploration."),
+        ("apply", "Apply Approved Group", "Apply each accepted group as its own patch."),
+        ("outcome", "Record Group Outcome", "Record applied, rejected, partial, stale, or review-required outcome."),
+        ("continue", "Continue Exploration", "Continue bounded maintenance independently of pending decisions."),
+    )
+    nodes: list[WorkflowNode] = []
+    for index, (key, label, summary) in enumerate(stages):
+        metadata: dict[str, object] = {
+            "entity_type": "workflow_node",
+            "workflow_id": workflow_id,
+            "wf_op": f"crosslink_{key}",
+            "default_context_window": 4000,
+        }
+        if index == 0:
+            metadata["wf_start"] = True
+        if key == "continue":
+            metadata["wf_terminal"] = True
+        nodes.append(WorkflowNode(
+            id=str(stable_id("wf_node", workflow_id, key)),
+            label=label,
+            type="entity",
+            summary=summary,
+            mentions=_dummy_grounding(),
+            metadata=metadata,
+        ))
+    ids = {key: str(stable_id("wf_node", workflow_id, key)) for key, _, _ in stages}
+    transitions = (
+        ("select", "evidence", "selected"),
+        ("evidence", "propose", "evidence_ready"),
+        ("propose", "validate", "groups_proposed"),
+        ("validate", "critic", "deterministic_checks_passed"),
+        ("critic", "route", "critic_verdict_recorded"),
+        ("route", "pending", "human_review_required"),
+        ("route", "apply", "automatic_approval_or_human_approval"),
+        ("critic", "pending", "critic_review_required"),
+        ("pending", "continue", "pending_is_non_blocking"),
+        ("apply", "outcome", "patch_result_recorded"),
+        ("outcome", "continue", "group_finished"),
+        ("propose", "continue", "no_candidate"),
+        ("validate", "continue", "rejected_or_stale"),
+        ("critic", "continue", "critic_rejected"),
+    )
+    edges = [
+        _workflow_edge(
+            workflow_id,
+            edge_key=f"{source}_{target}_{label}",
+            source_id=ids[source],
+            target_id=ids[target],
+            label=label,
+            summary=f"Cross-link lifecycle: {label.replace('_', ' ')}.",
+        )
+        for source, target, label in transitions
+    ]
+    return WorkflowDesignArtifact(
+        workflow_id=workflow_id,
+        workflow_version="v1",
+        start_node_id=ids["select"],
+        nodes=nodes,
+        edges=edges,
+    )
+
+
 def materialize_maintenance_designs(workflow_engine: GraphKnowledgeEngine) -> None:
     """Saves all authoritative maintenance designs to the workflow engine."""
     for design in (
@@ -283,6 +357,7 @@ def materialize_maintenance_designs(workflow_engine: GraphKnowledgeEngine) -> No
         build_execution_wisdom_design(),
         build_graph_patch_proposal_design(),
         build_graph_patch_apply_design(),
+        build_crosslink_group_design(),
     ):
         for node in design.nodes:
             workflow_engine.write.add_node(node)

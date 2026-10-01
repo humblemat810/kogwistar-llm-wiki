@@ -119,6 +119,7 @@ def test_crosslink_authority_rejects_endpoint_outside_security_scope(monkeypatch
         metadata={"workspace_id": "demo", "security_scope": "tenant-a"},
     )
     worker = SimpleNamespace(
+        _is_active_source_derivation=lambda *_args: True,
         engines=SimpleNamespace(
             kg=SimpleNamespace(
                 read=SimpleNamespace(
@@ -141,7 +142,7 @@ def test_crosslink_authority_rejects_endpoint_outside_security_scope(monkeypatch
     with pytest.raises(PermissionError, match="security scope"):
         MaintenanceExecutionWorkerMixin._validate_crosslink_authority(
             worker,
-            SimpleNamespace(workspace_id="demo"),
+            SimpleNamespace(workspace_id="demo", payload={}),
             patch,
         )
 
@@ -180,7 +181,7 @@ def test_crosslink_authority_rejects_source_document_outside_security_scope(monk
     with pytest.raises(PermissionError, match="evidence"):
         MaintenanceExecutionWorkerMixin._validate_crosslink_authority(
             worker,
-            SimpleNamespace(workspace_id="demo"),
+            SimpleNamespace(workspace_id="demo", payload={}),
             patch,
         )
 
@@ -223,7 +224,7 @@ def test_crosslink_authority_rejects_pointer_pinned_to_stale_source_revision(mon
     with pytest.raises(ValueError, match="stale source revision"):
         MaintenanceExecutionWorkerMixin._validate_crosslink_authority(
             worker,
-            SimpleNamespace(workspace_id="demo"),
+            SimpleNamespace(workspace_id="demo", payload={}),
             patch,
         )
 
@@ -765,24 +766,15 @@ def test_crosslink_revalidation_requires_a_derived_edge_and_preserves_old_until_
             "crosslink_source_revision_current": True,
         },
     )
-    accepted = MaintenanceExecutionWorkerMixin._promote_crosslink_candidate(accepted_ctx, patch)
+    accepted = MaintenanceExecutionWorkerMixin._promote_crosslink_candidate(
+        accepted_ctx, patch, authority_validated=True
+    )
     assert accepted.requires_atomic_replacement is True
     assert accepted.operations[0].supersedes_ids == ["ws:demo:edge:old"]
     assert accepted.operations[1].kind.value == "TOMBSTONE_EDGE"
 
 
-@pytest.mark.parametrize(
-    "missing_attestation",
-    [
-        "crosslink_acl_authorized",
-        "crosslink_scope_valid",
-        "crosslink_profile_compatible",
-        "crosslink_source_revision_current",
-    ],
-)
-def test_crosslink_acceptance_requires_every_attestation(
-    missing_attestation: str,
-) -> None:
+def test_crosslink_acceptance_does_not_trust_payload_attestations() -> None:
     ctx = SimpleNamespace(
         workspace_id="demo",
         request_node_id="request-1",
@@ -790,16 +782,10 @@ def test_crosslink_acceptance_requires_every_attestation(
         maintenance_kind="document_validate_crosslinks",
         payload={
             "accepted_confidence": 0.95,
-            **{
-                field_name: True
-                for field_name in (
-                    "crosslink_acl_authorized",
-                    "crosslink_scope_valid",
-                    "crosslink_profile_compatible",
-                    "crosslink_source_revision_current",
-                )
-                if field_name != missing_attestation
-            },
+            "crosslink_acl_authorized": True,
+            "crosslink_scope_valid": True,
+            "crosslink_profile_compatible": True,
+            "crosslink_source_revision_current": True,
         },
     )
     candidate_ctx = SimpleNamespace(
@@ -824,7 +810,7 @@ def test_crosslink_acceptance_requires_every_attestation(
     )
     patch = MaintenanceExecutionWorkerMixin._build_crosslink_candidate_patch(object(), candidate_ctx)
 
-    with pytest.raises(ValueError, match=missing_attestation):
+    with pytest.raises(ValueError, match="host-side current authority"):
         MaintenanceExecutionWorkerMixin._promote_crosslink_candidate(ctx, patch)
 
 

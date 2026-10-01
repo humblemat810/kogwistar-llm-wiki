@@ -16,13 +16,14 @@ from .maintenance_selection import select_request_candidates
 from .maintenance_strategies import MaintenanceJobExecutionContext
 from .state import belongs_to_workspace as _belongs_to_workspace
 from .state import edge_ids as _edge_ids
+from .state import metadata_mapping
 
 
 def _selection_entity_is_accessible(entity: object, workspace_id: str) -> bool:
     """Require explicit workspace ownership and an accessible entity scope."""
 
-    metadata = getattr(entity, "metadata", None)
-    if not isinstance(metadata, Mapping):
+    metadata = metadata_mapping(entity)
+    if not metadata:
         return False
     if str(metadata.get("workspace_id") or "").strip() != str(workspace_id):
         return False
@@ -121,8 +122,8 @@ class MaintenanceSelectionWorkerMixin:
     def _is_active_source_derivation(self, node: object, workspace_id: str) -> bool:
         """Exclude inactive parse generations before candidate ranking."""
 
-        metadata = getattr(node, "metadata", None)
-        if not isinstance(metadata, Mapping):
+        metadata = metadata_mapping(node)
+        if not metadata:
             return True
         member_id = str(
             metadata.get("parse_generation_member_id")

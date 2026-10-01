@@ -340,6 +340,22 @@ accepted + changed evidence
 retraction logic. A workflow that only completes a `noop` node is not an
 implementation of the lifecycle.
 
+Background proposal generation uses a bounded provider contract that can cite
+only host-issued evidence IDs. The host resolves each citation to an immutable
+source revision, verifies the exact excerpt with Kogwistar's source-pointer
+validator, and applies the ordinary workspace/namespace/ACL/ParseView gates.
+Each group receives independent deterministic validation and a separate
+structured critic verdict. Automatic routing requires both deterministic
+success and critic approval; human routing persists a group evaluation in the
+workspace conversation background graph and continues exploration without
+waiting for a decision. Provider calls debit the existing maintenance budget
+ledger before invocation and append durable usage events, including for
+provider failures; retries therefore cannot evade the call limit. A hard
+per-job ceiling of thirteen calls bounds one proposal plus up to twelve group
+critic reviews. If the critic budget is exhausted, the group is routed to
+human review and cannot be auto-accepted. The interactive workbench proposal
+flow remains a separate, explicitly user-confirmed capability.
+
 Cross-link updates are never in-place edits. They use a new derived edge plus
 a tombstone of the old derived edge, with `supersedes_ids`, provenance, reason,
 expected revisions, and the existing acceptance fence. Retraction may target
@@ -431,6 +447,12 @@ reviewed again before changing a core persistence contract.
   `switch_to_boundary`, and `reparse_region` through durable parse jobs.
 - [x] Route relation findings through existing graph-patch proposal and
   acceptance fences.
+- [x] Generate bounded provider-backed background cross-link groups with
+  host-resolved, exact source evidence and per-group critic review.
+- [x] Persist pending groups as conversation evaluation artifacts; expose
+  pending-list and independent, version-checked batch decisions.
+- [x] Continue exploration while human decisions are pending and revalidate
+  source revisions before applying approved groups.
 - [x] Replace the graph-patch `noop` workflow with executable proposal,
   validation, acceptance, and retraction handlers.
 - [x] Implement the cross-link lifecycle: candidate, validated, accepted,

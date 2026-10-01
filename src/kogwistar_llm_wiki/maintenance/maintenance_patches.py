@@ -142,6 +142,7 @@ class MaintenancePatch(BaseModel):
     operations: list[MaintenancePatchOperation]
     status: MaintenancePatchStatus = MaintenancePatchStatus.PROPOSED
     rationale: str | None = None
+    requires_atomic_group: bool = False
 
     @model_validator(mode="after")
     def _requires_operations(self) -> MaintenancePatch:
@@ -160,7 +161,7 @@ class MaintenancePatch(BaseModel):
         activation path instead of calling the direct patch applier.
         """
 
-        return any(operation.supersedes_ids for operation in self.operations)
+        return self.requires_atomic_group or any(operation.supersedes_ids for operation in self.operations)
 
 
 class MaintenancePatchValidationIssue(BaseModel):

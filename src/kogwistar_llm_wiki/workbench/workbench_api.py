@@ -31,6 +31,7 @@ from ..disambiguation.disambiguation_contracts import DisambiguationDecisionKind
 from ..disambiguation.service import DisambiguationService
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
 from ..ingest_pipeline import IngestPipeline
+from ..maintenance.crosslink_reviews import CrosslinkGroupReviewService
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
 from ..maintenance.maintenance_patches import MaintenancePatch
 from ..memory import MemoryService
@@ -112,6 +113,42 @@ class WorkbenchApi:
             authorizer
             and authorizer(workspace_id, resource_type, resource_id, action)
         )
+
+    def list_crosslink_group_reviews(self, *, workspace_id: str, limit: int = 100) -> dict[str, object]:
+        """List pending provider-generated cross-link groups for a workspace."""
+        groups = CrosslinkGroupReviewService(self.pipeline.engines).list_pending(
+            workspace_id=workspace_id, limit=limit
+        )
+        return {
+            "status": "ok",
+            "workspace_id": workspace_id,
+            "groups": [
+                {
+                    "artifact_id": str(group.id),
+                    "label": group.label,
+                    "summary": group.summary,
+                    "metadata": dict(group.metadata or {}),
+                }
+                for group in groups
+            ],
+        }
+
+    def decide_crosslink_group_reviews(
+        self,
+        *,
+        workspace_id: str,
+        decisions: Sequence[Mapping[str, object]],
+        actor_id: str,
+        authority_claims: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Record independent, version-checked decisions for a bounded batch."""
+        results = CrosslinkGroupReviewService(self.pipeline.engines).decide_batch(
+            workspace_id=workspace_id,
+            decisions=decisions,
+            actor_id=actor_id,
+            authority_claims=authority_claims,
+        )
+        return {"status": "ok", "workspace_id": workspace_id, "results": results}
 
     def list_contact_matches(
         self, *, workspace_id: str, limit: int = 100

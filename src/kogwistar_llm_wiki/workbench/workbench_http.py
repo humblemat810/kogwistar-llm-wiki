@@ -24,6 +24,7 @@ from ..configuration.identity import (
     authenticate_bearer,
     authorize,
     claims_context,
+    durable_claims_snapshot,
 )
 from .workbench_api import WorkbenchApi
 
@@ -177,6 +178,15 @@ def build_workbench_handler(
                         workspace_id=workspace_id,
                         limit=int(_first(query, "limit", "100")),
                     )
+                elif parsed.path == "/api/crosslink-groups/pending":
+                    workspace_id = _first(query, "workspace_id", "")
+                    if not workspace_id:
+                        raise ValueError("workspace_id is required")
+                    self._require_scope("read", workspace_id)
+                    body = api.list_crosslink_group_reviews(
+                        workspace_id=workspace_id,
+                        limit=int(_first(query, "limit", "100")),
+                    )
                 elif parsed.path == "/api/address-book":
                     workspace_id = _first(query, "workspace_id", "")
                     if not workspace_id:
@@ -203,7 +213,7 @@ def build_workbench_handler(
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
             extension_route = extension_routes.get(("POST", parsed.path))
-            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", *agent_paths}:
+            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", "/api/crosslink-groups/decision", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -240,6 +250,8 @@ def build_workbench_handler(
                         self._require_scope("write" if parsed.path in {"/a2a/v1/message:send", "/a2a/v1/message:stream"} else "read", workspace_id)
                 elif parsed.path in {"/api/ask", "/api/proposal/validate"}:
                     self._require_scope("read", workspace_id)
+                elif parsed.path == "/api/crosslink-groups/decision":
+                    self._require_scope("write", workspace_id)
                 else:
                     self._require_scope("write", workspace_id)
                 if parsed.path == "/a2a":
@@ -322,6 +334,18 @@ def build_workbench_handler(
                         decision=payload.get("decision"),
                         confirmed=payload.get("confirmed"),
                         actor_id=getattr(identity, "principal_id", None),
+                    )
+                    status = 200
+                elif parsed.path == "/api/crosslink-groups/decision":
+                    identity = getattr(self, "_identity_context", None)
+                    decisions = payload.get("decisions")
+                    if not isinstance(decisions, list) or any(not isinstance(item, dict) for item in decisions):
+                        raise ValueError("decisions must be a list of objects")
+                    body = api.decide_crosslink_group_reviews(
+                        workspace_id=str(workspace_id or ""),
+                        decisions=decisions,
+                        actor_id=str(getattr(identity, "principal_id", None) or "local-operator"),
+                        authority_claims=durable_claims_snapshot(),
                     )
                     status = 200
                 else:
