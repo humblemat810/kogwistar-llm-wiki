@@ -1532,3 +1532,25 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   inspected during this follow-up. The previously capped local runtime remains
   outside this verification window; a fresh authorized runtime window is still
   required for the outstanding direct/follow-up/background Bonsai checks.
+
+### BGE-Small CPU Encoder Smoke (2026-10-01)
+
+- Ran the existing `llm-wiki-embedding-bge-cpu:local` image with
+  `--network none`, a read-only bind mount of the downloaded model, one CPU,
+  and a 2 GiB memory limit. No Compose service, graph, vector store, or Bonsai
+  process was accessed.
+- The encoder loaded `BAAI/bge-small-en-v1.5` revision
+  `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a` with Torch `2.8.0+cpu` and
+  returned normalized 384-D vectors using CPU. Cold load took 16.291 seconds;
+  five document encodings took 4.667 seconds; five query encodings took 0.215
+  seconds total. Process peak RSS was 459.8 MiB under the container limits.
+- On five deliberately small finance-topic query/document pairs, expected
+  documents ranked first for all five (MRR 1.0). This is only a smoke sanity
+  check, not a representative finance retrieval benchmark or proof of useful
+  graph search quality. BGE remains a separate 384-D profile and was not
+  connected to the existing graph; the active vector schema/profile is not
+  migrated by this check.
+- A direct host-Python attempt was rejected before model load because the
+  encoder contract requires Torch 2.8.0 while the host environment has
+  `2.14.0+cpu`. The isolated pinned CPU image is the verified execution path;
+  do not weaken the runtime-version guard based on that host mismatch.
