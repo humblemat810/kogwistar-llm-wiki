@@ -200,6 +200,7 @@ def serve_combined(
     from ..agent.gateway import AgentGateway
     from ..agent.mcp_server import build_agent_mcp
     from ..app_contracts.workbench_extensions import load_workbench_extensions
+    from ..configuration.resource_authorizer import load_resource_authorizer
     from ..daemon import MaintenanceDaemon
     from ..ingest_pipeline import IngestPipeline
     from ..workbench.workbench_api import WorkbenchApi
@@ -207,7 +208,10 @@ def serve_combined(
 
     engines = build_engines(args.workspace, args.data_dir, args.backend, args.dsn)
     pipeline = IngestPipeline(engines)
-    api = WorkbenchApi(pipeline)
+    api = WorkbenchApi(
+        pipeline,
+        resource_authorizer=load_resource_authorizer(),
+    )
     stop_event = threading.Event()
     extension_ids = tuple(
         item.strip()
@@ -286,6 +290,7 @@ def workbench(
         CodexCliSettings,
         HostCockpitResponder,
     )
+    from ..configuration.resource_authorizer import load_resource_authorizer
     from ..ingest_pipeline import IngestPipeline
     from ..workbench.workbench_api import WorkbenchApi
     from ..workbench.workbench_http import serve_workbench
@@ -337,6 +342,7 @@ def workbench(
         )
     api = WorkbenchApi(
         IngestPipeline(engines, **persistence_kwargs(args)),
+        resource_authorizer=load_resource_authorizer(),
         cockpit_responder=responder,
         codex_worker_count=args.codex_workers,
         trace_sink=lambda event: logger.info(
@@ -368,6 +374,7 @@ def mcp(
     """Serve the full MCP protocol through the official MCP SDK."""
     from ..agent.gateway import AgentGateway
     from ..agent.mcp_server import build_agent_mcp
+    from ..configuration.resource_authorizer import load_resource_authorizer
     from ..ingest_pipeline import IngestPipeline
     from ..workbench.workbench_api import WorkbenchApi
 
@@ -380,7 +387,12 @@ def mcp(
         **persistence_kwargs(args),
     )
     try:
-        gateway = AgentGateway(WorkbenchApi(IngestPipeline(engines, **persistence_kwargs(args))))
+        gateway = AgentGateway(
+            WorkbenchApi(
+                IngestPipeline(engines, **persistence_kwargs(args)),
+                resource_authorizer=load_resource_authorizer(),
+            )
+        )
         mcp_server = build_agent_mcp(gateway)
         logger.info(
             "agent_mcp_started workspace=%s transport=%s host=%s port=%s",

@@ -56,5 +56,16 @@ The combined CLI does not invent resource permissions. Applications must
 inject a resource authorizer; without one, extension resource access remains
 denied even when workspace-level HTTP access succeeds.
 
+For the standard CLI, an application may configure a trusted adapter as
+`LLM_WIKI_RESOURCE_AUTHORIZER=package.module:callable`. The callable receives
+`(workspace_id, resource_type, resource_id, action)` and returns a strict
+boolean decision. HTTP and authenticated MCP calls execute inside the core
+claims context, so an adapter can bind decisions to the authenticated
+`sub`/agent identity via `kogwistar.server.auth_middleware.claims_ctx`. The
+adapter must deny when identity or policy lookup is absent or indeterminate.
+An empty setting grants nothing; malformed or non-callable configuration
+fails startup. Do not infer resource rights from `ro`/`rw`, workspace
+membership, plugin enablement, or sender-provided message fields.
+
 Kogwistar remains canonical graph authority; extension handlers must use
 application services and must not create a parallel graph truth.
