@@ -1569,3 +1569,27 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   benchmark. Keep exact-source retrieval and human/critic review; do not let
   BGE similarity promote financial claims or connect this 384-D profile to the
   existing graph.
+
+### Feature-Branch Hosted CI And Sync Check (2026-10-01)
+
+- Queried GitHub's Actions API for the four runs on feature head
+  `41a0994971cecde53b4ee2ca011beb0e33049382`. Regular CI run `36817279673`,
+  same-host benchmark `36817279923`, PyPy 3.12 beta workflow `36817280221`,
+  and PyPy image smoke `36817279758` all report `completed / success` at that
+  exact head SHA. The beta workflow's overall conclusion does not establish
+  that its optional install/probe steps succeeded; its workflow is
+  non-blocking.
+- A read-only `git merge-tree --write-tree origin/main HEAD` simulation
+  completed without conflicts. This establishes that Git can construct a
+  conflict-free aggregate merge tree for those two tips; it does not verify
+  an interactive/commit-by-commit rebase or semantic compatibility. The branch
+  was not rebased or pushed as part of this check.
+- The Bonsai feature diff against current `origin/main` contains no
+  email-specific implementation paths; the host email extraction is already
+  represented in its history. Several maintenance/provider files overlap with
+  newer `origin/main` changes, so a semantic review and test run are still
+  required before treating a rebase or merge as complete.
+- This is repository/CI evidence only. The capped Bonsai runtime remains
+  stopped and was not probed, restarted, or inspected. No new ingestion,
+  direct request, follow-up, background model call, or parse/crosslink quality
+  result is claimed here.
