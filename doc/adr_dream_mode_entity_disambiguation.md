@@ -369,9 +369,11 @@ it reads bounded typed observations from explicitly injected channel providers,
 checks every requested source stream before reading, proposes candidates, and
 persists immutable review snapshots. It does not invoke an LLM workflow and
 does not merge entities. Channel adapters enqueue this job after an authorized
-source update; the maintenance daemon must be constructed with those same
-trusted observation providers and the host ACL authorizer. Missing provider or
-ACL configuration fails closed and leaves the durable job retryable.
+source update. The standard maintenance CLI and combined server pass scan
+providers registered by explicitly enabled Workbench extensions into the
+worker; embedded daemon callers can inject the same generic provider map and
+host ACL authorizer. Missing provider or ACL configuration fails closed and
+leaves the durable job retryable.
 The job's stream IDs identify changed trigger sources, not the complete
 comparison scope. A cross-channel provider must authorize each additional
 stream before reading it; the worker rechecks authorization for every returned

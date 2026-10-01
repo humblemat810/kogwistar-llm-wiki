@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable, Mapping
+from functools import partial
 
 from .daemons import maintenance_budget as _maintenance_budget
 from .daemons.maintenance_daemon import MaintenanceDaemonRuntime
@@ -31,6 +33,7 @@ from .daemons.runtime_support import (
     _log_startup_recovery,  # noqa: F401 - compatibility helper seam
     _stop_service_health,
 )
+from .disambiguation.contact_book import ContactScanObservationProvider
 from .maintenance import MaintenanceProfileLadderDecision
 from .maintenance.maintenance_control import MaintenanceControlState
 from .models import NamespaceEngines
@@ -54,14 +57,30 @@ class MaintenanceDaemon(MaintenanceDaemonRuntime):
         *,
         data_dir: str | os.PathLike[str] | None = None,
         background_interval: float = 600.0,
+        contact_observation_providers: Mapping[str, ContactScanObservationProvider] | None = None,
+        contact_stream_authorizer: Callable[[str, str], bool] | None = None,
     ) -> None:
+        providers = dict(contact_observation_providers or {})
+        if providers and not callable(contact_stream_authorizer):
+            raise TypeError("contact scan providers require an explicit stream authorizer")
+        if contact_stream_authorizer is not None and not callable(contact_stream_authorizer):
+            raise TypeError("contact stream authorizer must be callable")
+        worker_factory = (
+            partial(
+                MaintenanceWorker,
+                contact_observation_providers=providers,
+                contact_stream_authorizer=contact_stream_authorizer,
+            )
+            if providers
+            else MaintenanceWorker
+        )
         super().__init__(
             engines,
             workspace_id,
             poll_interval,
             data_dir=data_dir,
             background_interval=background_interval,
-            worker_factory=MaintenanceWorker,
+            worker_factory=worker_factory,
             provider_resolver=resolve_maintenance_provider_settings,
         )
 

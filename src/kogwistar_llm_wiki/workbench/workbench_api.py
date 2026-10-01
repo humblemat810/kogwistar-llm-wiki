@@ -25,6 +25,7 @@ from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
 from ..disambiguation.contact_book import (
     ContactObservationProvider,
+    ContactScanObservationProvider,
     build_address_book_projection,
     compose_contact_observation_providers,
 )
@@ -77,6 +78,7 @@ class _ContactObservationSource:
     provider: ContactObservationProvider
     owns_stream: Callable[[str, str], bool]
     authorize_stream: Callable[[str, str], bool]
+    scan_provider: ContactScanObservationProvider | None = None
 
 
 def _normalize_contact_query(query: str) -> str:
@@ -249,12 +251,15 @@ class WorkbenchApi:
         provider: ContactObservationProvider,
         owns_stream: Callable[[str, str], bool],
         authorize_stream: Callable[[str, str], bool],
+        scan_provider: ContactScanObservationProvider | None = None,
     ) -> None:
         """Register a trusted channel adapter without adding channel policy here."""
         if not isinstance(source_id, str) or not source_id.strip():
             raise ValueError("contact source_id must not be empty")
         if not callable(provider) or not callable(owns_stream) or not callable(authorize_stream):
             raise TypeError("contact source provider and callbacks must be callable")
+        if scan_provider is not None and not callable(scan_provider):
+            raise TypeError("contact scan provider must be callable")
         normalized_id = source_id.strip()
         if normalized_id in self._contact_observation_sources:
             raise ValueError(f"contact observation source is already registered: {normalized_id}")
@@ -262,8 +267,23 @@ class WorkbenchApi:
             provider=provider,
             owns_stream=owns_stream,
             authorize_stream=authorize_stream,
+            scan_provider=scan_provider,
         )
         self._composed_contact_observation_provider = None
+
+    def contact_scan_observation_providers(
+        self,
+    ) -> dict[str, ContactScanObservationProvider]:
+        """Return explicitly registered source scan adapters for worker bootstrap."""
+        return {
+            source_id: source.scan_provider
+            for source_id, source in self._contact_observation_sources.items()
+            if source.scan_provider is not None
+        }
+
+    def authorize_contact_stream(self, workspace_id: str, stream_id: str) -> bool:
+        """Apply source ownership and host ACL checks for contact evidence."""
+        return self._authorize_contact_stream(workspace_id, stream_id)
 
     def _authorize_contact_stream(self, workspace_id: str, stream_id: str) -> bool:
         sources = self._contact_observation_sources

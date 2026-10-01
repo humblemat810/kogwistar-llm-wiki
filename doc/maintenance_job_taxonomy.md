@@ -165,7 +165,9 @@ selected communication streams.
 
 **Execution**
 This is a deterministic direct maintenance strategy, not a graph-patch
-proposal workflow. The source/plugin adapter enqueues a durable
+proposal workflow. When a Workbench extension is explicitly enabled, standard
+maintenance CLI and combined-server bootstrap passes its optional scan
+provider to the worker. The source/plugin adapter enqueues a durable
 `maintenance_job:entity_disambiguation_scan` after an authorized source update.
 The maintenance worker must be configured with trusted channel observation
 providers and the host's stream ACL authorizer. It authorizes every trigger

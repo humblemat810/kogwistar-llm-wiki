@@ -107,7 +107,11 @@ def daemon_maintenance(
     close_engines: CloseEngines,
     persistence_kwargs: PersistenceKwargs,
 ) -> None:
+    from ..app_contracts.workbench_extensions import load_workbench_extensions
+    from ..configuration.resource_authorizer import load_resource_authorizer
     from ..daemon import MaintenanceDaemon
+    from ..ingest_pipeline import IngestPipeline
+    from ..workbench.workbench_api import WorkbenchApi
 
     engines = build_engines(
         args.workspace,
@@ -117,13 +121,37 @@ def daemon_maintenance(
         split_derived_knowledge=args.split_derived_knowledge,
         **persistence_kwargs(args),
     )
-    daemon = MaintenanceDaemon(
-        engines=engines,
-        workspace_id=args.workspace,
-        poll_interval=args.interval,
-        data_dir=args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
-        background_interval=args.background_interval,
+    extension_ids = tuple(
+        item.strip()
+        for item in os.environ.get("LLM_WIKI_WORKBENCH_EXTENSIONS", "").split(",")
+        if item.strip()
     )
+    api = None
+    scan_providers = None
+    scan_authorizer = None
+    try:
+        if extension_ids:
+            api = WorkbenchApi(
+                IngestPipeline(engines),
+                resource_authorizer=load_resource_authorizer(),
+            )
+            load_workbench_extensions(api, extension_ids)
+            scan_providers = api.contact_scan_observation_providers()
+            scan_authorizer = api.authorize_contact_stream
+        daemon = MaintenanceDaemon(
+            engines=engines,
+            workspace_id=args.workspace,
+            poll_interval=args.interval,
+            data_dir=args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
+            background_interval=args.background_interval,
+            contact_observation_providers=scan_providers,
+            contact_stream_authorizer=scan_authorizer,
+        )
+    except Exception:
+        if api is not None:
+            api.close()
+        close_engines(engines)
+        raise
 
     def _stop(sig: int, _frame: object) -> None:
         logger.info("Received signal %s - graceful stop requested for MaintenanceDaemon", sig)
@@ -131,7 +159,13 @@ def daemon_maintenance(
 
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
-    daemon.run()
+    try:
+        daemon.run()
+    finally:
+        daemon.stop()
+        if api is not None:
+            api.close()
+        close_engines(engines)
 
 
 def maintenance_control(args: argparse.Namespace) -> None:
@@ -233,6 +267,8 @@ def serve_combined(
         poll_interval=args.maintenance_interval,
         data_dir=args.data_dir or os.environ.get("KOGWISTAR_DATA_DIR") or ".",
         background_interval=args.background_interval,
+        contact_observation_providers=api.contact_scan_observation_providers(),
+        contact_stream_authorizer=api.authorize_contact_stream,
     )
     gateway = AgentGateway(api)
     mcp = build_agent_mcp(gateway)

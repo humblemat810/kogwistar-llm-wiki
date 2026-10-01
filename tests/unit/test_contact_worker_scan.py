@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from kogwistar_llm_wiki import WorkspaceNamespaces, build_in_memory_namespace_engines
+from kogwistar_llm_wiki import (
+    IngestPipeline,
+    WorkbenchApi,
+    WorkspaceNamespaces,
+    build_in_memory_namespace_engines,
+)
+from kogwistar_llm_wiki.daemon import MaintenanceDaemon
 from kogwistar_llm_wiki.disambiguation.contact_matching import (
     ContactIdentityObservation,
     ContactPointClaim,
@@ -167,4 +173,75 @@ def test_contact_scan_worker_without_provider_does_not_acknowledge_job() -> None
         ) == ()
         worker.close()
     finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> None:
+    engines = build_in_memory_namespace_engines()
+    try:
+        api = WorkbenchApi(
+            IngestPipeline(engines),
+            resource_authorizer=lambda *_: True,
+        )
+        observation = _observation("contact:mail", "mailbox:registered")
+        observed_authorizers: list[tuple[str, str]] = []
+
+        def authorize(workspace_id: str, stream_id: str) -> bool:
+            observed_authorizers.append((workspace_id, stream_id))
+            return workspace_id == "contact-scan-worker" and stream_id == "mailbox:registered"
+
+        def scan_source(workspace_id: str, payload, authorize_stream):
+            assert payload["source_stream_ids"] == ("mailbox:registered",)
+            assert authorize_stream(workspace_id, "mailbox:registered")
+            return (observation,)
+
+        api.register_contact_observation_source(
+            "email",
+            provider=lambda *_: (),
+            owns_stream=lambda workspace, stream: (
+                workspace == "contact-scan-worker" and stream == "mailbox:registered"
+            ),
+            authorize_stream=authorize,
+            scan_provider=scan_source,
+        )
+        assert set(api.contact_scan_observation_providers()) == {"email"}
+        _enqueue_scan(engines, job_id="scan-registered", streams=["mailbox:registered"])
+        worker = MaintenanceWorker(
+            engines,
+            contact_observation_providers=api.contact_scan_observation_providers(),
+            contact_stream_authorizer=api.authorize_contact_stream,
+        )
+        worker.process_pending_jobs("contact-scan-worker")
+
+        candidates = DisambiguationService(engines).list_current_contact_candidates(
+            workspace_id="contact-scan-worker",
+            authorize_stream=api.authorize_contact_stream,
+        )
+        assert len(candidates) == 0
+        # A single source observation cannot form a person-match pair.
+        assert observed_authorizers
+        worker.close()
+        api.close()
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_maintenance_daemon_accepts_optional_registered_scan_sources(tmp_path) -> None:
+    engines = build_in_memory_namespace_engines()
+    daemon = None
+    try:
+        daemon = MaintenanceDaemon(
+            engines,
+            "contact-scan-worker",
+            data_dir=tmp_path,
+            contact_observation_providers={"email": lambda *_: ()},
+            contact_stream_authorizer=lambda *_: True,
+        )
+        assert callable(daemon._worker.contact_observation_provider)
+        assert daemon._worker.contact_stream_authorizer("workspace", "stream") is True
+    finally:
+        if daemon is not None:
+            daemon._worker.close()
         engines.close()
