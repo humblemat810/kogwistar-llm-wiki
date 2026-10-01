@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from kogwistar.engine_core import AtomicMutationCapability
 from kogwistar.engine_core.models import Document, Grounding, Node, Span
+from kogwistar.server.auth_middleware import reset_claims_ctx, set_claims_ctx
 from pydantic import ValidationError
 
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
@@ -222,6 +223,77 @@ def test_review_decisions_are_durable_idempotent_and_group_scoped(pipeline) -> N
     workspace_id = "crosslink-review-tests"
     ns = WorkspaceNamespaces(workspace_id)
     artifact_id = "crosslink-review-artifact-1"
+    source_values = [
+        ("logical-a", "revision-a", "revision-doc-a", "First exact excerpt."),
+        ("logical-b", "revision-b", "revision-doc-b", "Second exact excerpt."),
+    ]
+    source_pointers: list[dict[str, object]] = []
+    endpoint_ids = ["ws:crosslink-review-tests:node:a", "ws:crosslink-review-tests:node:b"]
+    for index, (logical_id, revision_id, document_id, content) in enumerate(source_values):
+        digest = source_digest(content)
+        with _temporary_namespace(pipeline.engines.kg, ns.source_space):
+            pipeline.engines.kg.write.add_document(Document(
+                id=document_id,
+                content=content,
+                type="text",
+                metadata={
+                    "workspace_id": workspace_id,
+                    "logical_source_document_id": logical_id,
+                    "source_revision_id": revision_id,
+                    "revision_document_id": document_id,
+                    "source_digest": digest,
+                    "acl_scope": "team-a",
+                },
+            ))
+        with _temporary_namespace(pipeline.engines.kg, ns.curated_kg_space):
+            pipeline.engines.kg.write.add_node(Node(
+                id=endpoint_ids[index],
+                label=f"Concept {index}",
+                type="entity",
+                summary="Grounded review endpoint",
+                doc_id=document_id,
+                mentions=[Grounding(spans=[Span(
+                    doc_id=document_id,
+                    start_char=0,
+                    end_char=len(content),
+                    excerpt=content,
+                    document_page_url="",
+                    collection_page_url="",
+                    insertion_method="test",
+                )])],
+                metadata={"workspace_id": workspace_id, "acl_scope": "team-a"},
+            ))
+        source_pointers.append({
+            "doc_id": document_id,
+            "source_cluster_id": document_id,
+            "source_document_id": logical_id,
+            "source_revision_id": revision_id,
+            "source_digest": digest,
+            "workspace_id": workspace_id,
+            "start_char": 0,
+            "end_char": len(content),
+            "excerpt": content,
+        })
+    patch = MaintenancePatch(
+        patch_id="review-patch",
+        intent=MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
+        scope=MaintenanceScope(workspace_id=workspace_id),
+        rationale="review fixture",
+        operations=[MaintenancePatchOperation(
+            operation_id="review-edge",
+            kind=MaintenanceOperationKind.ADD_EDGE,
+            edge_id="ws:crosslink-review-tests:edge:review",
+            from_node_id=endpoint_ids[0],
+            to_node_id=endpoint_ids[1],
+            relation="supports",
+            provenance=MaintenanceProvenance(
+                source_document_id="revision-doc-a",
+                source_pointers=source_pointers,
+                maintenance_run_id="review-test-run",
+                confidence=1.0,
+            ),
+        )],
+    )
     artifact = Node(
         id=artifact_id,
         label="Review group",
@@ -235,27 +307,58 @@ def test_review_decisions_are_durable_idempotent_and_group_scoped(pipeline) -> N
             "review_status": "pending",
             "decision_version": 1,
             "group_id": "group-1",
+            "patch_json": json.dumps(patch.model_dump(mode="json")),
         },
     )
     with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
         pipeline.engines.conversation.write.add_node(artifact)
 
     service = CrosslinkGroupReviewService(pipeline.engines)
-    assert [str(item.id) for item in service.list_pending(workspace_id=workspace_id)] == [artifact_id]
-    decision = CrosslinkReviewDecision(
-        artifact_id=artifact_id,
-        decision="reject",
-        expected_version=1,
-    )
-    first = service.decide_batch(workspace_id=workspace_id, decisions=[decision], actor_id="user:reviewer")
-    second = service.decide_batch(workspace_id=workspace_id, decisions=[decision], actor_id="user:reviewer")
-    assert first[0]["status"] == "decided"
-    assert second[0]["status"] == "already_decided"
-    assert service.list_pending(workspace_id=workspace_id) == []
+    claims_token = set_claims_ctx({"security_scope": "team-a"})
+    try:
+        assert [str(item.id) for item in service.list_pending(workspace_id=workspace_id)] == [artifact_id]
+        decision = CrosslinkReviewDecision(
+            artifact_id=artifact_id,
+            decision="reject",
+            expected_version=1,
+        )
+        first = service.decide_batch(workspace_id=workspace_id, decisions=[decision], actor_id="user:reviewer")
+        second = service.decide_batch(workspace_id=workspace_id, decisions=[decision], actor_id="user:reviewer")
+        assert first[0]["status"] == "decided"
+        assert second[0]["status"] == "already_decided"
+        assert service.list_pending(workspace_id=workspace_id) == []
 
-    opposite = decision.model_copy(update={"decision": "approve"})
-    with pytest.raises(CrosslinkReviewConflict):
-        service._decide_one(workspace_id, "user:reviewer", opposite)
+        opposite = decision.model_copy(update={"decision": "approve"})
+        with pytest.raises(CrosslinkReviewConflict):
+            service._decide_one(workspace_id, "user:reviewer", opposite)
+    finally:
+        reset_claims_ctx(claims_token)
+
+    claims_token = set_claims_ctx({"security_scope": "team-b"})
+    try:
+        assert service.list_pending(workspace_id=workspace_id) == []
+        pending_artifact = artifact.model_copy(update={
+            "id": "crosslink-review-artifact-other-scope",
+            "metadata": {
+                **dict(artifact.metadata or {}),
+                "review_status": "pending",
+                "decision_version": 1,
+            },
+        })
+        with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+            pipeline.engines.conversation.write.add_node(pending_artifact)
+        with pytest.raises(PermissionError, match="security scope"):
+            service._decide_one(
+                workspace_id,
+                "user:other-scope",
+                CrosslinkReviewDecision(
+                    artifact_id=str(pending_artifact.id),
+                    decision="approve",
+                    expected_version=1,
+                ),
+            )
+    finally:
+        reset_claims_ctx(claims_token)
 
 
 def _fake_proposal_worker(

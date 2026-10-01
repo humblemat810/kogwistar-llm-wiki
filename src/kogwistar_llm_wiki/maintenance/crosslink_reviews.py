@@ -7,8 +7,13 @@ from collections.abc import Mapping, Sequence
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.server.auth_middleware import can_access_security_scope
+from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 
 from ..configuration.workspace import WorkspaceNamespaces
+from ..maintenance.maintenance_guards import source_digest
+from ..maintenance.maintenance_patches import MaintenancePatch
+from ..maintenance.state import metadata_mapping as _metadata_mapping
 from ..models import NamespaceEngines
 from ..utils import _temporary_namespace
 from .crosslink_proposals import CrosslinkReviewDecision
@@ -41,7 +46,10 @@ class CrosslinkGroupReviewService:
             )
         result: list[Node] = []
         for node in nodes:
-            if self._decision(workspace_id, str(node.id)) is None:
+            if (
+                self._decision(workspace_id, str(node.id)) is None
+                and self._has_current_read_access(workspace_id, node)
+            ):
                 result.append(node)
         return result
 
@@ -85,13 +93,15 @@ class CrosslinkGroupReviewService:
         if not matches:
             raise KeyError(f"cross-link review artifact not found: {decision.artifact_id}")
         artifact = matches[0]
-        metadata = dict(artifact.metadata or {})
+        metadata = _metadata_mapping(artifact)
         if (
             metadata.get("artifact_kind") != "crosslink_group_review"
             or metadata.get("workspace_id") != workspace_id
             or metadata.get("review_status") != "pending"
         ):
             raise ValueError("artifact is not a pending cross-link review in this workspace")
+        if not self._has_current_read_access(workspace_id, artifact):
+            raise PermissionError("cross-link evidence is outside the current security scope")
         current = self._decision(workspace_id, decision.artifact_id)
         if current is not None:
             if current.get("decision") != decision.decision:
@@ -130,6 +140,134 @@ class CrosslinkGroupReviewService:
         if decision.decision == "approve":
             self._enqueue_revalidation(workspace_id, metadata, authority_claims)
         return {"artifact_id": decision.artifact_id, "status": "decided", "decision": decision.decision}
+
+    def _has_current_read_access(self, workspace_id: str, artifact: Node) -> bool:
+        """Recheck current source and endpoint ACLs before exposing a review payload."""
+        metadata = _metadata_mapping(artifact)
+        if metadata.get("workspace_id") != workspace_id:
+            return False
+        try:
+            patch = MaintenancePatch.model_validate(
+                json.loads(str(metadata.get("patch_json") or ""))
+            )
+        except (TypeError, ValueError):
+            return False
+        if patch.scope.workspace_id != workspace_id:
+            return False
+
+        endpoint_ids = {
+            str(value)
+            for operation in patch.operations
+            for value in (operation.from_node_id, operation.to_node_id)
+            if value
+        }
+        pointers = [
+            pointer
+            for operation in patch.operations
+            if operation.provenance is not None
+            for pointer in operation.provenance.source_pointers
+        ]
+        document_ids = {
+            str(pointer.get("doc_id") or "").strip()
+            for pointer in pointers
+        }
+        if not endpoint_ids or not pointers or "" in document_ids:
+            return False
+
+        namespaces = WorkspaceNamespaces(workspace_id)
+        with _temporary_namespace(self.engines.kg, namespaces.curated_kg_space):
+            nodes = self.engines.kg.read.get_nodes(
+                ids=sorted(endpoint_ids), limit=len(endpoint_ids)
+            )
+            superseded_ids = {
+                str(operation.properties.get("supersedes_edge_id") or "").strip()
+                for operation in patch.operations
+                if operation.properties.get("supersedes_edge_id")
+            }
+            edges = (
+                self.engines.kg.read.get_edges(ids=sorted(superseded_ids), limit=len(superseded_ids))
+                if superseded_ids
+                else []
+            )
+        if {str(node.id) for node in nodes} != endpoint_ids:
+            return False
+        if {str(edge.id) for edge in edges} != superseded_ids:
+            return False
+        for entity in [*nodes, *edges]:
+            entity_metadata = _metadata_mapping(entity)
+            if str(entity_metadata.get("workspace_id") or "") != workspace_id:
+                return False
+            scope = str(
+                entity_metadata.get("acl_scope")
+                or entity_metadata.get("security_scope")
+                or ""
+            ).strip()
+            if scope and not can_access_security_scope(scope):
+                return False
+
+        with _temporary_namespace(self.engines.kg, namespaces.source_space):
+            for document_id in sorted(document_ids):
+                try:
+                    document = self.engines.kg.read.get_document(document_id)
+                except (KeyError, ValueError):
+                    return False
+                source_metadata = _metadata_mapping(document)
+                logical_source_id = str(
+                    source_metadata.get("logical_source_document_id")
+                    or source_metadata.get("source_document_id")
+                    or ""
+                )
+                revision_id = str(
+                    source_metadata.get("source_revision_id")
+                    or source_metadata.get("revision_id")
+                    or ""
+                )
+                if (
+                    str(source_metadata.get("workspace_id") or "") != workspace_id
+                    or str(
+                        source_metadata.get("revision_document_id")
+                        or source_metadata.get("source_revision_document_id")
+                        or ""
+                    ) != document_id
+                ):
+                    return False
+                scope = str(
+                    source_metadata.get("acl_scope")
+                    or source_metadata.get("security_scope")
+                    or ""
+                ).strip()
+                if scope and not can_access_security_scope(scope):
+                    return False
+                text = str(document.content or "")
+                digest = source_digest(text)
+                if str(source_metadata.get("source_digest") or "") != digest:
+                    return False
+                for pointer in pointers:
+                    if str(pointer.get("doc_id") or "").strip() != document_id:
+                        continue
+                    if (
+                        str(pointer.get("workspace_id") or workspace_id) != workspace_id
+                        or str(pointer.get("source_document_id") or "") != logical_source_id
+                        or str(pointer.get("source_revision_id") or "") != revision_id
+                        or str(pointer.get("source_digest") or "") != digest
+                    ):
+                        return False
+                    if not source_pointer_has_character_span(pointer):
+                        return False
+                    try:
+                        validate_source_pointer(
+                            pointer,
+                            source_text_by_cluster={
+                                document_id: text,
+                                str(pointer.get("source_cluster_id") or ""): text,
+                            },
+                            end_mode="exclusive",
+                            require_source_text=True,
+                            require_text_match=True,
+                        )
+                    except ValueError:
+                        return False
+        return True
 
     def _decision(self, workspace_id: str, artifact_id: str) -> dict[str, object] | None:
         row = self.engines.conversation.meta_sqlite.get_named_projection(
