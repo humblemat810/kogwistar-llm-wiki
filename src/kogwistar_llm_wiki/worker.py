@@ -39,6 +39,7 @@ from .maintenance.state import (
 from .maintenance.state import (
     maintenance_budget_state as _maintenance_budget_state,  # noqa: F401 - legacy test seam
 )
+from .maintenance.worker_contacts import ContactDisambiguationWorkerMixin
 from .maintenance.worker_derived import DerivedMaintenanceWorkerMixin
 from .maintenance.worker_execution import MaintenanceExecutionWorkerMixin
 from .maintenance.worker_observation import MaintenanceObservationWorkerMixin
@@ -84,6 +85,7 @@ class MaintenanceWorker(
     DurableParseMaintenanceWorkerMixin,
     MaintenanceObservationWorkerMixin,
     MaintenanceExecutionWorkerMixin,
+    ContactDisambiguationWorkerMixin,
     DerivedMaintenanceWorkerMixin,
     MaintenanceRuntimeWorkerMixin,
     MaintenanceSelectionWorkerMixin,

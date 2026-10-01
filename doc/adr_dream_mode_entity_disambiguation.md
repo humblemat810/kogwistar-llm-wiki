@@ -357,15 +357,29 @@ Costs:
 Initial implementation should add this as maintenance policy and artifact
 handling in `kogwistar-llm-wiki`.
 
-Likely first job kinds:
+Likely job kinds:
 
 - `entity_disambiguation_scan`
 - `entity_disambiguation_reconcile`
 - `entity_disambiguation_review`
 - `entity_disambiguation_patch_proposal`
 
-These should route through the existing maintenance strategy and graph patch
-proposal/apply path where possible.
+`entity_disambiguation_scan` is a deterministic direct maintenance operation:
+it reads bounded typed observations from explicitly injected channel providers,
+checks every requested source stream before reading, proposes candidates, and
+persists immutable review snapshots. It does not invoke an LLM workflow and
+does not merge entities. Channel adapters enqueue this job after an authorized
+source update; the maintenance daemon must be constructed with those same
+trusted observation providers and the host ACL authorizer. Missing provider or
+ACL configuration fails closed and leaves the durable job retryable.
+The job's stream IDs identify changed trigger sources, not the complete
+comparison scope. A cross-channel provider must authorize each additional
+stream before reading it; the worker rechecks authorization for every returned
+observation before persisting any candidate.
+
+Reconciliation, review, and patch-proposal jobs may use the existing workflow
+and graph-patch paths where appropriate. A user decision remains an explicit
+separate operation; candidate discovery alone cannot produce canonical links.
 
 No core schema change is required for the first implementation. Core changes
 should be considered only if repeated app behavior reveals a genuinely reusable

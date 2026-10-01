@@ -12,6 +12,7 @@ CROSSLINK_GROUP_KINDS = {
     "document_revalidate_crosslinks",
     "document_retract_crosslinks",
 }
+DIRECT_MAINTENANCE_KINDS = {"entity_disambiguation_scan"}
 
 EXECUTION_WISDOM_KINDS = {
     "execution_wisdom",
@@ -35,7 +36,6 @@ GRAPH_PATCH_PROPOSAL_KINDS = {
     "document_retract_crosslinks",
     "document_detect_conflicts",
     "entity_merge_candidate",
-    "entity_disambiguation_scan",
     "entity_disambiguation_reconcile",
     "entity_disambiguation_review",
     "entity_disambiguation_patch_proposal",
@@ -58,6 +58,8 @@ def workflow_id_for_maintenance_kind(maintenance_kind: str | None) -> str:
     normalized = normalize_maintenance_kind(maintenance_kind)
     if normalized in CROSSLINK_GROUP_KINDS:
         return CROSSLINK_GROUP_WORKFLOW_ID
+    if normalized in DIRECT_MAINTENANCE_KINDS:
+        raise ValueError(f"{normalized!r} is a direct maintenance operation, not a workflow")
     if normalized == "review_maintenance_subject":
         return MAINTENANCE_OBSERVATION_WORKFLOW_ID
     if normalized in EXECUTION_WISDOM_KINDS:

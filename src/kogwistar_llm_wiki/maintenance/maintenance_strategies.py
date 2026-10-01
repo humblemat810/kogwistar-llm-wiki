@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.engine_core.models import Node
@@ -38,6 +38,10 @@ class MaintenanceWorkerLike(Protocol):
     ) -> None: ...
 
     def _handle_execution_wisdom_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
+    def _handle_contact_disambiguation_scan(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
+    def _acknowledge_job(self, ctx: MaintenanceJobExecutionContext) -> bool: ...
 
     def _handle_graph_patch_apply_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
 
@@ -112,9 +116,19 @@ class MaintenanceObservationStrategy:
         worker._handle_review_maintenance_subject(ctx)
 
 
+class ContactDisambiguationScanStrategy:
+    name = "contact_disambiguation_scan"
+
+    def can_handle(self, maintenance_kind: str) -> bool:
+        return normalize_maintenance_kind(maintenance_kind) == "entity_disambiguation_scan"
+
+    def handle(self, worker: MaintenanceWorkerLike, ctx: MaintenanceJobExecutionContext) -> None:
+        worker._handle_contact_disambiguation_scan(ctx)
+
+
 class CrosslinkMaintenanceStrategy:
     name = "crosslink_lifecycle"
-    _KINDS = {
+    _KINDS: ClassVar[set[str]] = {
         "document_propose_crosslinks",
         "document_validate_crosslinks",
         "document_revalidate_crosslinks",
@@ -167,6 +181,7 @@ def build_default_maintenance_strategy_registry() -> MaintenanceStrategyRegistry
             ExecutionWisdomMaintenanceStrategy(),
             GraphPatchApplyMaintenanceStrategy(),
             MaintenanceObservationStrategy(),
+            ContactDisambiguationScanStrategy(),
             CrosslinkMaintenanceStrategy(),
             DocumentParseMaintenanceStrategy(),
             DocumentExpandParseChildrenMaintenanceStrategy(),
