@@ -14,7 +14,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from kogwistar_llm_wiki.agent.gateway import AgentGateway
-from kogwistar_llm_wiki.agent.mcp_server import build_agent_mcp
+from kogwistar_llm_wiki.agent.mcp_server import _tool_specs, build_agent_mcp
 from kogwistar_llm_wiki.configuration.identity import IdentityError, authenticate_bearer
 from kogwistar_llm_wiki.workbench.workbench_http import (
     _payload_workspace,
@@ -313,16 +313,36 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     ]
     assert all(tool.description for tool in tools)
     query = next(tool for tool in tools if tool.name == "query")
-    assert query.input_schema["required"] == ["workspace_id", "query_text"]
+    input_schema = getattr(query, "inputSchema", None) or getattr(
+        query, "input_schema", None
+    )
+    assert input_schema["required"] == ["workspace_id", "query_text"]
     reingest = next(tool for tool in tools if tool.name == "reingest")
-    assert "source_document_id" in reingest.input_schema["properties"]
+    reingest_schema = getattr(reingest, "inputSchema", None) or getattr(
+        reingest, "input_schema", None
+    )
+    assert "source_document_id" in reingest_schema["properties"]
+
+
+def test_retrieval_controls_are_exposed_on_query_search_and_hypergraph_tools():
+    schemas = {name: schema for name, _description, schema in _tool_specs()}
+    for name in ("query", "search", "hypergraph_search"):
+        properties = schemas[name]["properties"]
+        assert properties["retrieval_mode"]["enum"] == [
+            "auto", "graph", "semantic", "flat"
+        ]
+        assert properties["retrieval_required"]["type"] == "boolean"
+        assert properties["similarity_threshold"]["anyOf"]
+        assert properties["source_evidence_required"]["type"] == "boolean"
 
 
 def test_native_mcp_memory_capture_publishes_record_contract():
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     tools = asyncio.run(mcp.list_tools())
     memory_capture = next(tool for tool in tools if tool.name == "memory_capture")
-    schema = memory_capture.input_schema
+    schema = getattr(memory_capture, "inputSchema", None) or getattr(
+        memory_capture, "input_schema", None
+    )
 
     record = schema["properties"]["record"]
     record_schema = next(item for item in record["anyOf"] if item.get("type") == "object")
@@ -369,33 +389,37 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                 ) as http_client,
                 streamable_http_client(
                     "http://testserver/mcp", http_client=http_client
-                ) as (read_stream, write_stream),
-                ClientSession(read_stream, write_stream) as session,
+                ) as streams,
             ):
-                await session.initialize()
-                tools = await session.list_tools()
-                assert {tool.name for tool in tools.tools} == {
-                    "query",
-                    "search",
-                    "ingest",
-                    "source",
-                    "reingest",
-                    "maintain",
-                    "status",
-                    "hypergraph_search",
-                    "history",
-                    "memory_recall",
-                    "memory_capture",
-                    "memory_review",
-                    "propose",
-                    "confirm",
-                }
-                result = await session.call_tool(
-                    "query",
-                    {"workspace_id": "w", "query_text": "hello"},
-                )
-            assert result.is_error is False
-            assert result.structured_content["answer"]["text"] == (
+                read_stream, write_stream = streams[:2]
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools = await session.list_tools()
+                    assert {tool.name for tool in tools.tools} == {
+                        "query",
+                        "search",
+                        "ingest",
+                        "source",
+                        "reingest",
+                        "maintain",
+                        "status",
+                        "hypergraph_search",
+                        "history",
+                        "memory_recall",
+                        "memory_capture",
+                        "memory_review",
+                        "propose",
+                        "confirm",
+                    }
+                    result = await session.call_tool(
+                        "query",
+                        {"workspace_id": "w", "query_text": "hello"},
+                    )
+            assert (getattr(result, "isError", None) or getattr(result, "is_error", False)) is False
+            structured_content = getattr(result, "structuredContent", None) or getattr(
+                result, "structured_content", None
+            )
+            assert structured_content["answer"]["text"] == (
                     "grounded: hello"
                 )
 

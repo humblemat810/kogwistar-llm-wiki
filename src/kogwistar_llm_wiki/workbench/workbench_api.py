@@ -1153,6 +1153,14 @@ def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
         graph_spaces=tuple(payload.get("graph_spaces") or (GraphSpace.CURATED_KG.value,)),
         query_text=str(payload.get("query_text") or ""),
         semantic_retrieval=bool(payload.get("semantic_retrieval", False)),
+        retrieval_mode=str(payload.get("retrieval_mode") or "auto"),
+        retrieval_required=bool(payload.get("retrieval_required", False)),
+        similarity_threshold=(
+            None
+            if payload.get("similarity_threshold") is None
+            else float(payload["similarity_threshold"])
+        ),
+        source_evidence_required=bool(payload.get("source_evidence_required", False)),
         explicit_anchor_ids=tuple(str(value) for value in (payload.get("explicit_anchor_ids") or ())),
         hop_limit=integer("hop_limit", 1),
         max_nodes=integer("max_nodes", 40),

@@ -15,7 +15,8 @@ import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from math import isnan
+from typing import Any, Literal
 
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -24,6 +25,7 @@ from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]*", re.IGNORECASE)
 logger = logging.getLogger(__name__)
+RetrievalMode = Literal["auto", "graph", "semantic", "flat"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,10 @@ class SemanticLensRequest:
     graph_spaces: tuple[GraphSpace | str, ...] = (GraphSpace.CURATED_KG,)
     query_text: str = ""
     semantic_retrieval: bool = False
+    retrieval_mode: RetrievalMode = "auto"
+    retrieval_required: bool = False
+    similarity_threshold: float | None = None
+    source_evidence_required: bool = False
     explicit_anchor_ids: tuple[str, ...] = ()
     hop_limit: int = 1
     max_nodes: int = 40
@@ -46,6 +52,16 @@ class SemanticLensRequest:
             raise ValueError("workspace_id must not be empty")
         if not self.graph_spaces:
             raise ValueError("graph_spaces must not be empty")
+        if self.retrieval_mode not in {"auto", "graph", "semantic", "flat"}:
+            raise ValueError("retrieval_mode must be auto, graph, semantic, or flat")
+        if self.retrieval_mode == "graph" and self.similarity_threshold is not None:
+            raise ValueError("similarity_threshold requires semantic or flat retrieval_mode")
+        if self.retrieval_mode in {"graph", "semantic"} and self.source_evidence_required:
+            raise ValueError("source_evidence_required requires flat retrieval_mode")
+        if self.similarity_threshold is not None:
+            threshold = float(self.similarity_threshold)
+            if isnan(threshold):
+                raise ValueError("similarity_threshold must not be NaN")
         if not 0 <= self.hop_limit <= 8:
             raise ValueError("hop_limit must be between 0 and 8")
         if self.max_nodes < 1 or self.max_edges < 0 or self.max_hyperedges < 0:
@@ -102,6 +118,16 @@ class LensParticipation:
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievalStatus:
+    mode: str
+    semantic_available: bool
+    backend: str | None
+    metric: str | None
+    degraded_reason: str | None = None
+    score_kind: str = "similarity"
+
+
+@dataclass(frozen=True, slots=True)
 class SemanticLensSnapshot:
     lens_id: str
     workspace_id: str
@@ -116,6 +142,10 @@ class SemanticLensSnapshot:
     selection_explanations: tuple[SelectionExplanation, ...]
     omitted_summary: dict[str, int]
     query_timing_ms: int
+    retrieval: RetrievalStatus = field(
+        default_factory=lambda: RetrievalStatus("graph", False, None, None, None, "similarity")
+    )
+    flat_hits: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return _jsonable(asdict(self))
@@ -192,13 +222,63 @@ class SemanticLensService:
 
     def resolve(self, request: SemanticLensRequest) -> SemanticLensSnapshot:
         started = self._clock_ms()
+        mode = _effective_retrieval_mode(request)
+        if mode == "flat":
+            vector_results, status = self._vector_results(request)
+            if status.degraded_reason and request.retrieval_required:
+                raise ValueError(status.degraded_reason)
+            all_flat_hits = tuple(
+                self._flat_hit(
+                    item.node,
+                    item.graph_space,
+                    item.namespace,
+                    score,
+                    workspace_id=request.workspace_id,
+                )
+                for item, score in vector_results
+            )
+            if request.source_evidence_required:
+                all_flat_hits = tuple(
+                    hit
+                    for hit in all_flat_hits
+                    if (hit.get("source_evidence") or {}).get("status") == "verified"
+                )
+            flat_hits = all_flat_hits[: request.max_nodes]
+            if request.source_evidence_required and not flat_hits and vector_results:
+                status = RetrievalStatus(
+                    status.mode,
+                    status.semantic_available,
+                    status.backend,
+                    status.metric,
+                    "no_verified_source_evidence",
+                    status.score_kind,
+                )
+            identity = {"request": _request_key(request), "flat": flat_hits}
+            lens_id = "lens:" + hashlib.sha256(_stable_json(identity).encode()).hexdigest()[:24]
+            return SemanticLensSnapshot(
+                lens_id=lens_id,
+                workspace_id=request.workspace_id,
+                source_watermark=request.source_watermark,
+                projected_at_ms=self._clock_ms(),
+                completeness="exhausted" if not status.degraded_reason else "bounded",
+                nodes=(), edges=(), hyperedges=(), participations=(),
+                anchor_explanations=(), selection_explanations=(),
+                omitted_summary={"candidate_nodes": 0, "candidate_edges": 0, "candidate_hyperedges": 0},
+                query_timing_ms=max(0, self._clock_ms() - started),
+                retrieval=status,
+                flat_hits=flat_hits,
+            )
         results = self.query_service.get_nodes(
             workspace_id=request.workspace_id,
             graph_spaces=list(request.graph_spaces),
             resolve_mode="include_tombstone" if request.include_tombstones else "pointer_only",
         )
-        if request.semantic_retrieval and request.query_text.strip():
-            results = self._merge_vector_results(request, results)
+        retrieval = self._graph_status(request)
+        semantic_anchor_ids: tuple[str, ...] = ()
+        if mode == "semantic":
+            results, retrieval, semantic_anchor_ids = self._merge_vector_results(request, results)
+            if retrieval.degraded_reason and request.retrieval_required:
+                raise ValueError(retrieval.degraded_reason)
         candidates = [_lens_node(result) for result in results if _node_id(result.node)]
         by_id = {node.id: node for node in candidates}
         scores = {
@@ -206,7 +286,7 @@ class SemanticLensService:
             for node in candidates
         }
         matched = {node_id: terms for node_id, (_, terms) in scores.items() if terms}
-        anchors = self._anchors(request, candidates, scores)
+        anchors = self._anchors(request, candidates, scores, semantic_anchor_ids)
         edges = self._read_edges(request, by_id)
         distance = self._distances(anchors, edges, request.hop_limit)
         retained = self._retain_nodes(request, candidates, scores, distance, anchors)
@@ -269,50 +349,234 @@ class SemanticLensService:
             selection_explanations=explanations,
             omitted_summary=omitted,
             query_timing_ms=max(0, self._clock_ms() - started),
+            retrieval=retrieval,
         )
 
     def _merge_vector_results(
         self,
         request: SemanticLensRequest,
         results: Sequence[GraphSpaceQueryResult],
-    ) -> list[GraphSpaceQueryResult]:
-        """Use the installed reader vector API when explicitly requested."""
-        ns = WorkspaceNamespaces(request.workspace_id)
+    ) -> tuple[list[GraphSpaceQueryResult], RetrievalStatus, tuple[str, ...]]:
+        """Merge vector candidates while retaining an explicit degradation status."""
+        vector_results, status = self._vector_results(request)
         merged = list(results)
         seen = {str(getattr(item.node, "id", "") or "") for item in merged}
+        for item, _score in vector_results:
+            node_id = str(getattr(item.node, "id", "") or "")
+            if node_id and node_id not in seen:
+                seen.add(node_id)
+                merged.append(item)
+        return merged, status, tuple(
+            str(getattr(item.node, "id", "") or "")
+            for item, _score in vector_results
+            if str(getattr(item.node, "id", "") or "")
+        )
+
+    def _vector_results(
+        self, request: SemanticLensRequest,
+    ) -> tuple[list[tuple[GraphSpaceQueryResult, float | None]], RetrievalStatus]:
+        """Run the core scored vector boundary for each requested graph space."""
+        ns = WorkspaceNamespaces(request.workspace_id)
+        vector_results: list[tuple[GraphSpaceQueryResult, float | None]] = []
+        reasons: list[str] = []
+        completed = False
+        backend = self._backend_name()
+        metric = self._metric()
+        if not request.query_text.strip():
+            return [], RetrievalStatus(_effective_retrieval_mode(request), False, backend, metric, "query_text_required")
         as_of = datetime.now(UTC)
-        for graph_space in {_normalize_space(space) for space in request.graph_spaces}:
+        graph_spaces = tuple(dict.fromkeys(_normalize_space(space) for space in request.graph_spaces))
+        for graph_space in graph_spaces:
             namespace = _namespace_for(ns, graph_space)
             if namespace is None:
                 continue
             try:
                 with _temporary_namespace(self.engines.kg, namespace):
-                    nodes = self.engines.kg.read.search_nodes_as_of(
-                        query=request.query_text,
-                        as_of_ts=as_of,
-                        where={
+                    search_scored = getattr(
+                        self.engines.kg.read, "search_nodes_as_of_scored", None
+                    )
+                    search = search_scored or self.engines.kg.read.search_nodes_as_of
+                    search_kwargs = {
+                        "query": request.query_text,
+                        "as_of_ts": as_of,
+                        "where": {
                             "workspace_id": request.workspace_id,
                             "graph_space": graph_space,
                         },
-                        n_results=max(request.max_nodes * 2, 20),
-                        include=["documents", "metadatas"],
-                        follow_redirects=not request.include_tombstones,
-                    )
-            except (AttributeError, NotImplementedError, TypeError, ValueError):
+                        "n_results": (
+                            max(request.max_nodes * 4, 20)
+                            if request.similarity_threshold is not None
+                            else (
+                                request.max_nodes
+                                if _effective_retrieval_mode(request) == "flat"
+                                else max(request.max_nodes * 2, 20)
+                            )
+                        ),
+                        "include": ["documents", "metadatas"],
+                        "follow_redirects": not request.include_tombstones,
+                    }
+                    if search_scored is not None:
+                        search_kwargs["similarity_threshold"] = request.similarity_threshold
+                    scored = search(**search_kwargs)
+                    if search_scored is None:
+                        if request.similarity_threshold is not None:
+                            reasons.append("Kogwistar scored search is required for similarity_threshold")
+                            continue
+                        scored = [(node, None) for node in scored]
+                    completed = True
+            except (AttributeError, NotImplementedError, TypeError, ValueError, RuntimeError) as exc:
+                reasons.append(f"{graph_space}: {exc}")
                 continue
-            for node in nodes:
+            for hit in scored:
+                if isinstance(hit, tuple):
+                    node, score = hit
+                else:
+                    node = hit.node
+                    score = hit.similarity
+                if request.similarity_threshold is not None:
+                    if score is None:
+                        reasons.append(
+                            "similarity_threshold requires normalized similarity scores"
+                        )
+                        continue
+                    if float(score) < float(request.similarity_threshold):
+                        continue
                 node_id = str(getattr(node, "id", "") or "")
-                if not node_id or node_id in seen:
+                if not node_id:
                     continue
-                seen.add(node_id)
-                merged.append(
+                vector_results.append((
                     GraphSpaceQueryResult(
                         node=node,
                         graph_space=graph_space,
                         namespace=namespace,
-                    )
-                )
-        return merged
+                    ), score,
+                ))
+        if vector_results:
+            return vector_results, RetrievalStatus(_effective_retrieval_mode(request), True, backend, metric, None)
+        if completed and not reasons:
+            return [], RetrievalStatus(_effective_retrieval_mode(request), True, backend, metric, None)
+        reason = "; ".join(reasons) or "semantic backend returned no results"
+        return [], RetrievalStatus(_effective_retrieval_mode(request), False, backend, metric, reason)
+
+    def _backend_name(self) -> str | None:
+        backend = getattr(self.engines.kg, "backend", None)
+        if backend is None:
+            backend = getattr(self.engines.kg, "_backend", None)
+        return type(backend).__name__ if backend is not None else None
+
+    def _metric(self) -> str | None:
+        profile = getattr(self.engines.kg, "embedding_profile", None)
+        value = getattr(profile, "similarity_metric", None)
+        return str(value) if value is not None else "cosine"
+
+    def _graph_status(self, request: SemanticLensRequest) -> RetrievalStatus:
+        return RetrievalStatus("graph", False, self._backend_name(), self._metric(), None)
+
+    def _flat_hit(
+        self,
+        node: Any,
+        graph_space: str,
+        namespace: str,
+        score: float | None,
+        *,
+        workspace_id: str,
+    ) -> dict[str, object]:
+        return {
+            **_flat_hit(node, graph_space, namespace, score),
+            "source_evidence": self._source_evidence(
+                node, graph_space, namespace, workspace_id=workspace_id
+            ),
+        }
+
+    def _source_evidence(
+        self,
+        node: Any,
+        graph_space: str,
+        namespace: str,
+        *,
+        workspace_id: str | None = None,
+    ) -> dict[str, object]:
+        metadata = dict(getattr(node, "metadata", None) or {})
+        grounding = _grounding(node)
+        pointer = grounding[0] if grounding else {}
+        source_id = (
+            metadata.get("source_id")
+            or metadata.get("source_document_id")
+            or pointer.get("source_document_id")
+            or pointer.get("source_id")
+        )
+        revision_id = metadata.get("source_revision_id") or pointer.get("source_revision_id")
+        document_id = (
+            metadata.get("source_revision_document_id")
+            or metadata.get("revision_document_id")
+            or pointer.get("source_revision_document_id")
+            or pointer.get("doc_id")
+        )
+        result: dict[str, object] = {
+            "status": "unresolved",
+            "source_id": source_id,
+            "source_revision_id": revision_id,
+            "locator": pointer or None,
+        }
+        if not document_id or not pointer:
+            result["status"] = "missing_source_locator"
+            return result
+        resolved_workspace_id = str(workspace_id or metadata.get("workspace_id") or "").strip()
+        source_namespace = (
+            WorkspaceNamespaces(resolved_workspace_id).source_space
+            if resolved_workspace_id
+            else namespace
+        )
+        result["source_namespace"] = source_namespace
+        try:
+            with _temporary_namespace(self.engines.kg, source_namespace):
+                document = self.engines.kg.read.get_document(str(document_id))
+        except (AttributeError, KeyError, LookupError, RuntimeError, ValueError) as exc:
+            result["status"] = "source_revision_unresolved"
+            result["reason"] = str(exc)
+            return result
+        document_metadata = dict(getattr(document, "metadata", None) or {})
+        nested_metadata = document_metadata.get("metadata")
+        if isinstance(nested_metadata, str):
+            try:
+                nested_metadata = json.loads(nested_metadata)
+            except (TypeError, ValueError):
+                nested_metadata = None
+        if isinstance(nested_metadata, Mapping):
+            document_metadata.update(nested_metadata)
+        document_workspace_id = str(document_metadata.get("workspace_id") or "").strip()
+        if (
+            resolved_workspace_id
+            and document_workspace_id
+            and document_workspace_id != resolved_workspace_id
+        ):
+            result["status"] = "source_namespace_mismatch"
+            return result
+        document_revision_id = document_metadata.get("source_revision_id")
+        if revision_id and document_revision_id and str(document_revision_id) != str(revision_id):
+            result["status"] = "source_revision_mismatch"
+            return result
+        if revision_id is None and document_revision_id is not None:
+            result["source_revision_id"] = document_revision_id
+        if source_id is None or str(source_id) == str(document_id):
+            result["source_id"] = (
+                document_metadata.get("logical_source_document_id")
+                or document_metadata.get("source_document_id")
+                or document_id
+            )
+        content = str(getattr(document, "content", "") or "")
+        try:
+            start = int(pointer.get("start_char", 0))
+            end = int(pointer.get("end_char", 0))
+        except (TypeError, ValueError):
+            result["status"] = "invalid_source_locator"
+            return result
+        excerpt = str(pointer.get("excerpt") or "")
+        if start < 0 or end < start or end > len(content) or content[start:end] != excerpt:
+            result["status"] = "excerpt_mismatch"
+            return result
+        result.update({"status": "verified", "excerpt": excerpt})
+        return result
 
     def investigate(
         self,
@@ -344,16 +608,18 @@ class SemanticLensService:
         request: SemanticLensRequest,
         candidates: Sequence[LensNode],
         scores: Mapping[str, tuple[float, tuple[str, ...]]],
+        semantic_anchor_ids: Sequence[str] = (),
     ) -> tuple[str, ...]:
         by_id = {node.id for node in candidates}
         explicit = [node_id for node_id in request.explicit_anchor_ids if node_id in by_id]
         pinned = [node_id for node_id in request.pinned_node_ids if node_id in by_id]
+        semantic = [node_id for node_id in semantic_anchor_ids if node_id in by_id]
         lexical = [
             node.id
             for node in sorted(candidates, key=lambda item: (-scores[item.id][0], item.id))
             if scores[node.id][1]
         ]
-        return tuple(dict.fromkeys(explicit + pinned + lexical))
+        return tuple(dict.fromkeys(explicit + pinned + semantic + lexical))
 
     def _read_edges(self, request: SemanticLensRequest, nodes: Mapping[str, LensNode]) -> list[LensEdge]:
         ns = WorkspaceNamespaces(request.workspace_id)
@@ -534,6 +800,35 @@ def _request_key(request: SemanticLensRequest) -> dict[str, object]:
     return data
 
 
+def _effective_retrieval_mode(request: SemanticLensRequest) -> str:
+    if request.retrieval_mode != "auto":
+        return request.retrieval_mode
+    if request.source_evidence_required:
+        return "flat"
+    if request.similarity_threshold is not None:
+        return "semantic"
+    return "semantic" if request.semantic_retrieval else "graph"
+
+
+def _flat_hit(
+    node: Any,
+    graph_space: str,
+    namespace: str,
+    score: float | None,
+) -> dict[str, object]:
+    metadata = dict(getattr(node, "metadata", None) or {})
+    return {
+        "node_id": _node_id(node),
+        "graph_space": graph_space,
+        "namespace": namespace,
+        "score": score,
+        "source_id": metadata.get("source_id") or metadata.get("source_document_id"),
+        "source_revision_id": metadata.get("source_revision_id"),
+        "locator": metadata.get("locator") or metadata.get("source_pointer"),
+        "metadata": metadata,
+    }
+
+
 def _model_dump(value: Any) -> dict[str, object]:
     dump = getattr(value, "model_dump", None)
     if callable(dump):
@@ -567,6 +862,8 @@ __all__ = [
     "LensNode",
     "LensParticipation",
     "ProposalValidation",
+    "RetrievalMode",
+    "RetrievalStatus",
     "SelectionExplanation",
     "SemanticLensRequest",
     "SemanticLensService",
