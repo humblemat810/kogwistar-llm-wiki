@@ -198,3 +198,18 @@ def test_root_has_no_removed_functional_facades() -> None:
     assert not {name for name in removed_facades if (root / name).exists()}
 
 
+def test_email_product_code_and_tests_live_outside_the_host() -> None:
+    repository = Path(__file__).resolve().parents[2]
+    source = repository / "src" / "kogwistar_llm_wiki"
+    assert not (source / "email").exists()
+    assert not (source / "daemons" / "email_sync_daemon.py").exists()
+    assert not list((repository / "tests").rglob("test_email_*.py"))
+    assert "Email evidence plugin viewer" not in (
+        repository / "frontend" / "src" / "App.tsx"
+    ).read_text(encoding="utf-8")
+    http_source = (source / "workbench" / "workbench_http.py").read_text(
+        encoding="utf-8"
+    )
+    assert "/api/email" not in http_source
+    for path in source.rglob("*.py"):
+        assert "kogwistar_llm_wiki.email" not in path.read_text(encoding="utf-8")

@@ -120,6 +120,9 @@ Owns:
 - `kogwistar-obsidian-sink` depends on `kogwistar`
 - Source-specific optional plugins consume generic Kogwistar and LLM-Wiki
   contracts; the host owns no transport-specific parser or domain ontology.
+- `kogwistar-email-plugin` depends on `kogwistar` contracts and optional
+  transport libraries, and may optionally register through LLM-Wiki's generic
+  workbench extension contract
 - `kogwistar-llm-wiki` composes required components; optional plugins remain
   disabled unless explicitly allowlisted
 
