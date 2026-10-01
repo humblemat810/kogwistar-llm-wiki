@@ -82,6 +82,7 @@ def test_workbench_http_serves_lens_contract_without_core_changes(monkeypatch):
         engines.close()
 
 
+@pytest.mark.ci
 def test_workbench_http_rejects_invalid_contact_paging_cursor():
     engines = build_in_memory_namespace_engines()
 

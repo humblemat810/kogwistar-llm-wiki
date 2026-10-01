@@ -40,6 +40,7 @@ def _contact_observation(entity_id: str, stream_id: str, point: str):
     )
 
 
+@pytest.mark.ci
 def test_address_book_pages_resolved_groups_and_rejects_stale_cursor():
     engines = build_in_memory_namespace_engines()
     try:
