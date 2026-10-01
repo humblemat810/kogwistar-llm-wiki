@@ -24,6 +24,7 @@ from .disambiguation_contracts import (
 
 ContactChannel = str
 ContactVerification = Literal["claimed", "provider_verified", "user_confirmed"]
+DEFAULT_MAX_FUZZY_NAME_COMPARISONS = 100_000
 _CHANNEL = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
 
@@ -138,6 +139,7 @@ def discover_contact_match_candidates(
     authorize_stream: AuthorizeContactStream,
     max_observations: int = 250,
     max_candidates: int = 500,
+    max_fuzzy_name_comparisons: int = DEFAULT_MAX_FUZZY_NAME_COMPARISONS,
     fuzzy_name_threshold: float = 0.92,
 ) -> tuple[DisambiguationCandidate, ...]:
     """Return deterministic, ACL-gated, review-only person-match candidates.
@@ -152,8 +154,10 @@ def discover_contact_match_candidates(
     if (
         type(max_observations) is not int
         or type(max_candidates) is not int
+        or type(max_fuzzy_name_comparisons) is not int
         or max_observations <= 0
         or max_candidates <= 0
+        or max_fuzzy_name_comparisons <= 0
     ):
         raise ValueError("candidate bounds must be positive")
     if (
@@ -232,6 +236,7 @@ def discover_contact_match_candidates(
     # name pairs whose maximum possible ratio is already below threshold.
     # Its ratio is 2*M/(len(left)+len(right)), with M <= min(lengths).
     names = sorted(entities_by_name)
+    fuzzy_name_comparisons = 0
     for left_position, left_name in enumerate(names):
         left_length = len(left_name)
         for right_position in range(left_position + 1, len(names)):
@@ -242,6 +247,11 @@ def discover_contact_match_candidates(
             )
             if maximum_ratio < fuzzy_name_threshold:
                 continue
+            fuzzy_name_comparisons += 1
+            if fuzzy_name_comparisons > max_fuzzy_name_comparisons:
+                raise ValueError(
+                    "contact match scan exceeds max_fuzzy_name_comparisons"
+                )
             if (
                 SequenceMatcher(None, left_name, right_name).ratio()
                 < fuzzy_name_threshold

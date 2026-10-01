@@ -390,15 +390,18 @@ primitive.
 ### Current Scan Bound And Scale-Up Contract
 
 The current automatic maintenance scan is intentionally fail-closed at 250
-observations and 500 generated candidates. An oversized result is rejected
+observations, 500 generated candidates, and 100,000 eligible fuzzy comparisons
+between distinct normalized names. An oversized result is rejected
 before any candidate snapshot is written or the job acknowledged; it is never
 truncated into an apparently complete scan. The separately paged contact
 directory API may read up to 5,000 observations, but that limit does not apply
-to automatic matching. These are distinct capabilities.
+to automatic matching. These are distinct capabilities. Exact-name and
+contact-point indexes reduce common-case pair work, but adversarial alias sets
+can still reach the fuzzy comparison budget and fail closed.
 
-The current matcher compares observation pairs, so merely raising the scan
-bound would increase worst-case work quadratically and risk producing an
-unreviewable candidate flood. Large-workspace support therefore requires a
+The current matcher compares distinct normalized name pairs, so merely raising
+the scan bound would increase worst-case work quadratically and risk producing
+an unreviewable candidate flood. Large-workspace support therefore requires a
 separate scale-up before changing these bounds:
 
 - source providers expose stable, ACL-scoped snapshot/page cursors and an

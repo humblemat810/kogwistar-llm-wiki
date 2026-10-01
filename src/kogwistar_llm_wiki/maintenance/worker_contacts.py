@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from itertools import islice
 
 from ..disambiguation.contact_matching import (
+    DEFAULT_MAX_FUZZY_NAME_COMPARISONS,
     ContactIdentityObservation,
     discover_contact_match_candidates,
 )
@@ -15,6 +16,7 @@ from .maintenance_strategies import MaintenanceJobExecutionContext
 _MAX_CONTACT_SCAN_STREAMS = 64
 _MAX_CONTACT_SCAN_OBSERVATIONS = 250
 _MAX_CONTACT_SCAN_CANDIDATES = 500
+_MAX_CONTACT_SCAN_FUZZY_NAME_COMPARISONS = DEFAULT_MAX_FUZZY_NAME_COMPARISONS
 
 
 class ContactDisambiguationWorkerMixin:
@@ -66,6 +68,7 @@ class ContactDisambiguationWorkerMixin:
             authorize_stream=authorize_stream,
             max_observations=_MAX_CONTACT_SCAN_OBSERVATIONS,
             max_candidates=_MAX_CONTACT_SCAN_CANDIDATES,
+            max_fuzzy_name_comparisons=_MAX_CONTACT_SCAN_FUZZY_NAME_COMPARISONS,
         )
         self._assert_claim_owned(ctx, reason="claim_lost_before_contact_candidate_persist")
         persisted_ids = DisambiguationService(self.engines).persist_contact_candidates(

@@ -208,6 +208,50 @@ def test_contact_scan_overflow_fails_before_partial_candidate_persistence() -> N
 
 
 @pytest.mark.ci
+def test_contact_scan_fuzzy_work_overflow_keeps_job_pending_and_writes_nothing(
+    monkeypatch,
+) -> None:
+    from kogwistar_llm_wiki.maintenance import worker_contacts
+
+    monkeypatch.setattr(worker_contacts, "_MAX_CONTACT_SCAN_FUZZY_NAME_COMPARISONS", 1)
+    engines = build_in_memory_namespace_engines()
+    try:
+        _enqueue_scan(engines, job_id="scan-fuzzy-overflow", streams=["mailbox:one"])
+        observations = tuple(
+            _observation(f"contact:{index}", "mailbox:one").model_copy(
+                update={
+                    "display_names": (name,),
+                    "contact_points": (),
+                }
+            )
+            for index, name in enumerate(
+                ("Alessandra Example", "Bernardine Sample", "Christopher Person")
+            )
+        )
+        worker = MaintenanceWorker(
+            engines,
+            contact_observation_provider=lambda *_: observations,
+            contact_stream_authorizer=lambda *_: True,
+        )
+
+        with pytest.raises(ValueError, match="exceeds max_fuzzy_name_comparisons"):
+            worker.process_pending_jobs("contact-scan-worker")
+
+        assert DisambiguationService(engines).list_current_contact_candidates(
+            workspace_id="contact-scan-worker",
+            authorize_stream=lambda *_: True,
+        ) == ()
+        job_rows = engines.conversation.meta_sqlite.list_index_jobs(
+            namespace=WorkspaceNamespaces("contact-scan-worker").maintenance_jobs
+        )
+        assert len(job_rows) == 1
+        assert job_rows[0].status == "PENDING"
+        worker.close()
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
 def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> None:
     engines = build_in_memory_namespace_engines()
     try:

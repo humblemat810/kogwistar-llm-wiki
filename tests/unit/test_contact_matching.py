@@ -224,6 +224,39 @@ def test_name_length_bound_skips_impossible_fuzzy_comparisons(monkeypatch) -> No
     assert ratio_calls < len(observations) * (len(observations) - 1) // 2
 
 
+def test_fuzzy_name_comparison_budget_fails_closed_before_excess_work(monkeypatch) -> None:
+    import kogwistar_llm_wiki.disambiguation.contact_matching as matching
+
+    original = matching.SequenceMatcher
+    ratio_calls = 0
+
+    class CountingMatcher:
+        def __init__(self, *args):
+            self._inner = original(*args)
+
+        def ratio(self) -> float:
+            nonlocal ratio_calls
+            ratio_calls += 1
+            return self._inner.ratio()
+
+    monkeypatch.setattr(matching, "SequenceMatcher", CountingMatcher)
+    observations = tuple(
+        _observation(f"person-{index}", f"source:{index}", name=name)
+        for index, name in enumerate(
+            ("Alessandra Example", "Bernardine Sample", "Christopher Person")
+        )
+    )
+
+    with pytest.raises(ValueError, match="exceeds max_fuzzy_name_comparisons"):
+        discover_contact_match_candidates(
+            observations,
+            authorize_stream=lambda *_: True,
+            max_fuzzy_name_comparisons=1,
+        )
+
+    assert ratio_calls == 2
+
+
 def test_exact_name_candidate_is_deterministic_but_single_common_name_is_ignored() -> None:
     observations = (
         _observation("person-1", "authorized-source", name="Jordan Smith"),
@@ -508,7 +541,11 @@ def test_contact_observation_rejects_unbounded_or_controlled_identity_claims(cha
 
 def test_matcher_rejects_boolean_or_noninteger_work_bounds() -> None:
     observation = _observation("person-1", "authorized-source", name="Jordan Smith")
-    for kwargs in ({"max_observations": True}, {"max_candidates": 1.5}):
+    for kwargs in (
+        {"max_observations": True},
+        {"max_candidates": 1.5},
+        {"max_fuzzy_name_comparisons": False},
+    ):
         with pytest.raises(ValueError, match="bounds must be positive"):
             discover_contact_match_candidates(
                 (observation,),
