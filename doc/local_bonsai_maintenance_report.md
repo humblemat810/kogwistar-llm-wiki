@@ -1411,3 +1411,26 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 - These checks validate code and CI only; they do not change the experiment
   outcome. No Bonsai parse generation, active ParseView, crosslink quality, or
   follow-up/background maintenance success has been verified.
+
+### CPU Finance-Text Embedding Smoke (2026-10-01)
+
+- Added an opt-in BGE-small English text encoder profile alongside (not in
+  place of) Qwen3-VL and CLIP. The exact Hugging Face revision is
+  `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`; `model.safetensors` is
+  133,466,304 bytes with SHA-256
+  `3c9f31665447c8911517620762200d2245a2518d6e7208acc78cd9db317e21ad`.
+- Built the standalone CPU embedding image with the pinned Torch CPU runtime,
+  started only `embedding-bge-cpu` on loopback port 8793, and confirmed its
+  readiness profile: dimension 384, dot metric, 512 token limit, profile
+  fingerprint `5728cd9a3904c8e5eb6d1682ff251d0022aeb4aba5df0756da3301226f8748d7`.
+- A one-query/two-document smoke returned 384-D normalized vectors. For query
+  “GPU accelerators for AI training in data centers,” cosine-equivalent dot
+  scores were `0.8135` for an AMD Instinct MI300X description and `0.4343` for
+  an unrelated coffee-machine passage. First query latency was 1,619.6 ms;
+  the subsequent two-document batch took 187.3 ms. This is a single local
+  functional smoke, not a stable performance or finance retrieval benchmark.
+- The test service was stopped and its Compose network removed. No request was
+  sent to the LLM-Wiki graph or database, and no existing vector profile or
+  dimension was changed. BGE is text-only; CLIP remains the optional shared
+  text/image space. CPU retrieval quality on the actual finance corpus remains
+  to be evaluated after the Bonsai parsing/crosslink quality gate succeeds.

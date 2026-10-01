@@ -205,6 +205,40 @@ the run. A successful workflow with `call_used=0` is not a model-backed run.
 
 ## CPU Embeddings
 
+For this finance-text experiment, prefer the optional CPU-only BGE-small profile
+over CLIP when indexing text-only source units. The pinned model is
+`BAAI/bge-small-en-v1.5` at revision
+`5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`; its model card lists MIT licensing,
+384-D embeddings, and a 512-token sequence limit. The model author reports
+retrieval results for the model, but those are not a finance-domain evaluation
+or a benchmark on this host. BGE is English and text-only: it must reject image
+inputs. Use CLIP when a shared text/image space is needed, or Qwen3-VL for the
+existing multimodal embedding profile.
+
+Download the exact BGE snapshot outside the repository, for example:
+
+```powershell
+huggingface-cli download BAAI/bge-small-en-v1.5 `
+  --revision 5c38ec7c405ec4b44b94cc5a9bb96e735b38267a `
+  --local-dir D:/models/bge-small-en-v1.5
+```
+
+Run its optional standalone CPU service independently:
+
+```powershell
+docker compose -f compose.embedding-bge-cpu.yml up -d --build
+```
+
+It binds only to host loopback port `8793`, defaults to one CPU and 2 GiB, and
+uses a read-only model bind mount. The service applies BGE's retrieval query
+instruction to query inputs and not document inputs. Its profile fingerprint
+includes the pinned model revision, CLS pooling, normalization, instruction,
+and sequence limit. This 384-D space is distinct from the current Qwen/CLIP
+profiles; do not connect it to an existing graph or index unless that graph was
+created for the exact same profile. This overlay starts only the embedding
+service; wiring or migrating the active graph requires an explicit profile
+change and separate validation.
+
 The standalone service now supports the existing Qwen3-VL encoder and an
 optional CLIP ViT-B/32 CPU encoder. The CLIP checkpoint is pinned to revision
 `327ab6726d33c0e22f920c83f2ff9e4bd38ca37f`; only its `model.safetensors` and

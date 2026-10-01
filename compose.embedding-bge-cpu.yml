@@ -1,0 +1,33 @@
+# Optional English text-only CPU retrieval encoder. It has its own 384-D
+# embedding profile; do not connect it to a graph with another profile.
+services:
+  embedding-bge-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.embedding-service
+      args:
+        LLM_WIKI_EMBEDDING_TORCH_BACKEND: cpu
+    image: llm-wiki-embedding-bge-cpu:local
+    mem_limit: ${LLM_WIKI_BGE_MEMORY_LIMIT:-2g}
+    cpus: ${LLM_WIKI_BGE_CPU_LIMIT:-1.0}
+    environment:
+      LLM_WIKI_EMBEDDING_ENCODER: bge-small-en-v1.5
+      LLM_WIKI_EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
+      LLM_WIKI_EMBEDDING_MODEL_REVISION: 5c38ec7c405ec4b44b94cc5a9bb96e735b38267a
+      LLM_WIKI_EMBEDDING_MODEL_PATH: /models/bge-small-en-v1.5
+      LLM_WIKI_EMBEDDING_DIMENSION: "384"
+      LLM_WIKI_EMBEDDING_DEVICE: cpu
+      LLM_WIKI_EMBEDDING_TORCH_BACKEND: cpu
+      LLM_WIKI_EMBEDDING_BATCH_SIZE: "1"
+      LLM_WIKI_EMBEDDING_TOKEN: ${LLM_WIKI_BGE_TOKEN:-}
+      HF_HOME: /var/lib/huggingface
+      LLM_WIKI_EMBEDDING_HOST: 0.0.0.0
+      LLM_WIKI_EMBEDDING_PORT: "8790"
+    volumes:
+      - type: bind
+        source: ${LLM_WIKI_BGE_MODEL_HOST_PATH:-D:/models/bge-small-en-v1.5}
+        target: /models/bge-small-en-v1.5
+        read_only: true
+    ports:
+      - "127.0.0.1:${LLM_WIKI_BGE_PORT:-8793}:8790"
+    restart: unless-stopped

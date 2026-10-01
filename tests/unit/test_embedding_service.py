@@ -16,6 +16,10 @@ from llm_wiki_embedding_contract import EmbeddingProfile
 from llm_wiki_embedding_service.app import create_app
 from llm_wiki_embedding_service.clip_encoder import CLIPDualProjectionEncoder
 from llm_wiki_embedding_service.config import (
+    BGE_QUERY_INSTRUCTION,
+    BGE_SMALL_DIMENSION,
+    BGE_SMALL_MODEL,
+    BGE_SMALL_REVISION,
     CLIP_DIMENSION,
     CLIP_MODEL,
     CLIP_MODEL_SHA256,
@@ -106,6 +110,63 @@ def test_clip_config_rejects_a_dimension_that_does_not_match_its_projection() ->
             revision=CLIP_REVISION,
             dimension=384,
         )
+
+
+def test_bge_small_config_is_pinned_and_isolated_as_384d_text_profile() -> None:
+    config = load_config({"LLM_WIKI_EMBEDDING_ENCODER": "bge-small-en-v1.5"})
+
+    assert config.model == BGE_SMALL_MODEL
+    assert config.revision == BGE_SMALL_REVISION
+    assert config.dimension == BGE_SMALL_DIMENSION
+    assert config.device == "cpu"
+    assert config.profile.max_sequence_length == 512
+    assert "cls-l2" in config.profile.preprocessing_fingerprint
+    assert "query-prefix-v1" in config.profile.preprocessing_fingerprint
+    assert config.profile.fingerprint != load_config(
+        {
+            "LLM_WIKI_EMBEDDING_ENCODER": "clip-vit-b32",
+            "LLM_WIKI_EMBEDDING_MODEL_REVISION": CLIP_REVISION,
+        }
+    ).profile.fingerprint
+
+
+def test_bge_small_uses_cls_pooling_normalization_and_query_instruction() -> None:
+    torch = pytest.importorskip("torch")
+    from llm_wiki_embedding_service.encoder import BgeSmallTextEncoder
+
+    config = load_config({"LLM_WIKI_EMBEDDING_ENCODER": "bge-small-en-v1.5"})
+    calls: list[list[str]] = []
+
+    class _Tokenizer:
+        def __call__(self, texts, **kwargs):
+            calls.append(list(texts))
+            assert kwargs["max_length"] == 512
+            return {"input_ids": torch.ones((len(texts), 2), dtype=torch.long)}
+
+    class _Model:
+        def __call__(self, **inputs):
+            rows = inputs["input_ids"].shape[0]
+            hidden = torch.zeros((rows, 2, BGE_SMALL_DIMENSION))
+            hidden[:, 0, 0] = 3.0
+            hidden[:, 0, 1] = 4.0
+            hidden[:, 1, 2] = 50.0
+            return SimpleNamespace(last_hidden_state=hidden)
+
+    encoder = BgeSmallTextEncoder(
+        _Model(), _Tokenizer(), profile=config.profile, device="cpu"
+    )
+    vectors = encoder.encode(
+        [
+            {"text": "AMD earnings", "operation": "query"},
+            {"text": "AMD earnings", "operation": "document"},
+        ]
+    )
+
+    assert calls == [[BGE_QUERY_INSTRUCTION + "AMD earnings", "AMD earnings"]]
+    assert len(vectors) == 2
+    assert vectors[0][0][:3] == pytest.approx((0.6, 0.8, 0.0))
+    assert vectors[1][0][:3] == pytest.approx((0.6, 0.8, 0.0))
+    assert all(len(item[0]) == BGE_SMALL_DIMENSION for item in vectors)
 
 
 def test_clip_encodes_text_and_image_through_their_shared_projection_methods(

@@ -70,9 +70,12 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
     def capabilities(request: Request) -> Any:
         if not _authorized(request, selected.token):
             return _error("unauthorized", 401)
-        modalities = ["text", "image"] if selected.encoder == "clip-vit-b32" else [
-            "text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"
-        ]
+        if selected.encoder == "clip-vit-b32":
+            modalities = ["text", "image"]
+        elif selected.encoder == "bge-small-en-v1.5":
+            modalities = ["text"]
+        else:
+            modalities = ["text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"]
         return {"contract_version": "v1", "service": "llm-wiki-embedding", "embedding": "dense", "modalities": modalities, "profile": _profile(selected), "batch_size": selected.batch_size, "max_items": selected.max_items, "max_request_bytes": selected.max_request_bytes}
 
     @app.post("/v1/represent")
@@ -123,10 +126,17 @@ def _represent_payload(payload: object, encoder: Any, config: EmbeddingServiceCo
         if not item_id or item_id in item_ids:
             raise ContractValidationError("item IDs must be non-empty and unique")
         item_ids.add(item_id)
-        item: dict[str, object] = {"item_id": item_id, "modality": str(raw_item.get("modality", "text"))}
+        modality = str(raw_item.get("modality", "text"))
+        item: dict[str, object] = {
+            "item_id": item_id,
+            "modality": modality,
+            "operation": str(payload["operation"]),
+        }
         if raw_item.get("text") is not None:
             item["text"] = str(raw_item["text"])
         asset = raw_item.get("asset")
+        if config.encoder == "bge-small-en-v1.5" and (modality != "text" or asset is not None):
+            raise ContractValidationError("BGE profile accepts text modality only")
         if asset is not None:
             if not isinstance(asset, Mapping):
                 raise ContractValidationError("asset must be an object")

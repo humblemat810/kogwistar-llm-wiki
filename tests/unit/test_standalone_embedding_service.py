@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from llm_wiki_embedding_contract import EmbeddingProfile
 from llm_wiki_embedding_service.app import create_app
 from llm_wiki_embedding_service.config import (
+    BGE_SMALL_DIMENSION,
     CLIP_DIMENSION,
     EmbeddingServiceConfig,
     load_config,
@@ -78,6 +79,35 @@ def test_clip_capabilities_advertise_only_supported_modalities() -> None:
     assert response.status_code == 200
     assert response.json()["modalities"] == ["text", "image"]
     assert response.json()["profile"]["dimension"] == CLIP_DIMENSION
+
+
+def test_bge_profile_is_text_only_and_rejects_image_modality() -> None:
+    config = load_config(
+        {
+            "LLM_WIKI_EMBEDDING_ENCODER": "bge-small-en-v1.5",
+            "LLM_WIKI_EMBEDDING_TOKEN": "secret",
+        }
+    )
+    with TestClient(create_app(encoder=FakeEncoder(config.profile), config=config)) as client:
+        capabilities = client.get(
+            "/v1/capabilities", headers={"Authorization": "Bearer secret"}
+        )
+        assert capabilities.status_code == 200
+        assert capabilities.json()["modalities"] == ["text"]
+        assert capabilities.json()["profile"]["dimension"] == BGE_SMALL_DIMENSION
+
+        response = client.post(
+            "/v1/represent",
+            headers={"Authorization": "Bearer secret"},
+            json={
+                "contract_version": "v1",
+                "operation": "document",
+                "profile_fingerprint": config.profile.fingerprint,
+                "items": [{"item_id": "image", "modality": "image", "text": "chart"}],
+            },
+        )
+    assert response.status_code == 422
+    assert "text modality only" in response.json()["error"]
 
 
 def test_service_rejects_path_and_bad_asset_hash() -> None:
