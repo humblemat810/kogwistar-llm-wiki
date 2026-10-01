@@ -1658,3 +1658,7 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   activation, execution-trace review, or graph mutation was performed in this
   recheck. The prior finance parsing/cross-link quality gate therefore remains
   `FAIL`, and corpus expansion remains `HOLD`.
+- A read-only maintenance-control query then reported
+  `background_enabled=false`, `request_enabled=true`, profile `lite`, and no
+  deferred cycle. Background scheduling is therefore still disabled at the
+  current cutoff; this recheck did not alter that persisted control state.
