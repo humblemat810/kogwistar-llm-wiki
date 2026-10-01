@@ -1470,3 +1470,16 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 - This is not a live Bonsai result. The capped runtime was not restarted, and
   no claim is made that a ParseView activated or that finance parsing/crosslink
   quality passed review.
+
+### Local Image For Late-Parse Recovery (2026-10-01)
+
+- Built `kogwistar-llm-wiki:bonsai-late-parse-6aeef39` from the feature
+  worktree at commit `6aeef39`; image ID is
+  `sha256:fe5978fd1b502097b34d9648f9ce623d5577780754f4acf4bfd091f46b9e3380`
+  and compressed/local image size is 815,783,198 bytes.
+- A one-shot `docker run --rm --network none` imported the packaged maintenance
+  worker and verified the overrun persistence/review-fence implementation is
+  present. The container had no network, database mount, or service entrypoint.
+- This image has not been started as the maintenance service. No database or
+  model was accessed; a fresh, bounded runtime validation is still required to
+  prove that Bonsai parsing persists and passes finance-source quality review.
