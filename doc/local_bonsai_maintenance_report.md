@@ -1636,3 +1636,25 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   merged tree. It does not authorize a force-push, and it does not provide any
   new Bonsai runtime, direct/follow-up/background maintenance, or graph-quality
   evidence.
+
+### Read-Only Bonsai Runtime Recheck (2026-10-01)
+
+- The existing containers were already healthy: MCP on `127.0.0.1:8780`,
+  Grafana on `127.0.0.1:3002`, and PostgreSQL reported healthy. No service was
+  restarted and no source or research data was changed.
+- The llama.cpp process was running with the Bonsai 2 language model, matching
+  vision projector, `-c 8192`, `-ngl 999`, and the configured OpenAI-compatible
+  endpoint. Read-only `/health`, `/props`, and `/v1/models` requests succeeded;
+  `/props` reported the expected 26.9B model and `n_ctx=8192`.
+- One bounded non-persistent chat request was sent with `max_tokens=16` and
+  `temperature=0`. The server returned HTTP 200 and timing data, proving that
+  the model executed rather than merely advertising a model in `/v1/models`.
+  The response ended at the intentional token cap before emitting the requested
+  word, so this is an execution smoke test, not a quality result.
+- During the request, the RTX 3080 Laptop GPU reached 94% utilization with
+  6,895 MiB of 8,192 MiB allocated. This confirms the configured GPU-offload
+  path; the earlier idle snapshot was not representative of an active request.
+- No maintenance request, provider-backed cross-link proposal, ParseView
+  activation, execution-trace review, or graph mutation was performed in this
+  recheck. The prior finance parsing/cross-link quality gate therefore remains
+  `FAIL`, and corpus expansion remains `HOLD`.
