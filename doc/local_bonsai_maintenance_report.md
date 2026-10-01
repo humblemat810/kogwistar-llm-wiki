@@ -1554,3 +1554,15 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   encoder contract requires Torch 2.8.0 while the host environment has
   `2.14.0+cpu`. The isolated pinned CPU image is the verified execution path;
   do not weaken the runtime-version guard based on that host mismatch.
+- A second network-disabled run read, without modifying, the five actual
+  Markdown files in the root checkout's `data/stock_research_2026` directory.
+  Across ten explicit finance queries, the expected file ranked first for 8/10
+  (MRR 0.867); document encoding took 7.420 seconds, query encoding took
+  0.263 seconds total, and peak RSS was 495.3 MiB. The two misses were a
+  cross-company Data Center comparison (AMD results ranked above the knowledge
+  map) and a valuation-guardrail query (AMD results ranked above the quality
+  rubric, whose expected file ranked third). This is a small retrieval sanity
+  evaluation on exactly five documents, not a statistically meaningful quality
+  benchmark. Keep exact-source retrieval and human/critic review; do not let
+  BGE similarity promote financial claims or connect this 384-D profile to the
+  existing graph.
