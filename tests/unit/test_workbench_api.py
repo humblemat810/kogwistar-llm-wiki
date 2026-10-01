@@ -187,6 +187,16 @@ def test_registered_contact_source_uses_unique_owner_and_source_acl():
             authorize_stream=lambda _workspace, _stream: True,
         )
         assert api._authorize_contact_stream("registered-source", "email-stream-a") is False
+
+        denied_api = WorkbenchApi(IngestPipeline(engines))
+        denied_api.register_contact_observation_source(
+            "denied",
+            provider=lambda *_args: (observation,),
+            owns_stream=lambda _workspace, stream: stream == "email-stream-a",
+            authorize_stream=lambda _workspace, _stream: False,
+        )
+        with pytest.raises(PermissionError, match="unauthorized"):
+            denied_api.list_address_book(workspace_id="registered-source")
     finally:
         engines.close()
 
