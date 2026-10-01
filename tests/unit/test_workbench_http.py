@@ -82,6 +82,49 @@ def test_workbench_http_serves_lens_contract_without_core_changes(monkeypatch):
         engines.close()
 
 
+@pytest.mark.ci
+def test_workbench_http_rejects_invalid_contact_paging_cursor():
+    engines = build_in_memory_namespace_engines()
+
+    def authorize(_workspace_id, _stream_id):
+        return True
+
+    api = WorkbenchApi(
+        IngestPipeline(engines),
+        contact_authorize_stream=authorize,
+        contact_observation_provider=lambda _workspace_id, _limit, _authorize: (),
+    )
+    received = {}
+    list_address_book = api.list_address_book
+
+    def capture_address_book_request(**kwargs):
+        received.update(kwargs)
+        return list_address_book(**kwargs)
+
+    api.list_address_book = capture_address_book_request
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "GET",
+            "/api/address-book?workspace_id=cursor-http&limit=1&query=Jane%20Doe&cursor=not-a-cursor",
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 400
+        assert payload["error"] == "invalid_request"
+        assert received["query"] == "Jane Doe"
+        assert received["cursor"] == "not-a-cursor"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        api.close()
+        engines.close()
+
+
 def test_workbench_http_exposes_container_health_endpoint():
     engines = build_in_memory_namespace_engines()
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(WorkbenchApi(IngestPipeline(engines))))

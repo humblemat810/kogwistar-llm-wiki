@@ -31,7 +31,41 @@ duplicate ID, route collision, or invalid namespace fails server startup rather
 than silently disabling the requested integration.
 
 Host workspace authorization is necessary but not sufficient for resources
-inside an extension. Extensions must still enforce their domain ACLs (for
-example, connector/mailbox authorization) before reading or mutating data.
+inside an extension. Extensions must still enforce their resource ACLs (for
+example, authorization for an externally connected source) before reading or
+mutating data.
+
+### Channel-Neutral Contact Sources
+
+An extension that owns contact observations may register a bounded provider
+with `WorkbenchApi.register_contact_observation_source(...)`. Registration
+requires a stable source ID, an observation provider, a stream-ownership check,
+and a source-specific ACL callback. The host composes registered providers for
+its generic address-book and contact-review APIs; it does not import source
+domain code.
+
+For every stream access, the host requires exactly one registered owner and a
+positive source ACL decision. Ambiguous ownership, missing authorization, or a
+provider returning an out-of-scope observation is rejected. The constructor's
+existing generic provider remains supported and can coexist with registered
+sources; its configured authorizer remains required for streams not owned by a
+registered adapter. Registration is intended during explicit extension
+bootstrap, before serving requests.
+
+The combined CLI does not invent resource permissions. Applications must
+inject a resource authorizer; without one, extension resource access remains
+denied even when workspace-level HTTP access succeeds.
+
+For the standard CLI, an application may configure a trusted adapter as
+`LLM_WIKI_RESOURCE_AUTHORIZER=package.module:callable`. The callable receives
+`(workspace_id, resource_type, resource_id, action)` and returns a strict
+boolean decision. HTTP and authenticated MCP calls execute inside the core
+claims context, so an adapter can bind decisions to the authenticated
+`sub`/agent identity via `kogwistar.server.auth_middleware.claims_ctx`. The
+adapter must deny when identity or policy lookup is absent or indeterminate.
+An empty setting grants nothing; malformed or non-callable configuration
+fails startup. Do not infer resource rights from `ro`/`rw`, workspace
+membership, plugin enablement, or sender-provided message fields.
+
 Kogwistar remains canonical graph authority; extension handlers must use
 application services and must not create a parallel graph truth.

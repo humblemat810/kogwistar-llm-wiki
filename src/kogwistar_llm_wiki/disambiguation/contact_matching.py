@@ -24,6 +24,7 @@ from .disambiguation_contracts import (
 
 ContactChannel = str
 ContactVerification = Literal["claimed", "provider_verified", "user_confirmed"]
+DEFAULT_MAX_FUZZY_NAME_COMPARISONS = 100_000
 _CHANNEL = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
 
@@ -138,6 +139,7 @@ def discover_contact_match_candidates(
     authorize_stream: AuthorizeContactStream,
     max_observations: int = 250,
     max_candidates: int = 500,
+    max_fuzzy_name_comparisons: int = DEFAULT_MAX_FUZZY_NAME_COMPARISONS,
     fuzzy_name_threshold: float = 0.92,
 ) -> tuple[DisambiguationCandidate, ...]:
     """Return deterministic, ACL-gated, review-only person-match candidates.
@@ -152,8 +154,10 @@ def discover_contact_match_candidates(
     if (
         type(max_observations) is not int
         or type(max_candidates) is not int
+        or type(max_fuzzy_name_comparisons) is not int
         or max_observations <= 0
         or max_candidates <= 0
+        or max_fuzzy_name_comparisons <= 0
     ):
         raise ValueError("candidate bounds must be positive")
     if (
@@ -180,13 +184,21 @@ def discover_contact_match_candidates(
         if not authorize_stream(workspace_id, stream_id):
             raise PermissionError("contact match scan is not authorized for every source stream")
 
+    ordered = sorted(items, key=lambda item: item.entity_id)
     candidates: dict[str, DisambiguationCandidate] = {}
-    for left, right in combinations(sorted(items, key=lambda item: item.entity_id), 2):
+    considered: set[tuple[int, int]] = set()
+
+    def consider_pair(left_index: int, right_index: int) -> None:
+        pair = (left_index, right_index)
+        if left_index == right_index or pair in considered:
+            return
+        considered.add(pair)
+        left, right = ordered[left_index], ordered[right_index]
         basis, similarity, channels, matched_channels, verification = _match_evidence(
             left, right, fuzzy_name_threshold
         )
         if basis is None:
-            continue
+            return
         candidate = _make_candidate(
             left,
             right,
@@ -199,6 +211,60 @@ def discover_contact_match_candidates(
         candidates[candidate.candidate_key] = candidate
         if len(candidates) > max_candidates:
             raise ValueError("contact match scan exceeds max_candidates")
+
+    # Exact shared contact points and exact names are indexed, avoiding a full
+    # entity-by-entity scan for the common, high-signal matching cases.
+    entities_by_point: dict[tuple[str, str, str], set[int]] = {}
+    entities_by_name: dict[str, set[int]] = {}
+    for index, observation in enumerate(ordered):
+        for point in observation.contact_points:
+            entities_by_point.setdefault(_point_key(point), set()).add(index)
+        for name in observation.display_names:
+            normalized = _normalize_name(name)
+            if _is_matchable_name(normalized):
+                entities_by_name.setdefault(normalized, set()).add(index)
+
+    for indexes in entities_by_point.values():
+        for left_index, right_index in combinations(sorted(indexes), 2):
+            consider_pair(left_index, right_index)
+
+    for indexes in entities_by_name.values():
+        for left_index, right_index in combinations(sorted(indexes), 2):
+            consider_pair(left_index, right_index)
+
+    # Preserve the existing SequenceMatcher policy for fuzzy names, but skip
+    # name pairs whose maximum possible ratio is already below threshold.
+    # Its ratio is 2*M/(len(left)+len(right)), with M <= min(lengths).
+    names = sorted(entities_by_name)
+    fuzzy_name_comparisons = 0
+    for left_position, left_name in enumerate(names):
+        left_length = len(left_name)
+        for right_position in range(left_position + 1, len(names)):
+            right_name = names[right_position]
+            right_length = len(right_name)
+            maximum_ratio = 2 * min(left_length, right_length) / (
+                left_length + right_length
+            )
+            if maximum_ratio < fuzzy_name_threshold:
+                continue
+            fuzzy_name_comparisons += 1
+            if fuzzy_name_comparisons > max_fuzzy_name_comparisons:
+                raise ValueError(
+                    "contact match scan exceeds max_fuzzy_name_comparisons"
+                )
+            if (
+                SequenceMatcher(None, left_name, right_name).ratio()
+                < fuzzy_name_threshold
+                and SequenceMatcher(None, right_name, left_name).ratio()
+                < fuzzy_name_threshold
+            ):
+                continue
+            for left_index in sorted(entities_by_name[left_name]):
+                for right_index in sorted(entities_by_name[right_name]):
+                    if left_index < right_index:
+                        consider_pair(left_index, right_index)
+                    else:
+                        consider_pair(right_index, left_index)
     return tuple(candidates[key] for key in sorted(candidates))
 
 

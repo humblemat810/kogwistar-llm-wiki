@@ -177,6 +177,7 @@ def build_workbench_handler(
                     body = api.list_contact_matches(
                         workspace_id=workspace_id,
                         limit=int(_first(query, "limit", "100")),
+                        cursor=_first(query, "cursor", "") or None,
                     )
                 elif parsed.path == "/api/crosslink-groups/pending":
                     workspace_id = _first(query, "workspace_id", "")
@@ -195,6 +196,8 @@ def build_workbench_handler(
                     body = api.list_address_book(
                         workspace_id=workspace_id,
                         limit=int(_first(query, "limit", "500")),
+                        cursor=_first(query, "cursor", "") or None,
+                        query=_first(query, "query", ""),
                     )
                 else:
                     self._write_json({"error": "not_found"}, status=404)

@@ -6,11 +6,16 @@ contains no web framework and delegates all graph access to ``IngestPipeline``.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import inspect
+import json
 import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 from ..compose.options import ComposeOptions, validate_options
@@ -20,7 +25,9 @@ from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
 from ..disambiguation.contact_book import (
     ContactObservationProvider,
+    ContactScanObservationProvider,
     build_address_book_projection,
+    compose_contact_observation_providers,
 )
 from ..disambiguation.contact_matching import (
     ContactIdentityObservation,
@@ -60,6 +67,91 @@ from .workbench_cockpit import (
 AgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot], str]
 ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, ProgressCallback], str]
 
+_MAX_CONTACT_PAGE_SIZE = 1000
+_MAX_CONTACT_SNAPSHOT_ITEMS = 5000
+_MAX_CONTACT_CURSOR_CHARS = 4096
+_MAX_CONTACT_QUERY_CHARS = 200
+
+
+@dataclass(frozen=True, slots=True)
+class _ContactObservationSource:
+    provider: ContactObservationProvider
+    owns_stream: Callable[[str, str], bool]
+    authorize_stream: Callable[[str, str], bool]
+    scan_provider: ContactScanObservationProvider | None = None
+
+
+def _normalize_contact_query(query: str) -> str:
+    if not isinstance(query, str):
+        raise TypeError("contact query must be a string")
+    if len(query) > _MAX_CONTACT_QUERY_CHARS:
+        raise ValueError(f"contact query must be at most {_MAX_CONTACT_QUERY_CHARS} characters")
+    return " ".join(query.casefold().split())
+
+
+def _contact_snapshot_fingerprint(
+    items: Sequence[Mapping[str, object]], *, query: str = ""
+) -> str:
+    payload = json.dumps(
+        {"query": query, "results": items},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _encode_contact_cursor(
+    *, workspace_id: str, kind: str, snapshot_fingerprint: str, offset: int
+) -> str:
+    payload = json.dumps(
+        {
+            "v": 1,
+            "workspace": hashlib.sha256(workspace_id.encode("utf-8")).hexdigest(),
+            "kind": kind,
+            "snapshot": snapshot_fingerprint,
+            "offset": offset,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_contact_cursor(
+    token: str | None,
+    *,
+    workspace_id: str,
+    kind: str,
+    snapshot_fingerprint: str,
+    item_count: int,
+) -> int:
+    if token is None:
+        return 0
+    if not isinstance(token, str) or not token or len(token) > _MAX_CONTACT_CURSOR_CHARS:
+        raise ValueError("contact directory cursor is invalid")
+    try:
+        raw = base64.b64decode(
+            token + "=" * (-len(token) % 4), altchars=b"-_", validate=True
+        )
+        payload = json.loads(raw)
+    except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("contact directory cursor is invalid") from exc
+    expected = {
+        "v": 1,
+        "workspace": hashlib.sha256(workspace_id.encode("utf-8")).hexdigest(),
+        "kind": kind,
+        "snapshot": snapshot_fingerprint,
+    }
+    if not isinstance(payload, Mapping) or any(
+        payload.get(key) != value for key, value in expected.items()
+    ):
+        raise ValueError("contact directory cursor is stale or does not match request")
+    offset = payload.get("offset")
+    if type(offset) is not int or not 0 <= offset <= item_count:
+        raise ValueError("contact directory cursor is invalid")
+    return offset
+
 
 class WorkbenchApi:
     def __init__(
@@ -90,6 +182,8 @@ class WorkbenchApi:
         )
         self._contact_acl_configured = contact_authorize_stream is not None
         self._contact_observation_provider = contact_observation_provider
+        self._contact_observation_sources: dict[str, _ContactObservationSource] = {}
+        self._composed_contact_observation_provider: ContactObservationProvider | None = None
         self.interactions = WorkbenchInteractionStore(pipeline.engines)
         self._confirmation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._confirmation_locks_guard = threading.Lock()
@@ -150,23 +244,112 @@ class WorkbenchApi:
         )
         return {"status": "ok", "workspace_id": workspace_id, "results": results}
 
+    def register_contact_observation_source(
+        self,
+        source_id: str,
+        *,
+        provider: ContactObservationProvider,
+        owns_stream: Callable[[str, str], bool],
+        authorize_stream: Callable[[str, str], bool],
+        scan_provider: ContactScanObservationProvider | None = None,
+    ) -> None:
+        """Register a trusted channel adapter without adding channel policy here."""
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise ValueError("contact source_id must not be empty")
+        if not callable(provider) or not callable(owns_stream) or not callable(authorize_stream):
+            raise TypeError("contact source provider and callbacks must be callable")
+        if scan_provider is not None and not callable(scan_provider):
+            raise TypeError("contact scan provider must be callable")
+        normalized_id = source_id.strip()
+        if normalized_id in self._contact_observation_sources:
+            raise ValueError(f"contact observation source is already registered: {normalized_id}")
+        self._contact_observation_sources[normalized_id] = _ContactObservationSource(
+            provider=provider,
+            owns_stream=owns_stream,
+            authorize_stream=authorize_stream,
+            scan_provider=scan_provider,
+        )
+        self._composed_contact_observation_provider = None
+
+    def contact_scan_observation_providers(
+        self,
+    ) -> dict[str, ContactScanObservationProvider]:
+        """Return explicitly registered source scan adapters for worker bootstrap."""
+        return {
+            source_id: source.scan_provider
+            for source_id, source in self._contact_observation_sources.items()
+            if source.scan_provider is not None
+        }
+
+    def authorize_contact_stream(self, workspace_id: str, stream_id: str) -> bool:
+        """Apply source ownership and host ACL checks for contact evidence."""
+        return self._authorize_contact_stream(workspace_id, stream_id)
+
+    def _authorize_contact_stream(self, workspace_id: str, stream_id: str) -> bool:
+        sources = self._contact_observation_sources
+        if not sources:
+            return bool(
+                self._contact_acl_configured
+                and self._contact_authorize_stream(workspace_id, stream_id)
+            )
+        owners = [
+            source
+            for source in sources.values()
+            if source.owns_stream(workspace_id, stream_id)
+        ]
+        if len(owners) > 1:
+            return False
+        if not owners:
+            return bool(
+                self._contact_acl_configured
+                and self._contact_authorize_stream(workspace_id, stream_id)
+            )
+        source_allowed = bool(owners[0].authorize_stream(workspace_id, stream_id))
+        host_allowed = (
+            self._contact_authorize_stream(workspace_id, stream_id)
+            if self._contact_acl_configured
+            else True
+        )
+        return bool(source_allowed and host_allowed)
+
+    def _contact_provider(self) -> ContactObservationProvider | None:
+        if self._contact_observation_provider is not None and not self._contact_observation_sources:
+            return self._contact_observation_provider
+        if not self._contact_observation_sources and self._contact_observation_provider is None:
+            return None
+        if self._composed_contact_observation_provider is None:
+            providers = {
+                source_id: source.provider
+                for source_id, source in self._contact_observation_sources.items()
+            }
+            if self._contact_observation_provider is not None:
+                providers["host-configured"] = self._contact_observation_provider
+            self._composed_contact_observation_provider = compose_contact_observation_providers(
+                providers
+            )
+        return self._composed_contact_observation_provider
+
+    @property
+    def _contact_acl_available(self) -> bool:
+        return self._contact_acl_configured or bool(self._contact_observation_sources)
+
     def list_contact_matches(
-        self, *, workspace_id: str, limit: int = 100
+        self, *, workspace_id: str, limit: int = 100, cursor: str | None = None
     ) -> dict[str, object]:
-        """List bounded, ACL-visible contact review suggestions."""
+        """Page a bounded, ACL-visible snapshot of contact review suggestions."""
         if not isinstance(workspace_id, str) or not workspace_id.strip():
             raise ValueError("workspace_id must not be empty")
-        if type(limit) is not int or not 1 <= limit <= 1000:
+        if type(limit) is not int or not 1 <= limit <= _MAX_CONTACT_PAGE_SIZE:
             raise ValueError("limit must be between 1 and 1000")
         service = DisambiguationService(self.pipeline.engines)
         candidates = service.list_current_contact_candidates(
             workspace_id=workspace_id,
-            authorize_stream=self._contact_authorize_stream,
-            limit=limit,
+            authorize_stream=self._authorize_contact_stream,
+            limit=_MAX_CONTACT_SNAPSHOT_ITEMS,
         )
         observations = (
             self._load_authorized_contact_observations(workspace_id)
-            if candidates and self._contact_acl_configured
+            if candidates and self._contact_acl_available
             else {}
         )
         results: list[dict[str, object]] = []
@@ -198,11 +381,34 @@ class WorkbenchApi:
                 for item in pair
             ] if current else []
             results.append(result)
+        fingerprint = _contact_snapshot_fingerprint(results)
+        offset = _decode_contact_cursor(
+            cursor,
+            workspace_id=workspace_id,
+            kind="matches",
+            snapshot_fingerprint=fingerprint,
+            item_count=len(results),
+        )
+        page = results[offset : offset + limit]
+        next_offset = offset + len(page)
         return {
             "status": "ok",
             "workspace_id": workspace_id,
-            "candidate_window_may_be_incomplete": len(candidates) >= limit,
-            "results": results,
+            "candidate_window_may_be_incomplete": (
+                len(candidates) >= _MAX_CONTACT_SNAPSHOT_ITEMS
+            ),
+            "snapshot_id": fingerprint,
+            "next_cursor": (
+                _encode_contact_cursor(
+                    workspace_id=workspace_id,
+                    kind="matches",
+                    snapshot_fingerprint=fingerprint,
+                    offset=next_offset,
+                )
+                if next_offset < len(results)
+                else None
+            ),
+            "results": page,
         }
 
     def decide_contact_match(
@@ -237,20 +443,20 @@ class WorkbenchApi:
             raise ValueError("decision must be same_entity or distinct_entities")
         if confirmed is not True:
             raise ValueError("confirmed must be true to record a contact decision")
-        if not self._contact_acl_configured:
+        if not self._contact_acl_available:
             raise PermissionError("contact stream authorization is not configured")
 
         with self._confirmation_lock(workspace_id, f"contact:{candidate_key}"):
             service = DisambiguationService(self.pipeline.engines)
             candidates = service.list_current_contact_candidates(
                 workspace_id=workspace_id,
-                authorize_stream=self._contact_authorize_stream,
-                limit=1000,
+                authorize_stream=self._authorize_contact_stream,
+                limit=_MAX_CONTACT_SNAPSHOT_ITEMS,
             )
             candidate = next((item for item in candidates if item.candidate_key == candidate_key), None)
             if candidate is None:
                 return {"status": "not_found", "workspace_id": workspace_id}
-            if self._contact_observation_provider is None:
+            if self._contact_provider() is None:
                 return {"status": "unavailable", "workspace_id": workspace_id,
                         "reason": "current_contact_evidence_provider_not_configured"}
             observations = self._load_authorized_contact_observations(workspace_id)
@@ -286,11 +492,16 @@ class WorkbenchApi:
     def _load_authorized_contact_observations(
         self, workspace_id: str
     ) -> dict[str, ContactIdentityObservation]:
-        provider = self._contact_observation_provider
+        provider = self._contact_provider()
         if provider is None:
             return {}
-        observations = provider(workspace_id, 1000, self._contact_authorize_stream)
-        if not isinstance(observations, Sequence) or len(observations) > 1000:
+        observations = provider(
+            workspace_id, _MAX_CONTACT_SNAPSHOT_ITEMS, self._authorize_contact_stream
+        )
+        if (
+            not isinstance(observations, Sequence)
+            or len(observations) > _MAX_CONTACT_SNAPSHOT_ITEMS
+        ):
             raise ValueError("contact observation provider must return a bounded sequence")
         by_entity: dict[str, ContactIdentityObservation] = {}
         for observation in observations:
@@ -298,51 +509,119 @@ class WorkbenchApi:
                 raise TypeError("contact observation provider returned an invalid observation")
             if observation.workspace_id != workspace_id:
                 raise ValueError("contact observation provider returned another workspace")
-            if not self._contact_authorize_stream(workspace_id, observation.stream_id):
+            if not self._authorize_contact_stream(workspace_id, observation.stream_id):
                 raise PermissionError("contact observation source stream is not authorized")
             if observation.entity_id in by_entity:
                 raise ValueError("contact observation provider returned duplicate entities")
             by_entity[observation.entity_id] = observation
         return by_entity
 
-    def list_address_book(self, *, workspace_id: str, limit: int = 500) -> dict[str, object]:
-        """Project authorized source claims plus reviewed identity decisions."""
+    def list_address_book(
+        self,
+        *,
+        workspace_id: str,
+        limit: int = 500,
+        cursor: str | None = None,
+        query: str = "",
+    ) -> dict[str, object]:
+        """Page complete, resolved address-book groups from one bounded snapshot."""
         if not isinstance(workspace_id, str) or not workspace_id.strip():
             raise ValueError("workspace_id must not be empty")
-        if type(limit) is not int or not 1 <= limit <= 1000:
+        normalized_query = _normalize_contact_query(query)
+        if type(limit) is not int or not 1 <= limit <= _MAX_CONTACT_PAGE_SIZE:
             raise ValueError("limit must be between 1 and 1000")
-        provider = self._contact_observation_provider
-        if provider is None or not self._contact_acl_configured:
+        provider = self._contact_provider()
+        if provider is None or not self._contact_acl_available:
             return {"status": "unavailable", "workspace_id": workspace_id,
                     "reason": "authorized contact observation provider is not configured",
                     "results": []}
-        observations = provider(workspace_id, limit, self._contact_authorize_stream)
-        if not isinstance(observations, Sequence) or len(observations) > limit:
+        observations = provider(
+            workspace_id, _MAX_CONTACT_SNAPSHOT_ITEMS, self._authorize_contact_stream
+        )
+        if (
+            not isinstance(observations, Sequence)
+            or len(observations) > _MAX_CONTACT_SNAPSHOT_ITEMS
+        ):
             raise ValueError("contact observation provider exceeded limit")
         decisions = DisambiguationService(self.pipeline.engines).list_current_contact_candidates(
             workspace_id=workspace_id,
-            authorize_stream=self._contact_authorize_stream,
-            limit=1000,
+            authorize_stream=self._authorize_contact_stream,
+            limit=_MAX_CONTACT_SNAPSHOT_ITEMS,
         )
         entries = build_address_book_projection(
             observations, decisions,
-            authorize_stream=self._contact_authorize_stream,
-            max_observations=limit,
+            authorize_stream=self._authorize_contact_stream,
+            max_observations=_MAX_CONTACT_SNAPSHOT_ITEMS,
+            max_decisions=_MAX_CONTACT_SNAPSHOT_ITEMS,
         )
+        results = [
+            {
+                "contact_id": entry.contact_id,
+                "entity_ids": list(entry.entity_ids),
+                "display_names": list(entry.display_names),
+                "contact_points": [
+                    {
+                        "point": claim.point.model_dump(mode="json"),
+                        "stream_id": claim.stream_id,
+                        "entity_id": claim.entity_id,
+                        "source_document_ids": list(claim.source_document_ids),
+                        "evidence_revision_ids": list(claim.evidence_revision_ids),
+                        "observed_at_ms": claim.observed_at_ms,
+                    }
+                    for claim in entry.contact_points
+                ],
+            }
+            for entry in entries
+        ]
+        if normalized_query:
+            results = [
+                result
+                for result in results
+                if normalized_query
+                in " ".join(
+                    [
+                        *(str(name) for name in result["display_names"]),
+                        *(
+                            " ".join(
+                                str(value)
+                                for value in (
+                                    claim["point"].get("channel", ""),
+                                    claim["point"].get("provider", ""),
+                                    claim["point"].get("value", ""),
+                                )
+                            )
+                            for claim in result["contact_points"]
+                        ),
+                    ]
+                ).casefold()
+            ]
+        fingerprint = _contact_snapshot_fingerprint(results, query=normalized_query)
+        offset = _decode_contact_cursor(
+            cursor,
+            workspace_id=workspace_id,
+            kind="address_book",
+            snapshot_fingerprint=fingerprint,
+            item_count=len(results),
+        )
+        page = results[offset : offset + limit]
+        next_offset = offset + len(page)
         return {"status": "ok", "workspace_id": workspace_id,
-                "observation_window_may_be_incomplete": len(observations) >= limit,
-                "results": [{"contact_id": entry.contact_id,
-                             "entity_ids": list(entry.entity_ids),
-                             "display_names": list(entry.display_names),
-                             "contact_points": [{
-                                 "point": claim.point.model_dump(mode="json"),
-                                 "stream_id": claim.stream_id,
-                                 "entity_id": claim.entity_id,
-                                 "source_document_ids": list(claim.source_document_ids),
-                                 "evidence_revision_ids": list(claim.evidence_revision_ids),
-                                 "observed_at_ms": claim.observed_at_ms,
-                             } for claim in entry.contact_points]}
-                            for entry in entries]}
+                "observation_window_may_be_incomplete": (
+                    len(observations) >= _MAX_CONTACT_SNAPSHOT_ITEMS
+                    or len(decisions) >= _MAX_CONTACT_SNAPSHOT_ITEMS
+                ),
+                "snapshot_id": fingerprint,
+                "next_cursor": (
+                    _encode_contact_cursor(
+                        workspace_id=workspace_id,
+                        kind="address_book",
+                        snapshot_fingerprint=fingerprint,
+                        offset=next_offset,
+                    )
+                    if next_offset < len(results)
+                    else None
+                ),
+                "results": page}
 
     def readiness(self) -> dict[str, object]:
         """Check that owned engines are open and SQL backends accept a probe."""

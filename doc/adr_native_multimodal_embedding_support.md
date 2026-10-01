@@ -851,10 +851,11 @@ resolve_view -> authorized bytes/text for embedding or answering
 render_hint -> workbench presentation metadata
 ```
 
-Slides, office documents, email with attachments, e-books, maps, medical image
-series, and future audio/video sources can reuse the same asset, occurrence,
-source-map, grounding, projection, and retrieval contracts. A new format should
-normally add an adapter and locator subtype, not new node and edge classes.
+Slides, office documents, message archives with attachments, e-books, maps,
+medical image series, and future audio/video sources can reuse the same asset,
+occurrence, source-map, grounding, projection, and retrieval contracts. A new
+format should normally add an adapter and locator subtype, not new node and
+edge classes.
 
 ## Two-Stage Persistence And Scheduling
 

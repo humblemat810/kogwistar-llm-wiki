@@ -6,6 +6,7 @@ from kogwistar_llm_wiki.disambiguation.contact_matching import (
     ContactIdentityObservation,
     ContactPointClaim,
     contact_evidence_snapshot_id,
+    contact_match_basis,
     discover_contact_match_candidates,
 )
 from kogwistar_llm_wiki.disambiguation.disambiguation_contracts import (
@@ -48,6 +49,9 @@ def test_shared_claim_links_distinct_channels_as_pending_candidate() -> None:
         contact_points=(
             ContactPointClaim(channel="contact", value="address:morgan"),
             phone,
+            ContactPointClaim(
+                channel="im", provider="matrix", value="handle:morgan"
+            ),
         ),
     )
     chat_side = ContactIdentityObservation(
@@ -77,12 +81,183 @@ def test_shared_claim_links_distinct_channels_as_pending_candidate() -> None:
     assert candidate.semantic_decision == DisambiguationDecisionKind.AMBIGUOUS
     assert candidate.metadata["match_basis"] == "shared_contact_point"
     assert candidate.metadata["channels"] == "contact,im,phone"
-    assert candidate.metadata["matched_channels"] == "phone"
+    assert candidate.metadata["matched_channels"] == "im,phone"
     assert candidate.metadata["automatic_merge"] is False
     assert candidate.source_document_ids == ("chat-event:7", "doc:contact-address")
     assert authorized == [("workspace-a", "chat-stream"), ("workspace-a", "source-a")]
     assert "+14155550123" not in candidate.model_dump_json()
     assert "Morgan Lee" not in candidate.model_dump_json()
+
+
+def test_indexed_candidate_generation_matches_exhaustive_pair_semantics() -> None:
+    shared = ContactPointClaim(channel="external_id", value="shared-contact-id")
+    observations = (
+        _observation("person-a", "source-a:one", name="Alice Wong"),
+        _observation("person-b", "chat:one", name="Alicia Wong"),
+        _observation("person-c", "source-a:two", point=shared),
+        _observation(
+            "person-d",
+            "chat:two",
+            name="Different Person",
+            point=ContactPointClaim(channel="external_id", value="shared-contact-id"),
+        ),
+        _observation("person-e", "directory:one", name="Jordan Lee"),
+        _observation("person-f", "directory:two", name="Jordan Lee"),
+        _observation("person-g", "directory:three", name="Unrelated Contact"),
+    )
+    def authorize(_workspace, _stream):
+        return True
+
+    discovered = discover_contact_match_candidates(
+        observations,
+        authorize_stream=authorize,
+    )
+    actual = {
+        candidate.entity_ids: candidate.metadata["match_basis"]
+        for candidate in discovered
+    }
+    ordered = sorted(observations, key=lambda item: item.entity_id)
+    expected = {}
+    for left_index, left in enumerate(ordered):
+        for right in ordered[left_index + 1 :]:
+            basis = contact_match_basis(left, right)
+            if basis is not None:
+                expected[(left.entity_id, right.entity_id)] = basis
+
+    assert actual == expected
+
+
+@pytest.mark.parametrize("threshold", (0.7, 0.86, 0.92, 1.0))
+def test_indexed_candidates_match_exhaustive_alias_and_contact_pairs(threshold: float) -> None:
+    names = (
+        "Alexandra Chen",
+        "Alex Chen",
+        "Alexandre Chen",
+        "A. Chen",
+        "Alexandra Chan",
+        "Morgan Li",
+        "Morgan Lee",
+        "Jo",
+        "Priya Raman",
+        "Priya Ramanan",
+        "Priya R.",
+        "Jordan Smith",
+        "Jordan Smyth",
+    )
+    observations = []
+    for index in range(26):
+        base = _observation(
+            f"person-{index:02d}",
+            f"source:{index:02d}",
+            name=names[index % len(names)],
+        )
+        aliases = (
+            names[(index * 5 + 3) % len(names)],
+            names[(index * 7 + 8) % len(names)],
+        )
+        points = (
+            ContactPointClaim(channel="external_id", value=f"group-{index % 6}"),
+            ContactPointClaim(
+                channel="chat",
+                provider="matrix",
+                value=f"user-{index % 9}",
+            ),
+        )
+        observations.append(
+            base.model_copy(
+                update={
+                    "display_names": tuple(dict.fromkeys((base.display_names[0], *aliases))),
+                    "contact_points": points,
+                }
+            )
+        )
+
+    ordered = sorted(observations, key=lambda item: item.entity_id)
+    expected = {}
+    for left_index, left in enumerate(ordered):
+        for right in ordered[left_index + 1 :]:
+            basis = contact_match_basis(
+                left, right, fuzzy_name_threshold=threshold
+            )
+            if basis is not None:
+                expected[(left.entity_id, right.entity_id)] = basis
+
+    for batch in (observations, reversed(observations)):
+        discovered = discover_contact_match_candidates(
+            batch,
+            authorize_stream=lambda _workspace, _stream: True,
+            fuzzy_name_threshold=threshold,
+        )
+        actual = {
+            candidate.entity_ids: candidate.metadata["match_basis"]
+            for candidate in discovered
+        }
+        assert actual == expected
+
+
+def test_name_length_bound_skips_impossible_fuzzy_comparisons(monkeypatch) -> None:
+    import kogwistar_llm_wiki.disambiguation.contact_matching as matching
+
+    original = matching.SequenceMatcher
+    ratio_calls = 0
+
+    class CountingMatcher:
+        def __init__(self, *args):
+            self._inner = original(*args)
+
+        def ratio(self) -> float:
+            nonlocal ratio_calls
+            ratio_calls += 1
+            return self._inner.ratio()
+
+    monkeypatch.setattr(matching, "SequenceMatcher", CountingMatcher)
+    observations = tuple(
+        _observation(
+            f"person-{index:02d}",
+            f"directory:{index:02d}",
+            name=f"{'X' * name_length} Contact{index}",
+        )
+        for index, name_length in enumerate((10, 20, 40, 60, 100), start=1)
+    )
+
+    assert discover_contact_match_candidates(
+        observations,
+        authorize_stream=lambda *_: True,
+    ) == ()
+    assert ratio_calls < len(observations) * (len(observations) - 1) // 2
+
+
+def test_fuzzy_name_comparison_budget_fails_closed_before_excess_work(monkeypatch) -> None:
+    import kogwistar_llm_wiki.disambiguation.contact_matching as matching
+
+    original = matching.SequenceMatcher
+    ratio_calls = 0
+
+    class CountingMatcher:
+        def __init__(self, *args):
+            self._inner = original(*args)
+
+        def ratio(self) -> float:
+            nonlocal ratio_calls
+            ratio_calls += 1
+            return self._inner.ratio()
+
+    monkeypatch.setattr(matching, "SequenceMatcher", CountingMatcher)
+    observations = tuple(
+        _observation(f"person-{index}", f"source:{index}", name=name)
+        for index, name in enumerate(
+            ("Alessandra Example", "Bernardine Sample", "Christopher Person")
+        )
+    )
+
+    with pytest.raises(ValueError, match="exceeds max_fuzzy_name_comparisons"):
+        discover_contact_match_candidates(
+            observations,
+            authorize_stream=lambda *_: True,
+            max_fuzzy_name_comparisons=1,
+        )
+
+    assert ratio_calls == 2
 
 
 def test_exact_name_candidate_is_deterministic_but_single_common_name_is_ignored() -> None:
@@ -369,7 +544,11 @@ def test_contact_observation_rejects_unbounded_or_controlled_identity_claims(cha
 
 def test_matcher_rejects_boolean_or_noninteger_work_bounds() -> None:
     observation = _observation("person-1", "authorized-source", name="Jordan Smith")
-    for kwargs in ({"max_observations": True}, {"max_candidates": 1.5}):
+    for kwargs in (
+        {"max_observations": True},
+        {"max_candidates": 1.5},
+        {"max_fuzzy_name_comparisons": False},
+    ):
         with pytest.raises(ValueError, match="bounds must be positive"):
             discover_contact_match_candidates(
                 (observation,),

@@ -357,16 +357,65 @@ Costs:
 Initial implementation should add this as maintenance policy and artifact
 handling in `kogwistar-llm-wiki`.
 
-Likely first job kinds:
+Likely job kinds:
 
 - `entity_disambiguation_scan`
 - `entity_disambiguation_reconcile`
 - `entity_disambiguation_review`
 - `entity_disambiguation_patch_proposal`
 
-These should route through the existing maintenance strategy and graph patch
-proposal/apply path where possible.
+`entity_disambiguation_scan` is a deterministic direct maintenance operation:
+it reads bounded typed observations from explicitly injected channel providers,
+checks every requested source stream before reading, proposes candidates, and
+persists immutable review snapshots. It does not invoke an LLM workflow and
+does not merge entities. Channel adapters enqueue this job after an authorized
+source update. The standard maintenance CLI and combined server pass scan
+providers registered by explicitly enabled Workbench extensions into the
+worker; embedded daemon callers can inject the same generic provider map and
+host ACL authorizer. Missing provider or ACL configuration fails closed and
+leaves the durable job retryable.
+The job's stream IDs identify changed trigger sources, not the complete
+comparison scope. A cross-channel provider must authorize each additional
+stream before reading it; the worker rechecks authorization for every returned
+observation before persisting any candidate.
+
+Reconciliation, review, and patch-proposal jobs may use the existing workflow
+and graph-patch paths where appropriate. A user decision remains an explicit
+separate operation; candidate discovery alone cannot produce canonical links.
 
 No core schema change is required for the first implementation. Core changes
 should be considered only if repeated app behavior reveals a genuinely reusable
 primitive.
+
+### Current Scan Bound And Scale-Up Contract
+
+The current automatic maintenance scan is intentionally fail-closed at 250
+observations, 500 generated candidates, and 100,000 eligible fuzzy comparisons
+between distinct normalized names. An oversized result is rejected
+before any candidate snapshot is written or the job acknowledged; it is never
+truncated into an apparently complete scan. The separately paged contact
+directory API may read up to 5,000 observations, but that limit does not apply
+to automatic matching. These are distinct capabilities. Exact-name and
+contact-point indexes reduce common-case pair work, but adversarial alias sets
+can still reach the fuzzy comparison budget and fail closed.
+
+The current matcher compares distinct normalized name pairs, so merely raising
+the scan bound would increase worst-case work quadratically and risk producing
+an unreviewable candidate flood. Large-workspace support therefore requires a
+separate scale-up before changing these bounds:
+
+- source providers expose stable, ACL-scoped snapshot/page cursors and an
+  explicit completion signal; partial pages are never treated as full input;
+- durable continuation covers every required page-pair comparison, with a
+  stable source watermark/fingerprint so changes during a scan invalidate or
+  restart affected work rather than silently mixing revisions;
+- candidate writes remain idempotent immutable review snapshots, with current
+  evidence freshness rechecked before persistence and before completion;
+- the worker records progress and resumes after lease loss/crash without
+  acknowledging an incomplete scan; and
+- tests prove cross-page matches are found, denied pages are not read, and
+  interrupted scans converge without omissions or duplicate decisions.
+
+Until that contract exists, scans above the bound fail visibly and require
+operator/application action; the 5,000-entry contact browsing/search API is
+not evidence that automatic matching supports 5,000 contacts.

@@ -64,7 +64,7 @@ flowchart TB
 - A **file system watcher** that detects new documents in a watched directory and auto-triggers ingestion
 - A **webhook / pub-sub receiver** so external systems can push events into the graph
 - A **timer/cron primitive** native to the workflow graph (e.g., a node with `trigger: "every 1h"` that creates a maintenance job)
-- An **email/calendar/RSS ingestion adapter** â€” for a personal AI OS, the environment is the user's information stream
+- Optional **external information-stream adapters**: channel-specific connectors belong in separately installed plugins, while the host accepts generic events
 
 **Impact:** The system currently requires a human to initiate every cycle. A real OS processes environmental input without being asked.
 

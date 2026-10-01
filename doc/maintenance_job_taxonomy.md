@@ -63,7 +63,7 @@ flowchart TB
 
 ## 4.1 `ingest_followup`
 
-**Purpose**  
+**Purpose**
 Perform first-pass organization immediately after ingest.
 
 **Typical trigger**
@@ -86,7 +86,7 @@ Usually not required for candidate generation. Required later for promotion if p
 
 ## 4.2 `source_link_normalization`
 
-**Purpose**  
+**Purpose**
 Normalize and classify source-native links extracted from documents.
 
 **Typical trigger**
@@ -156,6 +156,42 @@ Find likely useful cross-links across documents, conversation artifacts, and kno
 
 **Human review**  
 Optional for suggestion stage. Recommended before strong promotion.
+
+## 4.5 `entity_disambiguation_scan`
+
+**Purpose**
+Generate bounded, review-only contact identity candidates across explicitly
+selected communication streams.
+
+**Execution**
+This is a deterministic direct maintenance strategy, not a graph-patch
+proposal workflow. When a Workbench extension is explicitly enabled, standard
+maintenance CLI and combined-server bootstrap passes its optional scan
+provider to the worker. The source/plugin adapter enqueues a durable
+`maintenance_job:entity_disambiguation_scan` after an authorized source update.
+The maintenance worker must be configured with trusted channel observation
+providers and the host's stream ACL authorizer. It authorizes every trigger
+stream before invoking providers; providers authorize all additional streams
+before reading. The worker rechecks every returned observation's stream ACL,
+bounds the scan, writes immutable candidate snapshots, verifies lease
+ownership, then acknowledges the job. Missing provider or ACL wiring fails
+closed and retries through the normal durable job policy.
+
+**Outputs**
+Pending `contact_match_candidate` evidence snapshots. They never merge people
+or grant permissions. A person must be explicitly marked SAME_ENTITY or
+DISTINCT_ENTITIES through the review API; later evidence may invalidate the
+snapshot.
+
+**Trigger input**
+Workspace ID and a bounded, unique list of changed/triggering source stream
+IDs. These identify why the scan was queued; they are not a whitelist of all
+evidence streams. A configured cross-channel provider may compare other
+workspace streams, but must authorize each stream before reading it. The worker
+also rechecks ACL for every returned observation before candidate creation.
+
+**Human review**
+Required for any identity decision.
 
 The executable cross-link lifecycle is split into bounded maintenance jobs:
 
