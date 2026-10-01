@@ -1394,3 +1394,15 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   new ingestion was performed after the cutoff. Parsing, ParseView activation,
   crosslink quality, and follow-up/background maintenance therefore remain
   unverified. Do not claim the Bonsai experiment succeeded.
+
+### Post-Cutoff Verification (2026-10-01)
+
+- Without restarting or inspecting the live maintenance stack, verified that
+  all four GitHub workflows for commit `466f5f3229e70d9a224df90144ff300f705a5138`
+  completed successfully: the standard CI matrix, PyPy 3.11 container smoke,
+  experimental PyPy 3.12 beta, and slot/runtime benchmarks.
+- Re-ran the relevant local durable-expansion, parse-session, and configured
+  parser-provider regression suites: `18 passed` in 26.70 seconds.
+- These checks validate code and CI only; they do not change the experiment
+  outcome. No Bonsai parse generation, active ParseView, crosslink quality, or
+  follow-up/background maintenance success has been verified.
