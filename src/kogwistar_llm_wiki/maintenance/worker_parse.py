@@ -359,20 +359,27 @@ class DurableParseMaintenanceWorkerMixin:
             if not (available_ids - consumed_ids).issubset(next_frontier_ids):
                 raise ValueError("layered parser dropped an unconsumed frontier item")
             reconciliation = result.get("reconciliation")
-            review_required = isinstance(reconciliation, Mapping) and bool(
+            reconciliation_review_required = isinstance(reconciliation, Mapping) and bool(
                 reconciliation.get("requires_review")
+            )
+            wall_time_review_required = bool(result.get("wall_time_budget_exceeded"))
+            review_required = reconciliation_review_required or wall_time_review_required
+            terminal_review_required = wall_time_review_required or (
+                stable and reconciliation_review_required
             )
             next_session = next_session.model_copy(
                 update={
                     "phase": (
                         ParseSessionPhase.REVIEW_REQUIRED
-                        if stable and review_required
+                        if terminal_review_required
                         else ParseSessionPhase.STABLE
                         if stable
                         else ParseSessionPhase.EXPANDING
                     ),
                     "failure_reason": (
-                        "reconciliation_review_required" if review_required else None
+                        str(result.get("review_reason") or "reconciliation_review_required")
+                        if terminal_review_required
+                        else None
                     ),
                     "frontier_ids": tuple(item.frontier_id for item in next_frontier),
                     "consumed_frontier_ids": tuple(
@@ -461,6 +468,19 @@ class DurableParseMaintenanceWorkerMixin:
                 store.save(next_session, next_frontier, expected_version=pending_version)
             else:
                 store.save(next_session, next_frontier, expected_version=version)
+            if wall_time_review_required:
+                self._emit_trace(
+                    "maintenance_parse_wall_time_budget_exceeded",
+                    workspace_id=ctx.workspace_id,
+                    source_document_id=str(ctx.payload.get("source_document_id") or ""),
+                    job_id=ctx.job_id,
+                    elapsed_seconds=float(result.get("parse_elapsed_seconds") or 0.0),
+                    budget_seconds=float(result.get("wall_time_budget_seconds") or 0.0),
+                    evidence_persisted=bool(generation_payload and commit_payload and members_payload),
+                    parse_view_activated=False,
+                )
+                self._acknowledge_job(ctx)
+                return
             if stable:
                 if isinstance(members_payload, list) and members_payload:
                     first_member = members_payload[0]
@@ -478,8 +498,6 @@ class DurableParseMaintenanceWorkerMixin:
                         job_id=ctx.job_id,
                         reconciliation=dict(reconciliation),
                     )
-                    if self._advance_maintenance_plan(ctx):
-                        return
                     self._acknowledge_job(ctx)
                     return
                 if self._advance_maintenance_plan(ctx):
@@ -969,11 +987,11 @@ class DurableParseMaintenanceWorkerMixin:
                 request=parser_request,
                 source_document_id=revision_document_id,
             )
-            if (
+            parse_elapsed_seconds = max(0.0, time.monotonic() - parse_started)
+            wall_time_budget_exceeded = (
                 session.wall_time_seconds is not None
-                and time.monotonic() - parse_started > session.wall_time_seconds
-            ):
-                raise TimeoutError("durable parse expansion exceeded wall-time budget")
+                and parse_elapsed_seconds > session.wall_time_seconds
+            )
             extraction = pipeline.translate_parse_result(
                 parse_result=parse_result,
                 source_document_id=revision_document_id,
@@ -1009,10 +1027,19 @@ class DurableParseMaintenanceWorkerMixin:
         stable = not remaining_frontier
         usage_summary = dict(getattr(parse_result, "usage_summary", {}) or {})
         member_diagnostics = {
-            "phase": "parsed_graph_persisted" if stable else "parse_expanding",
+            "phase": (
+                "review_required"
+                if wall_time_budget_exceeded
+                else "parsed_graph_persisted"
+                if stable
+                else "parse_expanding"
+            ),
             "frontier_id": selected.frontier_id,
             "remaining_frontier_count": len(remaining_frontier),
             "llm_call_count": int(usage_summary.get("llm_call_count") or 0),
+            "parse_elapsed_seconds": parse_elapsed_seconds,
+            "wall_time_budget_seconds": session.wall_time_seconds,
+            "wall_time_budget_exceeded": wall_time_budget_exceeded,
         }
         generation_store = ParseGenerationStore(
             self.engines.conversation.meta_sqlite,
@@ -1145,7 +1172,7 @@ class DurableParseMaintenanceWorkerMixin:
             predecessor_view_id = current_view.view_id
             next_view_version = current_view.view_version + 1
         view: ParseView | None = None
-        if stable:
+        if stable and not wall_time_budget_exceeded:
             # A generation can be committed over several bounded worker
             # invocations.  Activate the view only after the final item, and
             # include every committed member so earlier chunks remain visible.
@@ -1197,7 +1224,12 @@ class DurableParseMaintenanceWorkerMixin:
                 "last_progress_at": datetime.now(UTC),
             }
         )
-        if reconciliation.requires_review:
+        if reconciliation.requires_review or wall_time_budget_exceeded:
+            review_reason = (
+                "parse_wall_time_budget_exceeded"
+                if wall_time_budget_exceeded
+                else "reconciliation_review_required"
+            )
             return {
                 "session": next_session.model_dump(mode="json"),
                 "frontier": [item.model_dump(mode="json") for item in remaining_frontier],
@@ -1207,9 +1239,14 @@ class DurableParseMaintenanceWorkerMixin:
                 "commit": commit.model_dump(mode="json"),
                 "members": [member.model_dump(mode="json")],
                 "reconciliation": reconciliation.model_dump(mode="json"),
+                "review_required": True,
+                "review_reason": review_reason,
+                "wall_time_budget_exceeded": wall_time_budget_exceeded,
+                "parse_elapsed_seconds": parse_elapsed_seconds,
+                "wall_time_budget_seconds": session.wall_time_seconds,
                 "diagnostics": {
-                    "phase": "parsed_graph_persisted",
-                    "reason": "reconciliation_review_required",
+                    "phase": "review_required",
+                    "reason": review_reason,
                 },
             }
         return {
@@ -1223,6 +1260,9 @@ class DurableParseMaintenanceWorkerMixin:
             **({"parse_view": view.model_dump(mode="json")} if view is not None else {}),
             "expected_view_version": expected_view_version,
             "reconciliation": reconciliation.model_dump(mode="json"),
+            "wall_time_budget_exceeded": False,
+            "parse_elapsed_seconds": parse_elapsed_seconds,
+            "wall_time_budget_seconds": session.wall_time_seconds,
             "diagnostics": {
                 "phase": "parsed_graph_persisted" if stable else "parse_expanding",
                 "frontier_id": selected.frontier_id,

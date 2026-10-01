@@ -1447,3 +1447,26 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   parsing, active ParseView, graph cross-links, and background/follow-up
   maintenance outcomes remain unverified; the capped maintenance runtime was
   not restarted.
+
+### Durable Parse Wall-Time Overrun Handling (2026-10-01)
+
+- Fixed a loss path in durable expansion: a parser result returned successfully
+  after `wall_time_seconds` previously raised `TimeoutError` before translation
+  and persistence. That discarded the completed model work and left the same
+  frontier available for another expensive attempt.
+- A late result is now translated and persisted as revision-pinned generation
+  evidence, with elapsed/budget values attached to member diagnostics. The
+  session transitions to `review_required`, the current active ParseView is
+  not switched, readiness is not declared, and the maintenance job is
+  acknowledged rather than requeued. A new explicit parser profile/review is
+  required to continue; the wall-time setting remains an overrun detector, not
+  a mechanism that can interrupt an already-running synchronous model call.
+- Stable parse reconciliation that requires review now stops before advancing
+  the maintenance plan, so crosslink follow-up is not launched on a parse view
+  that was not accepted.
+- Tests pass on the updated code: durable expansion `8 passed`; worker
+  orchestration plus maintenance observation `58 passed, 4 warnings`; Ruff,
+  `git diff --check`, and the `.test/` ignore check pass.
+- This is not a live Bonsai result. The capped runtime was not restarted, and
+  no claim is made that a ParseView activated or that finance parsing/crosslink
+  quality passed review.
