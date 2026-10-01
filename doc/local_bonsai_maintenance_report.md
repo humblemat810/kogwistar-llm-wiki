@@ -1373,11 +1373,24 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   unverified.
 - Region-scope hardening follow-up: the active session key includes the
   derivation scope, so distinct targeted regions do not supersede each other.
-  The 15 focused tests and CI-selected Ruff pass after this adjustment; a new
-  GitHub run is required for the latest follow-up commit.
-- Update: commit `5451bae` is pushed to `feat/local-bonsai-maintenance`.
-  GitHub CI, PyPy 3.11 container smoke, and experimental PyPy 3.12 beta are
-  running; slot/runtime benchmarks have passed. The local `v0.5.1` maintenance
-  image rebuilt successfully from this worktree, but the service is still
-  stopped pending activation of a new bounded session. Do not treat the image
-  build or green benchmark workflow as a successful parse.
+  The 15 focused tests and CI-selected Ruff pass after this adjustment.
+
+### Final CI And Monitoring Cutoff (2026-10-01 01:05 UTC)
+
+- Latest code commit `ea40213` passed all four GitHub workflows: CI (including
+  CPython 3.12/3.13/3.14, PyPy 3.11, and Kogwistar Rust checks), PyPy 3.11
+  container smoke, experimental PyPy 3.12 beta, and slot/runtime benchmarks.
+  The full local CI slice was run against the explicitly selected worktree
+  imports and passed `973 passed, 9 skipped, 130 deselected` before the final
+  region-scope refinement; the refinement itself passed 15 focused tests and
+  is covered by the green full GitHub matrix.
+- Rebuilt the local `profchan/kogwistar-llm-wiki:v0.5.1` maintenance image
+  after the region-scope change; image ID is
+  `sha256:ea45498f553f0ba758eb0c8d6ffa8a4b6a11c047a8ef280b4d059da9b8a586ed`.
+  This is a local build only, not a published image.
+- The 10-hour experiment monitoring cutoff was enforced at 00:48 UTC.
+  At cutoff, `llm-wiki-maintenance-1` was stopped (`Exited 137`); Postgres,
+  MCP, and Grafana remained available. No further worker/session monitoring or
+  new ingestion was performed after the cutoff. Parsing, ParseView activation,
+  crosslink quality, and follow-up/background maintenance therefore remain
+  unverified. Do not claim the Bonsai experiment succeeded.
