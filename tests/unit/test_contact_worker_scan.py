@@ -184,28 +184,41 @@ def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> 
             IngestPipeline(engines),
             resource_authorizer=lambda *_: True,
         )
-        observation = _observation("contact:mail", "mailbox:registered")
+        observations = (
+            _observation("contact:mail", "mailbox:registered"),
+            _observation("contact:slack", "slack:registered"),
+        )
         observed_authorizers: list[tuple[str, str]] = []
 
         def authorize(workspace_id: str, stream_id: str) -> bool:
             observed_authorizers.append((workspace_id, stream_id))
-            return workspace_id == "contact-scan-worker" and stream_id == "mailbox:registered"
+            return workspace_id == "contact-scan-worker" and stream_id in {
+                "mailbox:registered",
+                "slack:registered",
+            }
 
-        def scan_source(workspace_id: str, payload, authorize_stream):
-            assert payload["source_stream_ids"] == ("mailbox:registered",)
-            assert authorize_stream(workspace_id, "mailbox:registered")
-            return (observation,)
+        def scan_source_for(stream_id: str, observation: ContactIdentityObservation):
+            def scan_source(workspace_id: str, payload, authorize_stream):
+                # Trigger is only the new email stream; each adapter reads its
+                # own registered stream after authorizing it.
+                assert payload["source_stream_ids"] == ("mailbox:registered",)
+                assert authorize_stream(workspace_id, stream_id)
+                return (observation,)
 
-        api.register_contact_observation_source(
-            "email",
-            provider=lambda *_: (),
-            owns_stream=lambda workspace, stream: (
-                workspace == "contact-scan-worker" and stream == "mailbox:registered"
-            ),
-            authorize_stream=authorize,
-            scan_provider=scan_source,
-        )
-        assert set(api.contact_scan_observation_providers()) == {"email"}
+            return scan_source
+
+        for source_id, observation in zip(("email", "slack"), observations, strict=True):
+            stream_id = observation.stream_id
+            api.register_contact_observation_source(
+                source_id,
+                provider=lambda *_: (),
+                owns_stream=lambda workspace, stream, owned=stream_id: (
+                    workspace == "contact-scan-worker" and stream == owned
+                ),
+                authorize_stream=authorize,
+                scan_provider=scan_source_for(stream_id, observation),
+            )
+        assert set(api.contact_scan_observation_providers()) == {"email", "slack"}
         _enqueue_scan(engines, job_id="scan-registered", streams=["mailbox:registered"])
         worker = MaintenanceWorker(
             engines,
@@ -218,9 +231,13 @@ def test_registered_optional_contact_adapter_flows_into_maintenance_worker() -> 
             workspace_id="contact-scan-worker",
             authorize_stream=api.authorize_contact_stream,
         )
-        assert len(candidates) == 0
-        # A single source observation cannot form a person-match pair.
-        assert observed_authorizers
+        assert len(candidates) == 1
+        assert candidates[0].entity_ids == ("contact:mail", "contact:slack")
+        assert candidates[0].metadata["automatic_merge"] is False
+        assert {stream for _workspace, stream in observed_authorizers} == {
+            "mailbox:registered",
+            "slack:registered",
+        }
         worker.close()
         api.close()
     finally:
