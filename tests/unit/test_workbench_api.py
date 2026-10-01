@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from kogwistar.engine_core.models import Grounding, Node, Span
 
 from kogwistar_llm_wiki import (
@@ -10,7 +11,123 @@ from kogwistar_llm_wiki import (
     WorkspaceNamespaces,
     build_in_memory_namespace_engines,
 )
+from kogwistar_llm_wiki.disambiguation.contact_matching import (
+    ContactIdentityObservation,
+    ContactPointClaim,
+    discover_contact_match_candidates,
+)
+from kogwistar_llm_wiki.disambiguation.disambiguation_contracts import (
+    DisambiguationArtifactStatus,
+    DisambiguationDecisionKind,
+    DisambiguationResolutionSource,
+)
+from kogwistar_llm_wiki.disambiguation.service import DisambiguationService
 from kogwistar_llm_wiki.utils import _temporary_namespace
+
+
+def _contact_observation(entity_id: str, stream_id: str, point: str):
+    return ContactIdentityObservation(
+        workspace_id="directory-paging",
+        stream_id=stream_id,
+        entity_id=entity_id,
+        source_document_ids=(f"doc:{entity_id}",),
+        evidence_revision_ids=(f"revision:{entity_id}",),
+        observed_at_ms=1,
+        display_names=(entity_id,),
+        contact_points=(
+            ContactPointClaim(channel="email", provider="test", value=point),
+        ),
+    )
+
+
+def test_address_book_pages_resolved_groups_and_rejects_stale_cursor():
+    engines = build_in_memory_namespace_engines()
+    try:
+        observations = [
+            _contact_observation("person-a", "mailbox-a", "shared@example.test"),
+            _contact_observation("person-b", "slack-a", "shared@example.test"),
+            _contact_observation("person-c", "mailbox-c", "second@example.test"),
+            _contact_observation("person-d", "slack-d", "second@example.test"),
+            _contact_observation("person-e", "mailbox-e", "other@example.test"),
+        ]
+        def authorize(_workspace: str, _stream: str) -> bool:
+            return True
+
+        candidates = discover_contact_match_candidates(
+            observations[:4], authorize_stream=authorize
+        )
+        reviewed = tuple(
+            candidate.model_copy(
+                update={
+                    "artifact_status": DisambiguationArtifactStatus.RESOLVED,
+                    "resolution_source": DisambiguationResolutionSource.USER,
+                    "semantic_decision": DisambiguationDecisionKind.SAME_ENTITY,
+                    "canonical_entity_id": candidate.entity_ids[0],
+                }
+            )
+            for candidate in candidates
+        )
+        DisambiguationService(engines).persist_contact_candidates(
+            reviewed, authorize_stream=authorize
+        )
+
+        def provide(workspace_id, limit, authorize_stream):
+            assert workspace_id == "directory-paging"
+            assert limit == 5000
+            return tuple(observations)
+
+        api = WorkbenchApi(
+            IngestPipeline(engines),
+            contact_authorize_stream=authorize,
+            contact_observation_provider=provide,
+        )
+        first = api.list_address_book(workspace_id="directory-paging", limit=1)
+        assert len(first["results"]) == 1
+        assert set(first["results"][0]["entity_ids"]) == {"person-a", "person-b"}
+        assert first["next_cursor"]
+
+        second = api.list_address_book(
+            workspace_id="directory-paging", limit=1, cursor=first["next_cursor"]
+        )
+        assert len(second["results"]) == 1
+        assert set(second["results"][0]["entity_ids"]) == {"person-c", "person-d"}
+        assert second["next_cursor"]
+        assert second["snapshot_id"] == first["snapshot_id"]
+
+        third = api.list_address_book(
+            workspace_id="directory-paging", limit=1, cursor=second["next_cursor"]
+        )
+        assert third["results"][0]["entity_ids"] == ["person-e"]
+        assert third["next_cursor"] is None
+
+        first_candidates = api.list_contact_matches(
+            workspace_id="directory-paging", limit=1
+        )
+        second_candidates = api.list_contact_matches(
+            workspace_id="directory-paging", limit=1, cursor=first_candidates["next_cursor"]
+        )
+        assert first_candidates["next_cursor"]
+        assert second_candidates["next_cursor"] is None
+        assert (
+            first_candidates["results"][0]["candidate_key"]
+            != second_candidates["results"][0]["candidate_key"]
+        )
+        with pytest.raises(ValueError, match="cursor is stale"):
+            api.list_contact_matches(
+                workspace_id="other-workspace",
+                limit=1,
+                cursor=first_candidates["next_cursor"],
+            )
+
+        observations.append(
+            _contact_observation("person-f", "matrix-f", "new@example.test")
+        )
+        with pytest.raises(ValueError, match="cursor is stale"):
+            api.list_address_book(
+                workspace_id="directory-paging", limit=1, cursor=first["next_cursor"]
+            )
+    finally:
+        engines.close()
 
 
 def test_workbench_api_returns_serializable_bounded_lens():

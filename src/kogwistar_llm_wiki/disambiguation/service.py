@@ -29,6 +29,8 @@ from .reconciliation import (
     reconcile_disambiguation_candidate,
 )
 
+_MAX_CONTACT_ARTIFACT_SCAN = 5000
+
 DisambiguationAnswerSource = Literal["user", "reviewer", "policy"]
 
 
@@ -148,8 +150,8 @@ class DisambiguationService:
             raise ValueError("workspace_id must not be empty")
         if not callable(authorize_stream):
             raise TypeError("authorize_stream callback is required")
-        if type(limit) is not int or not 1 <= limit <= 1000:
-            raise ValueError("limit must be between 1 and 1000")
+        if type(limit) is not int or not 1 <= limit <= _MAX_CONTACT_ARTIFACT_SCAN:
+            raise ValueError(f"limit must be between 1 and {_MAX_CONTACT_ARTIFACT_SCAN}")
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
             nodes = self.engines.conversation.read.get_nodes(
@@ -212,12 +214,12 @@ class DisambiguationService:
         decision nodes. It does not mutate evidence or apply returned patches.
         """
 
-        if type(limit) is not int or not 1 <= limit <= 1000:
-            raise ValueError("limit must be between 1 and 1000")
+        if type(limit) is not int or not 1 <= limit <= _MAX_CONTACT_ARTIFACT_SCAN:
+            raise ValueError(f"limit must be between 1 and {_MAX_CONTACT_ARTIFACT_SCAN}")
         snapshots = self.list_contact_candidate_snapshots(
             workspace_id=workspace_id,
             authorize_stream=authorize_stream,
-            limit=1000,
+            limit=_MAX_CONTACT_ARTIFACT_SCAN,
         )
         latest_by_key: dict[str, DisambiguationCandidate] = {}
         for candidate in snapshots:
@@ -242,7 +244,7 @@ class DisambiguationService:
                         "workspace_id": workspace_id,
                         "artifact_kind": artifact_kind,
                     },
-                    limit=1000,
+                    limit=_MAX_CONTACT_ARTIFACT_SCAN,
                 )
                 for node in decision_nodes:
                     key = str(node.metadata.get("candidate_key") or "")
