@@ -6,6 +6,7 @@ from kogwistar_llm_wiki.disambiguation.contact_matching import (
     ContactIdentityObservation,
     ContactPointClaim,
     contact_evidence_snapshot_id,
+    contact_match_basis,
     discover_contact_match_candidates,
 )
 from kogwistar_llm_wiki.disambiguation.disambiguation_contracts import (
@@ -83,6 +84,76 @@ def test_shared_claim_links_distinct_channels_as_pending_candidate() -> None:
     assert authorized == [("workspace-a", "chat-stream"), ("workspace-a", "source-a")]
     assert "+14155550123" not in candidate.model_dump_json()
     assert "Morgan Lee" not in candidate.model_dump_json()
+
+
+def test_indexed_candidate_generation_matches_exhaustive_pair_semantics() -> None:
+    shared = ContactPointClaim(channel="email", value="shared@example.test")
+    observations = (
+        _observation("person-a", "email:one", name="Alice Wong"),
+        _observation("person-b", "chat:one", name="Alicia Wong"),
+        _observation("person-c", "email:two", point=shared),
+        _observation(
+            "person-d",
+            "chat:two",
+            name="Different Person",
+            point=ContactPointClaim(channel="email", value="shared@example.test"),
+        ),
+        _observation("person-e", "directory:one", name="Jordan Lee"),
+        _observation("person-f", "directory:two", name="Jordan Lee"),
+        _observation("person-g", "directory:three", name="Unrelated Contact"),
+    )
+    def authorize(_workspace, _stream):
+        return True
+
+    discovered = discover_contact_match_candidates(
+        observations,
+        authorize_stream=authorize,
+    )
+    actual = {
+        candidate.entity_ids: candidate.metadata["match_basis"]
+        for candidate in discovered
+    }
+    ordered = sorted(observations, key=lambda item: item.entity_id)
+    expected = {}
+    for left_index, left in enumerate(ordered):
+        for right in ordered[left_index + 1 :]:
+            basis = contact_match_basis(left, right)
+            if basis is not None:
+                expected[(left.entity_id, right.entity_id)] = basis
+
+    assert actual == expected
+
+
+def test_name_length_bound_skips_impossible_fuzzy_comparisons(monkeypatch) -> None:
+    import kogwistar_llm_wiki.disambiguation.contact_matching as matching
+
+    original = matching.SequenceMatcher
+    ratio_calls = 0
+
+    class CountingMatcher:
+        def __init__(self, *args):
+            self._inner = original(*args)
+
+        def ratio(self) -> float:
+            nonlocal ratio_calls
+            ratio_calls += 1
+            return self._inner.ratio()
+
+    monkeypatch.setattr(matching, "SequenceMatcher", CountingMatcher)
+    observations = tuple(
+        _observation(
+            f"person-{index:02d}",
+            f"directory:{index:02d}",
+            name=f"{'X' * name_length} Contact{index}",
+        )
+        for index, name_length in enumerate((10, 20, 40, 60, 100), start=1)
+    )
+
+    assert discover_contact_match_candidates(
+        observations,
+        authorize_stream=lambda *_: True,
+    ) == ()
+    assert ratio_calls < len(observations) * (len(observations) - 1) // 2
 
 
 def test_exact_name_candidate_is_deterministic_but_single_common_name_is_ignored() -> None:
