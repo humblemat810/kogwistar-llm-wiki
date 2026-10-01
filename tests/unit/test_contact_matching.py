@@ -49,6 +49,9 @@ def test_shared_claim_links_distinct_channels_as_pending_candidate() -> None:
         contact_points=(
             ContactPointClaim(channel="contact", value="address:morgan"),
             phone,
+            ContactPointClaim(
+                channel="im", provider="matrix", value="handle:morgan"
+            ),
         ),
     )
     chat_side = ContactIdentityObservation(
@@ -78,7 +81,7 @@ def test_shared_claim_links_distinct_channels_as_pending_candidate() -> None:
     assert candidate.semantic_decision == DisambiguationDecisionKind.AMBIGUOUS
     assert candidate.metadata["match_basis"] == "shared_contact_point"
     assert candidate.metadata["channels"] == "contact,im,phone"
-    assert candidate.metadata["matched_channels"] == "phone"
+    assert candidate.metadata["matched_channels"] == "im,phone"
     assert candidate.metadata["automatic_merge"] is False
     assert candidate.source_document_ids == ("chat-event:7", "doc:contact-address")
     assert authorized == [("workspace-a", "chat-stream"), ("workspace-a", "source-a")]
