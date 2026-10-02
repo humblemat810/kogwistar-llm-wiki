@@ -13,6 +13,7 @@ from kogwistar.server.auth_middleware import claims_ctx
 from kogwistar.server.chat_service import ChatRunService
 from kogwistar.server.run_registry import RunRegistry
 
+from kogwistar_llm_wiki.configuration.identity import durable_storage_namespace_context
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import (
     IngestPipeline,
@@ -65,7 +66,8 @@ def _request() -> IngestPipelineRequest:
 
 
 def _lane_projection_snapshot(engine, *, inbox_id: str) -> list[tuple[str, str, str, int, int]]:
-    rows = engine.list_projected_lane_messages(inbox_id=inbox_id)
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        rows = engine.list_projected_lane_messages(inbox_id=inbox_id)
     return [
         (row.message_id, row.msg_type, row.status, int(row.seq), int(row.retry_count))
         for row in rows
@@ -104,9 +106,10 @@ def test_lane_message_request_reply_round_trip_is_backend_agnostic(tmp_path: Pat
 
     artifacts = pipeline.run(_request())
 
-    maintenance_rows = engines.conversation.list_projected_lane_messages(
-        inbox_id="inbox:worker:maintenance"
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        maintenance_rows = engines.conversation.list_projected_lane_messages(
+            inbox_id="inbox:worker:maintenance"
+        )
     assert len(maintenance_rows) == 1
     request_row = maintenance_rows[0]
     assert request_row.msg_type == "request.maintenance"
@@ -115,21 +118,51 @@ def test_lane_message_request_reply_round_trip_is_backend_agnostic(tmp_path: Pat
     worker = MaintenanceWorker(engines)
     worker.process_pending_jobs("demo")
 
-    maintenance_after = engines.conversation.list_projected_lane_messages(
-        inbox_id="inbox:worker:maintenance"
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        maintenance_after = engines.conversation.list_projected_lane_messages(
+            inbox_id="inbox:worker:maintenance"
+        )
     assert len(maintenance_after) == 1
     assert maintenance_after[0].message_id == request_row.message_id
     assert maintenance_after[0].status == "completed"
 
-    foreground_rows = engines.conversation.list_projected_lane_messages(
-        inbox_id="inbox:foreground"
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        foreground_rows = engines.conversation.list_projected_lane_messages(
+            inbox_id="inbox:foreground"
+        )
     assert len(foreground_rows) == 1
     assert foreground_rows[0].msg_type == "reply.maintenance.completed"
     assert foreground_rows[0].correlation_id == request_row.message_id
 
     assert artifacts.maintenance_job_id
+
+
+def test_maintenance_reply_without_authority_claims_stays_in_background_namespace(
+    tmp_path: Path,
+) -> None:
+    engines = build_in_memory_namespace_engines(tmp_path / "lane-background-namespace")
+    pipeline = IngestPipeline(engines)
+    materialize_maintenance_designs(engines.workflow)
+    artifacts = pipeline.run(_request())
+
+    MaintenanceWorker(engines).process_pending_jobs("demo")
+
+    namespace = WorkspaceNamespaces("demo").conv_bg
+    background_rows = engines.conversation.meta_sqlite.list_projected_lane_messages(
+        namespace=namespace,
+        inbox_id="inbox:foreground",
+    )
+    default_rows = engines.conversation.meta_sqlite.list_projected_lane_messages(
+        namespace=engines.conversation.namespace,
+        inbox_id="inbox:foreground",
+    )
+
+    assert any(
+        row.msg_type == "reply.maintenance.completed"
+        and row.conversation_id == f"maintenance:{artifacts.source_document_id}"
+        for row in background_rows
+    )
+    assert not any(row.msg_type == "reply.maintenance.completed" for row in default_rows)
 
 
 def test_repeated_sync_ingest_reuses_maintenance_request_message(tmp_path: Path):
@@ -141,9 +174,10 @@ def test_repeated_sync_ingest_reuses_maintenance_request_message(tmp_path: Path)
     second = pipeline.run(_request())
 
     assert second.maintenance_job_id == first.maintenance_job_id
-    maintenance_rows = engines.conversation.list_projected_lane_messages(
-        inbox_id="inbox:worker:maintenance"
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        maintenance_rows = engines.conversation.list_projected_lane_messages(
+            inbox_id="inbox:worker:maintenance"
+        )
     assert len(maintenance_rows) == 1
     jobs = engines.conversation.meta_sqlite.list_index_jobs(
         namespace=WorkspaceNamespaces("demo").maintenance_jobs,
@@ -213,26 +247,28 @@ def test_lane_message_projection_claim_ack_requeue_contract_is_backend_agnostic(
     assert before[0][1] == "request.maintenance"
     assert before[0][2] == "pending"
 
-    claimed = engines.conversation.claim_projected_lane_messages(
-        inbox_id="inbox:worker:maintenance",
-        claimed_by="test-worker",
-        limit=1,
-        lease_seconds=30,
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        claimed = engines.conversation.claim_projected_lane_messages(
+            inbox_id="inbox:worker:maintenance",
+            claimed_by="test-worker",
+            limit=1,
+            lease_seconds=30,
+        )
     assert len(claimed) == 1
     assert claimed[0].status == "claimed"
 
-    engines.conversation.requeue_projected_lane_message(
-        message_id=claimed[0].message_id,
-        claimed_by="test-worker",
-        error={"reason": "retry"},
-        delay_seconds=0,
-    )
-    engines.conversation.update_lane_message_status(
-        message_id=claimed[0].message_id,
-        status="pending",
-        error={"reason": "retry"},
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        engines.conversation.requeue_projected_lane_message(
+            message_id=claimed[0].message_id,
+            claimed_by="test-worker",
+            error={"reason": "retry"},
+            delay_seconds=0,
+        )
+        engines.conversation.update_lane_message_status(
+            message_id=claimed[0].message_id,
+            status="pending",
+            error={"reason": "retry"},
+        )
 
     after_requeue = _lane_projection_snapshot(
         engines.conversation,
@@ -241,22 +277,24 @@ def test_lane_message_projection_claim_ack_requeue_contract_is_backend_agnostic(
     assert after_requeue[0][2] == "pending"
     assert after_requeue[0][4] == 1
 
-    claimed_again = engines.conversation.claim_projected_lane_messages(
-        inbox_id="inbox:worker:maintenance",
-        claimed_by="test-worker",
-        limit=1,
-        lease_seconds=30,
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        claimed_again = engines.conversation.claim_projected_lane_messages(
+            inbox_id="inbox:worker:maintenance",
+            claimed_by="test-worker",
+            limit=1,
+            lease_seconds=30,
+        )
     assert len(claimed_again) == 1
-    engines.conversation.ack_projected_lane_message(
-        message_id=claimed_again[0].message_id,
-        claimed_by="test-worker",
-    )
-    engines.conversation.update_lane_message_status(
-        message_id=claimed_again[0].message_id,
-        status="completed",
-        completed=True,
-    )
+    with durable_storage_namespace_context(WorkspaceNamespaces("demo").conv_bg):
+        engines.conversation.ack_projected_lane_message(
+            message_id=claimed_again[0].message_id,
+            claimed_by="test-worker",
+        )
+        engines.conversation.update_lane_message_status(
+            message_id=claimed_again[0].message_id,
+            status="completed",
+            completed=True,
+        )
 
     after_ack = _lane_projection_snapshot(
         engines.conversation,

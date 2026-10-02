@@ -25,14 +25,14 @@ from ..maintenance.maintenance_planner import DEFAULT_DOCUMENT_MAINTENANCE_PLAN
 from ..models import (
     IngestPipelineRequest,
 )
+from ..parsing.parse_session_store import parse_session_scope_id
 from ..parsing.parse_views import (
     ParseTarget,
     ParseViewStore,
     parse_session_id,
     reparse_session_id,
 )
-from ..parsing.parse_session_store import parse_session_scope_id
-from ..utils import _temporary_namespace
+from ..utils import _background_namespace, _temporary_namespace
 
 
 class ParseSourceResult(Protocol):
@@ -230,7 +230,7 @@ class MaintenanceRequestMixin:
                     "parse_target": target.model_dump(mode="json") if target is not None else None,
                 },
             )
-            with _temporary_namespace(self.engines.conversation, namespace):
+            with _background_namespace(self.engines.conversation, namespace):
                 self.engines.conversation.write.add_node(node)
             request_node_id = str(node.id)
         else:
@@ -245,7 +245,7 @@ class MaintenanceRequestMixin:
                 request_fingerprint,
             )
         )
-        with _temporary_namespace(self.engines.conversation, namespace):
+        with _background_namespace(self.engines.conversation, namespace):
             existing_messages = self.engines.conversation.read.get_nodes(
                 where={
                     "$and": [
@@ -256,7 +256,7 @@ class MaintenanceRequestMixin:
                 limit=1,
             )
         existing_lane_message_id = str(existing_messages[0].id) if existing_messages else None
-        with _temporary_namespace(self.engines.conversation, namespace):
+        with _background_namespace(self.engines.conversation, namespace):
             lane_message = self.engines.conversation.send_lane_message(
                 conversation_id=f"maintenance:{source_document_id}",
                 inbox_id="inbox:worker:maintenance",
@@ -457,7 +457,7 @@ class MaintenanceRequestMixin:
                 "workflow_status": history_payload["workflow_status"],
             },
         )
-        with _temporary_namespace(self.engines.conversation, namespace):
+        with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
         self._trace_step(
             "create_parse_retry_history_complete",
@@ -514,7 +514,7 @@ class MaintenanceRequestMixin:
             label=f"Candidate link: {request.title}",
             summary=f"Candidate link derived from {parse_result.semantic_tree.title}",
         )
-        with _temporary_namespace(self.engines.conversation, namespace):
+        with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
         self._trace_step(
             "create_candidate_link_complete",
@@ -588,7 +588,7 @@ class MaintenanceRequestMixin:
                 "review_namespace": self.namespaces_for(request.workspace_id).review,
             },
         )
-        with _temporary_namespace(self.engines.conversation, namespace):
+        with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
         self._trace_step(
             "create_promotion_candidate_complete",
@@ -671,7 +671,7 @@ class MaintenanceRequestMixin:
                 "promotion_evidence_pack_digest": _metadata_digest_value(digest.model_dump(mode="python")),
             },
         )
-        with _temporary_namespace(self.engines.conversation, namespace):
+        with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
         self._trace_step(
             "create_promotion_evidence_pack_complete",

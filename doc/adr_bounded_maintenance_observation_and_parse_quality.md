@@ -532,6 +532,32 @@ isolation smoke passed. The live pgvector check provisions `vector` before
 creating profile-scoped tables and verifies two incompatible dimensions remain
 isolated.
 
+## Provider-Backed Background Cross-Link Group Status
+
+The implementation now has the following guarded behavior:
+
+- [x] Cross-link evidence is host-selected and requires an exact character
+  span and excerpt match against the current immutable source revision.
+- [x] Invalid provider groups are rejected independently and do not prevent
+  valid groups from continuing through critic review.
+- [x] Rejected groups, pending reviews, stage traces, and terminal run
+  summaries are persisted in the background maintenance conversation lane,
+  separate from foreground user conversation records.
+- [x] Cross-link runs carry a stable workspace, request, job, worker, attempt,
+  workflow-version, and maintenance-run identity.
+- [x] Conflicting cross-link graph resources use durable named-projection CAS
+  leases at apply time; a conflicting job is requeued rather than applied.
+- [ ] A live two-worker execution has not yet been run against the production
+  PostgreSQL setup; the durable queue and lock paths still require that gate.
+- [ ] The bounded Bonsai 2 evaluation remains blocked until the model endpoint
+  is confirmed available and a live run satisfies the existing parse-quality
+  and cross-link-quality cutoff.
+
+These implementation checks do not claim that a live provider run has created
+valid semantic links. Live evidence must still include provider calls, exact
+source grounding, critic decisions, durable traces and summaries, and any
+resulting graph mutations.
+
 ## Explicit Non-Goals
 
 - No replacement Kogwistar node, edge, or hyperedge model.

@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
-from ..utils import _temporary_namespace
+from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_patches import (
     MaintenanceOperationKind,
     MaintenancePatch,
@@ -307,7 +307,7 @@ def apply_maintenance_patch_for_scope(
                 protected_raw_edge_ids=protected_raw_edge_ids,
             )
 
-    with _temporary_namespace(engines.conversation, ns.conv_bg):
+    with _background_namespace(engines.conversation, ns.conv_bg):
         scope_issues = _non_workspace_scope_issues(engines.conversation, patch)
         if scope_issues:
             validation = MaintenancePatchValidationReport(valid=False, issues=scope_issues)
@@ -409,7 +409,7 @@ def _derived_crosslink_retraction_issues(
         return []
     try:
         edges = _read_entities_by_ids(engine, "edge", target_ids)
-    except Exception:
+    except Exception:  # noqa: BLE001 - unreadable targets fail closed as invalid
         edges = []
     by_id = {str(edge.id): edge for edge in edges}
     issues: list[MaintenancePatchValidationIssue] = []

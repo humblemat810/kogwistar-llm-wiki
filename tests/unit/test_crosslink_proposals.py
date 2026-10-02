@@ -382,6 +382,7 @@ def _fake_proposal_worker(
     records: dict[str, list[object]] = {
         "critic_calls": [],
         "reviews": [],
+        "rejections": [],
         "apply_jobs": [],
         "finished": [],
         "traces": [],
@@ -403,6 +404,16 @@ def _fake_proposal_worker(
                 "group": group,
                 "critic": review,
                 "status": status,
+            })
+            or f"artifact:{group_id}"
+        )
+    )
+    worker._persist_crosslink_group_rejection = (
+        lambda _ctx, group_id, group, error: (
+            records["rejections"].append({
+                "group_id": group_id,
+                "group": group,
+                "error": error,
             })
             or f"artifact:{group_id}"
         )
@@ -450,6 +461,73 @@ def _evidence_pair() -> list[CrosslinkEvidence]:
         )
         for index in range(4)
     ]
+
+
+def test_crosslink_resource_leases_serialize_conflicting_runs() -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.rows: dict[tuple[str, str], dict[str, object]] = {}
+
+        def get_named_projection(self, namespace: str, key: str) -> dict[str, object] | None:
+            return self.rows.get((namespace, key))
+
+        def compare_and_swap_named_projections(self, updates: list[dict[str, object]]) -> bool:
+            for item in updates:
+                current = self.rows.get((str(item["namespace"]), str(item["key"])))
+                expected = (
+                    item.get("expected_last_authoritative_seq"),
+                    item.get("expected_last_materialized_seq"),
+                )
+                actual = (
+                    current.get("last_authoritative_seq"),
+                    current.get("last_materialized_seq"),
+                ) if current else (None, None)
+                if expected != actual:
+                    return False
+            for item in updates:
+                self.rows[(str(item["namespace"]), str(item["key"]))] = dict(item)
+            return True
+
+    store = Store()
+    engines = SimpleNamespace(conversation=SimpleNamespace(meta_sqlite=store))
+    worker = object.__new__(MaintenanceExecutionWorkerMixin)
+    worker.engines = engines
+    worker.worker_id = "worker-a"
+    patch = MaintenancePatch(
+        patch_id="lease-patch",
+        intent=MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
+        scope=MaintenanceScope(workspace_id="lease-workspace"),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="link",
+                kind=MaintenanceOperationKind.ADD_EDGE,
+                edge_id="edge:shared",
+                from_node_id="node:left",
+                to_node_id="node:right",
+                relation="related_to",
+                properties={"crosslink_status": "candidate"},
+            )
+        ],
+    )
+    first = MaintenanceJobExecutionContext(
+        workspace_id="lease-workspace", job=None, job_id="job-a",
+        payload={"maintenance_run_id": "run-a"}, request_node=None,
+        request_node_id="request-a", lane_message_id="",
+        maintenance_kind="document_validate_crosslinks",
+    )
+    second = first.__class__(
+        workspace_id="lease-workspace", job=None, job_id="job-b",
+        payload={"maintenance_run_id": "run-b"}, request_node=None,
+        request_node_id="request-b", lane_message_id="",
+        maintenance_kind="document_validate_crosslinks",
+    )
+
+    keys = worker._acquire_crosslink_resource_locks(first, patch)
+    assert keys
+    assert worker._acquire_crosslink_resource_locks(second, patch) is None
+    worker._release_crosslink_resource_locks(first, keys)
+    assert worker._acquire_crosslink_resource_locks(second, patch) == keys
+    worker._release_crosslink_resource_locks(second, keys)
 
 
 def _proposal_group(
@@ -522,8 +600,10 @@ def test_background_provider_rejects_malformed_unknown_and_duplicate_operations(
     worker, records = _fake_proposal_worker(
         _evidence_pair(), proposal, _critic_reply(_evidence_pair()[:2], "approve")
     )
-    with pytest.raises((ValueError, ValidationError), match=error_match):
-        worker._propose_background_crosslink_groups(records["context"][0])
+    worker._propose_background_crosslink_groups(records["context"][0])
+    assert len(records["rejections"]) == 1
+    assert error_match.replace("|", " ").split()[0] in str(records["rejections"][0]["error"])
+    assert records["finished"][0]["rejected"] == 1
     assert records["apply_jobs"] == []
 
 
@@ -738,7 +818,7 @@ def test_fake_provider_human_review_pins_every_source_and_queues_fenced_revalida
 
     with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
         maintenance_messages = pipeline.engines.conversation.read.get_nodes(
-            where={"kind": "lane_message"}, limit=200
+            limit=500
         )
     stage_messages = [
         node for node in maintenance_messages
@@ -764,6 +844,17 @@ def test_fake_provider_human_review_pins_every_source_and_queues_fenced_revalida
         and "reasoning" not in payload
         for payload in stage_payloads
     )
+    summaries = [
+        node for node in maintenance_messages
+        if node.metadata.get("artifact_kind") == "maintenance_run_summary"
+    ]
+    assert len(summaries) == 1
+    summary_metadata = dict(summaries[0].metadata or {})
+    assert summary_metadata["maintenance_run_id"]
+    assert summary_metadata["workspace_id"] == workspace_id
+    assert summary_metadata["groups_proposed"] == 1
+    assert summary_metadata["groups_pending"] == 1
+    assert summary_metadata["trace_persistence_complete"] is True
 
     # Re-emitting a transition must not create a second maintenance record.
     worker._trace_crosslink_workflow_stage(
