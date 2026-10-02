@@ -20,10 +20,10 @@ from kogwistar_llm_wiki.maintenance.crosslink_reviews import (
     CrosslinkGroupReviewService,
     CrosslinkReviewConflict,
 )
-from kogwistar_llm_wiki.maintenance.maintenance_strategies import MaintenanceJobExecutionContext
 from kogwistar_llm_wiki.maintenance.maintenance_designs import (
     build_crosslink_group_design,
 )
+from kogwistar_llm_wiki.maintenance.maintenance_guards import source_digest
 from kogwistar_llm_wiki.maintenance.maintenance_patch_apply import (
     apply_maintenance_patch,
 )
@@ -39,14 +39,20 @@ from kogwistar_llm_wiki.maintenance.maintenance_policy import (
     CROSSLINK_GROUP_WORKFLOW_ID,
     workflow_id_for_maintenance_kind,
 )
-from kogwistar_llm_wiki.utils import _temporary_namespace
-from kogwistar_llm_wiki.maintenance.maintenance_guards import source_digest
-from kogwistar_llm_wiki.maintenance.worker_execution import MaintenanceExecutionWorkerMixin
-from kogwistar_llm_wiki.maintenance.worker_selection import MaintenanceSelectionWorkerMixin
+from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+)
 from kogwistar_llm_wiki.maintenance.state import (
     durable_maintenance_usage,
     metadata_mapping,
 )
+from kogwistar_llm_wiki.maintenance.worker_execution import (
+    MaintenanceExecutionWorkerMixin,
+)
+from kogwistar_llm_wiki.maintenance.worker_selection import (
+    MaintenanceSelectionWorkerMixin,
+)
+from kogwistar_llm_wiki.utils import _temporary_namespace
 
 
 def test_proposal_response_is_bounded_and_rejects_unknown_fields() -> None:
@@ -729,6 +735,50 @@ def test_fake_provider_human_review_pins_every_source_and_queues_fenced_revalida
         "pending", "outcome", "continue",
     }
     assert all(str(item["workflow_node_id"]) in workflow_node_ids for item in stage_traces)
+
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        maintenance_messages = pipeline.engines.conversation.read.get_nodes(
+            where={"kind": "lane_message"}, limit=200
+        )
+    stage_messages = [
+        node for node in maintenance_messages
+        if node.metadata.get("msg_type") == "maintenance.workflow.stage"
+    ]
+    assert stage_messages
+    stage_payloads = [
+        json.loads(str(node.metadata["payload_json"])) for node in stage_messages
+    ]
+    assert {str(item["workflow_stage"]) for item in stage_payloads} >= {
+        "select", "evidence", "propose", "validate", "critic", "route",
+        "pending", "outcome", "continue",
+    }
+    assert all(
+        node.metadata.get("namespace") == ns.conv_bg
+        and node.metadata.get("conversation_id") == "maintenance:provider-e2e-request"
+        and node.metadata.get("purpose") == "internal"
+        for node in stage_messages
+    )
+    assert all(
+        "rationale" not in payload
+        and "explanation" not in payload
+        and "reasoning" not in payload
+        for payload in stage_payloads
+    )
+
+    # Re-emitting a transition must not create a second maintenance record.
+    worker._trace_crosslink_workflow_stage(
+        ctx, "pending", "pending", group_id="provider-group", artifact_id=str(pending[0].id)
+    )
+    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        repeated_messages = pipeline.engines.conversation.read.get_nodes(
+            where={"kind": "lane_message"}, limit=200
+        )
+    assert len([
+        node for node in repeated_messages
+        if node.metadata.get("msg_type") == "maintenance.workflow.stage"
+        and json.loads(str(node.metadata["payload_json"])).get("workflow_stage") == "pending"
+        and json.loads(str(node.metadata["payload_json"])).get("outcome") == "pending"
+    ]) == 1
 
     decision = service.decide_batch(
         workspace_id=workspace_id,

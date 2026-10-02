@@ -18,10 +18,10 @@ from kogwistar.runtime.budget import (
     StateBackedBudgetLedger,
 )
 from kogwistar.runtime.models import RunSuccess
-from kogwistar.server.auth_middleware import can_access_security_scope
+from kogwistar.server.auth_middleware import can_access_security_scope, claims_ctx
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 
-from ..configuration.identity import runtime_authority_context
+from ..configuration.identity import durable_claims_context, runtime_authority_context
 from ..configuration.workspace import WorkspaceNamespaces
 from ..maintenance import (
     MaintenanceJobExecutionContext,
@@ -74,10 +74,22 @@ from .state import (
 from .state import (
     maintenance_budget_state as _maintenance_budget_state,
 )
+from .state import metadata_mapping
 from .state import (
     persisted_budget_state as _persisted_budget_state,
 )
-from .state import metadata_mapping
+
+_CROSSLINK_STAGE_FIELDS = frozenset({
+    "group_id",
+    "artifact_id",
+    "operation_count",
+    "group_count",
+    "approval_mode",
+    "critic_verdict",
+    "pending_groups",
+    "automatic_groups",
+    "rejected_groups",
+})
 
 logger = logging.getLogger(__name__)
 
@@ -1029,7 +1041,12 @@ class MaintenanceExecutionWorkerMixin:
         outcome: str,
         **fields: object,
     ) -> None:
-        """Attach real worker transitions to their materialized workflow nodes."""
+        """Record a bounded maintenance transition and its workflow node identity.
+
+        The durable record deliberately uses the background maintenance lane.  It
+        shares the conversation engine backend with other lanes, but it is not a
+        user conversation and never stores provider rationale or hidden reasoning.
+        """
         workflow_id = workflow_id_for_maintenance_kind(ctx.maintenance_kind)
         workflow_node_id = str(stable_id("wf_node", workflow_id, stage))
         self._emit_trace(
@@ -1044,6 +1061,62 @@ class MaintenanceExecutionWorkerMixin:
             outcome=outcome,
             **fields,
         )
+        try:
+            safe_fields: dict[str, str | int | float | bool | None] = {}
+            for key in _CROSSLINK_STAGE_FIELDS:
+                value = fields.get(key)
+                if isinstance(value, str):
+                    safe_fields[key] = value[:200]
+                elif value is None or isinstance(value, (bool, int, float)):
+                    safe_fields[key] = value
+            stage_payload = {
+                "workspace_id": ctx.workspace_id,
+                "job_id": ctx.job_id,
+                "request_node_id": ctx.request_node_id,
+                "maintenance_kind": ctx.maintenance_kind,
+                "workflow_id": workflow_id,
+                "workflow_node_id": workflow_node_id,
+                "workflow_stage": stage,
+                "outcome": outcome,
+                **safe_fields,
+            }
+            stage_key = str(
+                stable_id(
+                    "maintenance_workflow_stage",
+                    ctx.workspace_id,
+                    ctx.job_id,
+                    ctx.request_node_id,
+                    workflow_id,
+                    stage,
+                    outcome,
+                    json.dumps(safe_fields, sort_keys=True, separators=(",", ":")),
+                )
+            )
+            namespace = WorkspaceNamespaces(ctx.workspace_id).conv_bg
+            existing_claims = dict(claims_ctx.get() or {})
+            existing_claims["storage_ns"] = namespace
+            with durable_claims_context(existing_claims), _temporary_namespace(
+                self.engines.conversation, namespace
+            ):
+                self.engines.conversation.send_lane_message(
+                    conversation_id=f"maintenance:{ctx.request_node_id}",
+                    inbox_id="inbox:worker:maintenance:trace",
+                    sender_id="lane:worker:maintenance",
+                    recipient_id="lane:worker:maintenance-trace",
+                    msg_type="maintenance.workflow.stage",
+                    purpose="internal",
+                    payload=stage_payload,
+                    idempotency_key=stage_key,
+                )
+        except Exception as exc:  # noqa: BLE001 - trace persistence must be visible
+            self._emit_trace(
+                "maintenance_workflow_trace_persistence_failed",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                request_node_id=ctx.request_node_id,
+                workflow_stage=stage,
+                error_type=type(exc).__name__,
+            )
 
     def _collect_crosslink_evidence(
         self, ctx: MaintenanceJobExecutionContext
@@ -1203,6 +1276,7 @@ class MaintenanceExecutionWorkerMixin:
     ) -> ProviderUsageCallback:
         """Debit and durably record one bounded provider call before invoking it."""
         from kogwistar.runtime import BudgetAttribution
+
         from ..usage.events import persist_usage_events
 
         request_budgets = ctx.payload.get("budgets")

@@ -1662,3 +1662,27 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   `background_enabled=false`, `request_enabled=true`, profile `lite`, and no
   deferred cycle. Background scheduling is therefore still disabled at the
   current cutoff; this recheck did not alter that persisted control state.
+
+### Maintenance Workflow Trace Persistence Check (2026-10-02)
+
+- The provider-backed background cross-link lifecycle now persists a bounded
+  `maintenance.workflow.stage` lane message for each stage transition. The
+  record uses the workspace background maintenance namespace, the dedicated
+  `maintenance:<request-node>` conversation ID, and an internal maintenance
+  sender/recipient pair. It is not added to the foreground/user interaction
+  conversation even though both lanes may use the same graph engine backend.
+- Persisted stage payloads contain only workflow identity, stage/outcome, job
+  identity, and an allowlisted set of bounded scalar group fields. Provider
+  rationale, critic explanation, source excerpts, and hidden reasoning are not
+  copied into the stage trace; concise review rationale remains in the separate
+  group review artifact where the existing ACL and revision fences apply.
+- Deterministic idempotency keys make repeated delivery of the same stage
+  transition produce one maintenance record. The implementation also preserves
+  the worker's durable claims while explicitly binding storage to `conv_bg`.
+- The focused cross-link proposal and worker orchestration suites pass:
+  `48 passed, 4 warnings in 166.62s`. The tests cover namespace/conversation
+  separation, lifecycle stage coverage, idempotent stage persistence, provider
+  routing, and existing workflow graph behavior.
+- This is code-level observability evidence only. No Bonsai request, background
+  cycle, ingestion, graph mutation, or live quality evaluation was run. The
+  prior Bonsai quality gate remains `FAIL` and corpus expansion remains `HOLD`.
