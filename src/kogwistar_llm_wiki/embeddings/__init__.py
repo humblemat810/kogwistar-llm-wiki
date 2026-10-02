@@ -93,6 +93,18 @@ _EXPORT_MODULES = {
     **dict.fromkeys(
         ("VllmEmbeddingSettings", "VllmMultimodalEncoder"), ".vllm_remote"
     ),
+    **dict.fromkeys(
+        (
+            "EvidenceEvent",
+            "EvidenceSubscription",
+            "FeedState",
+            "MultimodalRecallTiming",
+            "MultimodalRetrievalSidecar",
+            "SynchronousMultimodalRecall",
+            "synchronous_multimodal_recall",
+        ),
+        ".retrieval_experiment",
+    ),
 }
 
 __all__ = [
@@ -112,9 +124,12 @@ __all__ = [
     "EmbeddingSet",
     "EvidenceClosureResolver",
     "EvidenceClosureValidator",
+    "EvidenceEvent",
     "EvidencePack",
     "EvidencePackReference",
+    "EvidenceSubscription",
     "FakeMultimodalEncoder",
+    "FeedState",
     "GroundingComposition",
     "GroundingValidationError",
     "HigherOrderGrounding",
@@ -125,6 +140,8 @@ __all__ = [
     "MultimodalEncoder",
     "MultimodalImageQueryEncoder",
     "MultimodalProjectionStore",
+    "MultimodalRecallTiming",
+    "MultimodalRetrievalSidecar",
     "MultimodalSearchHit",
     "MultimodalSourceBundle",
     "MultimodalSourceUnit",
@@ -135,6 +152,7 @@ __all__ = [
     "ResolvedEntityGrounding",
     "SQLiteMultimodalProjectionStore",
     "SourceEvidenceRef",
+    "SynchronousMultimodalRecall",
     "TinyEmbeddingFunction",
     "VllmEmbeddingSettings",
     "VllmMultimodalEncoder",
@@ -148,6 +166,7 @@ __all__ = [
     "resolve_embedding_functions",
     "score_embedding_sets",
     "split_text_units",
+    "synchronous_multimodal_recall",
     "to_core_embedding_profile",
     "validate_shared_postgres_embedding_profile",
     "video_interval_unit",

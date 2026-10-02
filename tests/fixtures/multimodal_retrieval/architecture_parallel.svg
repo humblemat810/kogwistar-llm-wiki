@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220">
+  <title>Fixture: parallel text and multimodal retrieval</title>
+  <rect width="720" height="220" fill="#f7f7f2"/>
+  <text x="24" y="32" font-family="sans-serif" font-size="18">FIXTURE DATA: parallel retrieval architecture</text>
+  <rect x="30" y="70" width="190" height="70" fill="#d8e8ff" stroke="#234"/>
+  <text x="52" y="101" font-family="sans-serif" font-size="16">CPU text/graph path</text>
+  <text x="72" y="124" font-family="sans-serif" font-size="13">topology + cheap search</text>
+  <rect x="500" y="70" width="190" height="70" fill="#ffe0c2" stroke="#432"/>
+  <text x="525" y="101" font-family="sans-serif" font-size="16">GPU MM sidecar</text>
+  <text x="536" y="124" font-family="sans-serif" font-size="13">native image recall</text>
+  <path d="M220 105 H500" stroke="#222" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="278" y="94" font-family="sans-serif" font-size="13">evidence references</text>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#222"/></marker></defs>
+</svg>

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "fixture_only": true,
+  "description": "Small synthetic memory-system packet for retrieval orchestration tests.",
+  "units": [
+    {
+      "id": "text-prototype",
+      "modality": "text",
+      "path": "text_prototype.md",
+      "role": "early textual interpretation"
+    },
+    {
+      "id": "architecture-image",
+      "modality": "image",
+      "path": "architecture_parallel.svg",
+      "role": "late visual correction"
+    },
+    {
+      "id": "benchmark-image",
+      "modality": "image",
+      "path": "benchmark_bottleneck.svg",
+      "role": "visual latency evidence"
+    },
+    {
+      "id": "provenance-memo",
+      "modality": "text",
+      "path": "provenance_memo.md",
+      "role": "related text distractor"
+    },
+    {
+      "id": "distractor-image",
+      "modality": "image",
+      "path": "distractor_topology.svg",
+      "role": "unrelated visual distractor"
+    }
+  ],
+  "queries": [
+    {
+      "id": "architecture_parallel",
+      "query": "diagram showing text graph work in parallel with multimodal retrieval",
+      "expected_top_refs": ["architecture-image"]
+    },
+    {
+      "id": "bottleneck_visual",
+      "query": "visual artifact showing the expensive retrieval stage",
+      "expected_top_refs": ["benchmark-image"]
+    }
+  ]
+}
