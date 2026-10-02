@@ -168,6 +168,21 @@ Only treat the retry as successful when its frontier is empty, the ParseView is
 active, and `parsed_graph_persisted` readiness is recorded. A model HTTP 200 or
 an exhausted wall budget is not parse success.
 
+All maintenance strategy exception paths use the same terminal-budget guard.
+An explicit wall-time or maintenance-budget exhaustion is marked `FAILED` with
+the active claim token and is not requeued; transient provider/network
+timeouts remain retryable. This prevents a timed-out durable job from renewing
+its lease indefinitely while preserving recovery for temporary provider
+failures.
+
+For a deliberately scaled local deployment, set
+`KOGWISTAR_MAINTENANCE_MULTI_WORKER=true`. Each maintenance replica then uses
+an instance-specific control socket under the shared data directory, while
+the durable queue, leases, and workspace budgets remain the coordination
+authority. The default remains one worker with `maintenance.sock` for
+backward-compatible local operation. The released image must include the
+socket-isolation change before scaling replicas in Compose.
+
 If the configured provider reports a context-window/input-token overflow during
 an observation or parser call, the assessment/job is marked `blocked_context`,
 the current maintenance plan is terminated without retrying that job, and
