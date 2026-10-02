@@ -23,6 +23,13 @@ immutable source revision. The provider returns one known `uses` proposal;
 the normal group validation and critic-routing path accepts it for the test
 harness.
 
+The test records the comparison audit fields explicitly: parser stages,
+evidence IDs passed to the provider, provider and critic call counts, proposal
+group and review status, validation failures, queued mutation IDs, configured
+call/token/step budgets, workflow stages, and the workspace namespace of every
+provider-visible node. The unparsed case asserts zero provider, critic, and
+mutation calls; the parsed case asserts one bounded call through each stage.
+
 The additional `cuda_platform.md` and `cuda_service.md` fixtures provide the
 minimal two-document variant for future provider runs. They make the intended
 cross-document relationship explicit without relying on a large corpus.
