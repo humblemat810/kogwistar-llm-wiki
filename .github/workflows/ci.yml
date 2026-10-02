@@ -78,7 +78,7 @@ jobs:
 
       - name: Set up uv
         if: matrix.is_pypy == false
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v9
         with:
           version: "0.12.21"
           enable-cache: true
