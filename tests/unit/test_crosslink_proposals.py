@@ -11,6 +11,10 @@ from kogwistar.server.auth_middleware import reset_claims_ctx, set_claims_ctx
 from pydantic import ValidationError
 
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
+from kogwistar_llm_wiki.maintenance.crosslink_context import (
+    CrosslinkContextBudget,
+    pack_crosslink_context,
+)
 from kogwistar_llm_wiki.maintenance.crosslink_proposals import (
     CrosslinkEvidence,
     CrosslinkProposalResponse,
@@ -53,6 +57,57 @@ from kogwistar_llm_wiki.maintenance.worker_selection import (
     MaintenanceSelectionWorkerMixin,
 )
 from kogwistar_llm_wiki.utils import _temporary_namespace
+
+
+def test_crosslink_context_uses_core_packing_and_all_optional_limits() -> None:
+    nodes = [
+        {
+            "context_kind": "neighbor_node",
+            "node_id": f"ws:demo:node:{index}",
+            "summary": "neighbor summary " + ("x" * 40),
+        }
+        for index in range(3)
+    ]
+    edges = [
+        {
+            "context_kind": "neighbor_edge",
+            "edge_id": f"ws:demo:edge:{index}",
+            "source_ids": ["ws:demo:node:0"],
+            "target_ids": [f"ws:demo:node:{index + 1}"],
+            "relation": "related_to",
+        }
+        for index in range(2)
+    ]
+    budget = CrosslinkContextBudget(
+        max_nodes=2,
+        max_edges=1,
+        max_tokens=200,
+        max_characters=500,
+    )
+
+    first = pack_crosslink_context(nodes, edges, budget=budget)
+    second = pack_crosslink_context(list(reversed(nodes)), list(reversed(edges)), budget=budget)
+
+    assert first == second
+    assert len(first["nodes"]) <= 2
+    assert len(first["edges"]) <= 1
+    assert first["estimated_tokens"] <= 200
+    assert first["characters"] <= 500
+    assert first["omitted_nodes"] >= 1
+    assert first["omitted_edges"] >= 1
+
+
+def test_crosslink_context_budget_defaults_and_compatibility_aliases() -> None:
+    assert CrosslinkContextBudget.from_payload({}) == CrosslinkContextBudget()
+    assert CrosslinkContextBudget.from_payload({
+        "crosslink_context": {"max_nodes": 3, "max_chars": 700}
+    }) == CrosslinkContextBudget(max_nodes=3, max_edges=24, max_characters=700)
+    assert CrosslinkContextBudget.from_payload({
+        "crosslink_context_max_edges": 5,
+        "crosslink_context_max_tokens": 900,
+    }) == CrosslinkContextBudget(max_nodes=16, max_edges=5, max_tokens=900)
+    with pytest.raises(ValueError, match="max_nodes must be non-negative"):
+        CrosslinkContextBudget.from_payload({"max_nodes": -1})
 
 
 def test_proposal_response_is_bounded_and_rejects_unknown_fields() -> None:
