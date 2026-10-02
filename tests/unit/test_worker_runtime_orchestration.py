@@ -27,7 +27,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
 )
 from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
-from kogwistar_llm_wiki.utils import _temporary_namespace
+from kogwistar_llm_wiki.utils import _background_namespace, _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 
 
@@ -629,7 +629,7 @@ def test_duplicate_maintenance_attempt_is_traceable_and_costed_once_per_llm_call
         )[0]
         assert _job_field(current_job, "status") == "DONE"
 
-        with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+        with _background_namespace(pipeline.engines.conversation, ns.conv_bg):
             replies = pipeline.engines.conversation.read.get_nodes(
                 where={
                     "artifact_kind": "lane_message",
