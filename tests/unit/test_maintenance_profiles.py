@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import socket
 import tempfile
 import threading
@@ -129,6 +130,22 @@ def test_multi_worker_control_uses_instance_socket(monkeypatch, tmp_path) -> Non
     assert control.socket_path.parent == tmp_path / "maintenance"
     assert control.socket_path.name.startswith("maintenance-")
     assert control.socket_path.name.endswith(".sock")
+
+
+def test_multi_worker_parser_log_uses_instance_path(monkeypatch, tmp_path) -> None:
+    from kogwistar_llm_wiki import _configure_multi_worker_parser_log
+
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_MULTI_WORKER", "true")
+    monkeypatch.setenv("KOGWISTAR_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("KG_DOC_PARSER_DOCUMENT_INGEST_LOG_DB", raising=False)
+    monkeypatch.setattr("kogwistar_llm_wiki.socket.gethostname", lambda: "worker-a")
+
+    _configure_multi_worker_parser_log()
+
+    assert (
+        Path(os.environ["KG_DOC_PARSER_DOCUMENT_INGEST_LOG_DB"])
+        == tmp_path / "logs" / "document_ingest-worker-a.sqlite"
+    )
 
 
 def test_disconnected_control_client_does_not_kill_server(tmp_path) -> None:
