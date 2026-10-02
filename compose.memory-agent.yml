@@ -93,7 +93,10 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 10s
+      # Durable maintenance state may take several minutes to recover before
+      # the control socket is created. Keep this grace period configurable so
+      # health status does not flap during normal restart recovery.
+      start_period: ${LLM_WIKI_MAINTENANCE_HEALTH_START_PERIOD:-300s}
     volumes:
       - app_data:/var/lib/llm-wiki
     extra_hosts:
