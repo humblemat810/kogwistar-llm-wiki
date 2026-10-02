@@ -246,6 +246,17 @@ def validate_maintenance_patch(
         if operation.provenance:
             for pointer_index, pointer in enumerate(operation.provenance.source_pointers):
                 if not source_pointer_has_character_span(pointer):
+                    if _is_crosslink_intent(patch.intent):
+                        issues.append(
+                            MaintenancePatchValidationIssue(
+                                operation_id=operation.operation_id,
+                                code="missing_crosslink_character_span",
+                                message=(
+                                    f"source_pointers[{pointer_index}] cross-link evidence "
+                                    "requires a character span"
+                                ),
+                            )
+                        )
                     continue
                 try:
                     validate_source_pointer(

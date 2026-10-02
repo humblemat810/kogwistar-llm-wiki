@@ -325,6 +325,19 @@ def durable_claims_context(claims: Mapping[str, object] | None) -> Iterator[None
         reset_claims_ctx(token)
 
 
+@contextmanager
+def durable_storage_namespace_context(namespace: str) -> Iterator[None]:
+    """Bind one storage namespace without discarding the current identity."""
+
+    normalized = str(namespace).strip()
+    if not normalized:
+        raise ValueError("durable storage namespace must not be empty")
+    claims = dict(claims_ctx.get() or {})
+    claims["storage_ns"] = normalized
+    with durable_claims_context(claims):
+        yield
+
+
 def runtime_authority_context(
     claims: Mapping[str, object] | None,
     *,
@@ -380,6 +393,7 @@ __all__ = [
     "claims_context",
     "durable_claims_context",
     "durable_claims_snapshot",
+    "durable_storage_namespace_context",
     "identity_from_durable_claims",
     "runtime_authority_context",
 ]

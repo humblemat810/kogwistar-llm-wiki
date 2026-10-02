@@ -15,7 +15,7 @@ from ..maintenance.maintenance_guards import source_digest
 from ..maintenance.maintenance_patches import MaintenancePatch
 from ..maintenance.state import metadata_mapping as _metadata_mapping
 from ..models import NamespaceEngines
-from ..utils import _temporary_namespace
+from ..utils import _background_namespace, _temporary_namespace
 from .crosslink_proposals import CrosslinkReviewDecision
 
 
@@ -35,7 +35,7 @@ class CrosslinkGroupReviewService:
         if not workspace_id.strip() or not 1 <= limit <= 500:
             raise ValueError("workspace_id and a limit from 1 to 500 are required")
         ns = WorkspaceNamespaces(workspace_id)
-        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+        with _background_namespace(self.engines.conversation, ns.conv_bg):
             nodes = self.engines.conversation.read.get_nodes(
                 where={
                     "artifact_kind": "crosslink_group_review",
@@ -88,7 +88,7 @@ class CrosslinkGroupReviewService:
         authority_claims: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         ns = WorkspaceNamespaces(workspace_id)
-        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+        with _background_namespace(self.engines.conversation, ns.conv_bg):
             matches = self.engines.conversation.read.get_nodes(ids=[decision.artifact_id], limit=1)
         if not matches:
             raise KeyError(f"cross-link review artifact not found: {decision.artifact_id}")
@@ -295,7 +295,7 @@ class CrosslinkGroupReviewService:
                 **dict(event),
             },
         )
-        with _temporary_namespace(self.engines.conversation, WorkspaceNamespaces(workspace_id).conv_bg):
+        with _background_namespace(self.engines.conversation, WorkspaceNamespaces(workspace_id).conv_bg):
             self.engines.conversation.write.add_node(node)
 
     def _enqueue_revalidation(

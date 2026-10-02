@@ -18,7 +18,7 @@ from kogwistar.runtime.models import RunSuccess
 from ..configuration.workspace import WorkspaceNamespaces
 from ..usage.events import persist_usage_events
 from ..usage.projection_engine import UsageProjection
-from ..utils import _temporary_namespace
+from ..utils import _background_namespace
 from .maintenance_strategies import MaintenanceJobExecutionContext
 from .state import persisted_budget_state as _persisted_budget_state
 
@@ -235,7 +235,7 @@ class MaintenanceRuntimeWorkerMixin:
                 correlation_id,
             )
         )
-        with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+        with _background_namespace(self.engines.conversation, ns.conv_bg):
             lane_status = (
                 status
                 if status in {"completed", "failed", "cancelled", "suspended"}

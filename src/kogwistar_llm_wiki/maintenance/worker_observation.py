@@ -9,7 +9,7 @@ from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..parsing.parse_views import ParseTarget, ParseViewResolver, ParseViewStore
-from ..utils import _temporary_namespace
+from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_context import append_maintenance_round
 from .maintenance_observation import (
     ObservationFinding,
@@ -621,9 +621,7 @@ class MaintenanceObservationWorkerMixin:
             return None, None, False
 
     def _observation_namespace(self, namespace: str):
-        from ..utils import _temporary_namespace
-
-        return _temporary_namespace(self.engines.conversation, namespace)
+        return _background_namespace(self.engines.conversation, namespace)
 
 
 def _validate_entity_scope(entity: object, *, workspace_id: str) -> bool:

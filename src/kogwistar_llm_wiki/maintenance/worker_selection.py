@@ -11,7 +11,7 @@ from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..parsing.parse_views import ParseViewResolver
-from ..utils import _temporary_namespace
+from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_selection import select_request_candidates
 from .maintenance_strategies import MaintenanceJobExecutionContext
 from .state import belongs_to_workspace as _belongs_to_workspace
@@ -171,7 +171,7 @@ class MaintenanceSelectionWorkerMixin:
             )
         )
         try:
-            with _temporary_namespace(self.engines.conversation, ns.conv_bg):
+            with _background_namespace(self.engines.conversation, ns.conv_bg):
                 self.engines.conversation.send_lane_message(
                     conversation_id=f"maintenance:{ctx.request_node_id}",
                     inbox_id="inbox:worker:maintenance:audit",

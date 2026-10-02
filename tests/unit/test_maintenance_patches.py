@@ -666,6 +666,7 @@ def test_crosslink_candidate_requires_two_sided_evidence_and_candidate_status() 
     assert invalid_report.valid is False
     assert {issue.code for issue in invalid_report.issues} == {
         "invalid_crosslink_status",
+        "missing_crosslink_character_span",
         "missing_crosslink_two_sided_evidence",
         "crosslink_confidence_below_threshold",
     }
