@@ -152,12 +152,12 @@ def build_argument_parser(handlers: Mapping[str, CommandHandler]) -> argparse.Ar
     report_p.add_argument(
         "--backend",
         choices=["chroma", "postgres", "pinecone", "qdrant"],
-        default=os.environ.get("KOGWISTAR_VECTOR_BACKEND", "chroma"),
-        help="Backend to use under --data-dir (default: chroma); optional providers are lazy-loaded",
+        default=argparse.SUPPRESS,
+        help="Backend to use under --data-dir; optional providers are lazy-loaded",
     )
     report_p.add_argument(
         "--dsn",
-        default=None,
+        default=argparse.SUPPRESS,
         help="PostgreSQL DSN for --backend postgres",
     )
     report_p.add_argument(

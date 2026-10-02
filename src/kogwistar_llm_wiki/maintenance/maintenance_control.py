@@ -30,6 +30,7 @@ DEFAULT_REQUEST_MAX_ROUNDS = DEFAULT_REQUEST_FOLLOW_UPS + 1
 REQUEST_MAX_ROUNDS_ENV = "LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS"
 REQUEST_ENABLED_ENV = "LLM_WIKI_MAINTENANCE_REQUEST_ENABLED"
 BACKGROUND_ENABLED_ENV = "LLM_WIKI_MAINTENANCE_BACKGROUND_ENABLED"
+MULTI_WORKER_ENV = "KOGWISTAR_MAINTENANCE_MULTI_WORKER"
 
 
 def configured_default_request_max_rounds() -> int:
@@ -62,6 +63,19 @@ def _bool_value(value: object, *, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"invalid boolean value: {value!r}")
+
+
+def _multi_worker_socket_path(root: Path) -> Path:
+    """Choose an instance-specific socket only for scaled deployments."""
+
+    if not _configured_bool(MULTI_WORKER_ENV, False):
+        return root / "maintenance.sock"
+    hostname = socket.gethostname().strip() or "worker"
+    safe_hostname = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "_"
+        for character in hostname
+    )
+    return root / f"maintenance-{safe_hostname}.sock"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +149,7 @@ class MaintenanceControl:
     def __init__(self, data_dir: str | os.PathLike[str], *, socket_path: str | None = None) -> None:
         self.root = Path(data_dir) / "maintenance"
         self.path = self.root / "control.json"
-        self.socket_path = Path(socket_path) if socket_path else self.root / "maintenance.sock"
+        self.socket_path = Path(socket_path) if socket_path else _multi_worker_socket_path(self.root)
         self._lock = threading.RLock()
         self._state = self._read()
         try:

@@ -587,7 +587,12 @@ class MaintenanceExecutionWorkerMixin:
                 },
             )
             if ctx.job_id:
-                self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
+                self._retry_or_fail_maintenance_job(
+                    ctx.job,
+                    e,
+                    workspace_id=ctx.workspace_id,
+                    maintenance_kind=ctx.maintenance_kind,
+                )
 
     def _handle_graph_patch_apply_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
         decision = self._evaluate_maintenance_guard(ctx)
@@ -745,7 +750,12 @@ class MaintenanceExecutionWorkerMixin:
                 },
             )
             if ctx.job_id:
-                self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
+                self._retry_or_fail_maintenance_job(
+                    ctx.job,
+                    e,
+                    workspace_id=ctx.workspace_id,
+                    maintenance_kind=ctx.maintenance_kind,
+                )
 
     def _persist_crosslink_group_apply_outcome(
         self,
@@ -963,7 +973,12 @@ class MaintenanceExecutionWorkerMixin:
                 payload={"maintenance_kind": ctx.maintenance_kind, "error": str(exc)},
             )
             if ctx.job_id:
-                self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
+                self._retry_or_fail_maintenance_job(
+                    ctx.job,
+                    exc,
+                    workspace_id=ctx.workspace_id,
+                    maintenance_kind=ctx.maintenance_kind,
+                )
 
     def _build_crosslink_candidate_patch(self, ctx: MaintenanceJobExecutionContext) -> MaintenancePatch:
         candidate = ctx.payload.get("crosslink_candidate")
@@ -2674,9 +2689,11 @@ class MaintenanceExecutionWorkerMixin:
                                 budget_state=budget_state,
                             )
                     elif ctx.job_id:
-                        self.engines.conversation.jobs.retry_or_fail(
+                        self._retry_or_fail_maintenance_job(
                             ctx.job,
                             RuntimeError(f"maintenance workflow ended with status={status!r}"),
+                            workspace_id=ctx.workspace_id,
+                            maintenance_kind=ctx.maintenance_kind,
                         )
                 except Exception as e:
                     self._emit_trace(
@@ -2705,7 +2722,12 @@ class MaintenanceExecutionWorkerMixin:
                         },
                     )
                     if ctx.job_id:
-                        self.engines.conversation.jobs.retry_or_fail(ctx.job, e)
+                        self._retry_or_fail_maintenance_job(
+                            ctx.job,
+                            e,
+                            workspace_id=ctx.workspace_id,
+                            maintenance_kind=ctx.maintenance_kind,
+                        )
                 finally:
                     if not usage_persisted:
                         try:

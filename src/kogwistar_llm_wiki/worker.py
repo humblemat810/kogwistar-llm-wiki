@@ -309,7 +309,16 @@ class MaintenanceWorker(
                             error_type=type(exc).__name__,
                         )
                         continue
-                    self.engines.conversation.jobs.retry_or_fail(job, exc)
+                    self._retry_or_fail_maintenance_job(
+                        job,
+                        exc,
+                        workspace_id=workspace_id,
+                        maintenance_kind=str(
+                            job_payload.get("maintenance_kind") or ""
+                        )
+                        if isinstance(job_payload, Mapping)
+                        else "",
+                    )
                     raise
                 if self.fair_scheduling:
                     self._emit_trace(

@@ -29,6 +29,64 @@ class MaintenanceRuntimeWorkerMixin:
     """Shared durable runtime mechanics used by all maintenance strategies."""
 
     @staticmethod
+    def _budget_exhaustion_reason(error: Exception | str) -> str | None:
+        """Return a terminal budget reason without classifying transient timeouts.
+
+        Provider/network timeouts remain retryable.  Only an explicit budget
+        exhaustion marker is terminal, because retrying it cannot make the
+        same bounded maintenance attempt succeed.
+        """
+
+        message = str(error).strip().lower()
+        markers = (
+            "exceeded wall-time budget",
+            "exceeded wall time budget",
+            "maintenance budget exhausted",
+            "max_llm_calls budget exhausted",
+            "max_tokens budget exhausted",
+            "max_steps budget exhausted",
+            "max_time_seconds budget exhausted",
+        )
+        for marker in markers:
+            if marker in message:
+                return marker
+        return None
+
+    def _retry_or_fail_maintenance_job(
+        self,
+        job: object,
+        error: Exception | str,
+        *,
+        workspace_id: str = "",
+        maintenance_kind: str = "",
+    ) -> None:
+        """Retry transient failures but terminalize exhausted maintenance budgets."""
+
+        reason = self._budget_exhaustion_reason(error)
+        if reason is None:
+            self.engines.conversation.jobs.retry_or_fail(job, error)
+            return
+
+        job_id = str(getattr(job, "job_id", "") or "")
+        claim_token = getattr(job, "claim_token", None)
+        error_text = f"maintenance_budget_exhausted: {error}"
+        self.engines.conversation.jobs.mark_failed(
+            job_id,
+            error_text,
+            final=True,
+            claim_token=claim_token,
+        )
+        self._emit_trace(
+            "maintenance_job_failed_budget",
+            workspace_id=workspace_id,
+            job_id=job_id,
+            maintenance_kind=maintenance_kind,
+            error_type=type(error).__name__,
+            reason=reason,
+            error=error_text,
+        )
+
+    @staticmethod
     def _selection_result_payload(ctx: MaintenanceJobExecutionContext) -> dict[str, object]:
         """Return bounded selection data for durable lane replies."""
         candidates = list(ctx.payload.get("maintenance_candidates") or [])

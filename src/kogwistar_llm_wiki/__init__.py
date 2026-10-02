@@ -1,3 +1,31 @@
+# The bootstrap must run before package imports; those imports intentionally
+# follow the environment setup below.
+# ruff: noqa: E402
+
+from __future__ import annotations
+
+import os
+import socket
+
+
+def _configure_multi_worker_parser_log() -> None:
+    """Give scaled maintenance replicas independent parser SQLite logs."""
+
+    enabled = os.getenv("KOGWISTAR_MAINTENANCE_MULTI_WORKER", "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return
+    hostname = socket.gethostname().strip() or "worker"
+    data_dir = os.getenv("KOGWISTAR_DATA_DIR", ".").strip() or "."
+    log_path = os.path.join(
+        data_dir,
+        "logs",
+        f"document_ingest-{hostname}.sqlite",
+    )
+    os.environ.setdefault("KG_DOC_PARSER_DOCUMENT_INGEST_LOG_DB", log_path)
+
+
+_configure_multi_worker_parser_log()
+
 from .agent.gateway import AgentGateway, AgentTurn
 from .agent.mcp_server import build_agent_mcp
 from .archiving.archive_contracts import (

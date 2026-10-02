@@ -108,6 +108,34 @@ class _FakePipeline:
         self._record("materialize_maintenance_designs")
 
 
+def test_report_preserves_global_backend_and_dsn(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    def _capture_report(args):
+        captured["backend"] = args.backend
+        captured["dsn"] = args.dsn
+
+    monkeypatch.setattr(llm_wiki_cli, "_cmd_report", _capture_report)
+
+    assert (
+        llm_wiki_cli.main(
+            [
+                "--backend",
+                "postgres",
+                "--dsn",
+                "postgresql://example",
+                "report",
+                "--workspace",
+                "demo",
+                "--data-dir",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    assert captured == {"backend": "postgres", "dsn": "postgresql://example"}
+
+
 @dataclass
 class _FakeGraphItem:
     id: str
