@@ -174,6 +174,57 @@ def test_lease_renewal_survives_a_long_provider_call_without_progress() -> None:
     assert not worker._claim_lost.is_set()
 
 
+def test_exhausted_maintenance_budget_is_terminal_not_retried() -> None:
+    calls: list[tuple[str, object]] = []
+    traces: list[dict[str, object]] = []
+
+    class Jobs:
+        def retry_or_fail(self, *_args, **_kwargs) -> None:
+            calls.append(("retry", _args))
+
+        def mark_failed(self, *args, **kwargs) -> None:
+            calls.append(("failed", (args, kwargs)))
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=Jobs()))
+    worker.trace_sink = traces.append
+    worker._last_progress_monotonic = time.monotonic()
+
+    job = SimpleNamespace(job_id="budget-job", claim_token="claim-budget")
+    worker._retry_or_fail_maintenance_job(
+        job,
+        TimeoutError("durable parse expansion exceeded wall-time budget"),
+        workspace_id="budget-workspace",
+        maintenance_kind="document_expand_parse_children",
+    )
+
+    assert [kind for kind, _ in calls] == ["failed"]
+    assert calls[0][1][0] == ("budget-job", "maintenance_budget_exhausted: durable parse expansion exceeded wall-time budget")
+    assert calls[0][1][1]["final"] is True
+    assert calls[0][1][1]["claim_token"] == "claim-budget"
+    assert any(event["event"] == "maintenance_job_failed_budget" for event in traces)
+
+
+def test_transient_provider_timeout_remains_retryable() -> None:
+    calls: list[str] = []
+
+    class Jobs:
+        def retry_or_fail(self, *_args, **_kwargs) -> None:
+            calls.append("retry")
+
+        def mark_failed(self, *_args, **_kwargs) -> None:
+            calls.append("failed")
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=Jobs()))
+    worker._retry_or_fail_maintenance_job(
+        SimpleNamespace(job_id="provider-timeout", claim_token="claim-provider"),
+        TimeoutError("provider request timed out"),
+    )
+
+    assert calls == ["retry"]
+
+
 def test_claim_loss_before_graph_patch_never_calls_the_applier(monkeypatch) -> None:
     applied: list[object] = []
     traces: list[dict[str, object]] = []

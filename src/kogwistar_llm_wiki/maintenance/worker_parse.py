@@ -197,7 +197,12 @@ class DurableParseMaintenanceWorkerMixin:
                     error_type=type(exc).__name__,
                     error=str(exc),
                 )
-                self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
+                self._retry_or_fail_maintenance_job(
+                    ctx.job,
+                    exc,
+                    workspace_id=ctx.workspace_id,
+                    maintenance_kind=ctx.maintenance_kind,
+                )
                 return
             if self._advance_maintenance_plan(ctx):
                 return
@@ -250,7 +255,12 @@ class DurableParseMaintenanceWorkerMixin:
                 error=str(exc),
                 duration_ms=int(time.time() * 1000) - started_ms,
             )
-            self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
+            self._retry_or_fail_maintenance_job(
+                ctx.job,
+                exc,
+                workspace_id=ctx.workspace_id,
+                maintenance_kind=ctx.maintenance_kind,
+            )
 
     def _mark_durable_parse_expanding(self, ctx: MaintenanceJobExecutionContext) -> None:
         """Advance only durable session state; parsing occurs in the frontier job."""
@@ -297,9 +307,11 @@ class DurableParseMaintenanceWorkerMixin:
                 job_id=ctx.job_id,
                 reason="parse_session_id_missing",
             )
-            self.engines.conversation.jobs.retry_or_fail(
+            self._retry_or_fail_maintenance_job(
                 ctx.job,
                 RuntimeError("parse_session_id is required for durable expansion"),
+                workspace_id=ctx.workspace_id,
+                maintenance_kind=ctx.maintenance_kind,
             )
             return
         store = ParseSessionStore(
@@ -315,9 +327,11 @@ class DurableParseMaintenanceWorkerMixin:
                 job_id=ctx.job_id,
                 reason="parse_session_missing",
             )
-            self.engines.conversation.jobs.retry_or_fail(
+            self._retry_or_fail_maintenance_job(
                 ctx.job,
                 RuntimeError("durable parse session is missing; refusing non-durable expansion"),
+                workspace_id=ctx.workspace_id,
+                maintenance_kind=ctx.maintenance_kind,
             )
             return
         try:
@@ -534,7 +548,12 @@ class DurableParseMaintenanceWorkerMixin:
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
-            self.engines.conversation.jobs.retry_or_fail(ctx.job, exc)
+            self._retry_or_fail_maintenance_job(
+                ctx.job,
+                exc,
+                workspace_id=ctx.workspace_id,
+                maintenance_kind=ctx.maintenance_kind,
+            )
 
     def _enqueue_derived_revalidation_after_view_switch(
         self,
