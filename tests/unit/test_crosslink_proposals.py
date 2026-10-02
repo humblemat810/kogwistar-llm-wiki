@@ -998,7 +998,10 @@ def test_real_provider_path_persists_call_and_token_usage_before_retry(
     pipeline, monkeypatch
 ) -> None:
     class Structured:
+        messages = None
+
         def invoke(self, _messages, *, config):
+            self.messages = _messages
             callback = config["callbacks"][0]
             callback.on_llm_start([], run_id="provider-run")
             callback.on_llm_end(
@@ -1013,7 +1016,9 @@ def test_real_provider_path_persists_call_and_token_usage_before_retry(
 
     class ChatModel:
         def with_structured_output(self, _schema):
-            return Structured()
+            return structured
+
+    structured = Structured()
 
     monkeypatch.setattr(
         "kg_doc_parser.workflow_ingest.page_index.build_chat_model_for_role",
@@ -1037,6 +1042,7 @@ def test_real_provider_path_persists_call_and_token_usage_before_retry(
             "workspace_id": "crosslink-usage",
             "source_document_id": "source-usage",
             "budgets": {"max_llm_calls": 2, "max_tokens": 100},
+            "crosslink_context_budget": {"max_nodes": 2, "max_edges": 2},
         },
         request_node=None,
         request_node_id="crosslink-usage-request",
@@ -1054,10 +1060,23 @@ def test_real_provider_path_persists_call_and_token_usage_before_retry(
         end_char=5,
         excerpt="usage",
     )
+    worker._crosslink_prompt_context = lambda _evidence, _ctx: {
+        "enabled": True,
+        "nodes": [{"context_kind": "neighbor_node", "node_id": "neighbor-1"}],
+        "edges": [],
+        "omitted_nodes": 0,
+        "omitted_edges": 0,
+        "estimated_tokens": 4,
+        "characters": 16,
+        "budget": {"max_nodes": 2, "max_edges": 2},
+    }
 
     result = worker._invoke_crosslink_proposer([evidence], ctx)
 
     assert result == {"groups": []}
+    assert structured.messages is not None
+    prompt = json.loads(structured.messages[1][1])
+    assert prompt["neighbor_context"]["nodes"][0]["node_id"] == "neighbor-1"
     usage = durable_maintenance_usage(
         pipeline.engines.conversation.meta_sqlite,
         namespace=WorkspaceNamespaces(ctx.workspace_id).usage_events,
