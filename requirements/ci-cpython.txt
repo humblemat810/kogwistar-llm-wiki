@@ -1,8 +1,28 @@
-# Provider-free CPython CI dependencies.
-# Keep this file stable so uv's GitHub cache invalidates when the dependency
-# contract changes. Chroma belongs to the scheduled full suite because the
-# default provider-free selector excludes requires_chroma tests.
+# CPython CI dependencies for the checked-out application and vendored repos.
+# Local packages are installed separately with --no-deps so their historical
+# Git URL pins cannot conflict with the checked-out editable Kogwistar core.
+# Keep this file stable so uv's GitHub cache invalidates when dependencies
+# change. Chroma is added only by the scheduled full suite.
+pydantic-extension>=0.0.7
+pydantic>=2.6
+anyio>=4.0
+Jinja2>=3.1
+fastapi>=0.111
 mcp>=2.2.0,<3
+httpx>=0.28.1
+python-jose[cryptography]>=3.3
+PyJWT>=2.8
+RapidFuzz>=3.13.0
+joblib>=1.3
+python-dotenv>=1.0.1
+requests>=2.32
+typing-extensions>=4.8
+pdf2image>=1.17.0
+pypdf>=6.5.0
+pathspec>=0.12.1
+pikepdf>=10.1.0
+langchain-core>=1.2.5
+langchain-google-genai>=4.1.2
 langchain-openai>=0.3
 langchain-ollama>=0.3
 sqlalchemy[asyncio]>=2.0

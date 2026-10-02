@@ -102,11 +102,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv pip install --system \
+          uv pip install --system --no-deps \
             -e ./kogwistar \
             -e ./kg-doc-parser \
-            -e ./kogwistar-obsidian-sink
-          uv pip install --system --no-deps -e ".[test,otel,agent]"
+            -e ./kogwistar-obsidian-sink \
+            -e ".[test,otel,agent]"
           uv pip install --system -r requirements/ci-cpython.txt
 
       - name: Install PyPy 3.11 Python-authority profile
