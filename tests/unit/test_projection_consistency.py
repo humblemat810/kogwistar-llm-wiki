@@ -9,6 +9,8 @@ from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
 from kogwistar_llm_wiki.utils import _temporary_namespace
 
+pytestmark = pytest.mark.ci_full
+
 
 def _job_field(job, name: str):
     if isinstance(job, dict):

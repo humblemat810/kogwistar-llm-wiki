@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from kogwistar_llm_wiki.maintenance.maintenance_migration import (
     compare_ingest_operation_modes,
 )
+
+pytestmark = pytest.mark.ci_full
 
 
 def test_compare_ingest_operation_modes_runs_same_document_shape_across_modes(pipeline, ingest_request) -> None:

@@ -33,6 +33,8 @@ def test_mark_default_ci_items_marks_only_default_ci_tests() -> None:
         _DummyItem(keywords={"requires_ollama": True}),
         _DummyItem(keywords={"requires_chroma": True}),
         _DummyItem(keywords={"llm_real": True}),
+        _DummyItem(keywords={"integration": True}),
+        _DummyItem(keywords={"e2e": True}),
         _DummyItem(keywords={"ci_full": True, "manual": True}),
     ]
 

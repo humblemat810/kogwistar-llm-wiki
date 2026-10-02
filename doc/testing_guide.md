@@ -68,6 +68,19 @@ real LLM credentials, and GPU model tests remain opt-in.
 The Python job prints the slowest 25 tests using `--durations`, so a growing
 CI runtime is visible in the job log rather than hidden behind one total.
 
+The default marker helper deliberately keeps tests marked `integration` or
+`e2e` out of pull-request CI unless they also have an explicit fast contract.
+The cookbook, knowledge-derivation, projection-consistency, lane-message, and
+durable-reparse scenarios are marked `ci_full` because they exercise real
+multi-step workflows and are materially slower than unit contracts.
+
+The excluded coverage is not deleted. `.github/workflows/ci-full.yml` runs the
+broader deterministic suite on CPython 3.13 every Sunday and through
+`workflow_dispatch`, including `ci_full` and `slow` tests while excluding only
+manual, real-provider, long-run, Ollama-dependent work. Keep required PR CI
+focused on regressions that can provide a fast, repeatable signal; use the full
+workflow for release and scheduled coverage.
+
 ### Per-Test Resource Reports
 
 The CI Python matrix also enables the opt-in resource reporter.  It prints

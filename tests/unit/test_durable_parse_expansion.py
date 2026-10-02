@@ -31,6 +31,9 @@ from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 
 
+pytestmark = pytest.mark.ci_full
+
+
 def test_durable_frontier_write_is_member_tagged_before_view_activation(
     pipeline,
     ingest_request: IngestPipelineRequest,
