@@ -183,6 +183,22 @@ authority. The default remains one worker with `maintenance.sock` for
 backward-compatible local operation. The released image must include the
 socket-isolation change before scaling replicas in Compose.
 
+The same switch also gives the parser's import-time SQLite ingest log an
+instance-specific path (`document_ingest-<container-hostname>.sqlite`). This
+avoids two replicas racing to initialize one local parser database. Kogwistar's
+PostgreSQL backend also serializes the database-wide pgvector extension
+creation with a transaction-scoped advisory lock; `CREATE EXTENSION IF NOT
+EXISTS` alone is not sufficient when fresh replicas initialize concurrently.
+The maintenance Compose healthcheck verifies the default socket or the
+replica's hostname-specific socket without using an invalid wildcard test.
+
+Local verification on 2026-10-02 used a fresh isolated Compose project with
+two maintenance replicas. Both replicas stayed running with zero restarts and
+became healthy; each created a distinct parser SQLite file and control socket.
+No `database is locked` or duplicate `pg_extension` error occurred. This is a
+local runtime verification of the hardening branch, not a claim that the
+corresponding GitHub PR checks are green.
+
 If the configured provider reports a context-window/input-token overflow during
 an observation or parser call, the assessment/job is marked `blocked_context`,
 the current maintenance plan is terminated without retrying that job, and
