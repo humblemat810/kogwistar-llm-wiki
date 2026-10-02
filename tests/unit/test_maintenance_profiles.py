@@ -121,6 +121,16 @@ def test_live_control_socket_returns_without_waiting_for_client_close(tmp_path) 
         server_thread.join(timeout=1)
 
 
+def test_multi_worker_control_uses_instance_socket(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("KOGWISTAR_MAINTENANCE_MULTI_WORKER", "true")
+
+    control = MaintenanceControl(tmp_path)
+
+    assert control.socket_path.parent == tmp_path / "maintenance"
+    assert control.socket_path.name.startswith("maintenance-")
+    assert control.socket_path.name.endswith(".sock")
+
+
 def test_disconnected_control_client_does_not_kill_server(tmp_path) -> None:
     if not hasattr(socket, "AF_UNIX"):
         pytest.skip("Unix-domain sockets are unavailable on this platform")
