@@ -27,6 +27,10 @@ from ..maintenance import (
     MaintenanceJobExecutionContext,
     workflow_id_for_maintenance_kind,
 )
+from ..maintenance.crosslink_context import (
+    CrosslinkContextBudget,
+    pack_crosslink_context,
+)
 from ..maintenance.crosslink_proposals import (
     CrosslinkCriticResponse,
     CrosslinkEvidence,
@@ -1583,10 +1587,12 @@ class MaintenanceExecutionWorkerMixin:
                 "Use only supplied evidence IDs; never invent node, document, or span IDs.",
                 "Each relation must be supported by exact excerpts from the cited evidence.",
                 "Evidence may come from the same or different source documents, but endpoint nodes must differ.",
+                "Neighbor context is descriptive only; it is not authoritative evidence and cannot be used as a mutation citation.",
                 "Return an empty groups list when no defensible link exists.",
                 "Do not emit hidden reasoning; rationale must be concise and evidence-based.",
             ],
             "evidence": [item.model_dump(mode="json") for item in evidence],
+            "neighbor_context": self._crosslink_prompt_context(evidence, ctx),
         }
         result = structured.invoke([
             ("system", "You produce bounded graph-link candidates, not authoritative facts."),
@@ -1611,9 +1617,14 @@ class MaintenanceExecutionWorkerMixin:
 
         model = build_chat_model_for_role("parser", self.provider_settings)
         structured = model.with_structured_output(CrosslinkCriticResponse)
+        critic_evidence = [CrosslinkEvidence.model_validate(item) for item in evidence]
         result = structured.invoke([
             ("system", "Independently review this cross-link group. Return only a verdict, concise explanation, and cited evidence IDs. Reject unsupported, redundant, or ambiguous links."),
-            ("human", json.dumps({"group": dict(group), "evidence": evidence}, ensure_ascii=False, sort_keys=True)),
+            ("human", json.dumps({
+                "group": dict(group),
+                "evidence": evidence,
+                "neighbor_context": self._crosslink_prompt_context(critic_evidence, ctx),
+            }, ensure_ascii=False, sort_keys=True)),
         ], config={"callbacks": [usage_callback]})
         parsed = result.get("parsed") if isinstance(result, Mapping) and "parsed" in result else result
         if hasattr(parsed, "model_dump"):
@@ -1621,6 +1632,106 @@ class MaintenanceExecutionWorkerMixin:
         if isinstance(parsed, Mapping):
             return parsed
         raise TypeError("crosslink critic returned an invalid structured result")
+
+    def _crosslink_prompt_context(
+        self,
+        evidence: list[CrosslinkEvidence],
+        ctx: MaintenanceJobExecutionContext,
+    ) -> dict[str, object]:
+        """Collect one-hop, scoped graph context for provider reasoning."""
+        budget = CrosslinkContextBudget.from_payload(ctx.payload)
+        if not any((budget.max_nodes, budget.max_edges, budget.max_tokens, budget.max_characters)):
+            return {
+                "nodes": [],
+                "edges": [],
+                "omitted_nodes": 0,
+                "omitted_edges": 0,
+                "estimated_tokens": 0,
+                "characters": 0,
+                "budget": {
+                    "max_nodes": 0,
+                    "max_edges": 0,
+                    "max_tokens": 0,
+                    "max_characters": 0,
+                },
+                "enabled": False,
+            }
+
+        endpoint_ids = {str(item.node_id) for item in evidence}
+        namespaces = WorkspaceNamespaces(ctx.workspace_id)
+        node_records: list[dict[str, object]] = []
+        edge_records: list[dict[str, object]] = []
+        with _temporary_namespace(self.engines.kg, namespaces.curated_kg_space):
+            scan_limit = min(512, max(64, (budget.max_edges or 64) * 4))
+            all_edges = list(self.engines.kg.read.get_edges(limit=scan_limit))
+            related_edges = []
+            neighbor_ids: set[str] = set()
+            for edge in all_edges:
+                source_ids = tuple(str(item) for item in (getattr(edge, "source_ids", ()) or ()))
+                target_ids = tuple(str(item) for item in (getattr(edge, "target_ids", ()) or ()))
+                endpoints = set(source_ids) | set(target_ids)
+                if not endpoints.intersection(endpoint_ids):
+                    continue
+                metadata = metadata_mapping(edge)
+                if str(metadata.get("workspace_id") or ctx.workspace_id) != ctx.workspace_id:
+                    continue
+                acl = str(metadata.get("acl_scope") or metadata.get("security_scope") or "").strip()
+                if acl and not can_access_security_scope(acl):
+                    continue
+                related_edges.append(edge)
+                neighbor_ids.update(endpoints - endpoint_ids)
+            max_neighbor_nodes = budget.max_nodes or 128
+            neighbors = list(self.engines.kg.read.get_nodes(
+                ids=sorted(neighbor_ids)[:max_neighbor_nodes],
+                limit=max_neighbor_nodes,
+            )) if neighbor_ids else []
+            for node in neighbors:
+                metadata = metadata_mapping(node)
+                if str(metadata.get("workspace_id") or ctx.workspace_id) != ctx.workspace_id:
+                    continue
+                acl = str(metadata.get("acl_scope") or metadata.get("security_scope") or "").strip()
+                if acl and not can_access_security_scope(acl):
+                    continue
+                node_records.append({
+                    "context_kind": "neighbor_node",
+                    "node_id": str(node.id),
+                    "label": str(getattr(node, "label", "") or "")[:240],
+                    "type": str(getattr(node, "type", "") or "")[:120],
+                    "summary": str(getattr(node, "summary", "") or "")[:800],
+                    "workspace_id": ctx.workspace_id,
+                })
+            for edge in related_edges:
+                edge_id = str(getattr(edge, "id", "") or "")
+                properties = getattr(edge, "properties", None)
+                properties = properties if isinstance(properties, Mapping) else {}
+                edge_records.append({
+                    "context_kind": "neighbor_edge",
+                    "edge_id": edge_id,
+                    "source_ids": sorted(str(item) for item in (getattr(edge, "source_ids", ()) or ())),
+                    "target_ids": sorted(str(item) for item in (getattr(edge, "target_ids", ()) or ())),
+                    "relation": str(
+                        getattr(edge, "relation", None)
+                        or properties.get("relation")
+                        or getattr(edge, "label", "")
+                        or ""
+                    )[:160],
+                    "workspace_id": ctx.workspace_id,
+                })
+
+        packed = pack_crosslink_context(node_records, edge_records, budget=budget)
+        packed["enabled"] = True
+        self._emit_trace(
+            "maintenance_crosslink_context_built",
+            workspace_id=ctx.workspace_id,
+            job_id=ctx.job_id,
+            node_count=len(packed["nodes"]),
+            edge_count=len(packed["edges"]),
+            omitted_nodes=packed["omitted_nodes"],
+            omitted_edges=packed["omitted_edges"],
+            estimated_tokens=packed["estimated_tokens"],
+            characters=packed["characters"],
+        )
+        return packed
 
     def _reserve_crosslink_provider_call(
         self, ctx: MaintenanceJobExecutionContext, reason: str
