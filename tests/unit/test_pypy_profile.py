@@ -237,40 +237,28 @@ def test_pinned_parser_metadata_supports_python_312() -> None:
 
 
 @pytest.mark.ci
-def test_parser_pins_the_checked_out_kogwistar_revision() -> None:
+def test_parser_uses_the_released_kogwistar_package() -> None:
     root = Path(__file__).parents[2]
     parser_metadata = tomllib.loads(
         (root / "kg-doc-parser" / "pyproject.toml").read_text(encoding="utf-8")
     )
-    parser_pin = parser_metadata["tool"]["poetry"]["dependencies"]["kogwistar"]["rev"]
+    parser_pin = parser_metadata["tool"]["poetry"]["dependencies"]["kogwistar"]
     lock_packages = tomllib.loads(
         (root / "kg-doc-parser" / "poetry.lock").read_text(encoding="utf-8")
     )["package"]
-    lock_pin = next(
-        package["source"]["resolved_reference"]
+    locked_package = next(
+        package
         for package in lock_packages
         if package["name"] == "kogwistar"
     )
-    core_revision = subprocess.check_output(
-        ["git", "-C", str(root / "kogwistar"), "rev-parse", "HEAD"],
-        text=True,
-    ).strip()
     parser_ci_workflow = (root / "kg-doc-parser" / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
 
-    # Local development may intentionally retain a core feature checkout while
-    # downstream CI pins the released core revision. Hosted CI remains the
-    # authoritative cross-repository consistency gate.
-    if os.getenv("CI", "").strip().lower() != "true" and parser_pin != core_revision:
-        pytest.skip(
-            "local Kogwistar checkout differs from the released downstream pin; "
-            "run this assertion in hosted CI"
-        )
-
-    assert parser_pin == core_revision
-    assert lock_pin == core_revision
-    assert f"ref: {core_revision}" in parser_ci_workflow
+    assert parser_pin == "0.6.2"
+    assert locked_package["version"] == parser_pin
+    assert "source" not in locked_package
+    assert "ref: v0.6.2" in parser_ci_workflow
 
 
 @pytest.mark.ci
