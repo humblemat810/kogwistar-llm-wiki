@@ -1686,3 +1686,41 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 - This is code-level observability evidence only. No Bonsai request, background
   cycle, ingestion, graph mutation, or live quality evaluation was run. The
   prior Bonsai quality gate remains `FAIL` and corpus expansion remains `HOLD`.
+
+### Bounded Direct Bonsai Background Evaluation (2026-10-02)
+
+- A disposable two-worker PostgreSQL/pgvector Compose project was used so this
+  evaluation could not mutate the normal local stack. The workers were healthy,
+  used distinct maintenance sockets, and wrote distinct parser-ingest SQLite
+  logs. No `database is locked` or duplicate pgvector-extension initialization
+  error was observed.
+- The evaluation used the direct OpenAI-compatible Bonsai endpoint, not the
+  Codex bridge:
+  `http://192.168.64.1:8181/v1`, model
+  `Ternary-Bonsai-2-27B-PTQ1_0`. The bounded request used workspace
+  `bonsai-eval-direct`, one short source document, one maintenance round,
+  `max_llm_calls=2`, `max_tokens=16000`, `max_steps=6`, and
+  `max_time_seconds=300`.
+- Persisted identifiers were job
+  `657eefc3-6974-5a53-89ce-d5ea7325ee58`, maintenance run
+  `6018c50d-ca24-5f98-a74d-58f60bd479e8`, worker
+  `maintenance-worker-7de99e8584e0`, and summary artifact
+  `8755102b-b2ab-5abc-9839-01e8024415df`.
+- The provider call reached the Bonsai server and returned HTTP 200. The run
+  selected two evidence items, entered the provider-backed proposal stage, and
+  completed with `no_candidate` and zero proposed groups. Therefore no critic
+  decision, approval, graph mutation, or candidate application occurred. This
+  is a valid bounded provider execution result, but it does not yet prove the
+  successful candidate/critic/mutation path.
+- The persisted summary reports `graph_mutation=false`,
+  `trace_persistence_complete=true`, workflow version
+  `crosslink-groups.v1`, and zero proposed/applied/failed/partial/pending/stale
+  groups. Workflow stages and maintenance artifacts were persisted in the
+  background conversation lane rather than the foreground user conversation.
+- An earlier zero-budget setup run is not counted as provider evidence: its
+  empty job budget correctly prevented an LLM call. This report counts only the
+  explicitly budgeted direct Bonsai run above.
+- Current conclusion: direct Bonsai connectivity, bounded budgets, stage
+  tracing, namespace isolation, and no-mutation behavior are evidenced. Model
+  quality and successful cross-link proposal/critic review remain unverified;
+  the quality gate stays `PARTIAL` and corpus expansion stays `HOLD`.
