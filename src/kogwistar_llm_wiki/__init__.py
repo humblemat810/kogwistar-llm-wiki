@@ -1,3 +1,7 @@
+# The bootstrap must run before package imports; those imports intentionally
+# follow the environment setup below.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import os
