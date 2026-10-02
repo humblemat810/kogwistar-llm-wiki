@@ -39,8 +39,8 @@ from ..parsing.parse_views import (
     frontier_id,
     generation_member_id,
 )
-from ..utils import _temporary_namespace
 from ..providers.role_config import normalize_provider_name
+from ..utils import _temporary_namespace
 from .state import semantic_fingerprint as _semantic_fingerprint
 
 
