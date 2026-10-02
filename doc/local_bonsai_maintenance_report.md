@@ -813,9 +813,8 @@ the original ten-hour monitoring limit has been honored as a stop condition.
   `0.0.0.0`; it passes a local llama.cpp reasoning effort/budget. This does
   not alter application provider behavior for Codex, Anthropic, or remote
   OpenAI-compatible providers.
-- No other feature branch was rebased or modified. The unrelated email test
-  relocation remains separate. This work is on the already-existing
-  `feat/bonsai-maintenance-review` branch to avoid creating another branch.
+ - No other feature branch was rebased or modified. This work remains on the
+   already-existing maintenance branch to avoid creating another branch.
 
 ### Control Socket Recovery (2026-09-30 13:44 UTC)
 
@@ -1299,11 +1298,10 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 
 ### Bonsai Durable Expansion Runtime Check (2026-10-01 23:25 UTC)
 
-- Correction to the earlier branch note: `feat/local-bonsai-maintenance` is the
-  active Bonsai branch and contains the host-side email implementation removal
-  via merge commit `6316778`; its current code commit is `bad2b40` and is pushed
-  to the matching origin branch. Do not rebase this worktree again for the
-  already-merged host change.
+ - Correction to the earlier branch note: `feat/local-bonsai-maintenance` is the
+   active Bonsai branch; its current code commit is `bad2b40` and is pushed to
+   the matching origin branch. Do not rebase this worktree again for the
+   already-merged host change.
 - GitHub Actions for `bad2b40527c7d21c6647b692e5ab2f2bffa1c06f` completed:
   full CI, PyPy 3.11 container smoke, experimental PyPy 3.12 beta, and slot /
   runtime benchmark workflows all succeeded.
@@ -1584,11 +1582,11 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
   conflict-free aggregate merge tree for those two tips; it does not verify
   an interactive/commit-by-commit rebase or semantic compatibility. The branch
   was not rebased or pushed as part of this check.
-- The Bonsai feature diff against current `origin/main` contains no
-  email-specific implementation paths; the host email extraction is already
-  represented in its history. Several maintenance/provider files overlap with
-  newer `origin/main` changes, so a semantic review and test run are still
-  required before treating a rebase or merge as complete.
+ - The Bonsai feature diff against current `origin/main` contains no
+   prohibited source-specific implementation paths. Several
+   maintenance/provider files overlap with newer `origin/main` changes, so a
+   semantic review and test run are still required before treating a rebase or
+   merge as complete.
 - This is repository/CI evidence only. The capped Bonsai runtime remains
   stopped and was not probed, restarted, or inspected. No new ingestion,
   direct request, follow-up, background model call, or parse/crosslink quality
