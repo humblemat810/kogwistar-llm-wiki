@@ -633,7 +633,7 @@ def test_observation_continuation_requeues_same_job_once_with_bounded_context() 
     )
 
 
-def test_crosslink_candidate_requires_two_source_documents() -> None:
+def test_crosslink_candidate_allows_distinct_nodes_in_one_source_document() -> None:
     ctx = SimpleNamespace(
         workspace_id="demo",
         request_node_id="request-1",
@@ -647,11 +647,42 @@ def test_crosslink_candidate_requires_two_source_documents() -> None:
                 "left_source_document_id": "doc-left",
                 "right_source_document_id": "doc-left",
                 "confidence": 0.7,
+                "source_pointers": [
+                    {"doc_id": "doc-left", "start_char": 0, "end_char": 5},
+                ],
             }
         },
     )
 
-    with pytest.raises(ValueError, match="two source documents"):
+    patch = MaintenanceExecutionWorkerMixin._build_crosslink_candidate_patch(object(), ctx)
+
+    assert patch.operations[0].from_node_id == "ws:demo:left"
+    assert patch.operations[0].to_node_id == "ws:demo:right"
+    assert patch.operations[0].provenance is not None
+    assert {pointer["doc_id"] for pointer in patch.operations[0].provenance.source_pointers} == {"doc-left"}
+
+
+def test_crosslink_candidate_rejects_self_link() -> None:
+    ctx = SimpleNamespace(
+        workspace_id="demo",
+        request_node_id="request-1",
+        job_id="job-1",
+        maintenance_kind="document_propose_crosslinks",
+        payload={
+            "crosslink_candidate": {
+                "left_node_id": "ws:demo:same",
+                "right_node_id": "ws:demo:same",
+                "relation": "related_to",
+                "left_source_document_id": "doc-left",
+                "right_source_document_id": "doc-left",
+                "source_pointers": [
+                    {"doc_id": "doc-left", "start_char": 0, "end_char": 5},
+                ],
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="different nodes"):
         MaintenanceExecutionWorkerMixin._build_crosslink_candidate_patch(object(), ctx)
 
 

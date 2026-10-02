@@ -990,14 +990,14 @@ class MaintenanceExecutionWorkerMixin:
         left_doc = str(candidate.get("left_source_document_id") or "").strip()
         right_doc = str(candidate.get("right_source_document_id") or "").strip()
         if not left_id or not right_id or not relation or not left_doc or not right_doc:
-            raise ValueError("crosslink candidate requires both nodes, relation, and two source documents")
+            raise ValueError("crosslink candidate requires both nodes, relation, and source documents")
+        if left_id == right_id:
+            raise ValueError("crosslink candidate endpoints must be different nodes")
         namespace_prefix = f"ws:{ctx.workspace_id}:"
         if not left_id.startswith(namespace_prefix) or not right_id.startswith(namespace_prefix):
             raise ValueError("crosslink candidate nodes must remain in the workspace namespace")
         pointers = candidate.get("source_pointers")
         normalized_pointers = [dict(item) for item in pointers if isinstance(item, Mapping)] if isinstance(pointers, list) else []
-        if len({left_doc, right_doc}) < 2:
-            raise ValueError("crosslink candidate requires evidence from two source documents")
         if not normalized_pointers:
             raise ValueError("crosslink candidate requires authoritative source pointers")
         pointer_documents = {
@@ -1211,9 +1211,6 @@ class MaintenanceExecutionWorkerMixin:
                     break
                 if left.node_id == right.node_id:
                     group_error = "crosslink operation endpoints must be different nodes"
-                    break
-                if left.source_document_id == right.source_document_id:
-                    group_error = "crosslink operation requires evidence from two source documents"
                     break
                 key = (left.node_id, right.node_id, operation.relation)
                 if key in seen_operations or key in group_operation_keys:
@@ -1581,10 +1578,11 @@ class MaintenanceExecutionWorkerMixin:
         model = build_chat_model_for_role("parser", self.provider_settings)
         structured = model.with_structured_output(CrosslinkProposalResponse)
         prompt = {
-            "task": "Propose only evidence-supported cross-document semantic links.",
+            "task": "Propose only evidence-supported semantic links between distinct nodes.",
             "constraints": [
                 "Use only supplied evidence IDs; never invent node, document, or span IDs.",
-                "Each relation must be supported by excerpts from two different source documents.",
+                "Each relation must be supported by exact excerpts from the cited evidence.",
+                "Evidence may come from the same or different source documents, but endpoint nodes must differ.",
                 "Return an empty groups list when no defensible link exists.",
                 "Do not emit hidden reasoning; rationale must be concise and evidence-based.",
             ],
