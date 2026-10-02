@@ -534,6 +534,31 @@ the separate all-adapters variant; embedding images use the explicit targets doc
 Do not run an overlay alone. Compose does not have a built-in way for an
 overlay to require its base file, so the operator must use the documented
 `-f` order. The CLI generator instead writes one self-contained YAML file.
+
+### Maintenance readiness during recovery
+
+The maintenance service is considered ready when its Unix control socket,
+`/var/lib/llm-wiki/maintenance/maintenance.sock`, exists. On a restart with a
+large durable maintenance state, the daemon may spend several minutes rebuilding
+state before creating that socket. During this interval the process can be
+running while Compose reports the service as `starting`; this is expected and
+does not require creating a second Compose project or deleting the app-data
+volume.
+
+The Compose overlay allows five minutes by default for this recovery period. To
+change it for a larger or smaller persisted state, set the following in the
+local `.env` before recreating the maintenance service:
+
+```dotenv
+LLM_WIKI_MAINTENANCE_HEALTH_START_PERIOD=300s
+```
+
+Use `docker compose ps` to inspect readiness. Do not remove the app-data volume
+to make the socket appear: that discards durable maintenance state. If the
+socket is still absent after the configured grace period, inspect the
+maintenance container logs and persisted files under
+`/var/lib/llm-wiki/maintenance/` before changing the timeout.
+
 ### Maintenance profiles and combined mode
 
 The split maintenance service supports two independent request/background
