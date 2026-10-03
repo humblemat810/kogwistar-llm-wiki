@@ -38,6 +38,8 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag }}-cpu
       LATEST_TAG: latest-cpu
+      MODEL_RELEASE_TAG: ${{ inputs.tag }}-qwen3-vl-embedding-2b-cpu
+      MODEL_LATEST_TAG: latest-qwen3-vl-embedding-2b-cpu
     steps:
       - uses: actions/checkout@v7
       - name: Verify package version matches release tag
@@ -72,6 +74,17 @@ jobs:
           docker buildx imagetools create
           --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.LATEST_TAG }}
           docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
+      - name: Promote model-qualified CPU alias
+        if: inputs.promote_latest == true
+        run: >-
+          docker buildx imagetools create
+          --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.MODEL_LATEST_TAG }}
+          docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
+      - name: Publish model-qualified CPU release tag
+        run: >-
+          docker buildx imagetools create
+          --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.MODEL_RELEASE_TAG }}
+          docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
 
   publish-cuda:
     if: inputs.confirm == true && (inputs.target == 'embedding-cuda12.8' || inputs.target == 'all')
@@ -80,6 +93,8 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag }}-cuda12.8
       LATEST_TAG: latest-cuda12.8
+      MODEL_RELEASE_TAG: ${{ inputs.tag }}-qwen3-vl-embedding-2b-cuda12.8
+      MODEL_LATEST_TAG: latest-qwen3-vl-embedding-2b-cuda12.8
     steps:
       - uses: actions/checkout@v7
       - name: Verify package version matches release tag
@@ -113,4 +128,15 @@ jobs:
         run: >-
           docker buildx imagetools create
           --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.LATEST_TAG }}
+          docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
+      - name: Promote model-qualified CUDA alias
+        if: inputs.promote_latest == true
+        run: >-
+          docker buildx imagetools create
+          --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.MODEL_LATEST_TAG }}
+          docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}
+      - name: Publish model-qualified CUDA release tag
+        run: >-
+          docker buildx imagetools create
+          --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.MODEL_RELEASE_TAG }}
           docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki-embedding:${{ env.RELEASE_TAG }}

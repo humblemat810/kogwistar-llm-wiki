@@ -37,6 +37,14 @@ function Get-EmbeddingTag {
     return "$Tag-$Backend"
 }
 
+function Get-ModelEmbeddingTag {
+    param([Parameter(Mandatory = $true)][string]$Backend)
+    if ($Tag -eq "latest") {
+        return "latest-qwen3-vl-embedding-2b-$Backend"
+    }
+    return "$Tag-qwen3-vl-embedding-2b-$Backend"
+}
+
 function Test-RemoteImageTag {
     param([Parameter(Mandatory = $true)][string]$Image)
     $output = & docker buildx imagetools inspect $Image 2>&1
@@ -58,9 +66,11 @@ function Get-PublishImages {
     }
     if ($Target -eq "embedding-cpu" -or $Target -eq "all") {
         $images += "$DockerHubUser/kogwistar-llm-wiki-embedding:$(Get-EmbeddingTag 'cpu')"
+        $images += "$DockerHubUser/kogwistar-llm-wiki-embedding:$(Get-ModelEmbeddingTag 'cpu')"
     }
     if ($Target -eq "embedding-cuda12.8" -or $Target -eq "all") {
         $images += "$DockerHubUser/kogwistar-llm-wiki-embedding:$(Get-EmbeddingTag 'cuda12.8')"
+        $images += "$DockerHubUser/kogwistar-llm-wiki-embedding:$(Get-ModelEmbeddingTag 'cuda12.8')"
     }
     return $images
 }
@@ -72,16 +82,20 @@ function Publish-Embedding {
     )
 
     $embeddingImage = "$DockerHubUser/kogwistar-llm-wiki-embedding:$(Get-EmbeddingTag $Backend)"
+    $modelEmbeddingImage = "$DockerHubUser/kogwistar-llm-wiki-embedding:$(Get-ModelEmbeddingTag $Backend)"
     Write-Host "Building $embeddingImage ($TorchBackend)"
     Invoke-Docker @(
         "buildx", "build", "--load",
         "--build-arg", "LLM_WIKI_EMBEDDING_TORCH_BACKEND=$TorchBackend",
         "--tag", $embeddingImage,
+        "--tag", $modelEmbeddingImage,
         "--file", "Dockerfile.embedding-service",
         "."
     )
     Write-Host "Pushing $embeddingImage"
     Invoke-Docker @("push", $embeddingImage)
+    Write-Host "Pushing $modelEmbeddingImage"
+    Invoke-Docker @("push", $modelEmbeddingImage)
 }
 
 if ($SkipEmbedding) {
