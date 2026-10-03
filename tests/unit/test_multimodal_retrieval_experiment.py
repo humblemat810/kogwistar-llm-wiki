@@ -527,17 +527,28 @@ def test_pipeline_skips_one_unauthorized_hit_and_keeps_later_authorized_hits() -
     store = InMemoryMultimodalProjectionStore(scope="workspace-1", profile=profile)
     units = tuple(
         MultimodalSourceUnit(
-            view_id=view_id,
+            view_id=f"blocked-{index}",
             workspace_id="workspace-1",
-            source_id=source_id,
+            source_id=f"blocked-source-{index}",
             source_revision_id="rev-1",
             modality="text",
             locator={"kind": "text_span", "start_char": 0, "end_char": 4},
             text="text",
         )
-        for view_id, source_id in (("blocked", "blocked-source"), ("allowed", "allowed-source"))
+        for index in range(40)
+    ) + (
+        MultimodalSourceUnit(
+            view_id="allowed",
+            workspace_id="workspace-1",
+            source_id="allowed-source",
+            source_revision_id="rev-1",
+            modality="text",
+            locator={"kind": "text_span", "start_char": 0, "end_char": 4},
+            text="text",
+        ),
     )
-    for unit, vector in zip(units, (((1.0, 0.0),), ((0.9, 0.1),))):
+    for unit in units:
+        vector = ((1.0, 0.0),) if unit.source_id.startswith("blocked") else ((0.9, 0.1),)
         store.capture(unit)
         store.upsert_embedding(unit, vector, profile=profile)
 
@@ -546,7 +557,7 @@ def test_pipeline_skips_one_unauthorized_hit_and_keeps_later_authorized_hits() -
         multimodal_projection_store = store
 
     def authorize(unit: MultimodalSourceUnit) -> None:
-        if unit.source_id == "blocked-source":
+        if unit.source_id.startswith("blocked-source"):
             raise PermissionError("ACL denied")
 
     batch = pipeline_multimodal_retriever(

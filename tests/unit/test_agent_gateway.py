@@ -340,6 +340,18 @@ def test_retrieval_controls_are_exposed_on_query_search_and_hypergraph_tools():
         assert properties["source_evidence_required"]["type"] == "boolean"
 
 
+def test_multimodal_capture_schema_describes_host_validated_units():
+    schemas = {name: schema for name, _description, schema in _tool_specs()}
+    unit_schema = schemas["multimodal_capture"]["properties"]["units"]["items"]
+    assert unit_schema["additionalProperties"] is False
+    assert set(unit_schema["required"]) >= {
+        "view_id", "workspace_id", "source_id", "source_revision_id",
+        "modality", "locator",
+    }
+    assert "embedding_reference" not in unit_schema["properties"]
+    assert unit_schema["properties"]["locator"]["required"] == ["kind"]
+
+
 def test_native_mcp_memory_capture_publishes_record_contract():
     mcp = build_agent_mcp(AgentGateway(FakeApi()))
     tools = asyncio.run(mcp.list_tools())

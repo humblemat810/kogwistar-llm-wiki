@@ -238,6 +238,7 @@ def pipeline_multimodal_retriever(
     authorize_source: Callable[[MultimodalSourceUnit], None],
     limit: int = 10,
     overfetch_factor: int = 4,
+    max_candidate_scan: int = 4096,
     image_query: object | None = None,
     dereferencer: EmbeddingReferenceDereferencer | None = None,
     allowed_namespaces: Iterable[str] | None = None,
@@ -249,9 +250,15 @@ def pipeline_multimodal_retriever(
     Authorization remains a required host callback.
     """
 
-    if not workspace_id or limit <= 0 or overfetch_factor <= 0:
+    if (
+        not workspace_id
+        or limit <= 0
+        or overfetch_factor <= 0
+        or max_candidate_scan < limit
+    ):
         raise ValueError(
-            "workspace_id, result limit, and overfetch factor must be positive"
+            "workspace_id, result limit, overfetch factor, and candidate scan bound "
+            "must be valid"
         )
     encoder = getattr(pipeline, "multimodal_encoder", None)
     store = getattr(pipeline, "multimodal_projection_store", None)
@@ -282,15 +289,25 @@ def pipeline_multimodal_retriever(
             raise ValueError(
                 "multimodal query encoder returned an invalid result count"
             )
+        # ACL filtering happens after vector ranking because the projection
+        # store must remain independent of application authorization. Use a
+        # bounded safety overfetch so a dense unauthorized prefix cannot
+        # starve the authorized result set.
+        fetch_limit = max_candidate_scan
         hits = store.search(
             query_vectors[0],
             profile=encoder.profile,
-            limit=limit * overfetch_factor,
+            limit=fetch_limit,
+            workspace_id=workspace_id,
         )
         searched_at = _clock_ms()
         candidates: list[EvidenceCandidate] = []
         for hit in hits:
-            unit = store.get(hit.view_id, profile=encoder.profile)
+            unit = store.get(
+                hit.view_id,
+                profile=encoder.profile,
+                workspace_id=workspace_id,
+            )
             if unit is None:
                 continue
             if (

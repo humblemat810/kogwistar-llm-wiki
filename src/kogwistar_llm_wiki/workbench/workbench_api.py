@@ -195,6 +195,9 @@ class WorkbenchApi:
         multimodal_asset_resolver: AssetResolver | None = None,
         multimodal_dereferencer: EmbeddingReferenceDereferencer | None = None,
         multimodal_allowed_namespaces: Callable[[str], Sequence[str]] | None = None,
+        multimodal_source_map_resolver: Callable[
+            [MultimodalSourceUnit], Mapping[str, object] | None
+        ] | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = MemoryService(pipeline.engines)
@@ -209,6 +212,9 @@ class WorkbenchApi:
         self._multimodal_asset_resolver = multimodal_asset_resolver
         self._multimodal_dereferencer = multimodal_dereferencer
         self._multimodal_allowed_namespaces = multimodal_allowed_namespaces
+        self._multimodal_source_map_resolver = multimodal_source_map_resolver or getattr(
+            pipeline, "resolve_multimodal_source_map", None
+        )
         self._contact_authorize_stream = contact_authorize_stream or (
             lambda _workspace_id, _stream_id: False
         )
@@ -273,6 +279,13 @@ class WorkbenchApi:
                 workspace_id, "source_revision", unit.source_revision_id, "write"
             ):
                 raise PermissionError("source revision is not authorized for multimodal capture")
+            source_map_resolver = self._multimodal_source_map_resolver
+            if not callable(source_map_resolver):
+                raise PermissionError("authoritative source map is not configured")
+            source_map = source_map_resolver(unit)
+            if source_map is None:
+                raise PermissionError("authoritative source map revision is unavailable")
+            self._validate_multimodal_source_map(unit, source_map)
             units.append(unit)
         count = self.pipeline.capture_multimodal_units(units)
         return {
@@ -280,10 +293,52 @@ class WorkbenchApi:
             "workspace_id": workspace_id,
             "count": count,
             "view_ids": [unit.view_id for unit in units],
-            "stage_counts": self.pipeline.multimodal_projection_store.stage_counts()
+            "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(
+                workspace_id=workspace_id
+            )
             if self.pipeline.multimodal_projection_store is not None
             else {},
         }
+
+    @staticmethod
+    def _validate_multimodal_source_map(
+        unit: MultimodalSourceUnit, source_map: Mapping[str, object]
+    ) -> None:
+        """Require a projection view to match trusted source-map evidence."""
+        for field, expected in (
+            ("workspace_id", unit.workspace_id),
+            ("source_namespace", unit.source_namespace or unit.workspace_id),
+            ("source_id", unit.source_id),
+            ("source_revision_id", unit.source_revision_id),
+        ):
+            if str(source_map.get(field) or "") != expected:
+                raise ValueError(f"multimodal unit does not match source map {field}")
+        raw_text = source_map.get("raw_text")
+        source_digest = str(source_map.get("source_digest") or "").strip()
+        if isinstance(raw_text, str):
+            digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+            if source_digest and source_digest != digest:
+                raise ValueError("source map text digest is inconsistent")
+            locator = dict(unit.locator)
+            start = locator.get("start_char")
+            end = locator.get("end_char")
+            if start is not None or end is not None:
+                if type(start) is not int or type(end) is not int or not 0 <= start <= end <= len(raw_text):
+                    raise ValueError("multimodal source span is outside the source map")
+                if unit.text != raw_text[start:end]:
+                    raise ValueError("multimodal text does not match the source map span")
+            elif unit.modality == "text":
+                raise ValueError("text projection requires a bounded source map span")
+        elif unit.modality == "text":
+            raise ValueError("text projection requires source map text")
+        expected_ref = str(source_map.get("content_ref") or "").strip()
+        if expected_ref and unit.content_ref != expected_ref:
+            raise ValueError("multimodal asset reference does not match the source map")
+        expected_asset_hash = str(source_map.get("asset_sha256") or "").strip().lower()
+        if unit.modality != "text" and (
+            not expected_asset_hash or unit.asset_sha256 != expected_asset_hash
+        ):
+            raise ValueError("multimodal asset digest does not match the source map")
 
     def multimodal_index(self, payload: Mapping[str, Any]) -> dict[str, object]:
         """Promote pending units using the configured, host-owned resolver."""
@@ -307,6 +362,7 @@ class WorkbenchApi:
         try:
             embedded = self.pipeline.embed_multimodal_pending(
                 batch_size=batch_size,
+                max_units=batch_size,
                 resolver=self._multimodal_asset_resolver,
                 workspace_id=workspace_id,
             )
@@ -315,13 +371,17 @@ class WorkbenchApi:
                 "status": "degraded",
                 "workspace_id": workspace_id,
                 "reason": str(exc),
-                "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(),
+                "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(
+                    workspace_id=workspace_id
+                ),
             }
         return {
             "status": "indexed",
             "workspace_id": workspace_id,
             "embedded_count": embedded,
-            "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(),
+            "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(
+                workspace_id=workspace_id
+            ),
             "profile_fingerprint": (
                 self.pipeline.multimodal_encoder.profile.fingerprint
                 if self.pipeline.multimodal_encoder is not None
@@ -358,7 +418,7 @@ class WorkbenchApi:
                 "dimension": encoder.profile.dimension,
                 "metric": encoder.profile.metric,
             },
-            "stage_counts": store.stage_counts(),
+            "stage_counts": store.stage_counts(workspace_id=workspace_id),
         }
 
     def multimodal_search(self, payload: Mapping[str, Any]) -> dict[str, object]:

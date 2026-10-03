@@ -105,6 +105,38 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
         return {"type": "string", **extra}
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None}
     object_value = {"additionalProperties": True, "type": "object"}
+    multimodal_unit = {
+        "additionalProperties": False,
+        "properties": {
+            "view_id": string(),
+            "workspace_id": string(),
+            "source_id": string(),
+            "source_revision_id": string(),
+            "source_namespace": nullable_string,
+            "modality": {
+                "enum": [
+                    "text", "image", "audio", "video", "pdf_page",
+                    "table", "chart", "webpage", "video_frame",
+                ],
+                "type": "string",
+            },
+            "locator": {
+                "additionalProperties": True,
+                "properties": {"kind": string()},
+                "required": ["kind"],
+                "type": "object",
+            },
+            "content_ref": nullable_string,
+            "text": nullable_string,
+            "asset_sha256": nullable_string,
+            "metadata": {"additionalProperties": True, "type": "object", "default": {}},
+        },
+        "required": [
+            "view_id", "workspace_id", "source_id", "source_revision_id",
+            "modality", "locator",
+        ],
+        "type": "object",
+    }
     nullable_object = {"anyOf": [object_value, {"type": "null"}], "default": None}
     nullable_string_list = {
         "anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
@@ -322,7 +354,7 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                 {
                     "workspace_id": string(),
                     "units": {
-                        "items": object_value,
+                        "items": multimodal_unit,
                         "maxItems": 100,
                         "minItems": 1,
                         "type": "array",
