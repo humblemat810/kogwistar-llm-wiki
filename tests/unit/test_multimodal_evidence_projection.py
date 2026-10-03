@@ -3,13 +3,16 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
 from kogwistar.engine_core import (
     EmbeddingReference,
     MultimodalSpan,
     PinnedLogicalRef,
 )
 from kogwistar.logical_refs import LogicalRef
+
+from kogwistar_llm_wiki.embeddings.multimodal_dereference import (
+    EmbeddingReferenceDereferencer,
+)
 from kogwistar_llm_wiki.embeddings.multimodal_projection import (
     EmbeddingProfileMismatch,
     InMemoryMultimodalProjectionStore,
@@ -17,9 +20,6 @@ from kogwistar_llm_wiki.embeddings.multimodal_projection import (
     MultimodalSourceUnit,
     ProjectionIntegrityError,
     to_core_embedding_profile,
-)
-from kogwistar_llm_wiki.embeddings.multimodal_dereference import (
-    EmbeddingReferenceDereferencer,
 )
 from kogwistar_llm_wiki.embeddings.multimodal_sources import (
     audio_interval_unit,
@@ -63,6 +63,7 @@ def test_audio_and_video_track_units_create_typed_core_spans() -> None:
         start_ms=100,
         end_ms=500,
         content_ref="lake://audio-1",
+        asset_sha256="0" * 64,
     )
     assert audio.to_multimodal_span().locator.kind == "temporal_interval"
 
@@ -75,6 +76,7 @@ def test_audio_and_video_track_units_create_typed_core_spans() -> None:
         track_manifest_ref="lake://tracks/video-1.json",
         track_manifest_sha256="a" * 64,
         content_ref="lake://video-1",
+        asset_sha256="0" * 64,
     )
     span = video.to_multimodal_span()
     assert isinstance(span, MultimodalSpan)
@@ -90,6 +92,7 @@ def test_search_unit_can_carry_one_reference_for_many_late_interaction_vectors()
         modality="image",
         locator={"kind": "whole_image"},
         content_ref="lake://image-1",
+        asset_sha256="0" * 64,
     )
     reference = EmbeddingReference(
         source_namespace="workspace-a",
@@ -109,6 +112,43 @@ def test_search_unit_can_carry_one_reference_for_many_late_interaction_vectors()
     persisted = replace(unit, embedding_reference=reference)
     assert persisted.embedding_reference is not None
     assert persisted.to_payload()["embedding_reference"] is not None
+    assert persisted.to_multimodal_span().source_namespace == "workspace-a"
+
+
+def test_source_namespace_round_trips_without_being_workspace_identity() -> None:
+    unit = MultimodalSourceUnit(
+        view_id="view-ns",
+        workspace_id="workspace-a",
+        source_namespace="media-lake-a",
+        source_id="image-1",
+        source_revision_id="rev-1",
+        modality="image",
+        locator={"kind": "whole_image"},
+        content_ref="lake://image-1",
+        asset_sha256="0" * 64,
+    )
+    restored = MultimodalSourceUnit.from_payload(unit.to_payload())
+    assert restored.source_namespace == "media-lake-a"
+    assert restored.to_multimodal_span().source_namespace == "media-lake-a"
+
+
+def test_asset_backed_stage_two_requires_a_verified_digest() -> None:
+    profile = MultimodalEmbeddingProfile(
+        provider="fake", model="dense", embedding="dense", dimension=2
+    )
+    unit = MultimodalSourceUnit(
+        view_id="undigested",
+        workspace_id="workspace-a",
+        source_id="image-1",
+        source_revision_id="rev-1",
+        modality="image",
+        locator={"kind": "whole_image"},
+        content_ref="lake://image-1",
+    )
+    store = InMemoryMultimodalProjectionStore(scope="workspace-a", profile=profile)
+    store.capture(unit)
+    with pytest.raises(ProjectionIntegrityError, match="SHA-256"):
+        store.upsert_embedding(unit, ((1.0, 0.0),), profile=profile)
 
 
 def test_projection_rejects_reference_from_another_embedding_space() -> None:
@@ -126,6 +166,7 @@ def test_projection_rejects_reference_from_another_embedding_space() -> None:
         modality="image",
         locator={"kind": "whole_image"},
         content_ref="lake://image-1",
+        asset_sha256="0" * 64,
     )
     invalid = replace(
         unit,
@@ -166,6 +207,7 @@ def test_legacy_locator_is_readable_but_not_indexable() -> None:
         modality="image",
         locator={"kind": "unknown_historical_locator", "value": "opaque"},
         content_ref="lake://image-legacy",
+        asset_sha256="0" * 64,
     )
     store = InMemoryMultimodalProjectionStore(scope="workspace-a", profile=profile)
     store.capture(unit)
@@ -194,6 +236,7 @@ def test_dereference_checks_source_map_first_and_enforces_namespace() -> None:
         modality="image",
         locator={"kind": "whole_image"},
         content_ref="lake://image-1",
+        asset_sha256="0" * 64,
     )
     reference = EmbeddingReference(
         source_namespace="workspace-a",

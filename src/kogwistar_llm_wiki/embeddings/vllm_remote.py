@@ -38,8 +38,9 @@ from .multimodal_remote import (
 
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-fA-F]{64}$")
 DEFAULT_VLLM_MODEL = "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm"
+OVIS_BNB4_VLLM_MODEL = "pt810/Ovis-Omni-Embedding-3B-bnb-4bit-vllm"
 LEGACY_VLLM_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
-SUPPORTED_VLLM_MODELS = (DEFAULT_VLLM_MODEL, LEGACY_VLLM_MODEL)
+SUPPORTED_VLLM_MODELS = (DEFAULT_VLLM_MODEL, OVIS_BNB4_VLLM_MODEL, LEGACY_VLLM_MODEL)
 DEFAULT_VLLM_DIMENSION = 1024
 MIN_VLLM_DIMENSION = 64
 MAX_VLLM_DIMENSION = 2048
@@ -49,7 +50,7 @@ DEFAULT_VLLM_CROP_TOKEN_BUDGET = 7680
 
 def _model_family(model: str) -> str:
     """Keep profile fingerprints explicit when serving different model families."""
-    if model == DEFAULT_VLLM_MODEL:
+    if model.startswith("pt810/Ovis-Omni-Embedding-3B-"):
         return "ovis-omni"
     return "qwen3-vl"
 
@@ -342,19 +343,16 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             "encoding_format": "float",
             "dimensions": self.profile.dimension,
         }
-        if self.settings.model == DEFAULT_VLLM_MODEL:
-            # Ovis uses vLLM's pooling embeddings contract, whose multimodal
-            # input is a single OpenAI-style user message.
+        # The OpenAI-compatible pooling endpoint accepts the model input as
+        # ``input``.  Sending Chat Completions-only ``messages`` here makes
+        # current vLLM reject Qwen3-VL with HTTP 400 even though the same
+        # server is healthy and accepts a normal embeddings request. Ovis'
+        # validated pooling adapter uses one user message; Qwen keeps the
+        # full instruction-bearing chat sequence under ``input``.
+        if _model_family(self.settings.model) == "ovis-omni":
             payload["input"] = [messages[1]]
         else:
-            payload.update(
-                {
-                    "messages": messages,
-                    "continue_final_message": True,
-                    "add_generation_prompt": False,
-                    "add_special_tokens": True,
-                }
-            )
+            payload["input"] = messages
         result = self._post_json("/v1/embeddings", payload)
         if result.get("model") != self.settings.model:
             raise EmbeddingProtocolError("vLLM returned an unexpected model identity")
@@ -457,6 +455,7 @@ __all__ = [
     "LEGACY_VLLM_MODEL",
     "MAX_VLLM_DIMENSION",
     "MIN_VLLM_DIMENSION",
+    "OVIS_BNB4_VLLM_MODEL",
     "SUPPORTED_VLLM_MODELS",
     "VllmEmbeddingSettings",
     "VllmMultimodalEncoder",

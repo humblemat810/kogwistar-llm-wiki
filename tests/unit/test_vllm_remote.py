@@ -14,6 +14,8 @@ from kogwistar_llm_wiki.embeddings.multimodal_projection import (
 from kogwistar_llm_wiki.embeddings.multimodal_remote import EmbeddingProtocolError
 from kogwistar_llm_wiki.embeddings.vllm_remote import (
     DEFAULT_VLLM_MODEL,
+    LEGACY_VLLM_MODEL,
+    OVIS_BNB4_VLLM_MODEL,
     VllmEmbeddingSettings,
     VllmMultimodalEncoder,
 )
@@ -51,6 +53,11 @@ def _settings() -> VllmEmbeddingSettings:
 def test_vllm_defaults_to_validated_ovis_profile() -> None:
     assert _settings().model == DEFAULT_VLLM_MODEL
     assert _settings().model == "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm"
+
+
+def test_vllm_accepts_the_local_ovis_4bit_benchmark_profile() -> None:
+    settings = replace(_settings(), model=OVIS_BNB4_VLLM_MODEL)
+    assert settings.profile.preprocessing_fingerprint.startswith("ovis-omni:vllm:")
 
 
 def test_vllm_profile_is_distinct_from_transformers_profile() -> None:
@@ -161,6 +168,31 @@ def test_vllm_adapter_uses_configured_dimension() -> None:
     embedding_requests = [request for request in requests if "dimensions" in request]
     assert embedding_requests[-1]["dimensions"] == 1536
     assert ":1536:context=" in encoder.profile.preprocessing_fingerprint
+
+
+def test_qwen_vllm_adapter_uses_pooling_input_not_chat_messages() -> None:
+    requests: list[dict[str, object]] = []
+
+    def opener(request, *, timeout):
+        del timeout
+        payload = json.loads(request.data.decode("utf-8"))
+        requests.append(payload)
+        if request.full_url.endswith("/tokenize"):
+            return _Response({"count": 2, "tokens": [1, 2]})
+        return _Response(
+            {
+                "model": LEGACY_VLLM_MODEL,
+                "data": [{"index": 0, "embedding": [1.0] + [0.0] * 1023}],
+            }
+        )
+
+    settings = replace(_settings(), model=LEGACY_VLLM_MODEL)
+    VllmMultimodalEncoder(settings, opener=opener).encode_queries(["qwen query"])
+    embedding_request = [item for item in requests if "dimensions" in item][-1]
+    assert "input" in embedding_request
+    assert "messages" not in embedding_request
+    assert embedding_request["input"][0]["role"] == "system"
+    assert embedding_request["input"][1]["role"] == "user"
 
 
 def test_vllm_adapter_tokenizes_and_crops_long_text() -> None:

@@ -44,6 +44,13 @@
       "id": "bottleneck_visual",
       "query": "visual artifact showing the expensive retrieval stage",
       "expected_top_refs": ["benchmark-image"]
+    },
+    {
+      "id": "image_to_related_text",
+      "query_kind": "image",
+      "query_source_ref": "architecture-image",
+      "query": "image query for the parallel retrieval architecture",
+      "expected_top_refs": ["text-prototype"]
     }
   ]
 }

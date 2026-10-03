@@ -29,6 +29,7 @@ from kogwistar_llm_wiki.embeddings.vllm_remote import (
     VllmEmbeddingSettings,
     VllmMultimodalEncoder,
 )
+from llm_wiki_embedding_contract import EmbeddingProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,8 @@ class MultimodalBenchmarkCase:
     name: str
     item_count: int
     samples: int
+    warmup_count: int
+    warmup_ms: float
     median_ms: float
     mean_ms: float
     items_per_second: float
@@ -95,6 +98,23 @@ def _mixed_units(count: int) -> tuple[MultimodalSourceUnit, ...]:
     return tuple(units)
 
 
+def _text_image_units(count: int) -> tuple[MultimodalSourceUnit, ...]:
+    """Return one multimodal request per item, containing text and an image."""
+    return tuple(
+        MultimodalSourceUnit(
+            view_id=f"benchmark-text-image-{index}",
+            workspace_id="benchmark",
+            source_id="benchmark-source",
+            source_revision_id="benchmark-revision",
+            modality="image",
+            locator={"kind": "whole_image", "ordinal": index},
+            content_ref=f"benchmark://image/{index}",
+            text=f"A deterministic text description paired with image {index}.",
+        )
+        for index in range(count)
+    )
+
+
 def _png_bytes() -> bytes:
     from PIL import Image
 
@@ -113,8 +133,10 @@ def _measure_case(
     warmup: int,
     resolver: MappingAssetResolver | None,
 ) -> MultimodalBenchmarkCase:
+    warmup_started = time.perf_counter()
     for _ in range(warmup):
         encoder.encode_documents(units, batch_size=batch_size, resolver=resolver)
+    warmup_ms = (time.perf_counter() - warmup_started) * 1000.0
     timings: list[float] = []
     for _ in range(repeats):
         started = time.perf_counter()
@@ -134,6 +156,8 @@ def _measure_case(
         name=name,
         item_count=len(units),
         samples=len(timings),
+        warmup_count=warmup,
+        warmup_ms=warmup_ms,
         median_ms=median(timings),
         mean_ms=mean(timings),
         items_per_second=len(units) / (median(timings) / 1000.0) if timings else 0.0,
@@ -205,8 +229,6 @@ def run_multimodal_benchmark(
             EmbeddingServiceSettings,
             RemoteMultimodalEncoder,
         )
-        from llm_wiki_embedding_service.config import EmbeddingServiceConfig
-
         capabilities_request = Request(service_url.rstrip("/") + "/v1/capabilities", method="GET")
         if service_token:
             capabilities_request.add_header("Authorization", f"Bearer {service_token}")
@@ -222,12 +244,24 @@ def run_multimodal_benchmark(
                 "restart the service with LLM_WIKI_EMBEDDING_BATCH_SIZE"
             )
 
-        profile = EmbeddingServiceConfig(
-            model=service_model or "Qwen/Qwen3-VL-Embedding-2B",
-            revision=service_model_revision,
-            dimension=dimension,
-            instruction=service_instruction or "Represent the user's input.",
-        ).profile
+        try:
+            profile_payload = capabilities["profile"]
+            profile = EmbeddingProfile.from_payload(profile_payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("remote service capabilities omitted a valid embedding profile") from exc
+        if profile.dimension != dimension:
+            raise ValueError(
+                f"remote service dimension mismatch: expected {dimension}, got {profile.dimension}"
+            )
+        if service_model and profile.model != service_model:
+            raise ValueError(
+                f"remote service model mismatch: expected {service_model}, got {profile.model}"
+            )
+        if service_model_revision and profile.model_revision != service_model_revision:
+            raise ValueError(
+                "remote service model revision mismatch: "
+                f"expected {service_model_revision}, got {profile.model_revision}"
+            )
         encoder = RemoteMultimodalEncoder(
             profile,
             EmbeddingServiceSettings(
@@ -278,6 +312,8 @@ def run_multimodal_benchmark(
         ("image_batch", _image_units(items)),
         ("single_text", _text_units(1)),
         ("text_batch", _text_units(items)),
+        ("single_text_image", _text_image_units(1)),
+        ("text_image_batch", _text_image_units(items)),
         ("mixed_image_text_batch", _mixed_units(items)),
     )
     results = [

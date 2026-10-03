@@ -24,7 +24,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from io import BytesIO
 from math import sqrt
@@ -33,6 +33,8 @@ from typing import Protocol, runtime_checkable
 
 from kogwistar.engine_core import (
     EmbeddingProfile as CoreEmbeddingProfile,
+)
+from kogwistar.engine_core import (
     EmbeddingReference,
     LegacyLocator,
     MultimodalSpan,
@@ -88,6 +90,7 @@ class MultimodalSourceUnit:
     content_ref: str | None = None
     text: str | None = None
     asset_sha256: str | None = None
+    source_namespace: str | None = None
     metadata: Mapping[str, object] = field(default_factory=dict)
     embedding_reference: EmbeddingReference | None = None
 
@@ -100,6 +103,8 @@ class MultimodalSourceUnit:
             raise ValueError(f"unsupported source modality {self.modality!r}")
         if not self.content_ref and not self.text:
             raise ValueError("a source unit requires content_ref or text")
+        if self.source_namespace is not None and not self.source_namespace.strip():
+            raise ValueError("source_namespace cannot be empty")
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -107,6 +112,7 @@ class MultimodalSourceUnit:
             "workspace_id": self.workspace_id,
             "source_id": self.source_id,
             "source_revision_id": self.source_revision_id,
+            "source_namespace": self.source_namespace,
             "modality": self.modality,
             "locator": dict(self.locator),
             "content_ref": self.content_ref,
@@ -122,6 +128,16 @@ class MultimodalSourceUnit:
 
     def to_multimodal_span(self) -> MultimodalSpan:
         """Convert a legacy source-unit locator into the core evidence contract."""
+
+        if (
+            self.content_ref is not None
+            and self.modality != "text"
+            and not re.fullmatch(r"[0-9a-fA-F]{64}", self.asset_sha256 or "")
+        ):
+            raise ProjectionIntegrityError(
+                "asset-backed multimodal spans require the SHA-256 digest of "
+                "the resolved source bytes"
+            )
 
         locator = dict(self.locator)
         kind = str(locator.get("kind", "legacy"))
@@ -174,7 +190,7 @@ class MultimodalSourceUnit:
         ).hexdigest()
         modality = "video" if self.modality == "video_frame" else self.modality
         return MultimodalSpan(
-            source_namespace=self.workspace_id,
+            source_namespace=self.source_namespace or self.workspace_id,
             resource_id=self.source_id,
             resource_revision_id=self.source_revision_id,
             content_sha256=source_digest,
@@ -189,6 +205,11 @@ class MultimodalSourceUnit:
             workspace_id=str(payload["workspace_id"]),
             source_id=str(payload["source_id"]),
             source_revision_id=str(payload["source_revision_id"]),
+            source_namespace=(
+                str(payload["source_namespace"])
+                if payload.get("source_namespace")
+                else None
+            ),
             modality=str(payload["modality"]),  # type: ignore[arg-type]
             locator=dict(payload.get("locator") or {}),
             content_ref=str(payload["content_ref"]) if payload.get("content_ref") else None,
@@ -379,8 +400,23 @@ def _validate_captured_unit(
     unit: MultimodalSourceUnit,
     *,
     profile: MultimodalEmbeddingProfile,
+    require_asset_digest: bool = False,
 ) -> None:
     """Apply the common stage-1 evidence/profile checks for every backend."""
+
+    binary_modalities = {
+        "image", "audio", "video", "pdf_page", "table", "chart", "video_frame"
+    }
+    if (
+        require_asset_digest
+        and unit.content_ref is not None
+        and unit.modality in binary_modalities
+        and not re.fullmatch(r"[0-9a-fA-F]{64}", unit.asset_sha256 or "")
+    ):
+        raise ProjectionIntegrityError(
+            "stage-2 indexing of asset-backed multimodal units requires "
+            "the SHA-256 digest of the resolved asset"
+        )
 
     if unit.embedding_reference is not None:
         if unit.embedding_reference.profile_fingerprint != profile.fingerprint:
@@ -389,6 +425,29 @@ def _validate_captured_unit(
             )
         if unit.embedding_reference.span.evidence_key != unit.to_multimodal_span().evidence_key:
             raise ProjectionIntegrityError("embedding reference evidence does not match source unit")
+        if unit.embedding_reference.source_namespace != (
+            unit.source_namespace or unit.workspace_id
+        ):
+            raise ProjectionIntegrityError(
+                "embedding reference namespace does not match source unit"
+            )
+
+
+def _is_digest_only_upgrade(
+    existing: MultimodalSourceUnit,
+    replacement: MultimodalSourceUnit,
+) -> bool:
+    """Allow Stage 1 to gain its verified asset digest during promotion."""
+
+    if existing.asset_sha256 is not None or replacement.asset_sha256 is None:
+        return False
+    old_payload = existing.to_payload()
+    new_payload = replacement.to_payload()
+    old_payload.pop("asset_sha256", None)
+    new_payload.pop("asset_sha256", None)
+    return old_payload == new_payload and bool(
+        re.fullmatch(r"[0-9a-fA-F]{64}", replacement.asset_sha256)
+    )
 
 
 class InMemoryMultimodalProjectionStore:
@@ -416,12 +475,16 @@ class InMemoryMultimodalProjectionStore:
     def capture(self, unit: MultimodalSourceUnit) -> None:
         _validate_captured_unit(unit, profile=self.profile)
         existing = self._units.get(unit.view_id)
-        if existing is not None and existing.to_payload() != unit.to_payload():
+        if existing is not None and (
+            existing.to_payload() != unit.to_payload()
+            and not _is_digest_only_upgrade(existing, unit)
+        ):
             raise ProjectionIntegrityError(f"source view {unit.view_id!r} was changed in place")
         self._units[unit.view_id] = unit
 
     def upsert_embedding(self, unit: MultimodalSourceUnit, vectors: object, *, profile: MultimodalEmbeddingProfile) -> None:
         self._check_profile(profile)
+        _validate_captured_unit(unit, profile=self.profile, require_asset_digest=True)
         if isinstance(unit.to_multimodal_span().locator, LegacyLocator):
             raise ProjectionIntegrityError(
                 "legacy multimodal locators are readable but must be converted before indexing"
@@ -479,9 +542,7 @@ class InMemoryMultimodalProjectionStore:
                     if unit.embedding_reference is not None
                     else None
                 ),
-                dereference_status=(
-                    "available" if unit.embedding_reference is not None else "unresolved"
-                ),
+                dereference_status="unresolved",
             )
             for score, unit in scored[: max(0, int(limit))]
         ]
@@ -543,8 +604,17 @@ class SQLiteMultimodalProjectionStore(InMemoryMultimodalProjectionStore):
         existing = self._connection.execute(
             "SELECT unit_json FROM multimodal_source_unit WHERE view_id = ?", (unit.view_id,)
         ).fetchone()
-        if existing is not None and json.loads(str(existing["unit_json"])) != unit.to_payload():
-            raise ProjectionIntegrityError(f"source view {unit.view_id!r} was changed in place")
+        if existing is not None:
+            existing_unit = MultimodalSourceUnit.from_payload(
+                json.loads(str(existing["unit_json"]))
+            )
+            if (
+                existing_unit.to_payload() != unit.to_payload()
+                and not _is_digest_only_upgrade(existing_unit, unit)
+            ):
+                raise ProjectionIntegrityError(
+                    f"source view {unit.view_id!r} was changed in place"
+                )
         self._connection.execute(
             """
             INSERT INTO multimodal_source_unit(view_id, unit_json, stage, embedding_json)
@@ -557,6 +627,7 @@ class SQLiteMultimodalProjectionStore(InMemoryMultimodalProjectionStore):
 
     def upsert_embedding(self, unit: MultimodalSourceUnit, vectors: object, *, profile: MultimodalEmbeddingProfile) -> None:
         self._check_profile(profile)
+        _validate_captured_unit(unit, profile=self.profile, require_asset_digest=True)
         if isinstance(unit.to_multimodal_span().locator, LegacyLocator):
             raise ProjectionIntegrityError(
                 "legacy multimodal locators are readable but must be converted before indexing"
@@ -624,7 +695,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         super().__init__(state_path, scope=scope, profile=profile)
         self._client = chromadb.PersistentClient(path=str(self.persist_directory))
         collection_basis = collection_name or self.scope
-        name = f"mm_{sha256(f'{collection_basis}:profile:{self.profile.fingerprint}'.encode('utf-8')).hexdigest()[:24]}"
+        name = f"mm_{sha256(f'{collection_basis}:profile:{self.profile.fingerprint}'.encode()).hexdigest()[:24]}"
         self._collection = self._client.get_or_create_collection(name=name)
         self._validate_physical_rows()
 
@@ -651,6 +722,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         profile: MultimodalEmbeddingProfile,
     ) -> None:
         self._check_profile(profile)
+        _validate_captured_unit(unit, profile=self.profile, require_asset_digest=True)
         normalised = _normalise_embedding_set(vectors, dimension=profile.dimension)
         if profile.embedding in {"single_vector", "dense"} and len(normalised) != 1:
             raise ProjectionIntegrityError(
@@ -729,9 +801,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
                     if unit.embedding_reference is not None
                     else None
                 ),
-                dereference_status=(
-                    "available" if unit.embedding_reference is not None else "unresolved"
-                ),
+                dereference_status="unresolved",
             )
             for score, unit in scored[: max(0, int(limit))]
         ]
@@ -874,8 +944,15 @@ class PgVectorMultimodalProjectionStore:
                     self._unit_table.c.view_id == unit.view_id
                 )
             ).scalar_one_or_none()
-            if existing is not None and json.loads(str(existing)) != unit.to_payload():
-                raise ProjectionIntegrityError(f"source view {unit.view_id!r} was changed in place")
+            if existing is not None:
+                existing_unit = MultimodalSourceUnit.from_payload(json.loads(str(existing)))
+                if (
+                    existing_unit.to_payload() != unit.to_payload()
+                    and not _is_digest_only_upgrade(existing_unit, unit)
+                ):
+                    raise ProjectionIntegrityError(
+                        f"source view {unit.view_id!r} was changed in place"
+                    )
             if existing is None:
                 connection.execute(
                     self._unit_table.insert().values(
@@ -895,6 +972,7 @@ class PgVectorMultimodalProjectionStore:
         import sqlalchemy as sa
 
         self._check_profile(profile)
+        _validate_captured_unit(unit, profile=self.profile, require_asset_digest=True)
         if isinstance(unit.to_multimodal_span().locator, LegacyLocator):
             raise ProjectionIntegrityError(
                 "legacy multimodal locators are readable but must be converted before indexing"
@@ -1047,7 +1125,7 @@ class PgVectorMultimodalProjectionStore:
                     if unit.embedding_reference is not None
                     else None
                 ),
-                dereference_status=("available" if unit.embedding_reference is not None else "unresolved"),
+                dereference_status="unresolved",
             )
             for score, unit in scored[: max(0, int(limit))]
         ]
@@ -1861,6 +1939,26 @@ def embed_pending(
     pending = list(store.pending_units())
     if not pending:
         return 0
+    resolved_pending: list[MultimodalSourceUnit] = []
+    for unit in pending:
+        if unit.content_ref is None or unit.modality == "text" or unit.asset_sha256:
+            resolved_pending.append(unit)
+            continue
+        if resolver is None:
+            raise ProjectionIntegrityError(
+                f"asset resolver is required to hash pending unit {unit.view_id!r}"
+            )
+        raw = resolver.resolve(unit)
+        if hasattr(raw, "read"):
+            raw = raw.read()
+        if not isinstance(raw, (bytes, bytearray, memoryview)):
+            raise ProjectionIntegrityError(
+                f"asset resolver returned non-byte content for {unit.view_id!r}"
+            )
+        resolved_pending.append(
+            replace(unit, asset_sha256=sha256(bytes(raw)).hexdigest())
+        )
+    pending = resolved_pending
     vectors = _normalise_sets(
         encoder.encode_documents(pending, batch_size=batch_size, resolver=resolver),
         profile=encoder.profile,

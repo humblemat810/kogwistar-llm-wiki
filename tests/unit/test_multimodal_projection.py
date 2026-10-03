@@ -107,6 +107,7 @@ def test_image_query_uses_native_image_capability_without_captioning() -> None:
         modality="image",
         locator={"kind": "whole_image"},
         content_ref="blob://image-1",
+        asset_sha256="0" * 64,
     )
     store.capture(image)
     assert embed_pending(store, encoder) == 1
@@ -572,7 +573,11 @@ def test_ingest_pipeline_delegates_opt_in_multimodal_flow(tmp_path) -> None:
             content_ref="blob://image-query",
         )
         pipeline.capture_multimodal_units([image_unit])
-        assert pipeline.embed_multimodal_pending() == 3
+        assert pipeline.embed_multimodal_pending(
+            resolver=MappingAssetResolver(
+                {"blob://image": b"html-image", "blob://image-query": b"query-image"}
+            )
+        ) == 3
         assert pipeline.search_multimodal_image(["blob://image-query"], limit=1)[0].view_id == "standalone-image"
         mixed = pipeline.search_multimodal_mixed(
             text_queries=("multimodal article",),

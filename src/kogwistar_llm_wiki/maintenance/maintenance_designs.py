@@ -11,6 +11,7 @@ from .maintenance_policy import (
     EXECUTION_WISDOM_WORKFLOW_ID,
     GRAPH_PATCH_APPLY_WORKFLOW_ID,
     GRAPH_PATCH_PROPOSAL_WORKFLOW_ID,
+    MULTIMODAL_RETRIEVAL_WORKFLOW_ID,
 )
 
 
@@ -350,6 +351,84 @@ def build_crosslink_group_design(
     )
 
 
+def build_multimodal_retrieval_design(
+    workflow_id: str = MULTIMODAL_RETRIEVAL_WORKFLOW_ID,
+) -> WorkflowDesignArtifact:
+    """Describe the sidecar lifecycle using ordinary workflow graph entities.
+
+    The sidecar remains an application retrieval adapter, not a second graph.
+    This design is the durable workflow contract that records where the
+    sidecar may overlap the text/graph path and where evidence is authorized
+    before assimilation.
+    """
+
+    stages = (
+        ("dispatch", "Dispatch Retrieval", "Create a scoped multimodal retrieval run."),
+        ("text_graph", "Run Text And Graph Retrieval", "Continue the primary path without waiting for media."),
+        ("sidecar", "Run Multimodal Sidecar", "Retrieve profile-bound references asynchronously."),
+        ("checkpoint", "Reach Assimilation Checkpoint", "Pause only at an explicit worker checkpoint."),
+        ("authorize", "Authorize Current Evidence", "Recheck namespace, ACL, revision, and embedding profile."),
+        ("assimilate", "Assimilate Typed Evidence", "Add authorized references without mutating canonical truth."),
+        ("degraded", "Record Retrieval Degradation", "Record timeout, stale, unavailable, or unauthorized evidence."),
+        ("finalize", "Finalize Retrieval Run", "Close the sidecar and publish the bounded outcome."),
+    )
+    ids = {key: str(stable_id("wf_node", workflow_id, key)) for key, _, _ in stages}
+    nodes: list[WorkflowNode] = []
+    for key, label, summary in stages:
+        metadata: dict[str, object] = {
+            "entity_type": "workflow_node",
+            "workflow_id": workflow_id,
+            "wf_op": f"multimodal_{key}",
+            "default_context_window": 4000,
+        }
+        if key == "dispatch":
+            metadata["wf_start"] = True
+        if key == "sidecar":
+            metadata["wf_fanout"] = True
+        if key == "finalize":
+            metadata["wf_terminal"] = True
+        nodes.append(
+            WorkflowNode(
+                id=ids[key],
+                label=label,
+                type="entity",
+                summary=summary,
+                mentions=_dummy_grounding(),
+                metadata=metadata,
+            )
+        )
+    transitions = (
+        ("dispatch", "text_graph", "primary_path"),
+        ("dispatch", "sidecar", "sidecar_started"),
+        ("text_graph", "checkpoint", "primary_path_ready"),
+        ("sidecar", "checkpoint", "evidence_available"),
+        ("sidecar", "degraded", "timeout_or_provider_failure"),
+        ("checkpoint", "authorize", "checkpoint_reached"),
+        ("authorize", "assimilate", "evidence_authorized"),
+        ("authorize", "degraded", "evidence_rejected_or_stale"),
+        ("assimilate", "finalize", "evidence_assimilated"),
+        ("degraded", "finalize", "degradation_recorded"),
+    )
+    edges = [
+        _workflow_edge(
+            workflow_id,
+            edge_key=f"{source}_{target}_{label}",
+            source_id=ids[source],
+            target_id=ids[target],
+            label=label,
+            summary=f"Multimodal retrieval lifecycle: {label.replace('_', ' ')}.",
+        )
+        for source, target, label in transitions
+    ]
+    return WorkflowDesignArtifact(
+        workflow_id=workflow_id,
+        workflow_version="v1",
+        start_node_id=ids["dispatch"],
+        nodes=nodes,
+        edges=edges,
+    )
+
+
 def materialize_maintenance_designs(workflow_engine: GraphKnowledgeEngine) -> None:
     """Saves all authoritative maintenance designs to the workflow engine."""
     for design in (
@@ -358,6 +437,7 @@ def materialize_maintenance_designs(workflow_engine: GraphKnowledgeEngine) -> No
         build_graph_patch_proposal_design(),
         build_graph_patch_apply_design(),
         build_crosslink_group_design(),
+        build_multimodal_retrieval_design(),
     ):
         for node in design.nodes:
             workflow_engine.write.add_node(node)

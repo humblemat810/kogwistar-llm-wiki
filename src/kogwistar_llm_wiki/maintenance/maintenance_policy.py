@@ -6,6 +6,7 @@ GRAPH_PATCH_PROPOSAL_WORKFLOW_ID = "maintenance.graph_patch_proposal.v1"
 GRAPH_PATCH_APPLY_WORKFLOW_ID = "maintenance.graph_patch_apply.v1"
 MAINTENANCE_OBSERVATION_WORKFLOW_ID = "maintenance.observation.v1"
 CROSSLINK_GROUP_WORKFLOW_ID = "maintenance.crosslink_group.v1"
+MULTIMODAL_RETRIEVAL_WORKFLOW_ID = "retrieval.multimodal_sidecar.v1"
 CROSSLINK_GROUP_KINDS = {
     "document_propose_crosslinks",
     "document_validate_crosslinks",
