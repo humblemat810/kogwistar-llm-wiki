@@ -62,6 +62,7 @@ class MultimodalIngestMixin:
         *,
         batch_size: int | None = None,
         resolver: AssetResolver | None = None,
+        workspace_id: str | None = None,
     ) -> int:
         """Promote pending Stage-1 views using the configured encoder."""
         if self.multimodal_projection_store is None or self.multimodal_encoder is None:
@@ -71,6 +72,7 @@ class MultimodalIngestMixin:
             self.multimodal_encoder,
             batch_size=batch_size,
             resolver=resolver,
+            workspace_id=workspace_id,
         )
 
     def search_multimodal(

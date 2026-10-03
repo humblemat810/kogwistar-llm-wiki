@@ -43,6 +43,8 @@ READ_TOOL_NAMES = frozenset(
         "history",
         "memory_recall",
         "memory_review",
+        "multimodal_search",
+        "multimodal_status",
     }
 )
 
@@ -135,6 +137,8 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "retrieval_required": {"default": False, "type": "boolean"},
                     "similarity_threshold": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": None},
                     "source_evidence_required": {"default": False, "type": "boolean"},
+                    "include_multimodal": {"default": False, "type": "boolean"},
+                    "multimodal_limit": {"default": 10, "maximum": 100, "minimum": 1, "type": "integer"},
                 },
                 required=("workspace_id", "query_text"),
             ),
@@ -152,6 +156,8 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "retrieval_required": {"default": False, "type": "boolean"},
                     "similarity_threshold": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": None},
                     "source_evidence_required": {"default": False, "type": "boolean"},
+                    "include_multimodal": {"default": False, "type": "boolean"},
+                    "multimodal_limit": {"default": 10, "maximum": 100, "minimum": 1, "type": "integer"},
                 },
                 required=("workspace_id", "query_text"),
             ),
@@ -241,6 +247,8 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                     "retrieval_required": {"default": False, "type": "boolean"},
                     "similarity_threshold": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": None},
                     "source_evidence_required": {"default": False, "type": "boolean"},
+                    "include_multimodal": {"default": False, "type": "boolean"},
+                    "multimodal_limit": {"default": 10, "maximum": 100, "minimum": 1, "type": "integer"},
                 },
                 required=("workspace_id",),
             ),
@@ -306,6 +314,51 @@ def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
                 },
                 required=("workspace_id",),
             ),
+        ),
+        (
+            "multimodal_capture",
+            "Capture revision-bound multimodal projection units for later indexing.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "units": {
+                        "items": object_value,
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                    },
+                },
+                required=("workspace_id", "units"),
+            ),
+        ),
+        (
+            "multimodal_index",
+            "Promote pending multimodal units through the configured embedding profile.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "batch_size": {"default": 8, "maximum": 32, "minimum": 1, "type": "integer"},
+                },
+                required=("workspace_id",),
+            ),
+        ),
+        (
+            "multimodal_search",
+            "Search authorized multimodal projection evidence by text or image reference.",
+            _object_schema(
+                {
+                    "workspace_id": string(),
+                    "query_text": string(),
+                    "image_content_ref": string(default=""),
+                    "limit": {"default": 10, "maximum": 100, "minimum": 1, "type": "integer"},
+                },
+                required=("workspace_id",),
+            ),
+        ),
+        (
+            "multimodal_status",
+            "Report multimodal projection readiness, profile, and stage counts.",
+            _object_schema({"workspace_id": string()}, required=("workspace_id",)),
         ),
         (
             "propose",

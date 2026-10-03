@@ -21,6 +21,10 @@ class AgentToolCatalogMixin:
             "memory_recall",
             "memory_capture",
             "memory_review",
+            "multimodal_capture",
+            "multimodal_index",
+            "multimodal_search",
+            "multimodal_status",
             "propose",
             "confirm",
         )
@@ -39,6 +43,10 @@ class AgentToolCatalogMixin:
             "memory_recall": "Recall bounded, evidence-backed project memory for relevant work.",
             "memory_capture": "Capture a structured, evidence-backed project memory record.",
             "memory_review": "Review project memory records, evidence, lifecycle, and conflicts.",
+            "multimodal_capture": "Capture revision-bound multimodal projection units for later indexing.",
+            "multimodal_index": "Promote pending multimodal units through the configured embedding profile.",
+            "multimodal_search": "Search authorized multimodal projection evidence by text.",
+            "multimodal_status": "Report multimodal projection readiness, profile, and stage counts.",
             "propose": "Validate a candidate durable knowledge change without applying it.",
             "confirm": "Explicitly approve and apply a previously validated knowledge change.",
         }
@@ -58,6 +66,10 @@ class AgentToolCatalogMixin:
                 "memory_recall": self.memory_recall,
                 "memory_capture": self.memory_capture,
                 "memory_review": self.memory_review,
+                "multimodal_capture": self.multimodal_capture,
+                "multimodal_index": self.multimodal_index,
+                "multimodal_search": self.multimodal_search,
+                "multimodal_status": self.multimodal_status,
                 "propose": self.propose,
                 "confirm": self.confirm,
             }

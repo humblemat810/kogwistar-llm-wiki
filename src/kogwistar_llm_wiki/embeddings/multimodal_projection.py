@@ -1933,10 +1933,15 @@ def embed_pending(
     *,
     batch_size: int | None = None,
     resolver: AssetResolver | None = None,
+    workspace_id: str | None = None,
 ) -> int:
     """Promote captured Stage-1 units incrementally and crash-safely."""
 
-    pending = list(store.pending_units())
+    pending = [
+        unit
+        for unit in store.pending_units()
+        if workspace_id is None or unit.workspace_id == workspace_id
+    ]
     if not pending:
         return 0
     resolved_pending: list[MultimodalSourceUnit] = []

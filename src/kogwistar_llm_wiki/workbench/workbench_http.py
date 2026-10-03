@@ -32,6 +32,7 @@ API_VERSION = "v1"
 CAPABILITIES_SCHEMA_VERSION = "1"
 MCP_READ_TOOLS = frozenset({
     "query", "search", "source", "status", "hypergraph_search", "history",
+    "multimodal_search", "multimodal_status",
 })
 
 
@@ -145,9 +146,23 @@ def build_workbench_handler(
                         "hop_limit": int(_first(query, "hop_limit", "1")),
                         "max_nodes": int(_first(query, "max_nodes", "40")),
                         "max_edges": int(_first(query, "max_edges", "80")),
+                        "retrieval_mode": _first(query, "retrieval_mode", "auto"),
+                        "retrieval_required": _first(query, "retrieval_required", "false").lower() in {"1", "true", "yes"},
+                        "similarity_threshold": (
+                            float(_first(query, "similarity_threshold", "0"))
+                            if "similarity_threshold" in query
+                            else None
+                        ),
+                        "source_evidence_required": _first(query, "source_evidence_required", "false").lower() in {"1", "true", "yes"},
+                        "include_multimodal": _first(query, "include_multimodal", "false").lower() in {"1", "true", "yes"},
+                        "multimodal_limit": int(_first(query, "multimodal_limit", "10")),
                     }
                     self._require_scope("read", str(payload["workspace_id"]))
                     body = api.get_lens(payload)
+                elif parsed.path == "/api/multimodal/status":
+                    workspace_id = _first(query, "workspace_id", "default")
+                    self._require_scope("read", workspace_id)
+                    body = api.multimodal_status(workspace_id=workspace_id)
                 elif parsed.path == "/api/history":
                     workspace_id = _first(query, "workspace_id", "rl-fixture")
                     self._require_scope("read", workspace_id)
@@ -216,7 +231,7 @@ def build_workbench_handler(
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
             extension_route = extension_routes.get(("POST", parsed.path))
-            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", "/api/crosslink-groups/decision", *agent_paths}:
+            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", "/api/crosslink-groups/decision", "/api/multimodal/capture", "/api/multimodal/index", "/api/multimodal/search", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -251,7 +266,7 @@ def build_workbench_handler(
                         self._require_scope("read" if method == "tasks/get" else "write", workspace_id)
                     elif parsed.path != "/mcp/tools/call":
                         self._require_scope("write" if parsed.path in {"/a2a/v1/message:send", "/a2a/v1/message:stream"} else "read", workspace_id)
-                elif parsed.path in {"/api/ask", "/api/proposal/validate"}:
+                elif parsed.path in {"/api/ask", "/api/proposal/validate", "/api/multimodal/search"}:
                     self._require_scope("read", workspace_id)
                 elif parsed.path == "/api/crosslink-groups/decision":
                     self._require_scope("write", workspace_id)
@@ -300,6 +315,15 @@ def build_workbench_handler(
                     status = 200
                 elif parsed.path == "/api/ask":
                     body = api.ask(payload)
+                    status = 200
+                elif parsed.path == "/api/multimodal/capture":
+                    body = api.multimodal_capture(payload)
+                    status = 201
+                elif parsed.path == "/api/multimodal/index":
+                    body = api.multimodal_index(payload)
+                    status = 200
+                elif parsed.path == "/api/multimodal/search":
+                    body = api.multimodal_search(payload)
                     status = 200
                 elif parsed.path == "/api/interactions":
                     body = api.submit_interaction(payload)

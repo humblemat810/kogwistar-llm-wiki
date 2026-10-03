@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+import json
+from http.client import HTTPConnection
+from threading import Thread
+
+import pytest
+
+from kogwistar_llm_wiki import IngestPipeline, build_in_memory_namespace_engines
+from kogwistar_llm_wiki.agent.gateway import AgentGateway
+from kogwistar_llm_wiki.embeddings.multimodal_projection import (
+    FakeMultimodalEncoder,
+    InMemoryMultimodalProjectionStore,
+    MultimodalEmbeddingProfile,
+)
+from kogwistar_llm_wiki.embeddings.multimodal_sources import MappingAssetResolver
+from kogwistar_llm_wiki.workbench.workbench_api import WorkbenchApi
+from kogwistar_llm_wiki.workbench.workbench_http import build_workbench_handler
+
+
+def _pipeline():
+    engines = build_in_memory_namespace_engines()
+    profile = MultimodalEmbeddingProfile(
+        provider="fake",
+        model="serving-contract-fixture",
+        embedding="late_interaction",
+        dimension=8,
+    )
+    encoder = FakeMultimodalEncoder(profile=profile)
+    store = InMemoryMultimodalProjectionStore(scope="demo:multimodal", profile=profile)
+    return engines, IngestPipeline(
+        engines,
+        multimodal_projection_store=store,
+        multimodal_encoder=encoder,
+    )
+
+
+def _unit(view_id: str = "image-region-1", *, workspace_id: str = "demo") -> dict[str, object]:
+    return {
+        "view_id": view_id,
+        "workspace_id": workspace_id,
+        "source_id": "source-1",
+        "source_revision_id": "source-1@rev-1",
+        "source_namespace": workspace_id,
+        "modality": "text",
+        "locator": {"kind": "text_range", "start_char": 0, "end_char": 20},
+        "text": "a rabbit in a lecture",
+    }
+
+
+def _api(pipeline: IngestPipeline) -> WorkbenchApi:
+    return WorkbenchApi(
+        pipeline,
+        resource_authorizer=lambda _workspace, _kind, _resource, _action: True,
+    )
+
+
+@pytest.mark.ci
+def test_multimodal_public_lifecycle_persists_and_searches() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = _api(pipeline)
+        captured = api.multimodal_capture(
+            {"workspace_id": "demo", "units": [_unit()]}
+        )
+        assert captured["status"] == "captured"
+        assert captured["stage_counts"] == {
+            "stage1": 1,
+            "stage2": 0,
+            "pending_stage2": 1,
+        }
+
+        indexed = api.multimodal_index({"workspace_id": "demo", "batch_size": 1})
+        assert indexed["status"] == "indexed"
+        assert indexed["embedded_count"] == 1
+        assert indexed["stage_counts"]["pending_stage2"] == 0
+
+        status = api.multimodal_status(workspace_id="demo")
+        assert status["status"] == "ready"
+        assert status["stage_counts"]["stage2"] == 1
+
+        result = api.multimodal_search(
+            {"workspace_id": "demo", "query_text": "rabbit lecture", "limit": 1}
+        )
+        assert result["status"] == "ok"
+        assert result["hits"][0]["source_revision_id"] == "source-1@rev-1"
+        assert result["hits"][0]["dereference_status"] == "unresolved"
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_mcp_tools_expose_the_same_host_validated_lifecycle() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        gateway = AgentGateway(_api(pipeline))
+        names = gateway.mcp_tool_names()
+        assert {
+            "multimodal_capture",
+            "multimodal_index",
+            "multimodal_search",
+            "multimodal_status",
+        } <= set(names)
+        gateway.call_mcp_tool(
+            "multimodal_capture", {"workspace_id": "demo", "units": [_unit()]}
+        )
+        indexed = gateway.call_mcp_tool(
+            "multimodal_index", {"workspace_id": "demo", "batch_size": 1}
+        )
+        assert indexed["embedded_count"] == 1
+        searched = gateway.call_mcp_tool(
+            "multimodal_search",
+            {"workspace_id": "demo", "query_text": "rabbit", "limit": 1},
+        )
+        assert searched["status"] == "ok"
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_capture_rejects_cross_workspace_and_caller_references() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = _api(pipeline)
+        with pytest.raises(PermissionError, match="different workspace"):
+            api.multimodal_capture(
+                {"workspace_id": "demo", "units": [_unit(workspace_id="other")]}
+            )
+        supplied_reference = _unit()
+        supplied_reference["embedding_reference"] = {}
+        with pytest.raises(ValueError, match="embedding_reference"):
+            api.multimodal_capture(
+                {"workspace_id": "demo", "units": [supplied_reference]}
+            )
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_public_search_fails_closed_without_source_acl() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = WorkbenchApi(pipeline)
+        with pytest.raises(PermissionError, match="not authorized"):
+            api.multimodal_capture({"workspace_id": "demo", "units": [_unit()]})
+        with pytest.raises(PermissionError, match="not authorized"):
+            api.multimodal_index({"workspace_id": "demo"})
+        with pytest.raises(PermissionError, match="not authorized"):
+            api.multimodal_status(workspace_id="demo")
+        result = api.multimodal_search(
+            {"workspace_id": "demo", "query_text": "rabbit"}
+        )
+        assert result["status"] == "degraded"
+        assert result["reason"] == "source_authorization_not_configured"
+        assert result["hits"] == []
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_index_is_workspace_scoped_in_a_shared_projection_store() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = _api(pipeline)
+        first = _unit("demo-view", workspace_id="demo")
+        second = _unit("other-view", workspace_id="other")
+        api.multimodal_capture({"workspace_id": "demo", "units": [first]})
+        api.multimodal_capture({"workspace_id": "other", "units": [second]})
+        result = api.multimodal_index({"workspace_id": "demo", "batch_size": 2})
+        assert result["embedded_count"] == 1
+        assert result["stage_counts"] == {
+            "stage1": 2,
+            "stage2": 1,
+            "pending_stage2": 1,
+        }
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_search_resolves_an_authorized_image_query_reference() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = WorkbenchApi(
+            pipeline,
+            resource_authorizer=lambda _workspace, _kind, _resource, _action: True,
+            multimodal_asset_resolver=MappingAssetResolver(
+                {"object://query-image": b"not-a-real-image-for-the-fake-encoder"}
+            ),
+        )
+        api.multimodal_capture({"workspace_id": "demo", "units": [_unit()]})
+        api.multimodal_index({"workspace_id": "demo"})
+        result = api.multimodal_search(
+            {
+                "workspace_id": "demo",
+                "image_content_ref": "object://query-image",
+                "limit": 1,
+            }
+        )
+        assert result["status"] == "ok"
+        assert len(result["hits"]) == 1
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_rest_endpoints_cover_capture_index_search_and_status(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
+    engines, pipeline = _pipeline()
+    server = None
+    thread = None
+    try:
+        api = _api(pipeline)
+        from http.server import ThreadingHTTPServer
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), build_workbench_handler(api))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+
+        def post(path: str, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+            encoded = json.dumps(payload).encode("utf-8")
+            connection.request(
+                "POST",
+                path,
+                body=encoded,
+                headers={
+                    "content-type": "application/json",
+                    "content-length": str(len(encoded)),
+                },
+            )
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+
+        status, captured = post(
+            "/api/multimodal/capture",
+            {"workspace_id": "demo", "units": [_unit()]},
+        )
+        assert status == 201 and captured["count"] == 1
+        status, indexed = post("/api/multimodal/index", {"workspace_id": "demo"})
+        assert status == 200 and indexed["embedded_count"] == 1
+        status, searched = post(
+            "/api/multimodal/search",
+            {"workspace_id": "demo", "query_text": "rabbit"},
+        )
+        assert status == 200 and searched["status"] == "ok"
+
+        connection.request("GET", "/api/multimodal/status?workspace_id=demo")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read())["stage_counts"]["stage2"] == 1
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+        if thread is not None:
+            thread.join(timeout=5)
+        engines.close()

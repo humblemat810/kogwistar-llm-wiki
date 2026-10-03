@@ -24,6 +24,12 @@ _MAX_SOURCE_DISCOVERY_NODES = 128
 class AgentSourceMixin:
     """Keep source discovery and queue inspection out of the protocol façade."""
 
+    def multimodal_capture(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.multimodal_capture(arguments)
+
+    def multimodal_index(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.multimodal_index(arguments)
+
     def _source_request(
         self,
         arguments: Mapping[str, Any],

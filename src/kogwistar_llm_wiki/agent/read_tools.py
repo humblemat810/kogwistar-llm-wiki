@@ -76,6 +76,13 @@ class AgentReadToolsMixin:
             authorized_stream_ids=self._authorized_memory_stream_ids(arguments, workspace_id),
         )
 
+    def multimodal_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        return self.api.multimodal_search(arguments)
+
+    def multimodal_status(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+        workspace_id = str(arguments.get("workspace_id") or "").strip()
+        return self.api.multimodal_status(workspace_id=workspace_id)
+
     def hypergraph_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         payload = _bounded_lens_arguments(arguments)
         payload.setdefault("max_hyperedges", 12)

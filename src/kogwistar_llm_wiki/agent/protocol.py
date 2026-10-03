@@ -64,6 +64,8 @@ def request_payload(payload: Mapping[str, Any]) -> dict[str, object]:
         "retrieval_required",
         "similarity_threshold",
         "source_evidence_required",
+        "include_multimodal",
+        "multimodal_limit",
         "explicit_anchor_ids",
         "hop_limit",
         "max_nodes",
