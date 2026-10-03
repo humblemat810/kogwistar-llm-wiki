@@ -385,6 +385,10 @@ class WorkbenchApi:
             }
         image_query: object | None = None
         if image_content_ref:
+            if not self.authorize_resource(
+                workspace_id, "asset", image_content_ref, "read"
+            ):
+                raise PermissionError("query asset is not authorized")
             if self._multimodal_asset_resolver is None:
                 return {
                     "status": "degraded",
@@ -406,8 +410,17 @@ class WorkbenchApi:
                 image_query = image_query.read()
 
         def authorize_source(unit: MultimodalSourceUnit) -> None:
+            source_namespace = unit.source_namespace or unit.workspace_id
+            if not self.authorize_resource(
+                workspace_id, "source_namespace", source_namespace, "read"
+            ):
+                raise PermissionError("source namespace is not authorized")
             if not self.authorize_resource(workspace_id, "source", unit.source_id, "read"):
                 raise PermissionError("source is not authorized")
+            if not self.authorize_resource(
+                workspace_id, "source_revision", unit.source_revision_id, "read"
+            ):
+                raise PermissionError("source revision is not authorized")
 
         namespaces = tuple(
             self._multimodal_allowed_namespaces(workspace_id)

@@ -204,6 +204,71 @@ def test_multimodal_search_resolves_an_authorized_image_query_reference() -> Non
 
 
 @pytest.mark.ci
+def test_multimodal_search_rejects_an_unauthorized_image_query_reference() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = WorkbenchApi(
+            pipeline,
+            resource_authorizer=lambda _workspace, kind, _resource, _action: kind != "asset",
+            multimodal_asset_resolver=MappingAssetResolver(
+                {"object://query-image": b"not-a-real-image-for-the-fake-encoder"}
+            ),
+        )
+        with pytest.raises(PermissionError, match="query asset"):
+            api.multimodal_search(
+                {
+                    "workspace_id": "demo",
+                    "image_content_ref": "object://query-image",
+                }
+            )
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_search_enforces_namespace_and_revision_acl() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = _api(pipeline)
+        api.multimodal_capture({"workspace_id": "demo", "units": [_unit()]})
+        api.multimodal_index({"workspace_id": "demo"})
+
+        denied_kinds = {"source_namespace", "source_revision"}
+        restricted = WorkbenchApi(
+            pipeline,
+            resource_authorizer=lambda _workspace, kind, _resource, _action: kind
+            not in denied_kinds,
+        )
+        result = restricted.multimodal_search(
+            {"workspace_id": "demo", "query_text": "rabbit", "limit": 1}
+        )
+        assert result["status"] == "ok"
+        assert result["hits"] == []
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
+def test_multimodal_capture_requires_write_access_to_a_foreign_source_namespace() -> None:
+    engines, pipeline = _pipeline()
+    try:
+        api = WorkbenchApi(
+            pipeline,
+            resource_authorizer=lambda _workspace, kind, resource, action: not (
+                kind == "source_namespace"
+                and resource == "foreign"
+                and action == "write"
+            ),
+        )
+        foreign = _unit()
+        foreign["source_namespace"] = "foreign"
+        with pytest.raises(PermissionError, match="source namespace"):
+            api.multimodal_capture({"workspace_id": "demo", "units": [foreign]})
+    finally:
+        engines.close()
+
+
+@pytest.mark.ci
 def test_multimodal_rest_endpoints_cover_capture_index_search_and_status(monkeypatch) -> None:
     monkeypatch.setenv("LLM_WIKI_AUTH_MODE", "disabled")
     engines, pipeline = _pipeline()
