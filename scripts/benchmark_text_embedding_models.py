@@ -26,6 +26,7 @@ import gc
 import json
 import platform
 import time
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import median
@@ -75,6 +76,7 @@ class Result:
     gpu_memory_mb: float | None
     status: str
     error: str | None = None
+    target_tokens: int | None = None
 
 
 def _make_text(words: int) -> str:
@@ -109,11 +111,50 @@ def _gpu_memory_mb(torch: Any) -> float | None:
 
 def _token_counts(model: Any, text: str) -> tuple[int, int, int]:
     tokenizer = model.tokenizer
-    raw = tokenizer(text, add_special_tokens=True, truncation=False)["input_ids"]
-    requested = len(raw)
+    requested = _token_count(
+        tokenizer(text, add_special_tokens=True, truncation=False)["input_ids"]
+    )
     max_length = int(model.max_seq_length)
     effective = min(requested, max_length)
     return requested, effective, max_length
+
+
+def _token_count(input_ids: Any) -> int:
+    """Count single-text tokenizer output from flat or batch-shaped IDs."""
+    shape = getattr(input_ids, "shape", ())
+    if len(shape) > 1:
+        return int(shape[-1])
+    if input_ids and isinstance(input_ids[0], (list, tuple)):
+        return len(input_ids[0])
+    return len(input_ids)
+
+
+def _make_text_for_token_target(model: Any, target_tokens: int) -> str:
+    """Build the deterministic fixture closest to a tokenizer token target."""
+    tokenizer = model.tokenizer
+
+    def count(words: int) -> int:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            return _token_count(
+                tokenizer(
+                    _make_text(words),
+                    add_special_tokens=True,
+                    truncation=False,
+                )["input_ids"]
+            )
+
+    low = 1
+    high = max(256, target_tokens * 2)
+    while count(high) < target_tokens:
+        high *= 2
+    while low < high:
+        midpoint = (low + high + 1) // 2
+        if count(midpoint) <= target_tokens:
+            low = midpoint
+        else:
+            high = midpoint - 1
+    return _make_text(low)
 
 
 def _measure_model(
@@ -122,6 +163,7 @@ def _measure_model(
     model_id: str,
     device: str,
     lengths: tuple[int, ...],
+    token_lengths: tuple[int, ...] | None,
     batch_size: int,
     warmups: int,
     repeats: int,
@@ -140,8 +182,18 @@ def _measure_model(
     # The caller records model loading time; rows below are warm steady-state
     # measurements only.
     results: list[Result] = []
-    for words in lengths:
-        text = _make_text(words)
+    if token_lengths is None:
+        measurements = ((words, None, _make_text(words)) for words in lengths)
+    else:
+        measurements = (
+            (
+                len((text := _make_text_for_token_target(model, target)).split()),
+                target,
+                text,
+            )
+            for target in token_lengths
+        )
+    for words, target_tokens, text in measurements:
         requested_tokens, effective_tokens, max_seq_length = _token_counts(model, text)
         batch = [text] * batch_size
         for _ in range(warmups):
@@ -185,6 +237,7 @@ def _measure_model(
                 resident_memory_mb=round(_memory_mb() or 0.0, 2),
                 gpu_memory_mb=round(_gpu_memory_mb(torch) or 0.0, 2),
                 status="ok",
+                target_tokens=target_tokens,
             )
         )
     del model
@@ -199,13 +252,18 @@ def run_benchmark(
     model_keys: tuple[str, ...],
     device: str,
     lengths: tuple[int, ...],
+    token_lengths: tuple[int, ...] | None,
     batch_size: int,
     warmups: int,
     repeats: int,
     trust_remote_code: bool,
     fail_fast: bool,
 ) -> dict[str, object]:
-    if not lengths or any(value <= 0 for value in lengths):
+    if token_lengths is not None:
+        if not token_lengths or any(value <= 0 for value in token_lengths):
+            raise ValueError("token_lengths must contain positive values")
+        lengths = ()
+    elif not lengths or any(value <= 0 for value in lengths):
         raise ValueError("lengths must contain positive values")
     if batch_size <= 0 or repeats <= 0 or warmups < 0:
         raise ValueError("batch size and repeats must be positive; warmups cannot be negative")
@@ -220,6 +278,7 @@ def run_benchmark(
                 model_id=model_id,
                 device=device,
                 lengths=lengths,
+                token_lengths=token_lengths,
                 batch_size=batch_size,
                 warmups=warmups,
                 repeats=repeats,
@@ -238,6 +297,7 @@ def run_benchmark(
         "model_keys": model_keys,
         "length_unit": "repeated words; requested/effective tokenizer tokens are reported separately",
         "lengths": lengths,
+        "token_lengths": token_lengths,
         "batch_size": batch_size,
         "warmups": warmups,
         "repeats": repeats,
@@ -251,6 +311,7 @@ def main() -> int:
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--models", nargs="+", choices=tuple(MODEL_IDS) + ("all",), default=["all"])
     parser.add_argument("--lengths", type=int, nargs="+", default=[128, 512, 2048, 4096])
+    parser.add_argument("--token-lengths", type=int, nargs="+")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=2)
@@ -258,6 +319,8 @@ def main() -> int:
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if args.token_lengths is not None and args.lengths != [128, 512, 2048, 4096]:
+        parser.error("use either --lengths or --token-lengths, not both")
     selected = tuple(MODEL_IDS) if "all" in args.models else tuple(args.models)
     if args.device == "cuda":
         import torch
@@ -268,6 +331,7 @@ def main() -> int:
         model_keys=selected,
         device=args.device,
         lengths=tuple(args.lengths),
+        token_lengths=tuple(args.token_lengths) if args.token_lengths is not None else None,
         batch_size=args.batch_size,
         warmups=args.warmups,
         repeats=args.repeats,
