@@ -273,19 +273,283 @@ Windows 9P bind mount. The loader was taking roughly 30--50 seconds per shard.
 This is an environment/startup failure, not a valid inference-throughput
 measurement. The disposable container was removed afterward.
 
-The next controlled serving sequence is:
+#### Resource-recovery retry
 
-1. Give Docker Desktop at least 12--16 GiB of RAM and stop unrelated model and
-   Grafana containers.
-2. Copy the checkpoint into a Docker named volume or a Linux/WSL filesystem;
-   do not benchmark from a Windows bind mount.
-3. Start with `--enforce-eager` disabled, `--max-num-seqs 4`, and
-   `--max-num-batched-tokens 2048`, then sweep concurrency and batch size.
-4. Compare the Ovis BnB 4-bit and already-validated BnB LLM.int8 images under
-   the same profile and request mix. The existing BnB8 batch-8 result of
-   16.41 items/s is the current Ovis throughput reference.
-5. Remove the Compose embedding CPU quota during the benchmark; the current
-   default of `2.0` CPUs can throttle checkpoint staging and tokenization.
+On 2026-10-04, the launch was retried after Docker Desktop was upgraded to
+about 16 GiB of Linux VM memory. The compatible Ovis vLLM bundle was copied
+into a Docker named volume instead of being read through the Windows 9P bind
+mount. The retry used the published 4-bit vLLM image with the same safe
+`max_model_len=512`, `gpu_memory_utilization=0.85`, disabled eager execution,
+and 1024-dimensional pooler configuration. It did not use this run to claim a
+complete `max_num_seqs=4`/`max_num_batched_tokens=2048` sweep; those settings
+still need a separately verified launch command.
+
+The retry reached `/health` successfully with `oom=false`. vLLM reported
+about 11.9 GiB available host RAM, a 5.32 GiB checkpoint on EXT4, 3.66 GiB
+model memory, and 1.97 GiB available GPU KV-cache memory. Startup took about
+5 minutes including Torch compilation and piecewise CUDA-graph capture. A
+real `/v1/embeddings` request returned two 1024-dimensional vectors. After one
+warmup request, three-repeat short-text measurements were:
+
+| Batch | Median latency | Throughput |
+| ---: | ---: | ---: |
+| 1 | 57.5 ms | 17.4 items/s |
+| 4 | 112.4 ms | 35.6 items/s |
+| 8 | 157.0 ms | 51.0 items/s |
+
+These are service-level text measurements only. They confirm that the former
+RAM/startup blocker is removed; they do not establish image or text-plus-image
+retrieval quality, nor do they replace an equal-profile Qwen comparison.
+
+#### Controlled matrix rerun
+
+On 2026-10-04, both models were measured again with one warmup and three
+timed repeats per case. The request used the same deterministic 1x1 PNG for
+image cases. These are warm service measurements after readiness, not cold
+startup measurements and not end-to-end graph retrieval measurements.
+
+The Qwen service used the cached revision
+`9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda`, 1024 dimensions, dot metric,
+`max_sequence_length=32768`, and the Transformers service image. Two internal
+encoder settings were tested:
+
+| Qwen internal batch setting | Input | Median latency | Throughput |
+| ---: | --- | ---: | ---: |
+| 1 | 1 text | 149.5 ms | 6.69 items/s |
+| 1 | 4 text | 417.2 ms | 9.59 items/s |
+| 1 | 8 text | 901.8 ms | 8.87 items/s |
+| 4 | 1 text | 99.2 ms | 10.08 items/s |
+| 4 | 4 text | 118.5 ms | 33.75 items/s |
+| 4 | 8 text | 243.8 ms | 32.82 items/s |
+
+For independent multimodal requests, Qwen did not scale materially with
+concurrency:
+
+| Qwen internal batch setting | Input | Median window latency | Throughput |
+| ---: | --- | ---: | ---: |
+| 1 | 4 images | 699.4 ms | 5.72 items/s |
+| 1 | 8 images | 1,597.4 ms | 5.01 items/s |
+| 1 | 4 text+image | 750.7 ms | 5.33 items/s |
+| 1 | 8 text+image | 1,407.6 ms | 5.68 items/s |
+| 4 | 4 images | 710.9 ms | 5.63 items/s |
+| 4 | 8 images | 1,403.4 ms | 5.70 items/s |
+| 4 | 4 text+image | 718.0 ms | 5.57 items/s |
+| 4 | 8 text+image | 1,499.4 ms | 5.34 items/s |
+
+The compatible Ovis run used the published BnB 4-bit vLLM image, an EXT4
+named volume, `max_model_len=512`, `gpu_memory_utilization=0.85`, disabled
+eager execution, and a 1024-dimensional pooler. Text arrays were actual
+multi-item requests:
+
+| Ovis input | Median latency | Throughput |
+| --- | ---: | ---: |
+| 1 text | 62.7 ms | 15.96 items/s |
+| 4 text | 131.6 ms | 30.40 items/s |
+| 8 text | 161.6 ms | 49.49 items/s |
+
+The Ovis multimodal endpoint returned one vector for an image-message array,
+so its multimodal comparison used concurrent independent requests rather
+than pretending that array was a true batch:
+
+| Ovis input | Median window latency | Throughput |
+| --- | ---: | ---: |
+| 4 images | 142.0 ms | 28.16 items/s |
+| 8 images | 193.5 ms | 41.35 items/s |
+| 4 text+image | 146.2 ms | 27.36 items/s |
+| 8 text+image | 189.8 ms | 42.15 items/s |
+
+The strongest conclusion from this matrix is operational rather than a model
+quality ranking: Ovis vLLM achieved higher local warm throughput in this
+4-bit configuration, especially for text and concurrent multimodal windows,
+while Qwen gained substantially from internal text batching but remained
+vision-bound for image and mixed requests. The numbers are not a fully equal
+benchmark because the serving stacks, batching semantics, context limits,
+and quantization differ. A retrieval-quality fixture is still required before
+choosing a default model.
+
+#### Paired context-length matrix
+
+On 2026-10-04, the same context-shape matrix was run against one resident
+Qwen service and one resident Ovis service, but in separate launches so each
+had the full RTX 3080. The harness is
+`scripts/benchmark_embedding_context_matrix.py`. Lengths below are repeated
+words, not exact tokenizer tokens; the requested character count is recorded
+in the JSON artifacts so this remains an input-shape comparison rather than a
+claim of exact token counts. One warmup and two timed requests were used per
+cell.
+
+Qwen used the standalone Transformers service with a 32768 declared maximum
+sequence length. Ovis used the retained 8-bit vLLM bundle with
+`max_model_len=8192`, eager execution forced by the BitsAndBytes runtime, and
+1024-dimensional output. The image-only row is shown once because its text
+context is empty; text-plus-image rows vary the text context.
+
+| Requested words | Qwen text | Qwen text+image | Ovis 8-bit text | Ovis 8-bit text+image |
+| ---: | ---: | ---: | ---: | ---: |
+| 128 | 171.09 ms / 5.845 items/s | 206.42 ms / 4.845 items/s | 1051.54 ms / 0.951 items/s | 869.06 ms / 1.151 items/s |
+| 512 | 140.95 ms / 7.095 items/s | 248.73 ms / 4.021 items/s | 821.87 ms / 1.217 items/s | 883.62 ms / 1.132 items/s |
+| 2048 | 267.42 ms / 3.739 items/s | 377.49 ms / 2.649 items/s | 930.75 ms / 1.074 items/s | 928.29 ms / 1.077 items/s |
+| 4096 | 548.54 ms / 1.823 items/s | 644.52 ms / 1.552 items/s | 925.33 ms / 1.081 items/s | 1030.41 ms / 0.970 items/s |
+| 8192 | 1151.49 ms / 0.868 items/s | 1253.97 ms / 0.797 items/s | rejected: HTTP 400 | rejected: HTTP 400 |
+
+The 128-word image-only baseline was **208.40 ms / 4.798 items/s** for Qwen
+and **846.57 ms / 1.181 items/s** for Ovis. All successful vectors were
+finite, 1024-dimensional, and returned by the expected service. Ovis rejected
+the 8192-word requests because the actual tokenized prompt plus the pooling
+wrapper exceeded its 8192-token model limit; the word count is not the same as
+the final token count.
+
+For this specific long-context configuration, Qwen was faster at every shared
+successful length: roughly 6.1x at 128 words, 3.0x at 512, 3.5x at 2048,
+and 1.7x at 4096 for text. The gap narrows as context grows because Qwen's
+latency rises with the text length while Ovis is already dominated by its
+eager 8-bit runtime overhead. This does **not** contradict the earlier Ovis
+4-bit short-context result: that was a different quantization and serving
+path, and the Ovis 4-bit run was not the service tested here.
+
+The matrix therefore changes the practical conclusion by context and runtime:
+
+* For short multimodal throughput, the earlier Ovis 4-bit vLLM path remains
+  the fastest observed configuration.
+* For the measured 8-bit long-context path, Qwen is faster and supports the
+  larger declared context window.
+* Ovis 8-bit did not produce a valid 8192-word result in this configuration;
+  increasing `max_model_len` alone is not enough if the GPU cannot reserve
+  sufficient KV cache.
+* These are throughput measurements, not accuracy measurements. The paired
+  retrieval-quality fixture remains the separate evidence for ranking quality.
+
+The raw matrices are intentionally kept under ignored `test-results/` paths:
+`context-matrix-qwen.json` and `context-matrix-ovis.json`. To reproduce with
+different lengths, keep the services resident and run the harness with the
+same `--repeats` and `--warmups`; do not compare a cold startup to a warm
+request.
+
+#### Model caching semantics
+
+Both experiments used Docker named volumes for model files. This avoids
+re-downloading or recopying the checkpoint on every container creation, but it
+does not keep model weights in RAM or VRAM after the process exits. A restart
+must load the weights and initialize the runtime again. For repeated sweeps,
+keep one container running and send requests to that resident process; change
+startup parameters only between separately measured restarts. Do not run
+`docker compose down -v` or remove the model volume when preserving the cache
+matters. The cache is a disk/filesystem optimization, not a persistent GPU
+memory cache.
+
+#### Scheduler-flag follow-up
+
+The scheduler follow-up was rerun against the **correct Ovis 4-bit vLLM
+bundle** (`Ovis-Omni-Embedding-3B-bnb-4bit-vllm-bundle`), rather than the
+plain Transformers directory that caused the earlier quantized-weight shape
+assertion. The launch included:
+
+```text
+--max-num-seqs 4
+--max-num-batched-tokens 2048
+```
+
+vLLM 0.30.0 reported both flags correctly, reached `/health`, and completed
+real embedding requests without an OOM. After one warmup, three-repeat text
+measurements were:
+
+| Batch | Median latency | Throughput |
+| ---: | ---: | ---: |
+| 1 | 157.3 ms | 5.64 items/s |
+| 4 | 340.5 ms | 11.34 items/s |
+| 8 | 607.7 ms | 13.29 items/s |
+
+Concurrent multimodal measurements were:
+
+| Input | Concurrency | Median window latency | Throughput |
+| --- | ---: | ---: | ---: |
+| image | 4 | 405.1 ms | 9.88 items/s |
+| image | 8 | 600.0 ms | 13.33 items/s |
+| text+image | 4 | 335.3 ms | 11.93 items/s |
+| text+image | 8 | 518.9 ms | 15.42 items/s |
+
+These scheduler rows are valid, but they are lower than the earlier default
+4-bit rows. That is a measured runtime difference, not proof that the flags
+are universally worse: the runs were separate process launches and vLLM
+runtime state, compilation, and scheduling policy can affect short samples.
+The earlier shape assertion remains attributable to using the wrong model
+artifact, not to `max_num_seqs` or `max_num_batched_tokens`.
+
+The correct 8-bit vLLM bundle was also tested in a resident container. Its
+startup log resolved `enforce_eager=True` and reported about 5.72 GiB model
+memory, so it is not an apples-to-apples comparison with the 4-bit run that
+used eager execution disabled. The 8-bit matrix was:
+
+| Input | Median latency | Throughput |
+| --- | ---: | ---: |
+| 1 text | 875.7 ms | 1.15 items/s |
+| 4 text | 1,564.8 ms | 2.57 items/s |
+| 8 text | 1,629.2 ms | 4.82 items/s |
+| 4 images | 1,649.3 ms | 2.43 items/s |
+| 8 images | 1,662.1 ms | 4.81 items/s |
+| 4 text+image | 1,670.7 ms | 2.39 items/s |
+| 8 text+image | 1,605.8 ms | 4.98 items/s |
+
+The 8-bit service returned finite, normalized 1024-dimensional vectors. Its
+slower result is consistent with the resolved eager execution and the
+quantization/runtime path; it should not be interpreted as an intrinsic model
+quality result. The model-file bundles were kept in named volumes and the
+benchmarks were run against already-ready resident services.
+
+#### Paired real-service fixture quality run
+
+On 2026-10-04, the same five-unit corpus and three labeled queries were sent
+to each already-warm service independently. Each model used its own temporary
+vector set; no vector or score was shared across profiles. The checked-in SVG
+fixtures were rendered into deterministic PNGs in the ignored
+`test-results/real-quality-assets` directory because the real service contract
+accepts raster image media. This is genuine model inference, but it is still a
+small synthetic fixture and not a public benchmark replacement.
+
+The Qwen service used revision
+`9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda` and profile fingerprint
+`e902d868485f37b667021d5f2647cd3b18e058e4a57e8baab59964ef970fc351`. The Ovis
+service used the separate 8-bit vLLM bundle and a separate 1024-dimensional
+profile. Results below report only ranked IDs and normalized ranking metrics,
+not cross-model cosine values:
+
+| Model | Architecture text -> image | Bottleneck text -> image | Architecture image -> related text | Mean R@1 | Mean R@3 | Mean R@5 | MRR | nDCG |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Qwen3-VL | rank 2 | rank 5 | rank 2 | 0.000 | 0.667 | 1.000 | 0.400 | 0.550 |
+| Ovis 8-bit | rank 1 | rank 2 | rank 5 | 0.333 | 0.667 | 1.000 | 0.567 | 0.673 |
+
+The full per-query ranked IDs are in the ignored run artifacts
+`test-results/real-quality-qwen.json` and
+`test-results/real-quality-ovis.json`. The result is useful evidence that the
+two spaces behave differently on this fixture, and that profile isolation is
+required. It is not sufficient to select a production model: three queries,
+temporary rasterizations, and one candidate corpus cannot establish general
+semantic quality. A larger manually labeled corpus with authoritative source
+spans remains the next quality gate. Neither model achieved every expected
+top-1 target: Qwen placed the two text queries at ranks 2 and 5 and the
+image-to-text target at rank 2; Ovis placed them at ranks 1, 2, and 5. The
+perfect Recall@5 therefore reflects the small five-item candidate set, not a
+claim of reliable top-ranked retrieval.
+
+The relevant multimodal regression set was rerun after the service
+measurements: **67 passed, 3 optional skips**. It covers the sidecar lifecycle,
+fixture expectations, profile-bound in-memory/SQLite/Chroma behavior, vLLM
+contract checks, and dimension mismatch checks. This verifies the projection
+contract, but does not turn the small real-model fixture into a
+production-scale index benchmark.
+
+Remaining follow-up work is:
+
+1. The 8-bit launch was already attempted without an explicit eager flag;
+   vLLM/BitsAndBytes still resolved `enforce_eager=True` and disabled
+   compilation/CUDAGraphs. A no-eager comparison therefore requires a
+   different quantization/runtime path, not another identical launch.
+2. Expand the paired real-service quality smoke to a larger labeled corpus,
+   verified source spans, and actual profile-isolated indexes. The current
+   three-query result is evidence, not enough to select a default.
+3. Remove the Compose embedding CPU quota during any production-like benchmark;
+   the current default of `2.0` CPUs can throttle checkpoint staging and
+   tokenization.
 
 vLLM explicitly cautions that pooling-model support is currently primarily a
 convenience path and is not guaranteed to outperform Transformers, so changing
@@ -297,12 +561,12 @@ field and has a different fingerprint. The client correctly rejects it. The
 current image must be published before the model-qualified tags are used for
 production or for the complete remote benchmark.
 
-The existing Ovis results are not a Qwen-versus-Ovis comparison. They compare
-Ovis quantizations against Ovis BF16 vectors. The first fair model bakeoff is
-therefore Qwen3-VL-Embedding-2B against the viable Ovis Omni-Embedding-3B
-8-bit candidate, using the same labeled fixture, preprocessing contract,
-query instructions, candidate set, and profile-isolated indexes. Do not mix
-their vectors or compare raw cosine values across profiles.
+The earlier Ovis results are not a Qwen-versus-Ovis comparison; they compare
+Ovis quantizations against Ovis BF16 vectors. The new paired smoke is the first
+Qwen3-VL-Embedding-2B versus viable Ovis Omni-Embedding-3B 8-bit comparison
+using the same labeled fixture and query instructions. It kept the vector sets
+separate; do not mix their vectors or compare raw cosine values across
+profiles.
 
 ## Qwen Versus Ovis: Current Evidence
 
@@ -314,8 +578,9 @@ There are three separate questions when treating Ovis as a Qwen replacement:
    projection and changing the complete profile fingerprint; it is not valid to
    point Ovis at Qwen vectors or to compare their raw scores.
 2. **Does it retrieve the right evidence?** This requires the same labeled
-   multimodal query set and candidate corpus. The current report does not yet
-   contain a Qwen-versus-Ovis quality score.
+   multimodal query set and candidate corpus. A first three-query paired score
+   now exists below, but it is only a smoke-sized synthetic fixture and not a
+   production model-selection result.
 3. **Does it meet the runtime budget?** This requires identical request shapes,
    batching, context limits, warmup policy, and hardware. Existing numbers are
    useful screening evidence, but are not a side-by-side latency result.
@@ -329,8 +594,8 @@ The currently measured evidence is:
 | Warm throughput evidence | 1 image: 14.73 items/s; 4 images: 54.80 items/s; 4 images + 4 text: 55.53 items/s | Batch-8 prior measurement: 16.41 items/s | Not directly comparable: request mix, runtime settings, and measurement harness differ |
 | GPU/memory evidence | 4,319 MiB resident of 8,192 MiB; sampled utilization peaked at 95% | About 6.03 GiB weights/non-torch plus constrained activation/KV usage | Ovis has a tighter 8-GiB memory budget in the tested configuration |
 | Long-context evidence | Not measured in this Qwen run | 32K request passed for the validated 8-bit Ovis service | Ovis currently has the stronger documented context-capacity result |
-| Quality evidence | No score against the shared labeled multimodal fixture yet | Against Ovis BF16 reference: mean cosine drift 0.00348, 100% nearest-neighbor agreement, R@1/5/10 and nDCG 1.0 on the text screening set | Ovis int8 preserves its own reference well; this does not prove it beats Qwen |
-| Modality evidence | Current smoke returned text and image vectors | Published Ovis 8-bit probe accepts text, image, and audio request shapes | The multimodal ranking fixture still needs to be run against both |
+| Quality evidence | On the paired three-query fixture: mean R@1 0.000, R@3 0.667, R@5 1.000, MRR 0.400, nDCG 0.550 | On the same fixture: mean R@1 0.333, R@3 0.667, R@5 1.000, MRR 0.567, nDCG 0.673 | Initial real-model evidence exists, but the fixture is too small for a general quality ranking |
+| Modality evidence | Current smoke and paired run returned text and image vectors | Published Ovis 8-bit probe accepts text, image, and audio request shapes; paired run covered text and image | Audio/video and a larger labeled corpus still need coverage |
 
 ### Published Retrieval Scores (Not Directly Comparable)
 
@@ -356,13 +621,17 @@ benchmark-version mismatch. The only defensible model decision for this
 project is therefore a paired run on the same fixture and metric.
 
 **Current conclusion:** Ovis LLM.int8 is a credible alternative deployment
-candidate, especially when its verified 32K context path matters. It is not
-yet demonstrated to be a better semantic retriever than Qwen, and the existing
-throughput figures do not establish that it is faster. Qwen currently has the
+candidate, especially when its verified 32K context path matters. The first
+paired real-service fixture favors Ovis on this tiny corpus, but is not enough
+to claim a general semantic advantage. The serving stacks, eager-mode behavior,
+quantization, and request semantics still differ, so the deployment decision
+remains open pending a larger labeled quality set and a fully equalized latency
+run. Qwen currently has the
 lower observed resident memory in this experiment, while Ovis has the stronger
 long-context evidence. The decision must remain “undecided pending paired
 quality and latency measurements,” rather than selecting a model from the
-different baselines.
+different baselines. The initial paired smoke does not satisfy the larger
+quality gate because it has only three queries and temporary rasterized assets.
 
 ### Required side-by-side bakeoff
 
@@ -391,7 +660,10 @@ fits the deployment budget.
   retrieval operation with text/graph work and safely deliver typed evidence.
 - It **does** show that Qwen has a working current remote service benchmark and
   that Ovis has a quality-preserving int8-vs-Ovis-reference screening result.
-- It **does not** show that Ovis is better or worse than Qwen semantically.
+- It **does** provide an initial real-service Qwen-versus-Ovis quality smoke on
+  the same three-query fixture, with separate ranked IDs and profile spaces.
+- It **does not** establish that Ovis is generally better or worse than Qwen
+  semantically.
 - It **does not** show that the sidecar is faster when real Qwen and Ovis
   inference timings replace the injected fixture delay.
 - It **does not** justify sharing an index, threshold, or score calibration
