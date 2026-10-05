@@ -141,7 +141,9 @@ def test_public_discovery_and_readiness_endpoints(monkeypatch):
         assert capabilities["mcp_tools"] == [
             "query", "search", "ingest", "source", "reingest", "maintain",
             "status", "hypergraph_search", "history", "memory_recall",
-            "memory_capture", "memory_review", "propose", "confirm",
+            "memory_capture", "memory_review", "multimodal_capture",
+            "multimodal_index", "multimodal_search", "multimodal_status",
+            "propose", "confirm",
         ]
     finally:
         server.shutdown()
@@ -309,7 +311,9 @@ def test_native_mcp_registers_exact_semantic_tools_and_descriptions():
     assert [tool.name for tool in tools] == [
         "query", "search", "ingest", "source", "reingest", "maintain",
         "status", "hypergraph_search", "history", "memory_recall",
-        "memory_capture", "memory_review", "propose", "confirm",
+        "memory_capture", "memory_review", "multimodal_capture",
+        "multimodal_index", "multimodal_search", "multimodal_status",
+        "propose", "confirm",
     ]
     assert all(tool.description for tool in tools)
     query = next(tool for tool in tools if tool.name == "query")
@@ -334,6 +338,18 @@ def test_retrieval_controls_are_exposed_on_query_search_and_hypergraph_tools():
         assert properties["retrieval_required"]["type"] == "boolean"
         assert properties["similarity_threshold"]["anyOf"]
         assert properties["source_evidence_required"]["type"] == "boolean"
+
+
+def test_multimodal_capture_schema_describes_host_validated_units():
+    schemas = {name: schema for name, _description, schema in _tool_specs()}
+    unit_schema = schemas["multimodal_capture"]["properties"]["units"]["items"]
+    assert unit_schema["additionalProperties"] is False
+    assert set(unit_schema["required"]) >= {
+        "view_id", "workspace_id", "source_id", "source_revision_id",
+        "modality", "locator",
+    }
+    assert "embedding_reference" not in unit_schema["properties"]
+    assert unit_schema["properties"]["locator"]["required"] == ["kind"]
 
 
 def test_native_mcp_memory_capture_publishes_record_contract():
@@ -408,6 +424,10 @@ def test_native_mcp_streamable_http_preserves_wire_contract():
                         "memory_recall",
                         "memory_capture",
                         "memory_review",
+                        "multimodal_capture",
+                        "multimodal_index",
+                        "multimodal_search",
+                        "multimodal_status",
                         "propose",
                         "confirm",
                     }
@@ -482,7 +502,9 @@ def test_agent_protocol_routes_expose_response_chat_a2a_and_mcp(monkeypatch):
         assert {tool["name"] for tool in json.loads(response.read())["tools"]} == {
             "query", "search", "ingest", "source", "reingest", "maintain",
             "status", "hypergraph_search", "history", "memory_recall",
-            "memory_capture", "memory_review", "propose", "confirm",
+            "memory_capture", "memory_review", "multimodal_capture",
+            "multimodal_index", "multimodal_search", "multimodal_status",
+            "propose", "confirm",
         }
 
         encoded = json.dumps({"message": {"parts": [{"text": "hello"}]}, "workspace_id": "w", "background": False}).encode()

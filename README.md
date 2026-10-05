@@ -488,6 +488,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/adr_conversation_two_stage_materialization.md](doc/adr_conversation_two_stage_materialization.md) | Optional two-stage conversation materialization, ownership boundaries, and benchmark contract |
 | [doc/agent_gateway_quickstart.md](doc/agent_gateway_quickstart.md) | Agent integration quickstart for OpenAI-shaped, A2A, MCP, and OTel usage |
 | [doc/tutorial_progressive_rag_to_graph.md](doc/tutorial_progressive_rag_to_graph.md) | Stage-by-stage source-map RAG, parser, multimodal projection, and maintenance walkthrough |
+| [doc/multimodal_usage_guide.md](doc/multimodal_usage_guide.md) | User-facing multimodal capture, indexing, MCP/REST retrieval, sidecar, and smoke-test guide |
 | [doc/adr_agent_gateway_and_otel.md](doc/adr_agent_gateway_and_otel.md) | Agent gateway architecture, safety boundaries, and optional OpenTelemetry |
 | [skills/llm-wiki-knowledge/SKILL.md](skills/llm-wiki-knowledge/SKILL.md) | Portable grounded knowledge-management and proposal-review instructions for compatible agents |
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Implemented and deferred boundaries for moving generic maintenance mechanics into Kogwistar core |

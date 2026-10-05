@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from functools import partial
 
 from .daemons import maintenance_budget as _maintenance_budget
@@ -34,6 +34,7 @@ from .daemons.runtime_support import (
     _stop_service_health,
 )
 from .disambiguation.contact_book import ContactScanObservationProvider
+from .disambiguation.contact_matching import AuthorizeContactStream
 from .maintenance import MaintenanceProfileLadderDecision
 from .maintenance.maintenance_control import MaintenanceControlState
 from .models import NamespaceEngines
@@ -58,7 +59,7 @@ class MaintenanceDaemon(MaintenanceDaemonRuntime):
         data_dir: str | os.PathLike[str] | None = None,
         background_interval: float = 600.0,
         contact_observation_providers: Mapping[str, ContactScanObservationProvider] | None = None,
-        contact_stream_authorizer: Callable[[str, str], bool] | None = None,
+        contact_stream_authorizer: AuthorizeContactStream | None = None,
     ) -> None:
         providers = dict(contact_observation_providers or {})
         if providers and not callable(contact_stream_authorizer):
@@ -84,10 +85,14 @@ class MaintenanceDaemon(MaintenanceDaemonRuntime):
             provider_resolver=resolve_maintenance_provider_settings,
         )
 
-    @staticmethod
-    def _stop_service_health(*args: object, **kwargs: object) -> None:
+    def _stop_service_health(self) -> None:
         """Keep the historical root helper monkeypatch seam working."""
-        _stop_service_health(*args, **kwargs)
+        _stop_service_health(
+            self.engines,
+            workspace_id=self.workspace_id,
+            service_kind="maintenance_daemon",
+            instance_id=self._instance_id,
+        )
 
     def _select_profile_level(self, state: MaintenanceControlState) -> MaintenanceProfileLadderDecision:
         """Preserve the root-module provider resolver monkeypatch seam."""

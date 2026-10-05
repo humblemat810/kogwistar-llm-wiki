@@ -7,9 +7,9 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ..parsing import parse_statistics as _parse_statistics
 
@@ -101,11 +101,13 @@ def aggregate_stage_timings(summaries: list[Mapping[str, Any]]) -> dict[str, Any
 
 
 def _json_default(value: object) -> object:
-    if hasattr(value, "model_dump"):
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dump = cast(Callable[..., object], model_dump)
         try:
-            return value.model_dump(mode="json")
+            return dump(mode="json")
         except TypeError:
-            return value.model_dump()
+            return dump()
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, set):

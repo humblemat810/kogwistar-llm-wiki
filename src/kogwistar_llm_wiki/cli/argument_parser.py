@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
+from typing import Protocol
 
-CommandHandler = Callable[[argparse.Namespace], object]
+class CommandHandler(Protocol):
+    """Handle one parsed CLI command."""
+
+    def __call__(self, args: argparse.Namespace, /) -> object: ...
 
 
 def build_argument_parser(handlers: Mapping[str, CommandHandler]) -> argparse.ArgumentParser:

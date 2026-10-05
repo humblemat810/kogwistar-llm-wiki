@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import AbstractContextManager
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.id_provider import stable_id
@@ -32,9 +33,17 @@ class NotificationDeliveryAdapter(Protocol):
     ) -> None: ...
 
 
-AuthorizeRecipient = Callable[[str, str], bool]
+class AuthorizeRecipient(Protocol):
+    """Authorize delivery to one recipient in a workspace."""
+
+    def __call__(self, workspace_id: str, recipient_id: str, /) -> bool: ...
+
+
 # Source access is principal-scoped; workspace membership is not authorization.
-AuthorizeSource = Callable[[str, str, str], bool]
+class AuthorizeSource(Protocol):
+    """Authorize one source event for a recipient."""
+
+    def __call__(self, workspace_id: str, recipient_id: str, source_id: str, /) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +143,8 @@ class NotificationDeliveryScheduler:
         uow = getattr(self.engines.conversation, "uow", None)
         if not callable(uow):
             raise TypeError("conversation engine must expose uow() for atomic notification enqueue")
-        with uow():
+        transaction = cast(Callable[[], AbstractContextManager[object]], uow)
+        with transaction():
             for delivery_class, job_id, payload in prepared:
                 job_ids.append(
                     queue.enqueue(
@@ -450,7 +460,9 @@ def _deserialize_digest(raw: object, *, workspace_id: str) -> NotificationDigest
                     severity=severity,  # type: ignore[arg-type]
                     action_required=value["action_required"],
                     source_event_ids=tuple(_required(str(item), "event_id") for item in event_ids),
-                    evidence_refs=evidence_refs,
+                    evidence_refs=tuple(
+                        (ref[0], ref[1], ref[2]) for ref in evidence_refs
+                    ),
                     urgent=urgent,
                     logical_event_count=logical_count,
                     duplicate_copy_count=duplicate_count,

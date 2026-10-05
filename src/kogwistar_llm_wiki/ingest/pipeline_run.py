@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from typing import Protocol
-
 from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
     parser_llm_cache_transaction,
 )
@@ -18,23 +15,32 @@ from ..diagnostics.debug_helpers import (
 )
 from ..models import IngestPipelineArtifacts, IngestPipelineRequest
 from ..providers.role_config import normalize_provider_name
+from .contracts import (  # noqa: F401 - compatibility type seam
+    IngestPipelineHost,
+    ParserCallable,
+    ParseSourceResult,
+    SemanticTreeLike,
+)
+
+ParserFn = ParserCallable
 
 
-class SemanticTreeLike(Protocol):
-    title: str
+def _limit_int(value: int | float | str | None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("validated parse limit must be an integer")
+    return value
 
 
-class ParseSourceResult(Protocol):
-    semantic_tree: SemanticTreeLike
-
-
-ParserFn = Callable[..., ParseSourceResult]
+def _limit_float(value: int | float | str | None) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("validated parse limit must be numeric")
+    return float(value)
 
 
 class IngestRunMixin:
     """Run one ingestion transaction and expose its diagnostics."""
 
-    def run(self, request: IngestPipelineRequest) -> IngestPipelineArtifacts:
+    def run(self: IngestPipelineHost, request: IngestPipelineRequest) -> IngestPipelineArtifacts:
         ns = self.namespaces_for(request.workspace_id)
         source_document_id = self._source_document_id(request)
         operation_mode = self._operation_mode(request)
@@ -67,7 +73,20 @@ class IngestRunMixin:
                 revision_document_id=parse_document_id,
                 revision=revision,
                 parser_profile=self._durable_parse_profile(request),
-                **{key: value for key, value in parse_limits.items() if key != "parser_profile"},
+                max_depth=_limit_int(parse_limits["max_depth"]),
+                max_frontier_items=_limit_int(parse_limits["max_frontier_items"]),
+                max_parser_calls=_limit_int(parse_limits["max_parser_calls"]),
+                max_region_chars=_limit_int(parse_limits["max_region_chars"]),
+                token_budget=(
+                    _limit_int(parse_limits["token_budget"])
+                    if parse_limits.get("token_budget") is not None
+                    else None
+                ),
+                wall_time_seconds=(
+                    _limit_float(parse_limits["wall_time_seconds"])
+                    if parse_limits.get("wall_time_seconds") is not None
+                    else None
+                ),
             )
         if operation_mode == "maintenance_first":
             self.seed_source_map(
@@ -174,7 +193,10 @@ class IngestRunMixin:
         )
 
         promoted_entity_id: str | None = None
-        promotion_decision = self.policies.promotion.decide(
+        promotion_policy = self.policies.promotion
+        if promotion_policy is None:
+            raise RuntimeError("promotion policy is not initialized")
+        promotion_decision = promotion_policy.decide(
             promotion_mode=request.promotion_mode,
             auto_accept_threshold=request.auto_accept_threshold,
             metadata={
@@ -214,10 +236,10 @@ class IngestRunMixin:
             graph_status="expanding" if operation_mode == "hybrid" else "stable",
         )
 
-    def _trace_text(self, message: str) -> None:
+    def _trace_text(self: IngestPipelineHost, message: str) -> None:
         self._trace_event("trace", message=message)
 
-    def _trace_event(self, stage: str, **fields: object) -> None:
+    def _trace_event(self: IngestPipelineHost, stage: str, **fields: object) -> None:
         payload = {
             "timestamp_ms": now_ms(),
             "stage": stage,
@@ -230,7 +252,7 @@ class IngestRunMixin:
         self.telemetry.instrument_event(payload)
 
     def _record_parse_statistics(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -282,7 +304,7 @@ class IngestRunMixin:
         )
 
     def _trace_step(
-        self,
+        self: IngestPipelineHost,
         stage: str,
         *,
         request: IngestPipelineRequest,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from typing import Protocol
 
 from kogwistar.engine_core.models import (
     GraphExtractionWithIDs,
@@ -26,6 +25,7 @@ from ..models import (
     IngestPipelineRequest,
 )
 from ..parsing.parse_session_store import parse_session_scope_id
+from .contracts import IngestPipelineHost
 from ..parsing.parse_views import (
     ParseTarget,
     ParseViewStore,
@@ -33,12 +33,7 @@ from ..parsing.parse_views import (
     reparse_session_id,
 )
 from ..utils import _background_namespace, _temporary_namespace
-
-
-class ParseSourceResult(Protocol):
-    """Minimal parser result contract needed by maintenance evidence methods."""
-
-    semantic_tree: object
+from .contracts import ParseSourceResult
 
 
 def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
@@ -57,7 +52,7 @@ class MaintenanceRequestMixin:
     """Methods that turn ingestion outcomes into durable maintenance work."""
 
     def create_maintenance_request(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -333,7 +328,7 @@ class MaintenanceRequestMixin:
         return request_node_id
 
     def create_parse_retry_history(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -472,7 +467,7 @@ class MaintenanceRequestMixin:
         return str(node.id)
 
     def create_candidate_link(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -527,7 +522,7 @@ class MaintenanceRequestMixin:
         return str(node.id)
 
     def create_promotion_candidate(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -601,7 +596,7 @@ class MaintenanceRequestMixin:
         return str(node.id)
 
     def create_promotion_evidence_pack(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -684,7 +679,7 @@ class MaintenanceRequestMixin:
         return str(node.id), digest.model_dump(mode="python")
 
     def promote_to_knowledge(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -772,7 +767,7 @@ class MaintenanceRequestMixin:
         return node_id
 
     def _enqueue_maintenance_job(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         request_node_id: str,
@@ -857,7 +852,7 @@ class MaintenanceRequestMixin:
         return job_id
 
     def _enqueue_projection_job(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         promoted_id: str,

@@ -126,6 +126,11 @@ def _history_node(record: InvestigationHistoryRecord) -> Node:
         summary=record.question or record.action_kind,
         doc_id=f"_conv:{record.id}",
         mentions=[Grounding(spans=[span])],
+        domain_id=record.workspace_id,
+        canonical_entity_id=record.id,
+        properties={},
+        embedding=None,
+        level_from_root=0,
         metadata={
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
@@ -149,19 +154,25 @@ def _record_from_node(node: Node) -> InvestigationHistoryRecord:
     else:
         payload = metadata
     proposal = payload.get("proposal")
+    raw_watermark = payload.get("source_watermark")
+    source_watermark = raw_watermark if isinstance(raw_watermark, (str, int)) else None
+    raw_cited_ids = payload.get("cited_entity_ids")
+    cited_ids = raw_cited_ids if isinstance(raw_cited_ids, (list, tuple, set)) else ()
+    raw_created_at = payload.get("created_at_ms")
+    created_at_ms = int(raw_created_at) if isinstance(raw_created_at, (int, float, str)) else 0
     return InvestigationHistoryRecord(
         id=str(getattr(node, "id", "") or ""),
         workspace_id=str(payload.get("workspace_id") or ""),
         session_id=str(payload.get("session_id") or ""),
         lens_id=str(payload.get("lens_id") or ""),
-        source_watermark=payload.get("source_watermark"),
+        source_watermark=source_watermark,
         question=str(payload.get("question") or ""),
         action_kind=str(payload.get("action_kind") or ""),
         outcome=str(payload.get("outcome") or ""),
-        cited_entity_ids=tuple(str(value) for value in (payload.get("cited_entity_ids") or ())),
+        cited_entity_ids=tuple(str(value) for value in cited_ids),
         proposal=dict(proposal) if isinstance(proposal, Mapping) else None,
         insufficiency_reason=str(payload.get("insufficiency_reason") or "") or None,
-        created_at_ms=int(payload.get("created_at_ms") or 0),
+        created_at_ms=created_at_ms,
     )
 
 

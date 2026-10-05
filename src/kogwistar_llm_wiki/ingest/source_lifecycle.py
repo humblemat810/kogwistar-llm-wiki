@@ -23,9 +23,11 @@ from ..parsing.parse_session_store import (
     ParseSessionStoreConflict,
     parse_session_scope_id,
 )
+from .contracts import IngestPipelineHost
 from ..parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
+    ParseGenerationStatus,
     ParseSessionPhase,
     ParseSessionState,
     SourceRegion,
@@ -45,7 +47,7 @@ def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
 class SourceLifecycleMixin:
     """Keep immutable source and durable parser lifecycle out of orchestration."""
 
-    def _source_document_id(self, request: IngestPipelineRequest) -> str:
+    def _source_document_id(self: IngestPipelineHost, request: IngestPipelineRequest) -> str:
         return str(
             stable_id(
                 "kogwistar_llm_wiki.source_document",
@@ -143,7 +145,7 @@ class SourceLifecycleMixin:
         return f"{requested_profile}@{stable_id('kogwistar_llm_wiki.parse_profile_limits', limits_fingerprint)}"
 
     def source_revision(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -195,7 +197,7 @@ class SourceLifecycleMixin:
         return revision
 
     def begin_source_revision(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -247,7 +249,7 @@ class SourceLifecycleMixin:
         return revision
 
     def record_source_readiness(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -286,7 +288,7 @@ class SourceLifecycleMixin:
         return node_id
 
     def initialize_durable_parse_session(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -425,7 +427,7 @@ class SourceLifecycleMixin:
             llm_model=request.llm_model,
             model_version=model_version,
             prompt_version=prompt_version,
-            status="seeded",
+            status=ParseGenerationStatus.SEEDED,
         )
         node = self._artifact_node(
             request=request,
@@ -453,7 +455,7 @@ class SourceLifecycleMixin:
         )
         return session
 
-    def register_source(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> None:
+    def register_source(self: IngestPipelineHost, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> None:
         revision = self.begin_source_revision(request=request, source_document_id=source_document_id)
         source_namespace = self.namespaces_for(request.workspace_id).source_space
         revision_document_id = revision.revision_document_id or source_revision_document_id(
@@ -486,6 +488,10 @@ class SourceLifecycleMixin:
             content=request.raw_text,
             type="text",
             metadata=dict(source_metadata),
+            domain_id=request.workspace_id,
+            processed=False,
+            embeddings=None,
+            source_map=None,
         )
         compatibility_metadata = dict(source_metadata)
         compatibility_metadata["legacy_namespace"] = namespace
@@ -494,6 +500,10 @@ class SourceLifecycleMixin:
             content=request.raw_text,
             type="text",
             metadata=compatibility_metadata,
+            domain_id=request.workspace_id,
+            processed=False,
+            embeddings=None,
+            source_map=None,
         )
 
         with _temporary_namespace(self.engines.kg, source_namespace):
@@ -506,6 +516,10 @@ class SourceLifecycleMixin:
                         content=request.raw_text,
                         type="text",
                         metadata={**source_metadata, "legacy_alias": True},
+                        domain_id=request.workspace_id,
+                        processed=False,
+                        embeddings=None,
+                        source_map=None,
                     )
                 )
         with _temporary_namespace(self.engines.conversation, namespace):
@@ -518,6 +532,10 @@ class SourceLifecycleMixin:
                         content=request.raw_text,
                         type="text",
                         metadata={**compatibility_metadata, "legacy_alias": True},
+                        domain_id=request.workspace_id,
+                        processed=False,
+                        embeddings=None,
+                        source_map=None,
                     )
                 )
         revision_node = self._artifact_node(
@@ -558,7 +576,7 @@ class SourceLifecycleMixin:
             stage="source_registered",
         )
 
-    def seed_source_map(self, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
+    def seed_source_map(self: IngestPipelineHost, *, request: IngestPipelineRequest, source_document_id: str, namespace: str) -> str:
         revision = self.source_revision(request=request, source_document_id=source_document_id)
         revision_document_id = revision.revision_document_id or source_revision_document_id(
             workspace_id=request.workspace_id,

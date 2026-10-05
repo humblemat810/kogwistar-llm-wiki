@@ -29,6 +29,14 @@ class ContractValidationError(ValueError):
     """A v1 wire or embedding payload is invalid."""
 
 
+def _payload_int(value: object, *, field: str) -> int:
+    """Convert a JSON scalar to an integer at the untyped payload boundary."""
+
+    if not isinstance(value, (str, int, float)):
+        raise TypeError(f"{field} must be an integer-compatible scalar")
+    return int(value)
+
+
 @dataclass(frozen=True, slots=True)
 class EmbeddingProfile:
     provider: str
@@ -92,14 +100,20 @@ class EmbeddingProfile:
                 provider=str(payload["provider"]),
                 model=str(payload["model"]),
                 embedding=str(payload["embedding"]),  # type: ignore[arg-type]
-                dimension=int(payload["dimension"]),
+                dimension=_payload_int(payload["dimension"], field="dimension"),
                 metric=str(payload.get("metric", "dot")),  # type: ignore[arg-type]
                 model_revision=str(payload["model_revision"]) if payload.get("model_revision") else None,
                 preprocessing_fingerprint=str(payload.get("preprocessing_fingerprint", "default")),
-                max_sequence_length=int(payload.get("max_sequence_length", 32768)),
-                max_image_patches=int(payload.get("max_image_patches", 768)),
+                max_sequence_length=_payload_int(
+                    payload.get("max_sequence_length", 32768),
+                    field="max_sequence_length",
+                ),
+                max_image_patches=_payload_int(
+                    payload.get("max_image_patches", 768),
+                    field="max_image_patches",
+                ),
                 crop_token_budget=(
-                    int(payload["crop_token_budget"])
+                    _payload_int(payload["crop_token_budget"], field="crop_token_budget")
                     if payload.get("crop_token_budget") is not None
                     else None
                 ),

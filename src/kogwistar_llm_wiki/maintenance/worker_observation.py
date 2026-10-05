@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
+from typing import Literal, cast
 
 from kogwistar.id_provider import stable_id
 from kogwistar.server.auth_middleware import can_access_security_scope
@@ -15,10 +17,14 @@ from .maintenance_observation import (
     ObservationFinding,
     ObservationRuntimeLimits,
     ObservationSubject,
+    SubjectKind,
     assess_observation_frame,
     build_observation_frame,
 )
-from .maintenance_strategies import MaintenanceJobExecutionContext
+from .maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+    MaintenanceWorkerLike,
+)
 from .observation_critic import (
     is_context_window_error,
     safe_observation_critic_error_code,
@@ -29,7 +35,7 @@ from .observation_evidence import (
 )
 
 
-class MaintenanceObservationWorkerMixin:
+class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
     """Run read-only observation and persist its bounded assessment."""
 
     def _handle_review_maintenance_subject(self, ctx: MaintenanceJobExecutionContext) -> None:
@@ -75,7 +81,7 @@ class MaintenanceObservationWorkerMixin:
                 self._acknowledge_job(ctx)
             return
         subject = ObservationSubject(
-            kind=subject_kind,
+            kind=cast(SubjectKind, subject_kind),
             subject_id=subject_id,
             workspace_id=ctx.workspace_id,
             namespace=namespace,
@@ -221,7 +227,7 @@ class MaintenanceObservationWorkerMixin:
         self,
         ctx: MaintenanceJobExecutionContext,
         frame: object,
-    ) -> tuple[str, tuple[ObservationFinding, ...]]:
+    ) -> tuple[Literal["not_used", "succeeded", "failed", "blocked_context"], tuple[ObservationFinding, ...]]:
         """Invoke one bounded provider hook and fail closed on bad output."""
 
         critic = getattr(self, "observation_critic", None)
@@ -261,7 +267,7 @@ class MaintenanceObservationWorkerMixin:
                 ObservationFinding.model_validate(item)
                 for item in raw_findings
             )
-            return status, findings
+            return cast(Literal["succeeded", "failed"], status), findings
         except Exception as exc:  # noqa: BLE001 - critic failure is fail-closed
             if is_context_window_error(exc):
                 self._emit_trace(
@@ -301,18 +307,18 @@ class MaintenanceObservationWorkerMixin:
 
         if not continuation_allowed:
             return False
-        current_round = int(ctx.payload.get("maintenance_round") or 0)
-        max_rounds = int(ctx.payload.get("maintenance_max_rounds") or 0)
+        current_round = _as_int(ctx.payload.get("maintenance_round"))
+        max_rounds = _as_int(ctx.payload.get("maintenance_max_rounds"))
         if max_rounds > 0 and current_round + 1 >= max_rounds:
             return False
         last_scheduled_round = ctx.payload.get("observation_continuation_round")
-        if last_scheduled_round is not None and int(last_scheduled_round) == current_round:
+        if last_scheduled_round is not None and _as_int(last_scheduled_round) == current_round:
             return False
         budgets = ctx.payload.get("budgets")
         budget_state = ctx.payload.get("maintenance_budget_state")
-        max_steps = int(budgets.get("max_steps") or 0) if isinstance(budgets, Mapping) else 0
+        max_steps = _as_int(budgets.get("max_steps")) if isinstance(budgets, Mapping) else 0
         used_steps = (
-            int(budget_state.get("step_used") or 0)
+            _as_int(budget_state.get("step_used"))
             if isinstance(budget_state, Mapping)
             else 0
         )
@@ -402,9 +408,10 @@ class MaintenanceObservationWorkerMixin:
             next_payload["split_strategy"] = "boundary_first"
         if derived_parse_target is not None:
             next_payload["parse_target"] = derived_parse_target.model_dump(mode="json")
+        raw_context = ctx.payload.get("maintenance_context")
         next_payload["maintenance_context"] = append_maintenance_round(
-            ctx.payload.get("maintenance_context")
-            if isinstance(ctx.payload.get("maintenance_context"), Mapping)
+            cast(Mapping[str, object], raw_context)
+            if isinstance(raw_context, Mapping)
             else None,
             round_number=current_round + 1,
             summary=f"observation requested {action}",
@@ -527,17 +534,21 @@ class MaintenanceObservationWorkerMixin:
             expected_source_digest=subject.source_digest,
         )
         source_context: list[Mapping[str, object]] = [source_evidence, subject_record]
-        relation_context = [
+        relation_context: list[Mapping[str, object]] = [
             compact_entity_record(edge, workspace_id=ctx.workspace_id, namespace=namespace)
             for edge in related_edges[:64]
         ]
-        neighborhood_context = [
+        neighborhood_context: list[Mapping[str, object]] = [
             compact_entity_record(node, workspace_id=ctx.workspace_id, namespace=namespace)
             for node in neighbors
             if _validate_entity_scope(node, workspace_id=ctx.workspace_id)
         ]
         parent_context: list[Mapping[str, object]] = []
-        parent_id = str((subject_record.get("metadata") or {}).get("parent_member_id") or "").strip()
+        subject_metadata = subject_record.get("metadata")
+        parent_id = str(
+            (subject_metadata.get("parent_member_id") if isinstance(subject_metadata, Mapping) else "")
+            or ""
+        ).strip()
         if limits.ancestor_hops and parent_id:
             with _temporary_namespace(engine, namespace):
                 parent_nodes = list(engine.read.get_nodes(ids=[parent_id], limit=1))
@@ -620,14 +631,15 @@ class MaintenanceObservationWorkerMixin:
             )
             return None, None, False
 
-    def _observation_namespace(self, namespace: str):
+    def _observation_namespace(self, namespace: str) -> AbstractContextManager[None]:
         return _background_namespace(self.engines.conversation, namespace)
 
 
 def _validate_entity_scope(entity: object, *, workspace_id: str) -> bool:
     """Fail closed when a graph entity lacks the worker's ACL boundary."""
 
-    metadata = dict(getattr(entity, "metadata", None) or {})
+    raw_metadata = getattr(entity, "metadata", None)
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
     if str(metadata.get("workspace_id") or "") != workspace_id:
         raise ValueError("observation entity is outside the claimed workspace")
     acl_scope = str(
@@ -644,13 +656,22 @@ def _redacted_frame_payload(frame: object) -> dict[str, object]:
     """Persist source identifiers and hashes, never transient source excerpts."""
 
     model_dump = getattr(frame, "model_dump", None)
-    payload = model_dump(mode="json") if callable(model_dump) else {}
+    raw_payload = model_dump(mode="json") if callable(model_dump) else {}
+    payload = dict(raw_payload) if isinstance(raw_payload, Mapping) else {}
     source_context = payload.get("source_context")
     if isinstance(source_context, list):
         for record in source_context:
             if isinstance(record, dict):
                 record.pop("source_excerpt", None)
     return payload
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    return default
 
 
 __all__ = ["MaintenanceObservationWorkerMixin"]

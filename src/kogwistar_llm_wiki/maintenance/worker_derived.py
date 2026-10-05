@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from typing import cast
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
@@ -16,26 +17,33 @@ from kogwistar.wisdom.template import write_execution_wisdom_artifacts
 from ..configuration.workspace import WorkspaceNamespaces
 from ..maintenance import operation_category
 from ..models import NamespaceEngines
-from ..policies.rules import LlmWikiPolicies
+from ..policies.rules import (
+    LlmWikiDerivedKnowledgePolicy,
+    LlmWikiLifecyclePolicy,
+    LlmWikiPolicies,
+    LlmWikiWisdomPolicy,
+)
 from ..utils import _temporary_namespace
+from .maintenance_strategies import MaintenanceWorkerLike
 from .state import and_where as _and_where
 
 logger = logging.getLogger(__name__)
 
-
-class DerivedMaintenanceWorkerMixin:
+class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
     """Methods for derived knowledge and execution-history wisdom."""
 
     def _load_request_node(self, workspace_id: str, req_node_id: str) -> Node | None:
         ns = WorkspaceNamespaces(workspace_id)
         with _temporary_namespace(self.engines.conversation, ns.conv_bg):
-            nodes: list[Node] = self.engines.conversation.read.get_nodes(
-                where={
-                    "$and": [
-                        {"workspace_id": workspace_id},
-                        {"id": req_node_id},
-                    ]
-                }
+            nodes = list(
+                self.engines.conversation.read.get_nodes(
+                    where={
+                        "$and": [
+                            {"workspace_id": workspace_id},
+                            {"id": req_node_id},
+                        ]
+                    }
+                )
             )
         if nodes:
             return nodes[0]
@@ -62,13 +70,14 @@ class DerivedMaintenanceWorkerMixin:
             for item in (ctx.state_view.get("maintenance_candidates") or [])
             if isinstance(item, Mapping) and str(item.get("candidate_id") or "").strip()
         }
-        source_where = self.policies.derived_knowledge.source_query(workspace_id=workspace_id).where
+        derived_policy = cast(LlmWikiDerivedKnowledgePolicy, self.policies.derived_knowledge)
+        source_where = derived_policy.source_query(workspace_id=workspace_id).where
         if maintenance_mode == "background":
             if not selected_ids:
                 return RunSuccess(state_update=[("u", {"distillation_complete": True, "candidate_count": 0})])
             source_where = _and_where(source_where, {"id": {"$in": sorted(selected_ids)}})
         with _temporary_namespace(engines.kg, ns.curated_kg_space):
-            promoted_nodes: list[Node] = engines.kg.read.get_nodes(where=source_where)
+            promoted_nodes = list(engines.kg.read.get_nodes(where=source_where))
 
         if not promoted_nodes:
             self._emit_trace(
@@ -89,8 +98,8 @@ class DerivedMaintenanceWorkerMixin:
             source_namespace=ns.curated_kg_space,
             target_namespace=ns.derived_knowledge,
             source_where=source_where,
-            group_key_for_node=self.policies.derived_knowledge.group_key,
-            match_where_for_group=lambda label: self.policies.derived_knowledge.match_where(
+            group_key_for_node=derived_policy.group_key,
+            match_where_for_group=lambda label: derived_policy.match_where(
                 workspace_id=workspace_id,
                 label=label,
             ),
@@ -114,13 +123,14 @@ class DerivedMaintenanceWorkerMixin:
                             excerpt=f"distilled:{label}",
                             context_before="",
                             context_after="",
-                            chunk_id=None,
-                            source_cluster_id=None,
+                chunk_id=None,
+                source_cluster_id=None,
+                verification=None,
                         )
                     ]
                 ),
             ),
-            before_write=before_write if callable(before_write) else None,
+            before_write=cast(Callable[[str], None], before_write) if callable(before_write) else None,
         )
         for result in template_result.grouped_results:
             logger.info(
@@ -197,12 +207,20 @@ class DerivedMaintenanceWorkerMixin:
             label=label,
             type="entity",
             summary=f"Derived knowledge synthesis for {label} aggregated from {len(nodes)} source documents.",
+            domain_id=None,
+            canonical_entity_id=None,
+            properties=None,
+            embedding=None,
+            doc_id=None,
+            level_from_root=None,
             mentions=merged_mentions,
-            metadata=policies.derived_knowledge.build_metadata(
+            metadata=cast(LlmWikiDerivedKnowledgePolicy, policies.derived_knowledge).build_metadata(
                 workspace_id=workspace_id,
                 label=label,
                 source_node_ids=source_node_ids,
-                replaces_ids=policies.lifecycle.replacement_ids(existing),
+                replaces_ids=cast(LlmWikiLifecyclePolicy, policies.lifecycle).replacement_ids(
+                    [*cast(Sequence[Node | str], existing)]
+                ),
                 created_at_ms=created_at_ms,
             ),
         )
@@ -219,14 +237,16 @@ class DerivedMaintenanceWorkerMixin:
             return []
 
         ns = WorkspaceNamespaces(workspace_id)
+        wisdom_policy = cast(LlmWikiWisdomPolicy, self.policies.wisdom)
+        lifecycle_policy = cast(LlmWikiLifecyclePolicy, self.policies.lifecycle)
         result_items = write_execution_wisdom_artifacts(
             engines.conversation,
             target_engine=engines.wisdom,
             source_namespace=ns.conv_bg,
             target_namespace=ns.wisdom,
-            source_where=self.policies.wisdom.source_query(workspace_id=workspace_id).where,
-            min_failure_signals=self.policies.wisdom.min_failure_signals,
-            match_where_for_pattern=lambda pattern: self.policies.wisdom.match_where(
+            source_where=wisdom_policy.source_query(workspace_id=workspace_id).where,
+            min_failure_signals=wisdom_policy.min_failure_signals,
+            match_where_for_pattern=lambda pattern: wisdom_policy.match_where(
                 workspace_id=workspace_id,
                 step_op=pattern.step_op,
             ),
@@ -246,6 +266,12 @@ class DerivedMaintenanceWorkerMixin:
                     f"({len(pattern.failure_nodes)} occurrences across {len(pattern.run_ids)} runs). "
                     "Investigate step resolver, input contract, or upstream data quality."
                 ),
+                domain_id=None,
+                canonical_entity_id=None,
+                properties=None,
+                embedding=None,
+                doc_id=None,
+                level_from_root=None,
                 mentions=[
                     Grounding(
                         spans=[
@@ -262,16 +288,19 @@ class DerivedMaintenanceWorkerMixin:
                                 context_after="",
                                 chunk_id=None,
                                 source_cluster_id=None,
+                                verification=None,
                             )
                         ]
                     )
                 ],
-                metadata=self.policies.wisdom.build_metadata(
+                metadata=wisdom_policy.build_metadata(
                     workspace_id=workspace_id,
                     step_op=pattern.step_op,
                     failure_count=len(pattern.failure_nodes),
                     evidence_run_ids=list(pattern.run_ids),
-                    replaces_ids=self.policies.lifecycle.replacement_ids(existing),
+                    replaces_ids=lifecycle_policy.replacement_ids(
+                        [*cast(Sequence[Node | str], existing)]
+                    ),
                     created_at_ms=created_at_ms,
                 )
                 | {"label": f"execution_failure_pattern:{pattern.step_op}"},
@@ -295,10 +324,12 @@ class DerivedMaintenanceWorkerMixin:
         deps_raw = ctx.state_view.get("_deps")
         engines = deps_raw.get("engines") if isinstance(deps_raw, dict) else deps_raw
         before_write = deps_raw.get("before_authoritative_write") if isinstance(deps_raw, dict) else None
+        if not isinstance(workspace_id, str) or not isinstance(engines, NamespaceEngines):
+            return RunSuccess(state_update=[("u", {"error": "Missing context"})])
         emitted = self._emit_execution_wisdom_from_history(
             workspace_id,
             engines,
-            before_write=before_write if callable(before_write) else None,
+            before_write=cast(Callable[[object], None], before_write) if callable(before_write) else None,
         )
         return RunSuccess(
             state_update=[("u", {"history_wisdom_complete": True, "execution_wisdom_emitted": emitted})]

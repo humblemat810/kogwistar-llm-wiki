@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
 
 from ..agent.protocol import (
     budgets as _budgets,
@@ -16,10 +15,11 @@ from ..agent.protocol import (
 )
 from ..maintenance.maintenance_control import configured_default_request_max_rounds
 from ..models import IngestPipelineRequest
+from .host import AgentGatewayHost, ToolArguments
 
 
-class AgentMaintenanceToolsMixin:
-    def maintain(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+class AgentMaintenanceToolsMixin(AgentGatewayHost):
+    def maintain(self, arguments: ToolArguments) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         topic = str(arguments.get("topic") or "").strip()
         objective = str(arguments.get("objective") or arguments.get("policy") or "").strip()
@@ -43,7 +43,7 @@ class AgentMaintenanceToolsMixin:
         if not isinstance(raw_source_ids, (list, tuple, set, frozenset)):
             raise TypeError("source_document_ids must be a list of IDs")
         source_ids = [str(value) for value in raw_source_ids if str(value).strip()]
-        source_candidates: list[dict[str, object]] | None = None
+        source_candidates: Sequence[Mapping[str, object]] | None = None
         if not source_ids:
             source_candidates = self._source_documents(workspace_id)
             source_ids = self._source_ids_for_topic(

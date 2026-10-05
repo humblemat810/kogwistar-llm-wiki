@@ -144,10 +144,12 @@ class ReviewQueryService:
             query_where["patch_status"] = status
 
         with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
-            return self.engines.kg.read.get_nodes(
-                where=query_where,
-                limit=10_000,
-                resolve_mode="include_tombstones",
+            return list(
+                self.engines.kg.read.get_nodes(
+                    where=query_where,
+                    limit=10_000,
+                    resolve_mode="include_tombstones",
+                )
             )
 
     def get_maintenance_patch_report(
@@ -245,10 +247,12 @@ class ReviewQueryService:
 
 
 def _int_metadata(value: object, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
 
 
 __all__ = ["MaintenancePatchReport", "ReviewChainResult", "ReviewQueryService"]

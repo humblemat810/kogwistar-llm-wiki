@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Iterable, Mapping
 
 
 def operation_category(maintenance_kind: str) -> str:
@@ -26,15 +25,15 @@ def operation_category(maintenance_kind: str) -> str:
 
 
 def build_maintenance_statistics(
-    trace_rows: Iterable[dict[str, Any]],
-) -> dict[str, Any]:
+    trace_rows: Iterable[Mapping[str, object]],
+) -> dict[str, object]:
     """Build a read-side maintenance report from append-only worker traces."""
-    documents: dict[str, dict[str, Any]] = {}
+    documents: dict[str, dict[str, object]] = {}
     totals = Counter()
     failure_hotspots: Counter[str] = Counter()
     operation_totals: Counter[str] = Counter()
 
-    def document(row: dict[str, Any]) -> dict[str, Any]:
+    def document(row: Mapping[str, object]) -> dict[str, object]:
         doc_id = str(row.get("source_document_id") or "unattributed")
         if doc_id not in documents:
             documents[doc_id] = {

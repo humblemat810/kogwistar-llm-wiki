@@ -79,7 +79,7 @@ def resolve_token_pricing(
         for prefix in prefixes:
             name = f"{prefix}_{suffix}"
             raw = os.getenv(name)
-            if raw in {None, ""}:
+            if raw is None or raw == "":
                 continue
             try:
                 value = float(raw)
@@ -237,6 +237,9 @@ class ProviderUsageCallback(BaseCallbackHandler):
         )
         if estimated_cost is not None:
             amount, cost_status = estimated_cost
+            pricing = self.pricing
+            if pricing is None:
+                raise AssertionError("pricing is required when a cost estimate is present")
             provider_events.append(
                 BudgetEvent(
                     run_id=self.run_id,
@@ -250,10 +253,10 @@ class ProviderUsageCallback(BaseCallbackHandler):
                         "cost_status": "estimated_from_tokens",
                         "cost_provenance": "estimated_from_tokens",
                         "estimator_status": cost_status,
-                        "cost_source": self.pricing.source,
-                        "input_cost_per_1k": self.pricing.input_per_1k,
-                        "cached_input_cost_per_1k": self.pricing.cached_input_per_1k,
-                        "output_cost_per_1k": self.pricing.output_per_1k,
+                        "cost_source": pricing.source,
+                        "input_cost_per_1k": pricing.input_per_1k,
+                        "cached_input_cost_per_1k": pricing.cached_input_per_1k,
+                        "output_cost_per_1k": pricing.output_per_1k,
                         "provider_run_id": provider_run_id,
                     },
                     event_id=_stable_event_id(self.run_id, provider_run_id, "total_cost"),

@@ -1,17 +1,109 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import ClassVar, Protocol
+from threading import Event
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
+from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.engine_core.models import Node
+from kogwistar.runtime import RunResult
+from kogwistar.runtime.budget import StateBackedBudgetLedger
+from kogwistar.runtime.runtime import WorkflowRuntime
 
+from ..models import NamespaceEngines
+from ..policies.rules import LlmWikiPolicies
+from ..disambiguation.contact_matching import ContactIdentityObservation
+from .maintenance_guards import MaintenanceGuardDecision
 from .maintenance_policy import (
     GRAPH_PATCH_APPLY_KINDS,
     GRAPH_PATCH_PROPOSAL_KINDS,
     is_execution_wisdom_kind,
     normalize_maintenance_kind,
 )
+
+if TYPE_CHECKING:
+    from ..parsing.parse_views import ParseFrontierItem, ParseSessionState
+
+
+class LayeredMaintenanceParser(Protocol):
+    """Bounded durable parser callback used by maintenance expansion."""
+
+    def __call__(
+        self,
+        ctx: "MaintenanceJobExecutionContext",
+        session: "ParseSessionState",
+        frontier: list["ParseFrontierItem"],
+        /,
+    ) -> Mapping[str, object]: ...
+
+
+class MaintenanceTraceSink(Protocol):
+    """Receive one bounded, structured maintenance trace payload."""
+
+    def __call__(self, payload: dict[str, object], /) -> None: ...
+
+
+class MaintenanceUsageSink(Protocol):
+    """Record one named maintenance usage sample."""
+
+    def __call__(self, event_name: str, metrics: Mapping[str, float], /) -> None: ...
+
+
+class MaintenanceDocumentParser(Protocol):
+    """Parse one immutable source request into bounded evidence."""
+
+    def __call__(
+        self, ctx: MaintenanceJobExecutionContext, /
+    ) -> Mapping[str, object]: ...
+
+
+class MaintenanceObservationCritic(Protocol):
+    """Assess one bounded observation context without mutating the graph."""
+
+    def __call__(
+        self, subject: object, ctx: MaintenanceJobExecutionContext, /
+    ) -> Mapping[str, object]: ...
+
+
+class MaintenanceContextLimitSink(Protocol):
+    """Record that a maintenance context limit was reached."""
+
+    def __call__(self) -> None: ...
+
+
+class CrosslinkProposer(Protocol):
+    """Propose bounded cross-links from already authorized context."""
+
+    def __call__(
+        self,
+        context: list[Mapping[str, object]],
+        ctx: MaintenanceJobExecutionContext,
+        /,
+    ) -> Mapping[str, object]: ...
+
+
+class CrosslinkCritic(Protocol):
+    """Critique proposed cross-links before any patch is applied."""
+
+    def __call__(
+        self,
+        proposal: Mapping[str, object],
+        ctx: MaintenanceJobExecutionContext,
+        /,
+    ) -> Mapping[str, object]: ...
+
+
+class ContactObservationProvider(Protocol):
+    """Read bounded contact observations for one authorized workspace."""
+
+    def __call__(
+        self,
+        workspace_id: str,
+        payload: Mapping[str, object],
+        /,
+    ) -> Iterable[ContactIdentityObservation]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +119,61 @@ class MaintenanceJobExecutionContext:
 
 
 class MaintenanceWorkerLike(Protocol):
+    engines: NamespaceEngines
+    worker_id: str
+    lease_seconds: int
+    lease_renew_interval_seconds: int
+    strategy_registry: MaintenanceStrategyRegistry
+    _claim_lost: Event
+    _last_progress_monotonic: float
+    usage_sink: MaintenanceUsageSink | None
+    trace_sink: MaintenanceTraceSink | None
+    provider_settings: WorkflowProviderSettings
+    policies: LlmWikiPolicies
+    runtime: WorkflowRuntime
+    fair_scheduling: bool
+    maintenance_steps_per_slice: int
+    maintenance_llm_calls_per_slice: int
+    maintenance_seconds_per_slice: int
+    document_parser: MaintenanceDocumentParser
+    layered_parser: "LayeredMaintenanceParser"
+
+    def _load_request_node(self, workspace_id: str, req_node_id: str) -> Node | None: ...
+    def _emit_trace(self, event: str, **fields: object) -> None: ...
+    def _attach_request_selection(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+    def _evaluate_maintenance_guard(self, ctx: MaintenanceJobExecutionContext) -> MaintenanceGuardDecision: ...
+    def _block_guarded_job(self, ctx: MaintenanceJobExecutionContext, decision: MaintenanceGuardDecision) -> None: ...
+    def _renew_claim_while_progressing(self, ctx: MaintenanceJobExecutionContext, stop: Event) -> None: ...
+    def _retry_or_fail_maintenance_job(
+        self,
+        job: JobQueueItem,
+        error: Exception | str,
+        *,
+        workspace_id: str = "",
+        maintenance_kind: str = "",
+    ) -> None: ...
+    def _emit_lane_reply(
+        self,
+        *,
+        workspace_id: str,
+        source_document_id: str,
+        request_node_id: str,
+        reply_to_message_id: str | None,
+        status: str,
+        payload: dict[str, object],
+    ) -> None: ...
+    def _emit_stale_claim_discarded(self, ctx: MaintenanceJobExecutionContext, *, reason: str) -> None: ...
+    def _assert_claim_owned(self, ctx: MaintenanceJobExecutionContext, *, reason: str) -> None: ...
+    @staticmethod
+    def _selection_result_payload(ctx: MaintenanceJobExecutionContext) -> dict[str, object]: ...
+    def _emit_execution_wisdom_from_history(
+        self,
+        workspace_id: str,
+        engines: NamespaceEngines,
+        *,
+        before_write: Callable[[object], None] | None = None,
+    ) -> list[str]: ...
+
     def _handle_review_maintenance_subject(self, ctx: MaintenanceJobExecutionContext) -> None: ...
 
     def _handle_crosslink_maintenance_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
@@ -46,6 +193,27 @@ class MaintenanceWorkerLike(Protocol):
     def _handle_graph_patch_apply_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
 
     def _handle_runtime_workflow_strategy(self, ctx: MaintenanceJobExecutionContext) -> None: ...
+
+    def _advance_maintenance_plan(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        *,
+        budget_state: Mapping[str, object] | None = None,
+    ) -> bool: ...
+    def _is_active_source_derivation(self, node: object, workspace_id: str) -> bool: ...
+    def _persist_maintenance_usage(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        budget_ledger: StateBackedBudgetLedger,
+        result: object | None,
+    ) -> None: ...
+    def _requeue_suspended_maintenance_job(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        result: RunResult,
+        *,
+        budget_state: Mapping[str, object] | None = None,
+    ) -> None: ...
 
 
 class MaintenanceStrategy(Protocol):

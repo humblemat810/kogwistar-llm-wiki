@@ -168,7 +168,12 @@ class ProjectionWorker:
         error: str | None = None,
     ) -> None:
         """Append-only status event — never updates the original request node."""
-        from kogwistar.engine_core.models import Grounding, Node, Span
+        from kogwistar.engine_core.models import (
+            Grounding,
+            MentionVerification,
+            Node,
+            Span,
+        )
         from kogwistar.id_provider import stable_id
 
         event_id = str(stable_id("projection_status", req_node_id, promoted_entity_id, status))
@@ -186,6 +191,12 @@ class ProjectionWorker:
             context_after="",
             chunk_id=None,
             source_cluster_id=None,
+            verification=MentionVerification(
+                method="system",
+                is_verified=True,
+                score=1.0,
+                notes="projection status event",
+            ),
         )
         metadata: dict[str, str] = {
             "workspace_id": workspace_id,
@@ -217,6 +228,12 @@ class ProjectionWorker:
                 type="entity",
                 summary=f"Projection request {req_node_id} transitioned to {status}",
                 mentions=[Grounding(spans=[span])],
+                properties={},
                 metadata=metadata,
+                doc_id=f"conv:{ns.conv_bg}",
+                domain_id=None,
+                canonical_entity_id=None,
+                embedding=None,
+                level_from_root=0,
             )
             self.engines.conversation.write.add_node(event_node)

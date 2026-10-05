@@ -5,9 +5,9 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol, cast
 
 from kogwistar.engine_core.jobs import JobQueueItem
 
@@ -16,12 +16,49 @@ from ..models import NamespaceEngines
 from .notification_delivery import parse_notification_delivery_job
 
 DeliveryClass = Literal["routine", "urgent"]
-AuthorizeOutboxRecipient = Callable[[str, str], bool]
-AuthorizeOutboxSource = Callable[[str, str, str], bool]
+
+class AuthorizeOutboxRecipient(Protocol):
+    """Authorize delivery-history access for one workspace recipient."""
+
+    def __call__(self, workspace_id: str, principal_id: str, /) -> bool: ...
+
+
+class AuthorizeOutboxSource(Protocol):
+    """Authorize access to one source referenced by a delivery."""
+
+    def __call__(self, workspace_id: str, principal_id: str, source_id: str, /) -> bool: ...
 
 
 class NotificationOutboxUnavailableError(RuntimeError):
     """Raised when the selected Kogwistar backend lacks ordered history."""
+
+
+class _JobPageLike(Protocol):
+    items: tuple[JobQueueItem, ...] | list[JobQueueItem]
+    next_cursor: object | None
+
+
+class _JobPageReader(Protocol):
+    def __call__(
+        self,
+        *,
+        namespace: str,
+        status: str | None,
+        entity_kind: str,
+        job_kind: str,
+        limit: int,
+        cursor: object | None,
+    ) -> _JobPageLike: ...
+
+
+class _JobQueueCursorFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        created_at_us: int,
+        job_id: str,
+        filter_fingerprint: str,
+    ) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +160,8 @@ class NotificationOutboxReader:
             delivery_class=delivery_class,
             status=status,
         )
-        page = page_reader(
+        read_page = cast(_JobPageReader, page_reader)
+        page = read_page(
             namespace=namespace,
             status=status,
             entity_kind="notification_delivery",
@@ -306,12 +344,15 @@ class NotificationOutboxReader:
         ):
             raise ValueError("notification outbox cursor is invalid")
         try:
-            from kogwistar.engine_core.jobs import JobQueueCursor
+            from importlib import import_module
+
+            jobs_module = import_module("kogwistar.engine_core.jobs")
+            cursor_type = cast(_JobQueueCursorFactory, getattr(jobs_module, "JobQueueCursor"))
         except ImportError as exc:
             raise NotificationOutboxUnavailableError(
                 "notification outbox cursor requires a newer Kogwistar core"
             ) from exc
-        return JobQueueCursor(
+        return cursor_type(
             created_at_us=created_at_us,
             job_id=job_id,
             filter_fingerprint=fingerprint,

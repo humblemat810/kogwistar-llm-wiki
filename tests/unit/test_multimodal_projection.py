@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from contextlib import contextmanager
+from dataclasses import replace
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -107,9 +108,14 @@ def test_image_query_uses_native_image_capability_without_captioning() -> None:
         modality="image",
         locator={"kind": "whole_image"},
         content_ref="blob://image-1",
+        asset_sha256="".join(f"{value:02x}" for value in __import__("hashlib").sha256(b"image-bytes").digest()),
     )
     store.capture(image)
-    assert embed_pending(store, encoder) == 1
+    assert embed_pending(
+        store,
+        encoder,
+        resolver=MappingAssetResolver({"blob://image-1": b"image-bytes"}),
+    ) == 1
     query_vectors = encoder.encode_image_queries(["blob://image-1"])
     hit = store.search(query_vectors[0], profile=profile, limit=1)[0]
     assert hit.view_id == "image-view"
@@ -142,6 +148,35 @@ def test_in_memory_profiles_with_different_dimensions_are_isolated() -> None:
     assert store_3d.search(((1.0, 0.0, 0.0),), profile=profile_3d, limit=1)[0].view_id == unit.view_id
     with pytest.raises(EmbeddingProfileMismatch):
         store_2d.search(((1.0, 0.0, 0.0),), profile=profile_3d)
+
+
+def test_same_public_view_id_is_isolated_by_workspace() -> None:
+    profile = _profile(dimension=2)
+    store = InMemoryMultimodalProjectionStore(scope="shared", profile=profile)
+    first = replace(_unit("same-view", "workspace one"), workspace_id="workspace-1")
+    second = replace(_unit("same-view", "workspace two"), workspace_id="workspace-2")
+    store.upsert_embedding(first, ((1.0, 0.0),), profile=profile)
+    store.upsert_embedding(second, ((0.0, 1.0),), profile=profile)
+
+    assert store.get("same-view", profile=profile, workspace_id="workspace-1") == first
+    assert store.get("same-view", profile=profile, workspace_id="workspace-2") == second
+    assert store.stage_counts(workspace_id="workspace-1")["stage2"] == 1
+    assert store.stage_counts(workspace_id="workspace-2")["stage2"] == 1
+
+
+def test_sqlite_same_public_view_id_is_isolated_by_workspace(tmp_path) -> None:
+    profile = _profile(dimension=2)
+    store = SQLiteMultimodalProjectionStore(
+        tmp_path / "shared.sqlite", scope="shared", profile=profile
+    )
+    first = replace(_unit("same-view", "workspace one"), workspace_id="workspace-1")
+    second = replace(_unit("same-view", "workspace two"), workspace_id="workspace-2")
+    store.upsert_embedding(first, ((1.0, 0.0),), profile=profile)
+    store.upsert_embedding(second, ((0.0, 1.0),), profile=profile)
+
+    assert store.get("same-view", profile=profile, workspace_id="workspace-1") == first
+    assert store.get("same-view", profile=profile, workspace_id="workspace-2") == second
+    store.close()
 
 
 def test_single_vector_rejects_multiple_vectors() -> None:
@@ -572,7 +607,11 @@ def test_ingest_pipeline_delegates_opt_in_multimodal_flow(tmp_path) -> None:
             content_ref="blob://image-query",
         )
         pipeline.capture_multimodal_units([image_unit])
-        assert pipeline.embed_multimodal_pending() == 3
+        assert pipeline.embed_multimodal_pending(
+            resolver=MappingAssetResolver(
+                {"blob://image": b"html-image", "blob://image-query": b"query-image"}
+            )
+        ) == 3
         assert pipeline.search_multimodal_image(["blob://image-query"], limit=1)[0].view_id == "standalone-image"
         mixed = pipeline.search_multimodal_mixed(
             text_queries=("multimodal article",),

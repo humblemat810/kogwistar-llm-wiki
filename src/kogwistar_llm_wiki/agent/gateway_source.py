@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from typing import Any
+from typing import NoReturn
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 
 def validate_supplied_provenance(
-    provenance: Mapping[str, Any],
+    provenance: Mapping[str, object],
     *,
     workspace_id: str,
     source_uri: str,
@@ -55,7 +55,7 @@ def validate_agent_source_uri(source_uri: str) -> None:
         raise ValueError("source_uri must be a credential-free http(s) URL")
 
 
-def validate_reingest_revision(existing: Mapping[str, Any], provenance: object) -> None:
+def validate_reingest_revision(existing: Mapping[str, object], provenance: object) -> None:
     if not isinstance(provenance, Mapping):
         return
     requested = str(provenance.get("source_revision_id") or "").strip()
@@ -94,7 +94,7 @@ def fetch_source_text(source_uri: str) -> str:
     timeout = max(1.0, float(os.getenv("LLM_WIKI_SOURCE_FETCH_TIMEOUT_SECONDS", "30")))
 
     class NoRedirect(urllib_request.HTTPRedirectHandler):
-        def redirect_request(self, *_args: object, **_kwargs: object):
+        def redirect_request(self, *_args: object, **_kwargs: object) -> NoReturn:
             raise ValueError("source_uri redirects are not permitted")
 
     request = urllib_request.Request(
@@ -147,12 +147,22 @@ def node_json(
     if callable(dump):
         try:
             value = dump(dump_format="json")
-            return redact_source_text_value(value) if redact_source_text else value
+            return _json_object(value, redact_source_text=redact_source_text)
         except TypeError:
             value = dump(mode="json")
-            return redact_source_text_value(value) if redact_source_text else value
+            return _json_object(value, redact_source_text=redact_source_text)
     value = {"id": str(getattr(node, "id", "")), "metadata": dict(getattr(node, "metadata", {}) or {})}
-    return redact_source_text_value(value) if redact_source_text else value
+    return _json_object(value, redact_source_text=redact_source_text)
+
+
+def _json_object(value: object, *, redact_source_text: bool) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    result = {str(key): item for key, item in value.items()}
+    redacted = redact_source_text_value(result) if redact_source_text else result
+    if not isinstance(redacted, Mapping):
+        return None
+    return {str(key): item for key, item in redacted.items()}
 
 
 def redact_source_text_value(value: object) -> object:

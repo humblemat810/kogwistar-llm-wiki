@@ -14,6 +14,21 @@ from kogwistar.conversation.conversation_context import (
 )
 
 
+def _integer_value(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"{field} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError as exc:
+            raise ValueError(f"{field} must be an integer") from exc
+    raise TypeError(f"{field} must be an integer")
+
+
 @dataclass(frozen=True, slots=True)
 class CrosslinkContextBudget:
     """Optional limits for graph context sent to a cross-link provider.
@@ -56,15 +71,15 @@ class CrosslinkContextBudget:
             "max_characters": 0,
         }
         values: dict[str, int] = {}
-        for field, names in keys.items():
-            value = next((source[name] for name in names if name in source), defaults[field])
-            try:
-                integer = int(value)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"{field} must be an integer") from exc
+        for field_name, names in keys.items():
+            value = next(
+                (source[name] for name in names if name in source),
+                defaults[field_name],
+            )
+            integer = _integer_value(value, field=field_name)
             if integer < 0:
-                raise ValueError(f"{field} must be non-negative")
-            values[field] = integer
+                raise ValueError(f"{field_name} must be non-negative")
+            values[field_name] = integer
         return cls(**values)
 
 
@@ -158,16 +173,10 @@ def pack_crosslink_context(
         kept.append(record)
         used_characters += characters
 
-    dropped_by_builder = {
-        str((item.extra or {}).get("crosslink_kind") or ""): 0
-        for item in packed.dropped
-    }
+    dropped_by_builder: dict[str, int] = {}
     for item in packed.dropped:
-        kind = str((item.extra or {}).get("crosslink_kind") or "")
-        if kind == "node":
-            omitted_nodes += 1
-        elif kind == "edge":
-            omitted_edges += 1
+        # DroppedItem retains accounting metadata, not ContextItem.extra.
+        kind = str(item.kind)
         dropped_by_builder[kind] = dropped_by_builder.get(kind, 0) + 1
 
     return {

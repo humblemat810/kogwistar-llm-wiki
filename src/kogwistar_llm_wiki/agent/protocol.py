@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from numbers import Real
-from typing import Any
 
 from ..models import IngestPipelineRequest
 
@@ -24,7 +23,7 @@ def content_to_text(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def request_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+def request_payload(payload: Mapping[str, object]) -> dict[str, object]:
     messages = payload.get("messages")
     if isinstance(messages, list):
         text = next(
@@ -64,6 +63,8 @@ def request_payload(payload: Mapping[str, Any]) -> dict[str, object]:
         "retrieval_required",
         "similarity_threshold",
         "source_evidence_required",
+        "include_multimodal",
+        "multimodal_limit",
         "explicit_anchor_ids",
         "hop_limit",
         "max_nodes",
@@ -79,7 +80,7 @@ def request_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     return request
 
 
-def budgets(arguments: Mapping[str, Any]) -> dict[str, object]:
+def budgets(arguments: Mapping[str, object]) -> dict[str, object]:
     names = ("max_time_seconds", "max_llm_calls", "max_tokens", "max_cost_usd", "max_steps")
     integer_names = {"max_llm_calls", "max_tokens", "max_steps"}
     result: dict[str, object] = {}
@@ -100,9 +101,9 @@ def limit_budgeted_sources(
 ) -> tuple[list[tuple[str, IngestPipelineRequest]], list[str]]:
     """Prevent request-level call/step quotas from multiplying per document."""
     limits = [
-        int(budget_values[name])
+        _as_non_negative_int(budget_values[name], name)
         for name in ("max_llm_calls", "max_steps")
-        if name in budget_values and int(budget_values[name]) > 0
+        if name in budget_values and _as_non_negative_int(budget_values[name], name) > 0
     ]
     if not limits:
         return source_requests, []
@@ -122,7 +123,7 @@ def partition_budgets(
             result[name] = value
             continue
         if name in {"max_llm_calls", "max_tokens", "max_steps"}:
-            total = int(value)
+            total = _as_non_negative_int(value, name)
             base, remainder = divmod(total, count)
             result[name] = base + (1 if index < remainder else 0)
         else:
@@ -130,7 +131,16 @@ def partition_budgets(
     return result
 
 
-def bounded_lens_arguments(arguments: Mapping[str, Any]) -> dict[str, object]:
+def _as_non_negative_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError(f"{name} must be a non-negative number")
+    converted = int(float(value))
+    if converted < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return converted
+
+
+def bounded_lens_arguments(arguments: Mapping[str, object]) -> dict[str, object]:
     """Apply server-side result bounds instead of trusting agent limits."""
     result = dict(arguments)
     limits = {"hop_limit": 8, "max_nodes": 500, "max_edges": 2000, "max_hyperedges": 250}

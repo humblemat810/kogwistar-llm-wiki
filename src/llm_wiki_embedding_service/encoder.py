@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from io import BytesIO
-from typing import Any
+from typing import Any, Protocol
 
 from llm_wiki_embedding_contract import (
     ContractValidationError,
@@ -25,10 +25,20 @@ class EmbeddingInferenceError(ValueError):
     """The configured model returned an unusable embedding."""
 
 
+class DenseEncoder(Protocol):
+    """Stable application boundary shared by all embedding implementations."""
+
+    profile: EmbeddingProfile
+
+    def encode(
+        self, items: Sequence[Mapping[str, object]]
+    ) -> list[tuple[tuple[float, ...], ...]]: ...
+
+
 class Qwen3VLDenseEncoder:
     """One dense vector per text, image, or mixed request item."""
 
-    def __init__(self, model: object, processor: object, *, profile: EmbeddingProfile, device: str, batch_size: int = 1, vision_processor: object | None = None, instruction: str) -> None:
+    def __init__(self, model: Any, processor: Any, *, profile: EmbeddingProfile, device: str, batch_size: int = 1, vision_processor: Any | None = None, instruction: str) -> None:
         self._model = model
         self._processor = processor
         self._vision_processor = vision_processor
@@ -43,7 +53,9 @@ class Qwen3VLDenseEncoder:
             raise ValueError("embedding dimension must be between 64 and 2048")
         try:
             import torch
-            from qwen_vl_utils import process_vision_info
+            from qwen_vl_utils import (  # pyright: ignore[reportMissingImports]
+                process_vision_info,
+            )
             from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
             raise RuntimeError("embedding service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
@@ -68,7 +80,7 @@ class Qwen3VLDenseEncoder:
             raise ContractValidationError("embedding item requires text or asset")
         return [{"role": "system", "content": [{"type": "text", "text": self.instruction}]}, {"role": "user", "content": content}]
 
-    def _prepare(self, conversations: Sequence[list[dict[str, object]]]) -> object:
+    def _prepare(self, conversations: Sequence[list[dict[str, object]]]) -> Any:
         template = getattr(self._processor, "apply_chat_template", None)
         texts = template(conversations, add_generation_prompt=True, tokenize=False) if callable(template) else [str(c) for c in conversations]
         kwargs: dict[str, object] = {"text": texts, "truncation": True, "max_length": self.profile.max_sequence_length, "padding": True, "return_tensors": "pt"}
@@ -79,7 +91,7 @@ class Qwen3VLDenseEncoder:
                 kwargs.update(rest[-1])
         return self._processor(**kwargs)
 
-    def _run(self, inputs: object) -> list[tuple[tuple[float, ...], ...]]:
+    def _run(self, inputs: Any) -> list[tuple[tuple[float, ...], ...]]:
         import torch
         if isinstance(inputs, Mapping):
             inputs = {key: value.to(self.device) if hasattr(value, "to") else value for key, value in inputs.items()}
@@ -120,7 +132,9 @@ class Qwen3VLDenseEncoder:
             return result
         finally:
             for value in owned:
-                value.close()
+                close = getattr(value, "close", None)
+                if callable(close):
+                    close()
 
 
 class BgeSmallTextEncoder:
@@ -128,8 +142,8 @@ class BgeSmallTextEncoder:
 
     def __init__(
         self,
-        model: object,
-        tokenizer: object,
+        model: Any,
+        tokenizer: Any,
         *,
         profile: EmbeddingProfile,
         device: str,
@@ -181,7 +195,7 @@ class BgeSmallTextEncoder:
                 raise ContractValidationError("embedding operation must be query or document")
             texts.append(text)
 
-        encoded = self._tokenizer(
+        encoded: Any = self._tokenizer(
             texts,
             padding=True,
             truncation=True,
@@ -194,7 +208,7 @@ class BgeSmallTextEncoder:
         }
         with torch.inference_mode():
             output = self._model(**encoded)
-        hidden = getattr(output, "last_hidden_state", None)
+        hidden: Any = getattr(output, "last_hidden_state", None)
         if getattr(hidden, "ndim", None) != 3:
             raise EmbeddingInferenceError("BGE model did not return token hidden states")
         if hidden.shape[-1] != self.profile.dimension:
@@ -205,7 +219,7 @@ class BgeSmallTextEncoder:
         return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in vectors]
 
 
-def build_dense_encoder(config: EmbeddingServiceConfig) -> object:
+def build_dense_encoder(config: EmbeddingServiceConfig) -> DenseEncoder:
     """Select a standalone encoder from the explicit service profile."""
 
     if config.encoder == "clip-vit-b32":
@@ -236,4 +250,10 @@ def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
             raise RuntimeError("CUDA embedding requires accelerate") from exc
 
 
-__all__ = ["BgeSmallTextEncoder", "EmbeddingInferenceError", "Qwen3VLDenseEncoder", "build_dense_encoder"]
+__all__ = [
+    "BgeSmallTextEncoder",
+    "DenseEncoder",
+    "EmbeddingInferenceError",
+    "Qwen3VLDenseEncoder",
+    "build_dense_encoder",
+]

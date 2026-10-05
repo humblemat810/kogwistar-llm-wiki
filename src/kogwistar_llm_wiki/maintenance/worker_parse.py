@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Protocol, cast
 
 from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
     parser_llm_cache_transaction,
@@ -41,13 +42,40 @@ from ..parsing.parse_views import (
 )
 from ..providers.role_config import normalize_provider_name
 from ..utils import _temporary_namespace
+from .maintenance_strategies import MaintenanceWorkerLike
 from .state import semantic_fingerprint as _semantic_fingerprint
+
+
+class _MetadataEntity(Protocol):
+    """Minimal structural shape needed for derived-artifact selection."""
+
+    @property
+    def id(self) -> str | None: ...
+
+    @property
+    def metadata(self) -> Mapping[str, object]: ...
 
 
 def _metadata_flag(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    return default
+
+
+def _as_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    return default
 
 
 def _build_maintenance_parse_request(
@@ -98,7 +126,7 @@ def _build_maintenance_parse_request(
 
 
 def select_affected_crosslink_ids(
-    edges: list[object] | tuple[object, ...],
+    edges: Sequence[_MetadataEntity],
     *,
     workspace_id: str,
     source_document_id: str,
@@ -110,7 +138,7 @@ def select_affected_crosslink_ids(
         raise ValueError("limit must be positive")
     affected: set[str] = set()
     for edge in edges:
-        metadata = dict(getattr(edge, "metadata", {}) or {})
+        metadata = dict(edge.metadata or {})
         if str(metadata.get("workspace_id") or "") != workspace_id:
             continue
         if str(metadata.get("crosslink_status") or "").strip().lower() not in {
@@ -130,14 +158,14 @@ def select_affected_crosslink_ids(
             )
             if str(metadata.get(key) or "").strip()
         }
-        edge_id = str(getattr(edge, "id", "") or "").strip()
+        edge_id = str(edge.id or "").strip()
         if edge_id and source_document_id in source_ids:
             affected.add(edge_id)
     return tuple(sorted(affected)[:limit])
 
 
 def select_affected_parse_view_artifact_ids(
-    items: list[object] | tuple[object, ...],
+    items: Sequence[_MetadataEntity],
     *,
     workspace_id: str,
     source_document_id: str,
@@ -150,7 +178,7 @@ def select_affected_parse_view_artifact_ids(
         raise ValueError("limit must be positive")
     selected: set[str] = set()
     for item in items:
-        metadata = dict(getattr(item, "metadata", {}) or {})
+        metadata = dict(item.metadata or {})
         if str(metadata.get("workspace_id") or "") != workspace_id:
             continue
         if str(metadata.get("artifact_kind") or "").strip() not in artifact_kinds:
@@ -169,13 +197,13 @@ def select_affected_parse_view_artifact_ids(
                 source_id = str(value or "").strip()
                 if source_id:
                     source_ids.add(source_id)
-        item_id = str(getattr(item, "id", "") or "").strip()
+        item_id = str(item.id or "").strip()
         if item_id and source_document_id in source_ids:
             selected.add(item_id)
     return tuple(sorted(selected)[:limit])
 
 
-class DurableParseMaintenanceWorkerMixin:
+class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
     """Methods for bounded, revision-pinned parse expansion and reparsing."""
 
     def _handle_document_parse_strategy(self, ctx: MaintenanceJobExecutionContext) -> None:
@@ -236,9 +264,9 @@ class DurableParseMaintenanceWorkerMixin:
                 source_document_id=str(ctx.payload.get("source_document_id") or ""),
                 request_node_id=ctx.request_node_id,
                 job_id=ctx.job_id,
-                node_count=int(result.get("node_count") or 0),
-                edge_count=int(result.get("edge_count") or 0),
-                llm_call_count=int(result.get("llm_call_count") or 0),
+                node_count=_as_int(result.get("node_count")),
+                edge_count=_as_int(result.get("edge_count")),
+                llm_call_count=_as_int(result.get("llm_call_count")),
                 duration_ms=int(time.time() * 1000) - started_ms,
             )
             if self._advance_maintenance_plan(ctx):
@@ -341,13 +369,15 @@ class DurableParseMaintenanceWorkerMixin:
             result = self.layered_parser(ctx, session, frontier)
             next_session = ParseSessionState.model_validate(result.get("session", {}))
             self._validate_parse_session_transition(session, next_session)
+            raw_frontier = result.get("frontier")
             next_frontier = [
                 ParseFrontierItem.model_validate(item)
-                for item in (result.get("frontier") or [])
+                for item in (cast(Sequence[object], raw_frontier) if isinstance(raw_frontier, Sequence) and not isinstance(raw_frontier, (str, bytes, bytearray)) else [])
             ]
+            raw_consumed = result.get("consumed_frontier_ids")
             consumed_values = [
                 str(value)
-                for value in (result.get("consumed_frontier_ids") or [])
+                for value in (cast(Sequence[object], raw_consumed) if isinstance(raw_consumed, Sequence) and not isinstance(raw_consumed, (str, bytes, bytearray)) else [])
                 if str(value).strip()
             ]
             if len(consumed_values) != len(set(consumed_values)):
@@ -465,7 +495,7 @@ class DurableParseMaintenanceWorkerMixin:
                     expected_view_version=(
                         None
                         if expected_view_version is None
-                        else int(expected_view_version)
+                        else _as_int(expected_view_version)
                     ),
                 )
                 self._enqueue_derived_revalidation_after_view_switch(
@@ -488,8 +518,8 @@ class DurableParseMaintenanceWorkerMixin:
                     workspace_id=ctx.workspace_id,
                     source_document_id=str(ctx.payload.get("source_document_id") or ""),
                     job_id=ctx.job_id,
-                    elapsed_seconds=float(result.get("parse_elapsed_seconds") or 0.0),
-                    budget_seconds=float(result.get("wall_time_budget_seconds") or 0.0),
+                    elapsed_seconds=_as_float(result.get("parse_elapsed_seconds")),
+                    budget_seconds=_as_float(result.get("wall_time_budget_seconds")),
                     evidence_persisted=bool(generation_payload and commit_payload and members_payload),
                     parse_view_activated=False,
                 )
@@ -510,7 +540,7 @@ class DurableParseMaintenanceWorkerMixin:
                         workspace_id=ctx.workspace_id,
                         source_document_id=str(ctx.payload.get("source_document_id") or ""),
                         job_id=ctx.job_id,
-                        reconciliation=dict(reconciliation),
+                        reconciliation=dict(cast(Mapping[str, object], reconciliation)),
                     )
                     self._acknowledge_job(ctx)
                     return
@@ -623,7 +653,7 @@ class DurableParseMaintenanceWorkerMixin:
                         "maintenance_phase_index": 0,
                         "budgets": {"max_steps": 1},
                         "authority_claims": (
-                            dict(ctx.payload["authority_claims"])
+                            dict(cast(Mapping[str, object], ctx.payload["authority_claims"]))
                             if isinstance(ctx.payload.get("authority_claims"), Mapping)
                             else None
                         ),
@@ -663,7 +693,7 @@ class DurableParseMaintenanceWorkerMixin:
                         "maintenance_phase_index": 0,
                         "budgets": {"max_steps": 1},
                         "authority_claims": (
-                            dict(ctx.payload["authority_claims"])
+                            dict(cast(Mapping[str, object], ctx.payload["authority_claims"]))
                             if isinstance(ctx.payload.get("authority_claims"), Mapping)
                             else None
                         ),
@@ -1101,7 +1131,11 @@ class DurableParseMaintenanceWorkerMixin:
                 # consumed the final frontier item.  Intermediate commits are
                 # durable evidence, but must remain visibly expandable until
                 # the final ParseView activation.
-                status="stable" if not remaining_frontier else "expanding",
+                status=(
+                    ParseGenerationStatus.STABLE
+                    if not remaining_frontier
+                    else ParseGenerationStatus.EXPANDING
+                ),
             )
         member = ParseGenerationMember(
             member_id=member_id,

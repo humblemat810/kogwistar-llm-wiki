@@ -4,9 +4,20 @@ from __future__ import annotations
 
 import importlib
 import os
-from collections.abc import Callable
+from typing import Protocol, cast
 
-ResourceAuthorizer = Callable[[str, str, str, str], bool]
+
+class ResourceAuthorizer(Protocol):
+    """Authorize one resource operation before graph access."""
+
+    def __call__(
+        self,
+        workspace_id: str,
+        resource_kind: str,
+        resource_id: str,
+        operation: str,
+        /,
+    ) -> bool: ...
 
 
 def load_resource_authorizer(
@@ -35,7 +46,7 @@ def load_resource_authorizer(
     authorizer = getattr(module, attribute.strip(), None)
     if not callable(authorizer):
         raise TypeError("configured resource ACL adapter must name a callable")
-    return authorizer
+    return cast(ResourceAuthorizer, authorizer)
 
 
 __all__ = ["ResourceAuthorizer", "load_resource_authorizer"]

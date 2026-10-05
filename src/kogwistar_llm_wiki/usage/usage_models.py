@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
+
+from kogwistar.runtime.checkpointed_projection import (
+    CheckpointedProjectionStore,
+    ProjectionPayload,
+)
 
 
-class UsageMetaStore(Protocol):
+class UsageMetaStore(CheckpointedProjectionStore, Protocol):
     def append_entity_event(
         self,
         *,
@@ -30,13 +35,13 @@ class UsageMetaStore(Protocol):
         batch_size: int = 500,
     ) -> Iterable[tuple[int, str, str, str, str]]: ...
 
-    def get_named_projection(self, namespace: str, key: str) -> dict[str, Any] | None: ...
+    def get_named_projection(self, namespace: str, key: str) -> ProjectionPayload | None: ...
 
     def replace_named_projection(
         self,
         namespace: str,
         key: str,
-        payload: dict[str, Any],
+        payload: ProjectionPayload,
         *,
         last_authoritative_seq: int,
         last_materialized_seq: int,

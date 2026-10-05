@@ -11,9 +11,9 @@ import os
 import socket
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 from .maintenance_profiles import (
     configured_maintenance_enabled,
@@ -50,6 +50,19 @@ def _configured_bool(name: str, default: bool) -> bool:
     if raw is None or not raw.strip():
         return default
     return _bool_value(raw, default=default)
+
+
+def _mapping_value(source: Mapping[str, object], key: str) -> Mapping[str, object] | None:
+    value = source.get(key)
+    return value if isinstance(value, Mapping) else None
+
+
+def _int_value(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    return default
 
 
 def _bool_value(value: object, *, default: bool) -> bool:
@@ -96,7 +109,7 @@ class MaintenanceControlState:
     updated_by: str = "default"
 
     @classmethod
-    def from_mapping(cls, raw: dict[str, Any] | None) -> MaintenanceControlState:
+    def from_mapping(cls, raw: Mapping[str, object] | None) -> MaintenanceControlState:
         raw = raw or {}
         profile = str(raw.get("profile") or configured_maintenance_profile()).strip().lower()
         if profile not in {"high", "balanced", "budgeted", "lite"}:
@@ -128,11 +141,11 @@ class MaintenanceControlState:
                 for level in ladder_levels
             ],
             profile_ladder_configured=bool(raw.get("profile_ladder_configured", "profile_ladder" in raw)),
-            budget=normalize_budget(raw.get("budget") if isinstance(raw.get("budget"), dict) else None),
-            spend=normalize_budget(raw.get("spend") if isinstance(raw.get("spend"), dict) else None),
+            budget=normalize_budget(_mapping_value(raw, "budget")),
+            spend=normalize_budget(_mapping_value(raw, "spend")),
             deferred_cycle=_bool_value(raw.get("deferred_cycle"), default=False),
             status_reason=str(raw.get("status_reason") or "configured"),
-            updated_at_ms=int(raw.get("updated_at_ms") or 0),
+            updated_at_ms=_int_value(raw.get("updated_at_ms")),
             updated_by=str(raw.get("updated_by") or "default"),
         )
 
@@ -160,6 +173,8 @@ class MaintenanceControl:
     def _read(self) -> MaintenanceControlState:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise TypeError("maintenance control must be a JSON object")
             return MaintenanceControlState.from_mapping(raw)
         except FileNotFoundError:
             return MaintenanceControlState.from_mapping({})
@@ -252,9 +267,10 @@ class MaintenanceControl:
             pass
 
         def run() -> None:
-            if not hasattr(socket, "AF_UNIX"):
+            unix_family = getattr(socket, "AF_UNIX", None)
+            if not isinstance(unix_family, int):
                 return
-            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server = socket.socket(unix_family, socket.SOCK_STREAM)
             try:
                 server.bind(str(self.socket_path))
                 os.chmod(self.socket_path, 0o600)
@@ -309,9 +325,10 @@ def send_control_command(data_dir: str | os.PathLike[str], **command: object) ->
     control = MaintenanceControl(data_dir)
     payload = {key: value for key, value in command.items() if value is not None}
     try:
-        if not hasattr(socket, "AF_UNIX"):
+        unix_family = getattr(socket, "AF_UNIX", None)
+        if not isinstance(unix_family, int):
             raise OSError("Unix-domain sockets are unavailable on this host")
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        with socket.socket(unix_family, socket.SOCK_STREAM) as client:
             client.settimeout(2.0)
             client.connect(str(control.socket_path))
             client.sendall((json.dumps(payload) + "\n").encode("utf-8"))

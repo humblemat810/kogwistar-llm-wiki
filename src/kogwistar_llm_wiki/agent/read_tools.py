@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
+from .host import AgentGatewayHost, ToolArguments
 from .protocol import bounded_lens_arguments as _bounded_lens_arguments
 
 
-class AgentReadToolsMixin:
-    def _authorized_memory_stream_ids(self, arguments: Mapping[str, Any], workspace_id: str) -> tuple[str, ...]:
+class AgentReadToolsMixin(AgentGatewayHost):
+    def _authorized_memory_stream_ids(self, arguments: ToolArguments, workspace_id: str) -> tuple[str, ...]:
         raw_stream_ids = arguments.get("stream_ids") or []
         if not isinstance(raw_stream_ids, list) or not all(
             isinstance(stream_id, str) and stream_id.strip() for stream_id in raw_stream_ids
@@ -25,13 +25,13 @@ class AgentReadToolsMixin:
             raise PermissionError("memory stream is not authorized for workspace")
         return stream_ids
 
-    def query(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def query(self, arguments: ToolArguments) -> dict[str, object]:
         return self._answer(arguments)
 
-    def search(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def search(self, arguments: ToolArguments) -> dict[str, object]:
         return self.api.get_lens(_bounded_lens_arguments(arguments))
 
-    def history(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def history(self, arguments: ToolArguments) -> dict[str, object]:
         raw_limit = arguments.get("limit")
         limit = 100 if raw_limit is None else int(raw_limit)
         return {
@@ -42,7 +42,7 @@ class AgentReadToolsMixin:
             )
         }
 
-    def memory_recall(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def memory_recall(self, arguments: ToolArguments) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         stream_ids = self._authorized_memory_stream_ids(arguments, workspace_id)
         return self.api.recall_memory(
@@ -53,7 +53,7 @@ class AgentReadToolsMixin:
             authorized_stream_ids=stream_ids,
         )
 
-    def memory_capture(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def memory_capture(self, arguments: ToolArguments) -> dict[str, object]:
         payload = arguments.get("record")
         if payload is None:
             payload = arguments.get("records")
@@ -65,7 +65,7 @@ class AgentReadToolsMixin:
             return self.api.capture_memory(payload)
         raise ValueError("memory_capture record(s) must be an object or list of objects")
 
-    def memory_review(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def memory_review(self, arguments: ToolArguments) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         return self.api.review_memory(
             workspace_id=workspace_id,
@@ -76,7 +76,14 @@ class AgentReadToolsMixin:
             authorized_stream_ids=self._authorized_memory_stream_ids(arguments, workspace_id),
         )
 
-    def hypergraph_search(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def multimodal_search(self, arguments: ToolArguments) -> dict[str, object]:
+        return self.api.multimodal_search(arguments)
+
+    def multimodal_status(self, arguments: ToolArguments) -> dict[str, object]:
+        workspace_id = str(arguments.get("workspace_id") or "").strip()
+        return self.api.multimodal_status(workspace_id=workspace_id)
+
+    def hypergraph_search(self, arguments: ToolArguments) -> dict[str, object]:
         payload = _bounded_lens_arguments(arguments)
         payload.setdefault("max_hyperedges", 12)
         payload.setdefault("max_nodes", 40)

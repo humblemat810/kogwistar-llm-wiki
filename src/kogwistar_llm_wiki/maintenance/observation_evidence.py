@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import cast
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.server.auth_middleware import can_access_security_scope
@@ -128,13 +129,11 @@ def _entity_spans(entity: object) -> list[dict[str, object]]:
     iter_evidence = getattr(entity, "iter_evidence", None)
     if callable(iter_evidence):
         try:
-            values = iter_evidence()
+            values = cast(Iterable[object], iter_evidence())
             for span in values:
-                data = (
-                    span.model_dump(mode="python")
-                    if callable(getattr(span, "model_dump", None))
-                    else _mapping(span)
-                )
+                model_dump = getattr(span, "model_dump", None)
+                raw_data = model_dump(mode="python") if callable(model_dump) else None
+                data = _mapping(raw_data) if raw_data is not None else _mapping(span)
                 if data:
                     spans.append({key: data.get(key) for key in _SPAN_FIELDS})
         except Exception:  # noqa: BLE001 - malformed grounding must fail closed

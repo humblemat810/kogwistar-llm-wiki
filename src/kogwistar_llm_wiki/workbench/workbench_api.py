@@ -14,13 +14,14 @@ import json
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Protocol, cast
 
 from ..compose.options import ComposeOptions, validate_options
 from ..compose.rendering import render_compose
 from ..compose.validation import check_compose_text
+from ..configuration.resource_authorizer import ResourceAuthorizer
 from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
 from ..disambiguation.contact_book import (
@@ -30,13 +31,24 @@ from ..disambiguation.contact_book import (
     compose_contact_observation_providers,
 )
 from ..disambiguation.contact_matching import (
+    AuthorizeContactStream,
     ContactIdentityObservation,
     contact_evidence_snapshot_id,
     contact_match_basis,
 )
 from ..disambiguation.disambiguation_contracts import DisambiguationDecisionKind
 from ..disambiguation.service import DisambiguationService
+from ..embeddings.multimodal_dereference import EmbeddingReferenceDereferencer
+from ..embeddings.multimodal_projection import (
+    AssetResolver,
+    MultimodalSearchHit,
+    MultimodalSourceUnit,
+)
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
+from ..embeddings.retrieval_experiment import (
+    RetrievalBatch,
+    pipeline_multimodal_retriever,
+)
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.crosslink_reviews import CrosslinkGroupReviewService
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
@@ -46,6 +58,7 @@ from ..providers.model_catalog import available_models
 from .investigation_history import InvestigationHistoryRecord
 from .semantic_lens import (
     InvestigationOutcome,
+    RetrievalMode,
     SemanticLensRequest,
     SemanticLensSnapshot,
     validate_edit_proposal,
@@ -64,8 +77,42 @@ from .workbench_cockpit import (
     validate_cockpit_proposal,
 )
 
-AgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot], str]
-ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, ProgressCallback], str]
+class AgentResponder(Protocol):
+    """Produce a synchronous answer for one semantic-lens request."""
+
+    def __call__(self, request: SemanticLensRequest, snapshot: SemanticLensSnapshot, /) -> str: ...
+
+
+class ProgressAgentResponder(Protocol):
+    """Produce an answer while reporting bounded progress callbacks."""
+
+    def __call__(
+        self,
+        request: SemanticLensRequest,
+        snapshot: SemanticLensSnapshot,
+        progress: ProgressCallback,
+        /,
+    ) -> str: ...
+
+
+class TraceSink(Protocol):
+    """Receive one structured workbench trace event."""
+
+    def __call__(self, event: dict[str, object], /) -> None: ...
+
+
+class MultimodalNamespaceResolver(Protocol):
+    """Return namespaces visible to a workspace for multimodal retrieval."""
+
+    def __call__(self, workspace_id: str, /) -> Sequence[str]: ...
+
+
+class MultimodalSourceMapResolver(Protocol):
+    """Resolve one source unit to an authorized source-map payload."""
+
+    def __call__(
+        self, unit: MultimodalSourceUnit, /
+    ) -> Mapping[str, object] | None: ...
 
 _MAX_CONTACT_PAGE_SIZE = 1000
 _MAX_CONTACT_SNAPSHOT_ITEMS = 5000
@@ -73,11 +120,30 @@ _MAX_CONTACT_CURSOR_CHARS = 4096
 _MAX_CONTACT_QUERY_CHARS = 200
 
 
+def _multimodal_hit_payload(hit: MultimodalSearchHit) -> dict[str, object]:
+    return {
+        "view_id": hit.view_id,
+        "score": hit.score,
+        "source_id": hit.source_id,
+        "source_revision_id": hit.source_revision_id,
+        "modality": hit.modality,
+        "locator": hit.locator,
+        "metadata": dict(hit.metadata),
+        "embedding_reference_id": hit.embedding_reference_id,
+        "dereference_status": hit.dereference_status,
+        "multimodal_span": (
+            hit.multimodal_span.model_dump(mode="json")
+            if hit.multimodal_span is not None
+            else None
+        ),
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class _ContactObservationSource:
     provider: ContactObservationProvider
-    owns_stream: Callable[[str, str], bool]
-    authorize_stream: Callable[[str, str], bool]
+    owns_stream: AuthorizeContactStream
+    authorize_stream: AuthorizeContactStream
     scan_provider: ContactScanObservationProvider | None = None
 
 
@@ -161,11 +227,15 @@ class WorkbenchApi:
         agent_responder: AgentResponder | ProgressAgentResponder | None = None,
         cockpit_responder: CockpitResponder | None = None,
         codex_worker_count: int = 0,
-        trace_sink: Callable[[dict[str, object]], None] | None = None,
+        trace_sink: TraceSink | None = None,
         settings_path: str | None = None,
-        resource_authorizer: Callable[[str, str, str, str], bool] | None = None,
-        contact_authorize_stream: Callable[[str, str], bool] | None = None,
+        resource_authorizer: ResourceAuthorizer | None = None,
+        contact_authorize_stream: AuthorizeContactStream | None = None,
         contact_observation_provider: ContactObservationProvider | None = None,
+        multimodal_asset_resolver: AssetResolver | None = None,
+        multimodal_dereferencer: EmbeddingReferenceDereferencer | None = None,
+        multimodal_allowed_namespaces: MultimodalNamespaceResolver | None = None,
+        multimodal_source_map_resolver: MultimodalSourceMapResolver | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = MemoryService(pipeline.engines)
@@ -177,6 +247,12 @@ class WorkbenchApi:
         self.agent_responder = agent_responder
         self.cockpit_responder = cockpit_responder
         self._resource_authorizer = resource_authorizer
+        self._multimodal_asset_resolver = multimodal_asset_resolver
+        self._multimodal_dereferencer = multimodal_dereferencer
+        self._multimodal_allowed_namespaces = multimodal_allowed_namespaces
+        self._multimodal_source_map_resolver = multimodal_source_map_resolver or getattr(
+            pipeline, "resolve_multimodal_source_map", None
+        )
         self._contact_authorize_stream = contact_authorize_stream or (
             lambda _workspace_id, _stream_id: False
         )
@@ -207,6 +283,277 @@ class WorkbenchApi:
             authorizer
             and authorizer(workspace_id, resource_type, resource_id, action)
         )
+
+    def multimodal_capture(self, payload: Mapping[str, object]) -> dict[str, object]:
+        """Capture trusted, revision-bound multimodal projection units.
+
+        This is deliberately a capture operation only.  It does not accept
+        embedding references supplied by a caller and it never writes graph
+        truth from a projection payload.
+        """
+        workspace_id = str(payload.get("workspace_id") or "").strip()
+        raw_units = payload.get("units")
+        if not workspace_id or not isinstance(raw_units, list) or not raw_units:
+            raise ValueError("multimodal_capture requires workspace_id and a non-empty units list")
+        if len(raw_units) > 100:
+            raise ValueError("multimodal_capture accepts at most 100 units")
+        units: list[MultimodalSourceUnit] = []
+        for raw_unit in raw_units:
+            if not isinstance(raw_unit, Mapping):
+                raise TypeError("multimodal_capture units must be objects")
+            if raw_unit.get("embedding_reference") is not None:
+                raise ValueError("embedding_reference is host-generated and cannot be supplied")
+            unit = MultimodalSourceUnit.from_payload(raw_unit)
+            if unit.workspace_id != workspace_id:
+                raise PermissionError("multimodal unit belongs to a different workspace")
+            source_namespace = unit.source_namespace or workspace_id
+            if source_namespace != workspace_id and not self.authorize_resource(
+                workspace_id, "source_namespace", source_namespace, "write"
+            ):
+                raise PermissionError("source namespace is not authorized for this workspace")
+            if not self.authorize_resource(workspace_id, "source", unit.source_id, "write"):
+                raise PermissionError("source is not authorized for multimodal capture")
+            if not self.authorize_resource(
+                workspace_id, "source_revision", unit.source_revision_id, "write"
+            ):
+                raise PermissionError("source revision is not authorized for multimodal capture")
+            source_map_resolver = self._multimodal_source_map_resolver
+            if not callable(source_map_resolver):
+                raise PermissionError("authoritative source map is not configured")
+            source_map = source_map_resolver(unit)
+            if source_map is None:
+                raise PermissionError("authoritative source map revision is unavailable")
+            if not isinstance(source_map, Mapping):
+                raise PermissionError("authoritative source map has invalid shape")
+            self._validate_multimodal_source_map(unit, source_map)
+            units.append(unit)
+        count = self.pipeline.capture_multimodal_units(units)
+        return {
+            "status": "captured",
+            "workspace_id": workspace_id,
+            "count": count,
+            "view_ids": [unit.view_id for unit in units],
+            "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(
+                workspace_id=workspace_id
+            )
+            if self.pipeline.multimodal_projection_store is not None
+            else {},
+        }
+
+    @staticmethod
+    def _validate_multimodal_source_map(
+        unit: MultimodalSourceUnit, source_map: Mapping[str, object]
+    ) -> None:
+        """Require a projection view to match trusted source-map evidence."""
+        for field, expected in (
+            ("workspace_id", unit.workspace_id),
+            ("source_namespace", unit.source_namespace or unit.workspace_id),
+            ("source_id", unit.source_id),
+            ("source_revision_id", unit.source_revision_id),
+        ):
+            if str(source_map.get(field) or "") != expected:
+                raise ValueError(f"multimodal unit does not match source map {field}")
+        raw_text = source_map.get("raw_text")
+        source_digest = str(source_map.get("source_digest") or "").strip()
+        if isinstance(raw_text, str):
+            digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+            if source_digest and source_digest != digest:
+                raise ValueError("source map text digest is inconsistent")
+            locator = dict(unit.locator)
+            start = locator.get("start_char")
+            end = locator.get("end_char")
+            if start is not None or end is not None:
+                if type(start) is not int or type(end) is not int or not 0 <= start <= end <= len(raw_text):
+                    raise ValueError("multimodal source span is outside the source map")
+                if unit.text != raw_text[start:end]:
+                    raise ValueError("multimodal text does not match the source map span")
+            elif unit.modality == "text":
+                raise ValueError("text projection requires a bounded source map span")
+        elif unit.modality == "text":
+            raise ValueError("text projection requires source map text")
+        expected_ref = str(source_map.get("content_ref") or "").strip()
+        if expected_ref and unit.content_ref != expected_ref:
+            raise ValueError("multimodal asset reference does not match the source map")
+        expected_asset_hash = str(source_map.get("asset_sha256") or "").strip().lower()
+        if unit.modality != "text" and (
+            not expected_asset_hash or unit.asset_sha256 != expected_asset_hash
+        ):
+            raise ValueError("multimodal asset digest does not match the source map")
+
+    def multimodal_index(self, payload: Mapping[str, object]) -> dict[str, object]:
+        """Promote pending units using the configured, host-owned resolver."""
+        workspace_id = str(payload.get("workspace_id") or "").strip()
+        if not workspace_id:
+            raise ValueError("multimodal_index requires workspace_id")
+        if not self.authorize_resource(
+            workspace_id, "multimodal_projection", workspace_id, "write"
+        ):
+            raise PermissionError("multimodal projection is not authorized")
+        raw_batch_size = payload.get("batch_size", 8)
+        if isinstance(raw_batch_size, bool) or not isinstance(raw_batch_size, int):
+            raise TypeError("batch_size must be a positive integer")
+        batch_size = max(1, min(int(raw_batch_size), 32))
+        if self.pipeline.multimodal_projection_store is None:
+            return {
+                "status": "disabled",
+                "workspace_id": workspace_id,
+                "reason": "multimodal_projection_not_configured",
+            }
+        try:
+            embedded = self.pipeline.embed_multimodal_pending(
+                batch_size=batch_size,
+                max_units=batch_size,
+                resolver=self._multimodal_asset_resolver,
+                workspace_id=workspace_id,
+            )
+        except EmbeddingServiceUnavailable as exc:
+            return {
+                "status": "degraded",
+                "workspace_id": workspace_id,
+                "reason": str(exc),
+                "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(
+                    workspace_id=workspace_id
+                ),
+            }
+        return {
+            "status": "indexed",
+            "workspace_id": workspace_id,
+            "embedded_count": embedded,
+            "stage_counts": self.pipeline.multimodal_projection_store.stage_counts(
+                workspace_id=workspace_id
+            ),
+            "profile_fingerprint": (
+                self.pipeline.multimodal_encoder.profile.fingerprint
+                if self.pipeline.multimodal_encoder is not None
+                else None
+            ),
+        }
+
+    def multimodal_status(self, *, workspace_id: str) -> dict[str, object]:
+        """Return bounded projection and encoder readiness diagnostics."""
+        if not workspace_id:
+            raise ValueError("workspace_id is required")
+        if not self.authorize_resource(
+            workspace_id, "multimodal_projection", workspace_id, "read"
+        ):
+            raise PermissionError("multimodal projection is not authorized")
+        encoder = self.pipeline.multimodal_encoder
+        store = self.pipeline.multimodal_projection_store
+        if encoder is None or store is None:
+            return {
+                "status": "disabled",
+                "workspace_id": workspace_id,
+                "stage_counts": {},
+            }
+        readiness: dict[str, object] = {"ready": True}
+        if hasattr(encoder, "readiness"):
+            readiness = dict(encoder.readiness())
+        return {
+            "status": "ready" if readiness.get("ready", False) else "degraded",
+            "workspace_id": workspace_id,
+            "readiness": readiness,
+            "profile": {
+                "fingerprint": encoder.profile.fingerprint,
+                "model": encoder.profile.model,
+                "dimension": encoder.profile.dimension,
+                "metric": encoder.profile.metric,
+            },
+            "stage_counts": store.stage_counts(workspace_id=workspace_id),
+        }
+
+    def multimodal_search(self, payload: Mapping[str, object]) -> dict[str, object]:
+        """Run authorized text-to-multimodal retrieval through the host adapter."""
+        workspace_id = str(payload.get("workspace_id") or "").strip()
+        query_text = str(payload.get("query_text") or "").strip()
+        image_content_ref = str(payload.get("image_content_ref") or "").strip()
+        if not workspace_id or not query_text and not image_content_ref:
+            raise ValueError(
+                "multimodal_search requires workspace_id and query_text or image_content_ref"
+            )
+        raw_limit = payload.get("limit", 10)
+        if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
+            raise TypeError("limit must be a positive integer")
+        limit = max(1, min(raw_limit, 100))
+        if self.pipeline.multimodal_encoder is None or self.pipeline.multimodal_projection_store is None:
+            return {"status": "disabled", "workspace_id": workspace_id, "hits": []}
+        if self._resource_authorizer is None:
+            return {
+                "status": "degraded",
+                "workspace_id": workspace_id,
+                "reason": "source_authorization_not_configured",
+                "hits": [],
+            }
+        image_query: object | None = None
+        if image_content_ref:
+            if not self.authorize_resource(
+                workspace_id, "asset", image_content_ref, "read"
+            ):
+                raise PermissionError("query asset is not authorized")
+            if self._multimodal_asset_resolver is None:
+                return {
+                    "status": "degraded",
+                    "workspace_id": workspace_id,
+                    "reason": "query_asset_resolver_not_configured",
+                    "hits": [],
+                }
+            query_unit = MultimodalSourceUnit(
+                view_id="multimodal-query",
+                workspace_id=workspace_id,
+                source_id="multimodal-query",
+                source_revision_id="multimodal-query",
+                modality="image",
+                locator={"kind": "whole_image"},
+                content_ref=image_content_ref,
+            )
+            image_query = self._multimodal_asset_resolver.resolve(query_unit)
+            read = getattr(image_query, "read", None)
+            if callable(read):
+                image_query = read()
+
+        def authorize_source(unit: MultimodalSourceUnit) -> None:
+            source_namespace = unit.source_namespace or unit.workspace_id
+            if not self.authorize_resource(
+                workspace_id, "source_namespace", source_namespace, "read"
+            ):
+                raise PermissionError("source namespace is not authorized")
+            if not self.authorize_resource(workspace_id, "source", unit.source_id, "read"):
+                raise PermissionError("source is not authorized")
+            if not self.authorize_resource(
+                workspace_id, "source_revision", unit.source_revision_id, "read"
+            ):
+                raise PermissionError("source revision is not authorized")
+
+        namespaces = tuple(
+            self._multimodal_allowed_namespaces(workspace_id)
+            if self._multimodal_allowed_namespaces is not None
+            else (workspace_id,)
+        )
+        if workspace_id not in namespaces:
+            raise PermissionError("configured multimodal namespaces omit the workspace")
+        retrieve = pipeline_multimodal_retriever(
+            self.pipeline,
+            workspace_id=workspace_id,
+            authorize_source=authorize_source,
+            limit=limit,
+            overfetch_factor=4,
+            image_query=image_query,
+            dereferencer=self._multimodal_dereferencer,
+            allowed_namespaces=namespaces,
+        )
+        batch = retrieve(query_text, None)
+        if not isinstance(batch, RetrievalBatch):
+            raise TypeError("multimodal retriever returned an invalid result")
+        return {
+            "status": "ok",
+            "workspace_id": workspace_id,
+            "profile_fingerprint": self.pipeline.multimodal_encoder.profile.fingerprint,
+            "hits": [_multimodal_hit_payload(candidate.hit) for candidate in batch.candidates],
+            "timing_ms": {
+                "query_embedding": batch.query_embedding_ms,
+                "vector_search": batch.vector_search_ms,
+                "reference_resolution": batch.reference_resolution_ms,
+            },
+        }
 
     def list_crosslink_group_reviews(self, *, workspace_id: str, limit: int = 100) -> dict[str, object]:
         """List pending provider-generated cross-link groups for a workspace."""
@@ -249,8 +596,8 @@ class WorkbenchApi:
         source_id: str,
         *,
         provider: ContactObservationProvider,
-        owns_stream: Callable[[str, str], bool],
-        authorize_stream: Callable[[str, str], bool],
+        owns_stream: AuthorizeContactStream,
+        authorize_stream: AuthorizeContactStream,
         scan_provider: ContactScanObservationProvider | None = None,
     ) -> None:
         """Register a trusted channel adapter without adding channel policy here."""
@@ -707,7 +1054,7 @@ class WorkbenchApi:
             authorized_stream_ids=authorized_stream_ids,
         )
 
-    def compose_preview(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def compose_preview(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Return a generated Compose bundle without writing files or secrets."""
         options = ComposeOptions(
             backend=str(payload.get("backend") or "postgres"),
@@ -729,7 +1076,7 @@ class WorkbenchApi:
         return {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None}
 
     @staticmethod
-    def compose_check(payload: Mapping[str, Any]) -> dict[str, object]:
+    def compose_check(payload: Mapping[str, object]) -> dict[str, object]:
         text = payload.get("yaml")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("yaml must be a non-empty string")
@@ -741,7 +1088,7 @@ class WorkbenchApi:
             raise ValueError("role must be parser or maintenance")
         return available_models(role, provider=provider, base_url=base_url)
 
-    def get_lens(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def get_lens(self, payload: Mapping[str, object]) -> dict[str, object]:
         request = _lens_request(payload)
         result = self.pipeline.resolve_semantic_lens(request).to_dict()
         multimodal = self._multimodal_route(payload, query_text=request.query_text)
@@ -751,58 +1098,26 @@ class WorkbenchApi:
 
     def _multimodal_route(
         self,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, object],
         *,
         query_text: str,
     ) -> dict[str, object] | None:
-        """Add an optional bounded multimodal route without changing graph truth."""
-        if payload.get("include_multimodal", True) is False or not query_text.strip():
+        """Add an optional authorized multimodal route without changing graph truth."""
+        if payload.get("include_multimodal", False) is not True or not query_text.strip():
             return None
-        if not self.settings.snapshot().get("effective", {}).get("multimodal", {}).get("enabled", True):
-            return {"status": "disabled", "route": "multimodal_projection", "hits": []}
-        if (
-            self.pipeline.multimodal_projection_store is None
-            or self.pipeline.multimodal_encoder is None
-        ):
-            return None
-        limit = max(1, min(int(payload.get("multimodal_limit") or 10), 100))
-        try:
-            hits = self.pipeline.search_multimodal(query_text, limit=limit)
-        except EmbeddingServiceUnavailable as exc:
-            return {
-                "status": "degraded",
-                "route": "multimodal_projection",
-                "reason": str(exc),
-                "hits": [],
+        result = self.multimodal_search(
+            {
+                "workspace_id": str(payload.get("workspace_id") or ""),
+                "query_text": query_text,
+                "limit": payload.get("multimodal_limit", 10),
             }
-        except Exception as exc:  # noqa: BLE001 - keep canonical graph query available on route errors
-            return {
-                "status": "error",
-                "route": "multimodal_projection",
-                "reason": str(exc),
-                "hits": [],
-            }
-        return {
-            "status": "ok",
-            "route": "multimodal_projection",
-            "profile_fingerprint": self.pipeline.multimodal_encoder.profile.fingerprint,
-            "hits": [
-                {
-                    "view_id": hit.view_id,
-                    "score": hit.score,
-                    "source_id": hit.source_id,
-                    "source_revision_id": hit.source_revision_id,
-                    "modality": hit.modality,
-                    "locator": hit.locator,
-                    "metadata": {**hit.metadata, "grounding": "source_view"},
-                }
-                for hit in hits
-            ],
-        }
+        )
+        result["route"] = "multimodal_projection"
+        return result
 
     def ask(
         self,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, object],
         *,
         progress: ProgressCallback | None = None,
     ) -> dict[str, object]:
@@ -847,9 +1162,11 @@ class WorkbenchApi:
             else:
                 agent_status = "active"
 
+                agent_responder = self.agent_responder
+
                 def answer_from_agent(snapshot: SemanticLensSnapshot) -> str:
                     return _invoke_agent_responder(
-                        self.agent_responder,
+                        agent_responder,
                         request,
                         snapshot,
                         progress or _ignore_progress,
@@ -941,7 +1258,7 @@ class WorkbenchApi:
             "proposal_request": outcome.final_request,
         }
 
-    def submit_interaction(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def submit_interaction(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Persist and schedule one Codex turn without blocking the HTTP caller."""
         if self.dispatcher is None or (self.agent_responder is None and self.cockpit_responder is None):
             raise RuntimeError("Codex background worker is not configured")
@@ -1008,7 +1325,7 @@ class WorkbenchApi:
             for record in records
         ]
 
-    def validate_proposal(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def validate_proposal(self, payload: Mapping[str, object]) -> dict[str, object]:
         request_payload = payload.get("request")
         proposal = payload.get("proposal")
         if not isinstance(request_payload, Mapping) or not isinstance(proposal, Mapping):
@@ -1037,7 +1354,7 @@ class WorkbenchApi:
             "lens_id": snapshot.lens_id,
         }
 
-    def confirm_cockpit_proposal(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def confirm_cockpit_proposal(self, payload: Mapping[str, object]) -> dict[str, object]:
         workspace_id = str(payload.get("workspace_id") or "")
         interaction_id = str(payload.get("interaction_id") or "")
         if not workspace_id or not interaction_id:
@@ -1062,7 +1379,7 @@ class WorkbenchApi:
     def _confirm_cockpit_proposal_locked(
         self,
         *,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, object],
         workspace_id: str,
         interaction_id: str,
         interaction: WorkbenchInteraction,
@@ -1143,7 +1460,7 @@ class WorkbenchApi:
             return self._confirmation_locks.setdefault(key, threading.Lock())
 
 
-def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
+def _lens_request(payload: Mapping[str, object]) -> SemanticLensRequest:
     def integer(name: str, default: int) -> int:
         value = payload.get(name)
         return default if value is None else int(value)
@@ -1153,7 +1470,7 @@ def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
         graph_spaces=tuple(payload.get("graph_spaces") or (GraphSpace.CURATED_KG.value,)),
         query_text=str(payload.get("query_text") or ""),
         semantic_retrieval=bool(payload.get("semantic_retrieval", False)),
-        retrieval_mode=str(payload.get("retrieval_mode") or "auto"),
+        retrieval_mode=_retrieval_mode(payload.get("retrieval_mode")),
         retrieval_required=bool(payload.get("retrieval_required", False)),
         similarity_threshold=(
             None
@@ -1170,6 +1487,13 @@ def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
         source_watermark=payload.get("source_watermark"),
         include_tombstones=bool(payload.get("include_tombstones", False)),
     )
+
+
+def _retrieval_mode(value: object) -> RetrievalMode:
+    mode = str(value or "auto")
+    if mode not in {"auto", "graph", "semantic", "flat"}:
+        raise ValueError("retrieval_mode must be auto, graph, semantic, or flat")
+    return cast(RetrievalMode, mode)
 
 
 def _workbench_mode(value: object) -> WorkbenchMode:

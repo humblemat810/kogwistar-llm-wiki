@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import parse_qs, urlparse
 
 from ..agent.gateway import AgentGateway, _jsonrpc_result
@@ -32,6 +32,7 @@ API_VERSION = "v1"
 CAPABILITIES_SCHEMA_VERSION = "1"
 MCP_READ_TOOLS = frozenset({
     "query", "search", "source", "status", "hypergraph_search", "history",
+    "multimodal_search", "multimodal_status",
 })
 
 
@@ -62,7 +63,7 @@ def build_workbench_handler(
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
-            query = parse_qs(parsed.query)
+            query = _query_mapping(parsed.query)
             try:
                 route = extension_routes.get(("GET", parsed.path))
                 if route is not None:
@@ -145,9 +146,23 @@ def build_workbench_handler(
                         "hop_limit": int(_first(query, "hop_limit", "1")),
                         "max_nodes": int(_first(query, "max_nodes", "40")),
                         "max_edges": int(_first(query, "max_edges", "80")),
+                        "retrieval_mode": _first(query, "retrieval_mode", "auto"),
+                        "retrieval_required": _first(query, "retrieval_required", "false").lower() in {"1", "true", "yes"},
+                        "similarity_threshold": (
+                            float(_first(query, "similarity_threshold", "0"))
+                            if "similarity_threshold" in query
+                            else None
+                        ),
+                        "source_evidence_required": _first(query, "source_evidence_required", "false").lower() in {"1", "true", "yes"},
+                        "include_multimodal": _first(query, "include_multimodal", "false").lower() in {"1", "true", "yes"},
+                        "multimodal_limit": int(_first(query, "multimodal_limit", "10")),
                     }
                     self._require_scope("read", str(payload["workspace_id"]))
                     body = api.get_lens(payload)
+                elif parsed.path == "/api/multimodal/status":
+                    workspace_id = _first(query, "workspace_id", "default")
+                    self._require_scope("read", workspace_id)
+                    body = api.multimodal_status(workspace_id=workspace_id)
                 elif parsed.path == "/api/history":
                     workspace_id = _first(query, "workspace_id", "rl-fixture")
                     self._require_scope("read", workspace_id)
@@ -216,7 +231,7 @@ def build_workbench_handler(
             parsed = urlparse(self.path)
             agent_paths = {"/a2a", "/v1/responses", "/v1/chat/completions", "/a2a/v1/message:send", "/a2a/v1/message:stream", "/mcp/tools/call"}
             extension_route = extension_routes.get(("POST", parsed.path))
-            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", "/api/crosslink-groups/decision", *agent_paths}:
+            if extension_route is None and parsed.path not in {"/api/proposal/validate", "/api/proposal/confirm", "/api/ask", "/api/interactions", "/api/settings/desired", "/api/settings/apply", "/api/compose/preview", "/api/compose/check", "/api/contact-matches/decision", "/api/crosslink-groups/decision", "/api/multimodal/capture", "/api/multimodal/index", "/api/multimodal/search", *agent_paths}:
                 self._write_json({"error": "not_found"}, status=404)
                 return
             try:
@@ -224,7 +239,7 @@ def build_workbench_handler(
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")  # noqa: TRY004
-                extension_query = parse_qs(parsed.query)
+                extension_query = _query_mapping(parsed.query)
                 workspace_id = (
                     extension_route.workspace_id(extension_query, payload)
                     if extension_route is not None
@@ -251,7 +266,7 @@ def build_workbench_handler(
                         self._require_scope("read" if method == "tasks/get" else "write", workspace_id)
                     elif parsed.path != "/mcp/tools/call":
                         self._require_scope("write" if parsed.path in {"/a2a/v1/message:send", "/a2a/v1/message:stream"} else "read", workspace_id)
-                elif parsed.path in {"/api/ask", "/api/proposal/validate"}:
+                elif parsed.path in {"/api/ask", "/api/proposal/validate", "/api/multimodal/search"}:
                     self._require_scope("read", workspace_id)
                 elif parsed.path == "/api/crosslink-groups/decision":
                     self._require_scope("write", workspace_id)
@@ -261,8 +276,13 @@ def build_workbench_handler(
                     rpc = gateway.a2a_jsonrpc(payload)
                     if payload.get("method") == "message/stream" and "result" in rpc:
                         self._write_a2a_stream(
-                            rpc["result"],
-                            payload.get("params") if isinstance(payload.get("params"), dict) else {},
+                            cast(Mapping[str, object], rpc["result"]),
+                            cast(
+                                Mapping[str, object],
+                                payload.get("params")
+                                if isinstance(payload.get("params"), dict)
+                                else {},
+                            ),
                             gateway,
                             status=200,
                             jsonrpc_id=payload.get("id"),
@@ -279,12 +299,12 @@ def build_workbench_handler(
                     status = 200
                 elif parsed.path == "/a2a/v1/message:stream":
                     body = gateway.a2a_message(payload)
-                    status = 202 if body.get("status", {}).get("state") == "working" else 200
+                    status = 202 if _status_state(body) == "working" else 200
                     self._write_a2a_stream(body, payload, gateway, status=status)
                     return
                 elif parsed.path == "/a2a/v1/message:send":
                     body = gateway.a2a_message(payload)
-                    status = 202 if body.get("status", {}).get("state") == "working" else 200
+                    status = 202 if _status_state(body) == "working" else 200
                 elif parsed.path == "/mcp/tools/call":
                     name = payload.get("name")
                     arguments = payload.get("arguments") or {}
@@ -300,6 +320,15 @@ def build_workbench_handler(
                     status = 200
                 elif parsed.path == "/api/ask":
                     body = api.ask(payload)
+                    status = 200
+                elif parsed.path == "/api/multimodal/capture":
+                    body = api.multimodal_capture(payload)
+                    status = 201
+                elif parsed.path == "/api/multimodal/index":
+                    body = api.multimodal_index(payload)
+                    status = 200
+                elif parsed.path == "/api/multimodal/search":
+                    body = api.multimodal_search(payload)
                     status = 200
                 elif parsed.path == "/api/interactions":
                     body = api.submit_interaction(payload)
@@ -331,11 +360,11 @@ def build_workbench_handler(
                     identity = getattr(self, "_identity_context", None)
                     body = api.decide_contact_match(
                         workspace_id=str(workspace_id or ""),
-                        candidate_key=payload.get("candidate_key"),
-                        evidence_snapshot_id=payload.get("evidence_snapshot_id"),
-                        expected_evidence_version=payload.get("expected_evidence_version"),
-                        decision=payload.get("decision"),
-                        confirmed=payload.get("confirmed"),
+                        candidate_key=str(payload.get("candidate_key") or ""),
+                        evidence_snapshot_id=str(payload.get("evidence_snapshot_id") or ""),
+                        expected_evidence_version=int(payload.get("expected_evidence_version") or 0),
+                        decision=str(payload.get("decision") or ""),
+                        confirmed=bool(payload.get("confirmed", False)),
                         actor_id=getattr(identity, "principal_id", None),
                     )
                     status = 200
@@ -405,7 +434,7 @@ def build_workbench_handler(
             *,
             method: Literal["GET", "POST"],
             path: str,
-            query: dict[str, list[str]],
+            query: Mapping[str, tuple[str, ...]],
             payload: dict[str, object],
             workspace_id: str | None,
         ) -> WorkbenchExtensionResponse:
@@ -451,8 +480,8 @@ def build_workbench_handler(
 
         def _write_a2a_stream(
             self,
-            initial: dict[str, object],
-            payload: dict[str, object],
+            initial: Mapping[str, object],
+            payload: Mapping[str, object],
             gateway: AgentGateway,
             *,
             status: int,
@@ -471,8 +500,9 @@ def build_workbench_handler(
                 self.wfile.write(_sse_bytes("message" if standard else "task", value))
                 self.wfile.flush()
 
-            emit(initial)
-            if initial.get("status", {}).get("state") not in {"submitted", "working"}:
+            initial_map = dict(initial)
+            emit(initial_map)
+            if _status_state(initial_map) not in {"submitted", "working"}:
                 return
             metadata = payload.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
@@ -504,7 +534,7 @@ def build_workbench_handler(
                 if encoded != previous:
                     emit(current)
                     previous = encoded
-                if current.get("status", {}).get("state") not in {"submitted", "working"}:
+                if _status_state(cast(Mapping[str, object], current)) not in {"submitted", "working"}:
                     return
             emit({
                 "id": task_id,
@@ -513,10 +543,19 @@ def build_workbench_handler(
                 "metadata": {"workspace_id": workspace_id, "stream_timeout": True},
             })
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *_args: object) -> None:
             return
 
     return Handler
+
+
+def _query_mapping(query: str) -> dict[str, tuple[str, ...]]:
+    return {key: tuple(values) for key, values in parse_qs(query).items()}
+
+
+def _status_state(value: Mapping[str, object]) -> str:
+    status = value.get("status")
+    return str(status.get("state") or "") if isinstance(status, Mapping) else ""
 
 
 class _RouteHandled(Exception):
@@ -546,7 +585,7 @@ def create_workbench_server(
     )
 
 
-def _first(values: dict[str, list[str]], key: str, default: str) -> str:
+def _first(values: Mapping[str, Sequence[str]], key: str, default: str) -> str:
     return str((values.get(key) or [default])[0])
 
 

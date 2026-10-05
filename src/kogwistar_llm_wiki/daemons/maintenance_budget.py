@@ -11,8 +11,8 @@ import json
 import logging
 import os
 import time
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..maintenance import (
@@ -29,10 +29,15 @@ from ..maintenance import (
     select_embedding_exploration,
 )
 from ..maintenance.maintenance_control import MaintenanceControlState
+from ..models import NamespaceEngines
 from ..providers.role_config import resolve_maintenance_provider_settings
 from ..utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ..maintenance.maintenance_control import MaintenanceControl
+    from ..worker import MaintenanceWorker
 
 _BACKGROUND_NON_KNOWLEDGE_ENTITY_TYPES = frozenset(
     {
@@ -56,18 +61,24 @@ _BACKGROUND_NON_KNOWLEDGE_ID_PREFIXES = (
 )
 
 
-def _is_background_knowledge_candidate(node: object, workspace_id: str) -> bool:
+class _BackgroundNode(Protocol):
+    """Graph-node shape required by background candidate selection."""
+
+    metadata: Mapping[str, object]
+    embedding: Sequence[float] | None
+
+    def safe_get_id(self) -> str: ...
+
+
+def _is_background_knowledge_candidate(node: _BackgroundNode, workspace_id: str) -> bool:
     """Exclude operational history and unscoped legacy nodes from review."""
-    metadata = getattr(node, "metadata", None)
-    if not isinstance(metadata, Mapping):
-        return False
+    metadata = node.metadata
     if str(metadata.get("workspace_id") or "").strip() != workspace_id:
         return False
     entity_type = str(metadata.get("entity_type") or "").strip().lower()
     if entity_type in _BACKGROUND_NON_KNOWLEDGE_ENTITY_TYPES:
         return False
-    safe_get_id = getattr(node, "safe_get_id", None)
-    node_id = str(safe_get_id() if callable(safe_get_id) else "").strip()
+    node_id = str(node.safe_get_id() or "").strip()
     return bool(node_id) and not node_id.startswith(_BACKGROUND_NON_KNOWLEDGE_ID_PREFIXES)
 
 
@@ -87,6 +98,17 @@ def _bounded_background_int(name: str, *, default: int, minimum: int, maximum: i
 
 
 class MaintenanceBudgetMixin:
+    """State contract supplied by :class:`MaintenanceDaemonRuntime`."""
+
+    _worker: MaintenanceWorker
+    control: MaintenanceControl | None
+    control_state: MaintenanceControlState
+    engines: NamespaceEngines
+    workspace_id: str
+    poll_interval: float
+    background_interval: float
+    _recorded_usage_attempts: set[str]
+
     def _load_background_state(self) -> dict[str, Any]:
         path = getattr(self, "_background_state_path", None)
         if path is None:
@@ -362,9 +384,13 @@ class MaintenanceBudgetMixin:
         seed_material = f"{self.workspace_id}:{cycle_number}".encode()
         cycle_seed = int.from_bytes(hashlib.sha256(seed_material).digest()[:8], "big")
         ns = WorkspaceNamespaces(self.workspace_id)
+        nodes: list[_BackgroundNode]
         try:
             with _temporary_namespace(self.engines.kg, ns.curated_kg_space):
-                nodes = self.engines.kg.read.get_nodes(limit=500)
+                nodes = cast(
+                    list[_BackgroundNode],
+                    self.engines.kg.read.get_nodes(limit=500),
+                )
         except Exception as exc:  # noqa: BLE001 - backend failures degrade exploration only
             logger.warning("Background maintenance selection degraded: %s", exc)
             nodes = []
@@ -373,17 +399,17 @@ class MaintenanceBudgetMixin:
             if _is_background_knowledge_candidate(node, self.workspace_id)
         ]
         recent = sorted(
-            (node for node in nodes if getattr(node, "safe_get_id", lambda: "")()),
-            key=lambda node: str(getattr(node, "metadata", {}).get("updated_at_ms", "")),
+            (node for node in nodes if node.safe_get_id()),
+            key=lambda node: str(node.metadata.get("updated_at_ms", "")),
             reverse=True,
         )[:6]
         explored, strategy = select_embedding_exploration(
             nodes,
             dimension=next(
                 (
-                    len(getattr(node, "embedding", []))
+                    len(node.embedding or [])
                     for node in nodes
-                    if getattr(node, "embedding", None)
+                    if node.embedding
                 ),
                 1,
             ),
@@ -435,7 +461,7 @@ class MaintenanceBudgetMixin:
             ),
             "embedding_exploration": {
                 "profile": os.environ.get("KOGWISTAR_LLM_WIKI_EMBED_PROFILE", "unknown"),
-                "dimension": len(getattr(nodes[0], "embedding", []) or []) if nodes else None,
+                "dimension": len(nodes[0].embedding or []) if nodes else None,
                 "probe_seed": cycle_seed,
                 "strategy": strategy,
                 "candidates": [item.as_dict() for item in explored],

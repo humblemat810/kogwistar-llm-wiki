@@ -151,7 +151,7 @@ def _is_eligible(
         return False
     if int(candidate.score_bundle.usage_frequency) < int(policy.min_usage_frequency):
         return False
-    return str(candidate.question or "").strip()
+    return bool(str(candidate.question or "").strip())
 
 
 def _score_candidate(candidate: DisambiguationCandidate) -> DisambiguationReviewPick:

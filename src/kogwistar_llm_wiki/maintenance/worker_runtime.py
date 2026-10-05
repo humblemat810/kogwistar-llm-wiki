@@ -8,24 +8,34 @@ import threading
 import time
 import uuid
 from collections.abc import Mapping
+from typing import cast
 
 from kogwistar.id_provider import stable_id
+from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.runtime import RunResult
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.budget_adapters import summarize_budget_events
-from kogwistar.runtime.models import RunSuccess
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..usage.events import persist_usage_events
 from ..usage.projection_engine import UsageProjection
 from ..utils import _background_namespace
 from .maintenance_strategies import MaintenanceJobExecutionContext
+from .maintenance_strategies import MaintenanceWorkerLike
 from .state import persisted_budget_state as _persisted_budget_state
 
 logger = logging.getLogger(__name__)
 
 
-class MaintenanceRuntimeWorkerMixin:
+def _as_float(value: object) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    return 0.0
+
+
+class MaintenanceRuntimeWorkerMixin(MaintenanceWorkerLike):
     """Shared durable runtime mechanics used by all maintenance strategies."""
 
     @staticmethod
@@ -54,7 +64,7 @@ class MaintenanceRuntimeWorkerMixin:
 
     def _retry_or_fail_maintenance_job(
         self,
-        job: object,
+        job: JobQueueItem,
         error: Exception | str,
         *,
         workspace_id: str = "",
@@ -89,7 +99,8 @@ class MaintenanceRuntimeWorkerMixin:
     @staticmethod
     def _selection_result_payload(ctx: MaintenanceJobExecutionContext) -> dict[str, object]:
         """Return bounded selection data for durable lane replies."""
-        candidates = list(ctx.payload.get("maintenance_candidates") or [])
+        raw_candidates = ctx.payload.get("maintenance_candidates")
+        candidates = cast(list[object], raw_candidates) if isinstance(raw_candidates, list) else []
         return {
             "selection_strategy": str(ctx.payload.get("selection_strategy") or ""),
             "maintenance_candidates": candidates[:24],
@@ -162,15 +173,15 @@ class MaintenanceRuntimeWorkerMixin:
         ).refresh()
         if self.usage_sink is not None:
             summary = summarize_budget_events(budget_ledger.events)
-            input_tokens = float(summary.get("input_tokens", 0) or 0)
-            output_tokens = float(summary.get("output_tokens", 0) or 0)
+            input_tokens = _as_float(summary.get("input_tokens", 0))
+            output_tokens = _as_float(summary.get("output_tokens", 0))
             self.usage_sink(
                 f"{ctx.job_id}:{getattr(result, 'run_id', '') or ctx.request_node_id}",
                 {
-                    "tokens": float(summary.get("total_tokens", input_tokens + output_tokens) or 0),
+                    "tokens": _as_float(summary.get("total_tokens", input_tokens + output_tokens)),
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "money": float(summary.get("total_cost", 0) or 0),
+                    "money": _as_float(summary.get("total_cost", 0)),
                 },
             )
 
@@ -392,5 +403,3 @@ class MaintenanceRuntimeWorkerMixin:
                         else None
                     ),
                 )
-
-        return RunSuccess(state_update=[])

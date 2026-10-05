@@ -8,7 +8,9 @@ import threading
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
+from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.engine_core import RecoveryReport
 
 from ..daemons.maintenance_budget import MaintenanceBudgetMixin
@@ -25,11 +27,18 @@ from .runtime_support import (
     _declare_service_health,
     _heartbeat_service_health,
     _log_startup_recovery,
+    _stop_service_health,
 )
 
 logger = logging.getLogger(__name__)
 
-ProviderResolver = Callable[[], object]
+
+class ProviderResolver(Protocol):
+    """Resolve the provider settings used by a maintenance worker."""
+
+    def __call__(self) -> WorkflowProviderSettings: ...
+
+
 WorkerFactory = Callable[..., MaintenanceWorker]
 
 
@@ -88,6 +97,16 @@ class MaintenanceDaemonRuntime(MaintenanceBudgetMixin):
         )
         self._stop_event = threading.Event()
         self._instance_id = f"maintenance-{uuid.uuid4().hex}"
+
+    def _stop_service_health(self) -> None:
+        """Stop the daemon health record using the shared runtime helper."""
+
+        _stop_service_health(
+            self.engines,
+            workspace_id=self.workspace_id,
+            service_kind="maintenance_daemon",
+            instance_id=self._instance_id,
+        )
 
     def _stop_for_context_limit(self) -> None:
         """Persistently stop all maintenance modes when the model cannot fit a request."""
@@ -193,12 +212,7 @@ class MaintenanceDaemonRuntime(MaintenanceBudgetMixin):
                 )
                 logger.exception("MaintenanceDaemon: unhandled error in poll cycle")
             self._stop_event.wait(timeout=self._current_poll_interval())
-        self._stop_service_health(
-            self.engines,
-            workspace_id=self.workspace_id,
-            service_kind="maintenance_daemon",
-            instance_id=self._instance_id,
-        )
+        self._stop_service_health()
         logger.info("MaintenanceDaemon stopped - workspace=%s", self.workspace_id)
 
 

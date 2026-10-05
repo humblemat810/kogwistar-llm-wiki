@@ -5,14 +5,31 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from hashlib import sha256
+from typing import cast
 
 from kogwistar.engine_core.models import GraphExtractionWithIDs
-from kogwistar.runtime import budget_event_from_dict
+from kogwistar.runtime.budget import budget_event_from_dict
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 
 logger = logging.getLogger(__name__)
+
+
+def _as_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    return default
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    return default
 
 
 def and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
@@ -150,8 +167,8 @@ def maintenance_budget_state(
     for key, value in (durable_usage or {}).items():
         if key not in used or isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
-        used[key] = max(float(used[key] or 0), float(value))
-        state[key] = int(used[key]) if key != "cost_used" else float(used[key])
+        used[key] = max(_as_float(used[key]), _as_float(value))
+        state[key] = _as_int(used[key]) if key != "cost_used" else _as_float(used[key])
     state.update(
         {
             "token_budget": token_limit,
@@ -181,8 +198,8 @@ def maintenance_budget_state(
         for limit_key, slice_limit in slice_limits.items():
             if not slice_limit:
                 continue
-            request_limit = int(state[request_keys[limit_key]] or 0)
-            slice_cap = int(used[used_keys[limit_key]] or 0) + slice_limit
+            request_limit = _as_int(state[request_keys[limit_key]])
+            slice_cap = _as_int(used[used_keys[limit_key]]) + slice_limit
             state[limit_key] = min(request_limit, slice_cap) if request_limit else slice_cap
     return state
 
@@ -206,10 +223,10 @@ def durable_maintenance_usage(
             or parameter.kind is inspect.Parameter.VAR_KEYWORD
             for parameter in parameters
         )
-        iterator_kwargs = {"namespace": namespace, "from_seq": 1}
+        iterator_kwargs: dict[str, object] = {"namespace": namespace, "from_seq": 1}
         if supports_batch_size:
             iterator_kwargs["batch_size"] = 500
-        rows = iterator(**iterator_kwargs)
+        rows = cast(Iterable[object], iterator(**iterator_kwargs))
         for row in rows:
             # Core metadata stores expose five columns; older test seams and
             # SQLite adapters may include an additional event-id column.
@@ -242,8 +259,8 @@ def durable_maintenance_usage(
         "token_used": int(token_used),
         "call_used": sum(1 for event in events if event.unit in {"call", "llm_call"}),
         "step_used": sum(int(event.amount or 0) for event in events if event.unit == "step"),
-        "time_used_ms": int(summary.get("time_ms", 0) or 0),
-        "cost_used": float(summary.get("total_cost", 0.0) or 0.0),
+        "time_used_ms": _as_int(summary.get("time_ms")),
+        "cost_used": _as_float(summary.get("total_cost")),
     }
 
 

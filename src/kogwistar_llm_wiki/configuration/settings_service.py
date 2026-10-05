@@ -8,8 +8,9 @@ import tempfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Protocol, cast
 
+from ..embeddings.multimodal_projection import MultimodalEncoder
 from ..embeddings.multimodal_runtime import (
     configured_embedding_crop_token_budget,
     configured_embedding_max_model_len,
@@ -34,6 +35,7 @@ from ..maintenance.maintenance_control import (
     MaintenanceControlState,
     configured_default_request_max_rounds,
 )
+from ..models import NamespaceEngines
 from ..otel import _trace_exporter_endpoint
 from ..providers.model_catalog import _safe_endpoint
 from ..providers.role_config import (
@@ -70,6 +72,27 @@ _SECRET_WORDS = ("token", "secret", "password", "api_key", "credential")
 _WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router", "codex"})
 
 
+class SettingsPipelineLike(Protocol):
+    """Product pipeline surface required for settings inspection and updates."""
+
+    @property
+    def engines(self) -> NamespaceEngines: ...
+
+    @property
+    def multimodal_encoder(self) -> MultimodalEncoder | None: ...
+
+    @property
+    def telemetry(self) -> object: ...
+
+
+class SettingsMemoryLike(Protocol):
+    """Mutable memory settings exposed through the operator settings surface."""
+
+    enabled: bool
+    max_records_per_capture: int
+    max_recall_records: int
+
+
 def _redact(value: object) -> object:
     if isinstance(value, Mapping):
         return {
@@ -79,6 +102,19 @@ def _redact(value: object) -> object:
     if isinstance(value, list):
         return [_redact(item) for item in value]
     return value
+
+
+def _object_mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _setting_int(value: object, *, name: str) -> int:
+    if not isinstance(value, (int, float, str)):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 class SettingsService:
@@ -94,10 +130,10 @@ class SettingsService:
 
     def __init__(
         self,
-        pipeline: Any,
+        pipeline: SettingsPipelineLike,
         *,
         path: str | Path | None = None,
-        codex_memory: Any | None = None,
+        codex_memory: SettingsMemoryLike | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = codex_memory
@@ -149,8 +185,14 @@ class SettingsService:
                 report = report()
             if not isinstance(report, Mapping):
                 profile = getattr(engine, "embedding_profile", None)
-                report = profile.to_dict() if hasattr(profile, "to_dict") else {}
-            profile_payload = report.get("registered") or report.get("configured") or report
+                to_dict = getattr(profile, "to_dict", None)
+                report = to_dict() if callable(to_dict) else {}
+            report_mapping = _object_mapping(report)
+            profile_payload = (
+                report_mapping.get("registered")
+                or report_mapping.get("configured")
+                or report_mapping
+            )
             backend = getattr(engine, "backend", None)
             result[space] = {
                 "backend": type(backend).__name__ if backend is not None else "unknown",
@@ -255,13 +297,13 @@ class SettingsService:
             },
         }
         impact = self._impact(effective, desired)
-        return _redact({
+        return cast(dict[str, object], _redact({
             "version": 1,
             "effective": effective,
             "desired": desired,
             "components": self._components(effective),
             **impact,
-        })
+        }))
 
     def health(self, *, workspace_id: str = "default", readiness: Mapping[str, object] | None = None) -> dict[str, object]:
         readiness = dict(readiness or self.pipeline_ready())
@@ -287,11 +329,9 @@ class SettingsService:
             raise ValueError("auth_mode must be disabled, static_token, or kogwistar_jwt")
         for key in ("embedding_max_model_len", "embedding_crop_token_budget"):
             if key in next_desired:
-                try:
-                    next_desired[key] = int(next_desired[key])
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(f"{key} must be an integer") from exc
-                if next_desired[key] <= 0:
+                value = _setting_int(next_desired[key], name=key)
+                next_desired[key] = value
+                if value <= 0:
                     raise ValueError(f"{key} must be positive")
         if "codex_memory_enabled" in next_desired and not isinstance(next_desired["codex_memory_enabled"], bool):
             raise ValueError("codex_memory_enabled must be boolean")
@@ -300,18 +340,17 @@ class SettingsService:
             ("codex_memory_max_recall_records", 100),
         ):
             if key in next_desired:
-                try:
-                    next_desired[key] = int(next_desired[key])
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(f"{key} must be an integer") from exc
-                if not 1 <= next_desired[key] <= upper:
+                value = _setting_int(next_desired[key], name=key)
+                next_desired[key] = value
+                if not 1 <= value <= upper:
                     raise ValueError(f"{key} must be between 1 and {upper}")
         if "maintenance_default_request_max_rounds" in next_desired:
-            try:
-                next_desired["maintenance_default_request_max_rounds"] = int(next_desired["maintenance_default_request_max_rounds"])
-            except (TypeError, ValueError) as exc:
-                raise ValueError("maintenance_default_request_max_rounds must be an integer") from exc
-            if not 1 <= next_desired["maintenance_default_request_max_rounds"] <= 100:
+            value = _setting_int(
+                next_desired["maintenance_default_request_max_rounds"],
+                name="maintenance_default_request_max_rounds",
+            )
+            next_desired["maintenance_default_request_max_rounds"] = value
+            if not 1 <= value <= 100:
                 raise ValueError("maintenance_default_request_max_rounds must be between 1 and 100")
         if "maintenance_enabled" in next_desired and not isinstance(next_desired["maintenance_enabled"], bool):
             raise ValueError("maintenance_enabled must be boolean")
@@ -333,11 +372,12 @@ class SettingsService:
                 for level in levels
             ]
         if "maintenance_token_budget_rate" in next_desired:
-            try:
-                next_desired["maintenance_token_budget_rate"] = int(next_desired["maintenance_token_budget_rate"])
-            except (TypeError, ValueError) as exc:
-                raise ValueError("maintenance_token_budget_rate must be an integer") from exc
-            if next_desired["maintenance_token_budget_rate"] <= 0:
+            value = _setting_int(
+                next_desired["maintenance_token_budget_rate"],
+                name="maintenance_token_budget_rate",
+            )
+            next_desired["maintenance_token_budget_rate"] = value
+            if value <= 0:
                 raise ValueError("maintenance_token_budget_rate must be positive")
         if "maintenance_budget" in next_desired:
             if not isinstance(next_desired["maintenance_budget"], Mapping):
@@ -348,7 +388,9 @@ class SettingsService:
         if (
             "embedding_max_model_len" in next_desired
             and "embedding_crop_token_budget" in next_desired
-            and next_desired["embedding_crop_token_budget"] > next_desired["embedding_max_model_len"]
+            and isinstance(next_desired["embedding_crop_token_budget"], (int, float, str))
+            and isinstance(next_desired["embedding_max_model_len"], (int, float, str))
+            and int(next_desired["embedding_crop_token_budget"]) > int(next_desired["embedding_max_model_len"])
         ):
             raise ValueError("embedding_crop_token_budget cannot exceed embedding_max_model_len")
         for key in ("parser_provider", "maintenance_provider"):
@@ -386,10 +428,11 @@ class SettingsService:
                 ("codex_memory_max_recall_records", "max_recall_records"),
             ):
                 if key in desired:
-                    setattr(self.codex_memory, attribute, int(desired[key]))
+                    setattr(self.codex_memory, attribute, _setting_int(desired[key], name=key))
             snapshot = self.snapshot(workspace_id=workspace_id)
+        pending_changes = snapshot.get("pending_changes", [])
         if {"maintenance_enabled", "maintenance_profile", "maintenance_budget"}.intersection(
-            snapshot.get("pending_changes", [])
+            pending_changes if isinstance(pending_changes, (list, tuple, set)) else ()
         ):
             return {"status": "staged", "reason": "maintenance_control_is_local_only", **snapshot}
         if snapshot["restart_required"] or snapshot["reembedding_required"]:
@@ -417,46 +460,49 @@ class SettingsService:
             "multimodal_embedding": {"state": "up" if multimodal["enabled"] else "disabled", "toggleable": True, "description": "Qwen3-VL remote projection route."},
             "parser": {"state": "up", "toggleable": False},
             "maintenance": {
-                "state": "up" if effective.get("maintenance", {}).get("enabled") else "paused",
+                "state": "up" if _object_mapping(effective.get("maintenance")).get("enabled") else "paused",
                 "toggleable": True,
-                "profile": effective.get("maintenance", {}).get("effective_profile"),
+                "profile": _object_mapping(effective.get("maintenance")).get("effective_profile"),
                 "description": "Durable request maintenance plus locally controlled background profile work.",
             },
             "otel_sink": {"state": "up" if otel.get("enabled") else "disabled", "toggleable": True, "description": "Optional OpenTelemetry trace sink for the configured collector."},
-            "codex_memory": {"state": "up" if effective.get("codex_memory", {}).get("enabled") else "disabled", "toggleable": True, "description": "Project-scoped evidence-backed memory artifacts; canonical graph edits still require propose and confirm."},
+            "codex_memory": {"state": "up" if _object_mapping(effective.get("codex_memory")).get("enabled") else "disabled", "toggleable": True, "description": "Project-scoped evidence-backed memory artifacts; canonical graph edits still require propose and confirm."},
         }
 
     @staticmethod
     def _impact(effective: Mapping[str, object], desired: Mapping[str, object]) -> dict[str, object]:
         restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "maintenance_provider_chain", "maintenance_profile_ladder", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget", "maintenance_default_request_max_rounds"}
-        parser = effective.get("parser", {})
-        maintenance = effective.get("maintenance", {})
+        parser = _object_mapping(effective.get("parser"))
+        maintenance = _object_mapping(effective.get("maintenance"))
+        otel = _object_mapping(effective.get("otel"))
+        multimodal = _object_mapping(effective.get("multimodal"))
+        codex_memory = _object_mapping(effective.get("codex_memory"))
         effective_values = {
-            "parser_model": parser.get("model") if isinstance(parser, Mapping) else None,
-            "parser_provider": parser.get("provider") if isinstance(parser, Mapping) else None,
-            "parser_base_url": parser.get("base_url") if isinstance(parser, Mapping) else None,
-            "maintenance_model": maintenance.get("model") if isinstance(maintenance, Mapping) else None,
-            "maintenance_provider": maintenance.get("provider") if isinstance(maintenance, Mapping) else None,
-            "maintenance_provider_chain": maintenance.get("provider_chain") if isinstance(maintenance, Mapping) else None,
-            "maintenance_base_url": maintenance.get("base_url") if isinstance(maintenance, Mapping) else None,
+            "parser_model": parser.get("model"),
+            "parser_provider": parser.get("provider"),
+            "parser_base_url": parser.get("base_url"),
+            "maintenance_model": maintenance.get("model"),
+            "maintenance_provider": maintenance.get("provider"),
+            "maintenance_provider_chain": maintenance.get("provider_chain"),
+            "maintenance_base_url": maintenance.get("base_url"),
             "auth_mode": effective.get("auth_mode"),
-            "otel_enabled": effective.get("otel", {}).get("enabled") if isinstance(effective.get("otel"), Mapping) else None,
-            "embedding_max_model_len": effective.get("multimodal", {}).get("max_model_len") if isinstance(effective.get("multimodal"), Mapping) else None,
-            "embedding_crop_token_budget": effective.get("multimodal", {}).get("crop_token_budget") if isinstance(effective.get("multimodal"), Mapping) else None,
-            "codex_memory_enabled": effective.get("codex_memory", {}).get("enabled") if isinstance(effective.get("codex_memory"), Mapping) else None,
-            "codex_memory_max_records_per_capture": effective.get("codex_memory", {}).get("max_records_per_capture") if isinstance(effective.get("codex_memory"), Mapping) else None,
-            "codex_memory_max_recall_records": effective.get("codex_memory", {}).get("max_recall_records") if isinstance(effective.get("codex_memory"), Mapping) else None,
-            "maintenance_default_request_max_rounds": effective.get("maintenance", {}).get("default_request_max_rounds") if isinstance(effective.get("maintenance"), Mapping) else None,
-            "maintenance_enabled": effective.get("maintenance", {}).get("enabled") if isinstance(effective.get("maintenance"), Mapping) else None,
-            "maintenance_profile": effective.get("maintenance", {}).get("requested_profile") if isinstance(effective.get("maintenance"), Mapping) else None,
-            "maintenance_profile_ladder": effective.get("maintenance", {}).get("profile_ladder") if isinstance(effective.get("maintenance"), Mapping) else None,
-            "maintenance_token_budget_rate": effective.get("maintenance", {}).get("token_budget_rate") if isinstance(effective.get("maintenance"), Mapping) else None,
+            "otel_enabled": otel.get("enabled"),
+            "embedding_max_model_len": multimodal.get("max_model_len"),
+            "embedding_crop_token_budget": multimodal.get("crop_token_budget"),
+            "codex_memory_enabled": codex_memory.get("enabled"),
+            "codex_memory_max_records_per_capture": codex_memory.get("max_records_per_capture"),
+            "codex_memory_max_recall_records": codex_memory.get("max_recall_records"),
+            "maintenance_default_request_max_rounds": maintenance.get("default_request_max_rounds"),
+            "maintenance_enabled": maintenance.get("enabled"),
+            "maintenance_profile": maintenance.get("requested_profile"),
+            "maintenance_profile_ladder": maintenance.get("profile_ladder"),
+            "maintenance_token_budget_rate": maintenance.get("token_budget_rate"),
             "maintenance_model_class": os.getenv("LLM_WIKI_MAINTENANCE_MODEL_CLASS", "unknown"),
-            "maintenance_budget": effective.get("maintenance", {}).get("budget") if isinstance(effective.get("maintenance"), Mapping) else None,
+            "maintenance_budget": maintenance.get("budget"),
         }
         pending_changes = sorted(
             key for key, value in desired.items()
-            if key in _DESIRED_KEYS and value != effective_values.get(key, effective.get("multimodal", {}).get("enabled") if key == "multimodal_enabled" and isinstance(effective.get("multimodal"), Mapping) else None)
+            if key in _DESIRED_KEYS and value != effective_values.get(key, multimodal.get("enabled") if key == "multimodal_enabled" else None)
         )
         restart_required = bool(restart_keys.intersection(pending_changes))
         profile_keys = {"embedding_provider", "embedding_model", "embedding_dimension", "embedding_metric", "embedding_max_model_len", "embedding_crop_token_budget"}

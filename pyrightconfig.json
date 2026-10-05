@@ -1,0 +1,22 @@
+{
+    "include": [
+        "src"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "**/.pytest_cache",
+        "**/node_modules"
+    ],
+    "typeCheckingMode": "standard",
+    "executionEnvironments": [
+        {
+            "root": ".",
+            "extraPaths": [
+                ".",
+                "src",
+                "kogwistar",
+                "kg-doc-parser"
+            ]
+        }
+    ]
+}

@@ -5,18 +5,19 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from kogwistar.engine_core import GraphKnowledgeEngine
-from kogwistar.engine_core.models import Node, Span
+from kogwistar.engine_core.models import Grounding, Node, Span
 
 from ..maintenance.maintenance_guards import SourceRevision
 from ..models import IngestPipelineRequest
 from ..utils import _temporary_namespace
+from .contracts import IngestPipelineHost
 
 
 class IngestArtifactSupportMixin:
     """Build grounded artifact nodes and resolve durable identity helpers."""
 
     def _artifact_node(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -31,7 +32,11 @@ class IngestArtifactSupportMixin:
     ) -> Node:
         span = self._leading_span(source_document_id, request.raw_text, insertion_method=artifact_kind)
         extra_meta = dict(extra_metadata or {})
-        normalized_visibility = self.policies.visibility.visibility_for(
+        visibility_policy = self.policies.visibility
+        lifecycle_policy = self.policies.lifecycle
+        if visibility_policy is None or lifecycle_policy is None:
+            raise RuntimeError("ingestion policies are not fully initialized")
+        normalized_visibility = visibility_policy.visibility_for(
             {
                 "artifact_kind": artifact_kind,
                 "visibility": visibility,
@@ -48,7 +53,7 @@ class IngestArtifactSupportMixin:
             "visibility": normalized_visibility,
             "title": request.title,
             "parser_mode": request.parser_mode,
-            "requires_provenance": self.policies.lifecycle.requires_provenance(artifact_kind),
+            "requires_provenance": lifecycle_policy.requires_provenance(artifact_kind),
         }
         if normalized_visibility == "projection":
             metadata["projection_visible"] = True
@@ -60,11 +65,16 @@ class IngestArtifactSupportMixin:
             type="entity",
             summary=summary,
             doc_id=source_document_id,
-            mentions=[{"spans": [span.model_dump(field_mode="backend")]}],
+            mentions=[Grounding(spans=[span])],
             metadata=metadata,
+            domain_id=request.workspace_id,
+            canonical_entity_id=node_id,
+            properties={},
+            embedding=None,
+            level_from_root=0,
         )
 
-    def _node_exists(self, engine: GraphKnowledgeEngine, *, namespace: str, node_id: str) -> bool:
+    def _node_exists(self: IngestPipelineHost, engine: GraphKnowledgeEngine, *, namespace: str, node_id: str) -> bool:
         with _temporary_namespace(engine, namespace):
             return bool(engine.read.node_exists(ids=[str(node_id)]))
 
@@ -79,7 +89,7 @@ class IngestArtifactSupportMixin:
             return False
 
     def _parse_document_id_for_request(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -93,7 +103,7 @@ class IngestArtifactSupportMixin:
         return revision.revision_document_id or source_document_id
 
     def _job_exists(
-        self,
+        self: IngestPipelineHost,
         *,
         namespace: str,
         entity_kind: str,

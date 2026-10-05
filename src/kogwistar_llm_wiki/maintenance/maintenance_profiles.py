@@ -12,6 +12,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 PROFILE_NAMES = frozenset({"high", "balanced", "budgeted", "lite"})
 WINDOW_NAMES = ("daily", "weekly", "monthly")
@@ -20,11 +21,19 @@ WINDOW_SECONDS = {"daily": 86_400, "weekly": 604_800, "monthly": 2_592_000}
 MODEL_CLASSES = frozenset({"free", "metered", "unknown"})
 
 
+def _as_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    return default
+
+
 def _optional_number(value: object, *, name: str) -> float | None:
     if value is None or str(value).strip() == "":
         return None
     try:
-        result = float(value)
+        result = float(cast(str | int | float, value))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a non-negative number or empty") from exc
     if not math.isfinite(result) or result < 0:
@@ -162,8 +171,8 @@ def budget_fits(
     for window, metrics in normalized.items():
         current = spend.get(window, {})
         for metric, cap in metrics.items():
-            used = float(current.get(metric, 0.0) or 0.0)
-            amount = float(estimate.get(metric, 0.0) or 0.0)
+            used = _as_float(current.get(metric, 0.0))
+            amount = _as_float(estimate.get(metric, 0.0))
             if used + amount > cap:
                 return False, f"{window}_{metric}_cap"
     return True, "within_budget"
@@ -251,11 +260,11 @@ def add_usage(
     usage: Mapping[str, float],
 ) -> dict[str, dict[str, float]]:
     """Return updated spend without mutating the caller's persisted mapping."""
-    result = {window: {metric: float(value) for metric, value in metrics.items()} for window, metrics in spend.items()}
+    result = {window: {metric: _as_float(value) for metric, value in metrics.items()} for window, metrics in spend.items()}
     for window in WINDOW_NAMES:
         metrics = result.setdefault(window, {})
         for metric, amount in usage.items():
-            metrics[metric] = metrics.get(metric, 0.0) + max(0.0, float(amount))
+            metrics[metric] = metrics.get(metric, 0.0) + max(0.0, _as_float(amount))
     return {window: metrics for window, metrics in result.items() if metrics}
 
 
@@ -269,8 +278,8 @@ def reset_expired_spend(
     """Reset rolling (or calendar) windows without losing other window state."""
     if mode not in {"rolling", "calendar"}:
         raise ValueError("maintenance budget window mode must be rolling or calendar")
-    refreshed = {window: {metric: float(value) for metric, value in metrics.items()} for window, metrics in spend.items()}
-    starts = {window: float(value) for window, value in started_at.items() if window in WINDOW_NAMES}
+    refreshed = {window: {metric: _as_float(value) for metric, value in metrics.items()} for window, metrics in spend.items()}
+    starts = {window: _as_float(value, now) for window, value in started_at.items() if window in WINDOW_NAMES}
     for window in WINDOW_NAMES:
         start = starts.get(window, float(now))
         if mode == "rolling":

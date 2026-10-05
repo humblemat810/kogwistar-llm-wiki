@@ -12,8 +12,8 @@ import tempfile
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 from urllib import request as urllib_request
@@ -26,10 +26,14 @@ from ..workbench.workbench_background import ProgressCallback
 from ..workbench.workbench_cockpit import (
     CockpitAction,
     CockpitActionKind,
+    CockpitMaintenancePatch,
     CockpitObservation,
 )
 
-LineSink = Callable[[str], None]
+class LineSink(Protocol):
+    """Receive one diagnostic line from a Codex provider."""
+
+    def __call__(self, line: str) -> None: ...
 
 
 class _CockpitActionTransport(BaseModel):
@@ -46,9 +50,9 @@ class _CockpitActionTransport(BaseModel):
     rationale: str = Field(max_length=2_000)
 
     def to_action(self) -> CockpitAction:
-        patch: object = None
+        patch: CockpitMaintenancePatch | None = None
         if self.patch_json is not None:
-            patch = json.loads(self.patch_json)
+            patch = CockpitMaintenancePatch.model_validate(json.loads(self.patch_json))
         return CockpitAction(
             kind=self.kind,
             answer=self.answer,
@@ -228,6 +232,7 @@ class CodexAppServerRunner:
             bufsize=1,
         )
         assert process.stdin is not None
+        stdin = process.stdin
         assert process.stdout is not None
         lines: queue.Queue[str | None] = queue.Queue()
 
@@ -267,16 +272,16 @@ class CodexAppServerRunner:
             message: dict[str, object] = {"jsonrpc": "2.0", "id": request_id, "method": method}
             if params is not None:
                 message["params"] = dict(params)
-            process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
-            process.stdin.flush()
+            stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+            stdin.flush()
             return request_id
 
         def notify(method: str, params: Mapping[str, object] | None = None) -> None:
             message: dict[str, object] = {"jsonrpc": "2.0", "method": method}
             if params is not None:
                 message["params"] = dict(params)
-            process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
-            process.stdin.flush()
+            stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+            stdin.flush()
 
         def read_message() -> dict[str, object]:
             while True:
@@ -546,7 +551,7 @@ class HostCockpitResponder:
         if progress is not None:
             progress()
         payload = {
-            "request": request.model_dump(mode="json"),
+            "request": asdict(request),
             "snapshot": snapshot.to_dict(),
             "observations": [item.model_dump(mode="json") for item in observations],
         }

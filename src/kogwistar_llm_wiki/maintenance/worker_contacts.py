@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from typing import cast
 from itertools import islice
 
+from .maintenance_strategies import MaintenanceWorkerLike
 from ..disambiguation.contact_matching import (
     DEFAULT_MAX_FUZZY_NAME_COMPARISONS,
     ContactIdentityObservation,
@@ -19,7 +21,7 @@ _MAX_CONTACT_SCAN_CANDIDATES = 500
 _MAX_CONTACT_SCAN_FUZZY_NAME_COMPARISONS = DEFAULT_MAX_FUZZY_NAME_COMPARISONS
 
 
-class ContactDisambiguationWorkerMixin:
+class ContactDisambiguationWorkerMixin(MaintenanceWorkerLike):
     def _handle_contact_disambiguation_scan(
         self, ctx: MaintenanceJobExecutionContext
     ) -> None:
@@ -29,6 +31,7 @@ class ContactDisambiguationWorkerMixin:
             raise TypeError(
                 "contact disambiguation scan requires an observation provider and stream ACL"
             )
+        authorize = cast(Callable[[str, str], bool], authorize_stream)
 
         payload = dict(ctx.payload)
         if payload.get("workspace_id") != ctx.workspace_id:
@@ -48,7 +51,7 @@ class ContactDisambiguationWorkerMixin:
 
         # Authorize the complete requested scope before allowing a source adapter to read.
         for stream_id in sorted(stream_ids):
-            if not authorize_stream(ctx.workspace_id, stream_id):
+            if not authorize(ctx.workspace_id, stream_id):
                 raise PermissionError("contact scan source stream is not authorized")
         payload["source_stream_ids"] = tuple(stream_ids)
         observations = provider(ctx.workspace_id, payload)
@@ -60,12 +63,12 @@ class ContactDisambiguationWorkerMixin:
         if any(not isinstance(item, ContactIdentityObservation) for item in bounded):
             raise TypeError("contact observation provider returned an invalid observation")
         for item in bounded:
-            if not authorize_stream(ctx.workspace_id, item.stream_id):
+            if not authorize(ctx.workspace_id, item.stream_id):
                 raise PermissionError("contact scan provider returned an unauthorized stream")
 
         candidates = discover_contact_match_candidates(
             bounded,
-            authorize_stream=authorize_stream,
+            authorize_stream=authorize,
             max_observations=_MAX_CONTACT_SCAN_OBSERVATIONS,
             max_candidates=_MAX_CONTACT_SCAN_CANDIDATES,
             max_fuzzy_name_comparisons=_MAX_CONTACT_SCAN_FUZZY_NAME_COMPARISONS,
@@ -73,7 +76,7 @@ class ContactDisambiguationWorkerMixin:
         self._assert_claim_owned(ctx, reason="claim_lost_before_contact_candidate_persist")
         persisted_ids = DisambiguationService(self.engines).persist_contact_candidates(
             candidates,
-            authorize_stream=authorize_stream,
+            authorize_stream=authorize,
         )
         self._assert_claim_owned(ctx, reason="claim_lost_before_contact_scan_ack")
         self._acknowledge_job(ctx)

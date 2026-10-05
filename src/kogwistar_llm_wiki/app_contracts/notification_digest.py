@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import islice
-from typing import Literal
+from typing import Literal, Protocol, cast
 
 Severity = Literal["info", "normal", "high", "critical"]
 _SEVERITY_RANK: dict[Severity, int] = {
@@ -172,7 +172,10 @@ class NotificationDigest:
             raise ValueError("source event IDs must appear in only one digest item")
 
 
-AuthorizeNotificationSource = Callable[[str, str], bool]
+class AuthorizeNotificationSource(Protocol):
+    """Authorize one event source before digest aggregation."""
+
+    def __call__(self, workspace_id: str, source_id: str, /) -> bool: ...
 
 
 def build_notification_digest(
@@ -345,10 +348,10 @@ def _make_item(
         summary = f"{latest.title} ({len(source_events)} copies)"
     else:
         summary = latest.title
-    severity = max(
+    severity = cast(Severity, max(
         (event.severity for event in source_events),
-        key=lambda item: _SEVERITY_RANK[item],
-    )
+        key=lambda item: _SEVERITY_RANK[cast(Severity, item)],
+    ))
     identity = json.dumps(
         [workspace_id, start.isoformat(), end.isoformat(), group_key],
         ensure_ascii=True,

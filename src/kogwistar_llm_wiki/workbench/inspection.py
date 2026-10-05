@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
+
+from kogwistar.engine_core import GraphKnowledgeEngine
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -170,7 +173,7 @@ def build_workspace_graph_artifact_dump(
 
 
 def _count_graph_space(
-    engine: Any,
+    engine: GraphKnowledgeEngine,
     *,
     namespace: str,
     graph_space: str,
@@ -187,7 +190,7 @@ def _count_graph_space(
 
 def _sample_selected_graph(
     *,
-    engine_spaces: tuple[tuple[str, Any, str], ...],
+    engine_spaces: tuple[tuple[str, GraphKnowledgeEngine, str], ...],
     limit_per_space: int = 8,
 ) -> tuple[list[NodeSample], list[EdgeSample]]:
     sample_nodes: list[NodeSample] = []
@@ -303,7 +306,7 @@ def _graph_spaces_for_scope(
     engines: NamespaceEngines,
     ns: WorkspaceNamespaces,
     report_scope: ReportScope,
-) -> tuple[tuple[str, Any, str], ...]:
+) -> tuple[tuple[str, GraphKnowledgeEngine, str], ...]:
     all_spaces = (
         ("source", engines.kg, ns.source_space),
         ("base_kg", engines.kg, ns.base_kg_space),
@@ -360,11 +363,17 @@ def _first_value(sequence: object, fallback: object) -> str | None:
 def _model_dump_jsonable(entity: object) -> dict[str, object]:
     dump = getattr(entity, "model_dump", None)
     if callable(dump):
-        return dict(dump(dump_format="json"))
+        dumped = dump(dump_format="json")
+        if isinstance(dumped, Mapping):
+            return {str(key): value for key, value in dumped.items()}
+        return {}
+    raw = getattr(entity, "__dict__", {})
+    if not isinstance(raw, Mapping):
+        return {}
     return {
-        key: value
-        for key, value in dict(getattr(entity, "__dict__", {}) or {}).items()
-        if not key.startswith("_")
+        str(key): value
+        for key, value in raw.items()
+        if not str(key).startswith("_")
     }
 
 

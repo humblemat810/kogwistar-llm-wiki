@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from typing import Protocol, cast, runtime_checkable
+from typing import Protocol, cast
 
 from kogwistar.engine_core import (
     AtomicMutationCapability,
@@ -17,7 +17,7 @@ from kogwistar.engine_core.models import (
     Span,
 )
 from kogwistar.id_provider import stable_id
-from kogwistar.typing_interfaces import WriteLike
+from kogwistar.typing_interfaces import ReadLike, WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,6 +38,17 @@ from .maintenance_status import graph_status_for_patch
 JsonScalar = str | int | float | bool | None
 EngineUnitOfWork = AbstractContextManager[object | None]
 MaintenanceEntity = Node | Edge
+
+
+class EntityGetter(Protocol):
+    """Compatibility surface for core read APIs used by patch validation."""
+
+    def __call__(
+        self,
+        *,
+        ids: Sequence[str] | None = None,
+        resolve_mode: str | None = None,
+    ) -> Sequence[MaintenanceEntity]: ...
 
 
 _IMMUTABLE_RAW_ARTIFACT_KINDS = frozenset(
@@ -68,26 +79,12 @@ class _AtomicPatchOperationFailed(Exception):
         self.failed = failed
 
 
-@runtime_checkable
-class _MaintenanceReadLike(Protocol):
-    def get_nodes(
-        self,
-        ids: list[str] | None = None,
-        where: dict[str, object] | None = None,
-        resolve_mode: str | None = None,
-    ) -> list[Node]: ...
-
-    def get_edges(
-        self,
-        ids: list[str] | None = None,
-        where: dict[str, object] | None = None,
-        resolve_mode: str | None = None,
-    ) -> list[Edge]: ...
-
-
 class _MaintenanceEngineLike(Protocol):
-    read: _MaintenanceReadLike
-    write: WriteLike
+    @property
+    def read(self) -> ReadLike: ...
+
+    @property
+    def write(self) -> WriteLike: ...
 
     def uow(self) -> EngineUnitOfWork: ...
 
@@ -481,7 +478,10 @@ def _read_entities_by_ids(
     if not ids:
         return []
     read = getattr(engine, "read", engine)
-    getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
+    getter = cast(
+        EntityGetter | None,
+        getattr(read, "get_nodes" if kind == "node" else "get_edges", None),
+    )
     if not callable(getter):
         return []
     try:
@@ -550,8 +550,8 @@ def _stale_revision_issues(
     if not expected_revisions:
         return []
     read = getattr(engine, "read", engine)
-    node_getter = getattr(read, "get_nodes", None)
-    edge_getter = getattr(read, "get_edges", None)
+    node_getter = cast(EntityGetter | None, getattr(read, "get_nodes", None))
+    edge_getter = cast(EntityGetter | None, getattr(read, "get_edges", None))
     current: dict[str, str | int | None] = {}
     if callable(node_getter):
         current.update(_entity_revisions(node_getter, list(expected_revisions)))
@@ -571,7 +571,9 @@ def _stale_revision_issues(
     ]
 
 
-def _entity_revisions(getter: Callable[..., list[MaintenanceEntity]], ids: list[str]) -> dict[str, str | int | None]:
+def _entity_revisions(
+    getter: EntityGetter, ids: list[str]
+) -> dict[str, str | int | None]:
     try:
         items = getter(ids=ids, resolve_mode="active_only")
     except TypeError:
@@ -611,12 +613,12 @@ def _atomic_mutation_capability(engine: _MaintenanceEngineLike) -> AtomicMutatio
 def _read_active_ids(engine: _MaintenanceEngineLike, kind: str) -> set[str]:
     read = getattr(engine, "read", engine)
     if kind == "node":
-        getter = getattr(read, "get_nodes", None)
+        getter = cast(EntityGetter | None, getattr(read, "get_nodes", None))
     else:
-        getter = getattr(read, "get_edges", None)
+        getter = cast(EntityGetter | None, getattr(read, "get_edges", None))
     if not callable(getter):
         return set()
-    items: list[MaintenanceEntity]
+    items: Sequence[MaintenanceEntity]
     try:
         items = getter(resolve_mode="active_only")
     except TypeError:
@@ -626,10 +628,13 @@ def _read_active_ids(engine: _MaintenanceEngineLike, kind: str) -> set[str]:
 
 def _exists(engine: _MaintenanceEngineLike, kind: str, entity_id: str, *, include_tombstones: bool = False) -> bool:
     read = getattr(engine, "read", engine)
-    getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
+    getter = cast(
+        EntityGetter | None,
+        getattr(read, "get_nodes" if kind == "node" else "get_edges", None),
+    )
     if not callable(getter):
         return False
-    items: list[MaintenanceEntity]
+    items: Sequence[MaintenanceEntity]
     try:
         items = getter(ids=[entity_id], resolve_mode="include_tombstones" if include_tombstones else "active_only")
     except TypeError:
@@ -639,10 +644,13 @@ def _exists(engine: _MaintenanceEngineLike, kind: str, entity_id: str, *, includ
 
 def _is_tombstoned(engine: _MaintenanceEngineLike, kind: str, entity_id: str) -> bool:
     read = getattr(engine, "read", engine)
-    getter = getattr(read, "get_nodes" if kind == "node" else "get_edges", None)
+    getter = cast(
+        EntityGetter | None,
+        getattr(read, "get_nodes" if kind == "node" else "get_edges", None),
+    )
     if not callable(getter):
         return False
-    items: list[MaintenanceEntity]
+    items: Sequence[MaintenanceEntity]
     try:
         items = getter(ids=[entity_id], resolve_mode="include_tombstones")
     except TypeError:
@@ -695,17 +703,21 @@ def _apply_operation(
 
 
 def _write(engine: _MaintenanceEngineLike) -> WriteLike:
-    return getattr(engine, "write", engine)
+    return cast(WriteLike, getattr(engine, "write", engine))
 
 
 def _node_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOperation) -> Node:
     metadata = _operation_metadata(patch, operation)
     return Node(
         id=operation.node_id,
-        label=operation.label or operation.node_id,
+        label=str(operation.label or operation.node_id),
         type="entity",
-        summary=operation.reason or operation.label or operation.node_id,
+        summary=str(operation.reason or operation.label or operation.node_id),
+        domain_id=None,
+        canonical_entity_id=None,
         doc_id=_source_document_id(operation),
+        embedding=None,
+        level_from_root=None,
         properties=operation.properties or None,
         mentions=[Grounding(spans=[_span_from_operation(operation)])],
         metadata=metadata,
@@ -716,17 +728,20 @@ def _edge_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOpe
     metadata = _operation_metadata(patch, operation)
     return Edge(
         id=operation.edge_id,
-        label=operation.label or operation.relation or operation.edge_id,
+        label=str(operation.label or operation.relation or operation.edge_id),
         type="relationship",
-        summary=operation.reason or operation.label or operation.relation or operation.edge_id,
+        summary=str(operation.reason or operation.label or operation.relation or operation.edge_id),
+        domain_id=None,
+        canonical_entity_id=None,
         doc_id=_source_document_id(operation),
+        embedding=None,
         source_ids=[str(operation.from_node_id)],
         target_ids=[str(operation.to_node_id)],
         relation=str(operation.relation),
         source_edge_ids=[],
         target_edge_ids=[],
         properties=operation.properties or None,
-        mentions=[_span_from_operation(operation)],
+        mentions=[Grounding(spans=[_span_from_operation(operation)])],
         metadata=metadata,
     )
 
@@ -815,6 +830,8 @@ def _span_from_operation(operation: MaintenancePatchOperation) -> Span:
         excerpt=excerpt,
         context_before=str(pointer.get("context_before") or ""),
         context_after=str(pointer.get("context_after") or ""),
+        chunk_id=None,
+        source_cluster_id=None,
         verification=MentionVerification(
             method="system",
             is_verified=verified_span,
@@ -860,6 +877,11 @@ def _emit_patch_artifact(
         type="entity",
         summary=patch.rationale or f"Maintenance patch {patch.patch_id} {status.value}",
         doc_id=patch.patch_id,
+        domain_id=None,
+        canonical_entity_id=None,
+        properties={},
+        embedding=None,
+        level_from_root=None,
         mentions=[Grounding(spans=[Span.from_dummy_for_workflow(patch.patch_id)])],
         metadata={key: value for key, value in metadata.items() if value not in (None, "")},
     )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.id_provider import stable_id
@@ -11,6 +13,7 @@ from .maintenance_policy import (
     EXECUTION_WISDOM_WORKFLOW_ID,
     GRAPH_PATCH_APPLY_WORKFLOW_ID,
     GRAPH_PATCH_PROPOSAL_WORKFLOW_ID,
+    MULTIMODAL_RETRIEVAL_WORKFLOW_ID,
 )
 
 
@@ -26,6 +29,12 @@ def _dummy_grounding() -> list[Grounding]:
                     document_page_url="",
                     collection_page_url="",
                     insertion_method="",
+                    page_number=1,
+                    context_before="",
+                    context_after="",
+                    chunk_id=None,
+                    source_cluster_id=None,
+                    verification=None,
                 )
             ]
         )
@@ -33,7 +42,7 @@ def _dummy_grounding() -> list[Grounding]:
 
 
 def _terminal_node(workflow_id: str, *, node_id: str, label: str, summary: str) -> WorkflowNode:
-    return WorkflowNode(
+    return _workflow_node(
         id=node_id,
         label=label,
         type="entity",
@@ -66,6 +75,11 @@ def _workflow_edge(
         target_edge_ids=[],
         label=label,
         summary=summary,
+        domain_id=None,
+        canonical_entity_id=None,
+        properties={},
+        embedding=None,
+        doc_id=None,
         mentions=_dummy_grounding(),
         metadata={
             "entity_type": "workflow_edge",
@@ -73,6 +87,31 @@ def _workflow_edge(
             "wf_predicate": None,
             "wf_is_default": True,
         },
+    )
+
+
+def _workflow_node(
+    *,
+    id: str,
+    label: str,
+    type: Literal["entity", "relationship", "reference_pointer"],
+    summary: str,
+    mentions: list[Grounding],
+    metadata: dict[str, object],
+) -> WorkflowNode:
+    return WorkflowNode(
+        id=id,
+        label=label,
+        type=type,
+        summary=summary,
+        domain_id=None,
+        canonical_entity_id=None,
+        properties={},
+        embedding=None,
+        doc_id=None,
+        level_from_root=None,
+        mentions=mentions,
+        metadata=metadata,
     )
 
 
@@ -84,7 +123,7 @@ def build_derived_knowledge_design(
     node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
 
     nodes = [
-        WorkflowNode(
+        _workflow_node(
             id=node_distill_id,
             label="Derive Knowledge Synthesis",
             type="entity",
@@ -98,7 +137,7 @@ def build_derived_knowledge_design(
                 "default_context_window": 4000,
             },
         ),
-        WorkflowNode(
+        _workflow_node(
             id=node_check_id,
             label="Check Derived Knowledge Complete",
             type="entity",
@@ -156,7 +195,7 @@ def build_execution_wisdom_design(
     node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
 
     nodes = [
-        WorkflowNode(
+        _workflow_node(
             id=node_extract_id,
             label="Derive Problem-Solving Wisdom From History",
             type="entity",
@@ -215,7 +254,7 @@ def build_graph_patch_design(
     node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
 
     nodes = [
-        WorkflowNode(
+        _workflow_node(
             id=node_noop_id,
             label=label,
             type="entity",
@@ -305,7 +344,7 @@ def build_crosslink_group_design(
             metadata["wf_start"] = True
         if key == "continue":
             metadata["wf_terminal"] = True
-        nodes.append(WorkflowNode(
+        nodes.append(_workflow_node(
             id=str(stable_id("wf_node", workflow_id, key)),
             label=label,
             type="entity",
@@ -350,6 +389,84 @@ def build_crosslink_group_design(
     )
 
 
+def build_multimodal_retrieval_design(
+    workflow_id: str = MULTIMODAL_RETRIEVAL_WORKFLOW_ID,
+) -> WorkflowDesignArtifact:
+    """Describe the sidecar lifecycle using ordinary workflow graph entities.
+
+    The sidecar remains an application retrieval adapter, not a second graph.
+    This design is the durable workflow contract that records where the
+    sidecar may overlap the text/graph path and where evidence is authorized
+    before assimilation.
+    """
+
+    stages = (
+        ("dispatch", "Dispatch Retrieval", "Create a scoped multimodal retrieval run."),
+        ("text_graph", "Run Text And Graph Retrieval", "Continue the primary path without waiting for media."),
+        ("sidecar", "Run Multimodal Sidecar", "Retrieve profile-bound references asynchronously."),
+        ("checkpoint", "Reach Assimilation Checkpoint", "Pause only at an explicit worker checkpoint."),
+        ("authorize", "Authorize Current Evidence", "Recheck namespace, ACL, revision, and embedding profile."),
+        ("assimilate", "Assimilate Typed Evidence", "Add authorized references without mutating canonical truth."),
+        ("degraded", "Record Retrieval Degradation", "Record timeout, stale, unavailable, or unauthorized evidence."),
+        ("finalize", "Finalize Retrieval Run", "Close the sidecar and publish the bounded outcome."),
+    )
+    ids = {key: str(stable_id("wf_node", workflow_id, key)) for key, _, _ in stages}
+    nodes: list[WorkflowNode] = []
+    for key, label, summary in stages:
+        metadata: dict[str, object] = {
+            "entity_type": "workflow_node",
+            "workflow_id": workflow_id,
+            "wf_op": f"multimodal_{key}",
+            "default_context_window": 4000,
+        }
+        if key == "dispatch":
+            metadata["wf_start"] = True
+        if key == "sidecar":
+            metadata["wf_fanout"] = True
+        if key == "finalize":
+            metadata["wf_terminal"] = True
+        nodes.append(
+            _workflow_node(
+                id=ids[key],
+                label=label,
+                type="entity",
+                summary=summary,
+                mentions=_dummy_grounding(),
+                metadata=metadata,
+            )
+        )
+    transitions = (
+        ("dispatch", "text_graph", "primary_path"),
+        ("dispatch", "sidecar", "sidecar_started"),
+        ("text_graph", "checkpoint", "primary_path_ready"),
+        ("sidecar", "checkpoint", "evidence_available"),
+        ("sidecar", "degraded", "timeout_or_provider_failure"),
+        ("checkpoint", "authorize", "checkpoint_reached"),
+        ("authorize", "assimilate", "evidence_authorized"),
+        ("authorize", "degraded", "evidence_rejected_or_stale"),
+        ("assimilate", "finalize", "evidence_assimilated"),
+        ("degraded", "finalize", "degradation_recorded"),
+    )
+    edges = [
+        _workflow_edge(
+            workflow_id,
+            edge_key=f"{source}_{target}_{label}",
+            source_id=ids[source],
+            target_id=ids[target],
+            label=label,
+            summary=f"Multimodal retrieval lifecycle: {label.replace('_', ' ')}.",
+        )
+        for source, target, label in transitions
+    ]
+    return WorkflowDesignArtifact(
+        workflow_id=workflow_id,
+        workflow_version="v1",
+        start_node_id=ids["dispatch"],
+        nodes=nodes,
+        edges=edges,
+    )
+
+
 def materialize_maintenance_designs(workflow_engine: GraphKnowledgeEngine) -> None:
     """Saves all authoritative maintenance designs to the workflow engine."""
     for design in (
@@ -358,6 +475,7 @@ def materialize_maintenance_designs(workflow_engine: GraphKnowledgeEngine) -> No
         build_graph_patch_proposal_design(),
         build_graph_patch_apply_design(),
         build_crosslink_group_design(),
+        build_multimodal_retrieval_design(),
     ):
         for node in design.nodes:
             workflow_engine.write.add_node(node)

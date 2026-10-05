@@ -9,8 +9,13 @@ published separately from the manually confirmed
 | --- | --- | --- |
 | `kogwistar-llm-wiki` | `latest`, release version | Torch-free REST/MCP application |
 | `kogwistar-llm-wiki` | `all`, `all-vMAJOR.MINOR[.PATCH]` | Application image with optional Pinecone and Qdrant adapters |
-| `kogwistar-llm-wiki-embedding` | `latest-cuda12.8`, explicit release version with `-cuda12.8` | GPU-default Qwen3-VL Embedding Service |
-| `kogwistar-llm-wiki-embedding` | `latest-cpu`, explicit release version with `-cpu` | CPU fallback and smoke tests |
+| `kogwistar-llm-wiki-embedding` | `latest-qwen3-vl-embedding-2b-cuda12.8`, explicit release version with `-qwen3-vl-embedding-2b-cuda12.8` | GPU Qwen3-VL Embedding-2B Service |
+| `kogwistar-llm-wiki-embedding` | `latest-qwen3-vl-embedding-2b-cpu`, explicit release version with `-qwen3-vl-embedding-2b-cpu` | CPU Qwen3-VL Embedding-2B fallback and smoke tests |
+
+The older `latest-cuda12.8`, `latest-cpu`, and version-plus-backend tags remain
+compatibility aliases. The model-qualified tags are preferred because the image
+contains the service runtime for Qwen3-VL Embedding-2B; model checkpoints remain
+in the configured Hugging Face volume rather than being baked into the image.
 
 The embedding images contain the inference runtime but do not contain the Qwen
 checkpoint. Mount or configure the Hugging Face cache and set an immutable
@@ -82,14 +87,14 @@ disabled until the image has passed its runtime checks.
 
 ```powershell
 docker pull <dockerhub-user>/kogwistar-llm-wiki:latest
-docker pull <dockerhub-user>/kogwistar-llm-wiki-embedding:latest-cuda12.8
+docker pull <dockerhub-user>/kogwistar-llm-wiki-embedding:latest-qwen3-vl-embedding-2b-cuda12.8
 ```
 
 Use the images with the existing Compose files:
 
 ```powershell
 $env:LLM_WIKI_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki:latest'
-$env:LLM_WIKI_EMBEDDING_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki-embedding:latest-cuda12.8'
+$env:LLM_WIKI_EMBEDDING_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki-embedding:latest-qwen3-vl-embedding-2b-cuda12.8'
 $env:LLM_WIKI_EMBEDDING_MODEL_REVISION = '<40-character-model-commit-sha>'
 docker compose -f compose.yml -f compose.multimodal.yml -f compose.embedding-cuda.yml up -d
 ```
@@ -97,7 +102,7 @@ docker compose -f compose.yml -f compose.multimodal.yml -f compose.embedding-cud
 For CPU:
 
 ```powershell
-$env:LLM_WIKI_EMBEDDING_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki-embedding:latest-cpu'
+$env:LLM_WIKI_EMBEDDING_IMAGE = '<dockerhub-user>/kogwistar-llm-wiki-embedding:latest-qwen3-vl-embedding-2b-cpu'
 docker compose -f compose.yml -f compose.multimodal.yml up -d
 ```
 

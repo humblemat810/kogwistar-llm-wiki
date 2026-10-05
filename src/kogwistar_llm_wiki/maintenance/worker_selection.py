@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from typing import cast
 
 from kogwistar.engine_core.models import Node
 from kogwistar.id_provider import stable_id
@@ -14,6 +15,7 @@ from ..parsing.parse_views import ParseViewResolver
 from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_selection import select_request_candidates
 from .maintenance_strategies import MaintenanceJobExecutionContext
+from .maintenance_strategies import MaintenanceWorkerLike
 from .state import belongs_to_workspace as _belongs_to_workspace
 from .state import edge_ids as _edge_ids
 from .state import metadata_mapping
@@ -31,7 +33,7 @@ def _selection_entity_is_accessible(entity: object, workspace_id: str) -> bool:
     return not scope or can_access_security_scope(scope)
 
 
-class MaintenanceSelectionWorkerMixin:
+class MaintenanceSelectionWorkerMixin(MaintenanceWorkerLike):
     """Select bounded request candidates without changing execution budgets."""
 
     def _attach_request_selection(self, ctx: MaintenanceJobExecutionContext) -> None:
@@ -39,7 +41,12 @@ class MaintenanceSelectionWorkerMixin:
         kg = getattr(self.engines, "kg", None)
         if kg is None or not callable(getattr(getattr(kg, "read", None), "get_nodes", None)):
             return
-        seed_ids = {str(item) for item in (ctx.payload.get("seed_node_ids") or []) if item}
+        raw_seed_ids = ctx.payload.get("seed_node_ids")
+        seed_ids = {
+            str(item)
+            for item in (cast(list[object], raw_seed_ids) if isinstance(raw_seed_ids, list) else [])
+            if item
+        }
         continuation = ctx.payload.get("maintenance_context")
         if isinstance(continuation, Mapping):
             turns = continuation.get("turns")
@@ -157,7 +164,8 @@ class MaintenanceSelectionWorkerMixin:
 
     def _persist_selection_audit(self, ctx: MaintenanceJobExecutionContext) -> None:
         """Persist selection metadata in the workspace maintenance lane."""
-        candidates = list(ctx.payload.get("maintenance_candidates") or [])
+        raw_candidates = ctx.payload.get("maintenance_candidates")
+        candidates = cast(list[object], raw_candidates) if isinstance(raw_candidates, list) else []
         if not candidates:
             return
         ns = WorkspaceNamespaces(ctx.workspace_id)
@@ -166,7 +174,7 @@ class MaintenanceSelectionWorkerMixin:
                 "kogwistar_llm_wiki.maintenance.maintenance_selection",
                 ctx.workspace_id,
                 ctx.job_id,
-                ctx.payload.get("selection_strategy") or "",
+                str(ctx.payload.get("selection_strategy") or ""),
                 json.dumps(candidates, sort_keys=True, separators=(",", ":")),
             )
         )

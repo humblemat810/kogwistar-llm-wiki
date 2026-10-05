@@ -16,7 +16,9 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from math import isnan
-from typing import Any, Literal
+from typing import Literal, Protocol, cast
+
+from kogwistar.engine_core.models import Edge, Node
 
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -26,6 +28,12 @@ from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]*", re.IGNORECASE)
 logger = logging.getLogger(__name__)
 RetrievalMode = Literal["auto", "graph", "semantic", "flat"]
+GraphEntity = Node | Edge
+
+
+class _ScoredNode(Protocol):
+    node: Node
+    similarity: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +156,7 @@ class SemanticLensSnapshot:
     flat_hits: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return _jsonable(asdict(self))
+        return cast(dict[str, object], _jsonable(asdict(self)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +170,7 @@ class InvestigationOutcome:
     insufficiency_reason: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return _jsonable(asdict(self))
+        return cast(dict[str, object], _jsonable(asdict(self)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,13 +190,13 @@ def validate_edit_proposal(
         return ProposalValidation(False, True, "stale_lens_id")
     if proposal.get("source_watermark") != snapshot.source_watermark:
         return ProposalValidation(False, True, "stale_source_watermark")
-    target_ids = tuple(str(value) for value in (proposal.get("target_ids") or ()))
+    target_ids = _string_ids(proposal.get("target_ids"))
     visible_ids = {node.id for node in snapshot.nodes}
     visible_ids.update(edge.id for edge in (*snapshot.edges, *snapshot.hyperedges))
     missing = [node_id for node_id in target_ids if node_id not in visible_ids]
     if missing:
         return ProposalValidation(False, True, "target_not_in_scoped_lens")
-    evidence_ids = tuple(str(value) for value in (proposal.get("evidence_ids") or ()))
+    evidence_ids = _string_ids(proposal.get("evidence_ids"))
     if not evidence_ids and proposal.get("operation") not in {None, "no_change"}:
         return ProposalValidation(False, True, "grounding_evidence_required")
     missing_evidence = [entity_id for entity_id in evidence_ids if entity_id not in visible_ids]
@@ -241,7 +249,7 @@ class SemanticLensService:
                 all_flat_hits = tuple(
                     hit
                     for hit in all_flat_hits
-                    if (hit.get("source_evidence") or {}).get("status") == "verified"
+                    if _verified_source_evidence(hit)
                 )
             flat_hits = all_flat_hits[: request.max_nodes]
             if request.source_evidence_required and not flat_hits and vector_results:
@@ -427,7 +435,11 @@ class SemanticLensService:
             except (AttributeError, NotImplementedError, TypeError, ValueError, RuntimeError) as exc:
                 reasons.append(f"{graph_space}: {exc}")
                 continue
-            for hit in scored:
+            scored_items = cast(
+                Sequence[tuple[Node, float | None] | _ScoredNode],
+                scored,
+            )
+            for hit in scored_items:
                 if isinstance(hit, tuple):
                     node, score = hit
                 else:
@@ -474,7 +486,7 @@ class SemanticLensService:
 
     def _flat_hit(
         self,
-        node: Any,
+        node: Node,
         graph_space: str,
         namespace: str,
         score: float | None,
@@ -490,7 +502,7 @@ class SemanticLensService:
 
     def _source_evidence(
         self,
-        node: Any,
+        node: Node,
         graph_space: str,
         namespace: str,
         *,
@@ -566,8 +578,8 @@ class SemanticLensService:
             )
         content = str(getattr(document, "content", "") or "")
         try:
-            start = int(pointer.get("start_char", 0))
-            end = int(pointer.get("end_char", 0))
+            start = _as_int(pointer.get("start_char", 0))
+            end = _as_int(pointer.get("end_char", 0))
         except (TypeError, ValueError):
             result["status"] = "invalid_source_locator"
             return result
@@ -729,7 +741,7 @@ def _lens_node(result: GraphSpaceQueryResult) -> LensNode:
     )
 
 
-def _lens_edge(edge: Any, graph_space: str, namespace: str) -> LensEdge:
+def _lens_edge(edge: Edge, graph_space: str, namespace: str) -> LensEdge:
     payload = _model_dump(edge)
     return LensEdge(
         id=str(getattr(edge, "id", "") or ""),
@@ -745,7 +757,7 @@ def _lens_edge(edge: Any, graph_space: str, namespace: str) -> LensEdge:
     )
 
 
-def _grounding(node: Any) -> tuple[dict[str, object], ...]:
+def _grounding(node: GraphEntity) -> tuple[dict[str, object], ...]:
     refs: list[dict[str, object]] = []
     for mention in getattr(node, "mentions", None) or ():
         for span in getattr(mention, "spans", None) or ():
@@ -777,7 +789,7 @@ def _participations(edge: LensEdge) -> Iterable[LensParticipation]:
     yield from (LensParticipation(edge.id, node_id, "target") for node_id in edge.target_ids)
 
 
-def _node_id(node: Any) -> str:
+def _node_id(node: GraphEntity) -> str:
     return str(getattr(node, "id", "") or "")
 
 
@@ -811,7 +823,7 @@ def _effective_retrieval_mode(request: SemanticLensRequest) -> str:
 
 
 def _flat_hit(
-    node: Any,
+    node: Node,
     graph_space: str,
     namespace: str,
     score: float | None,
@@ -829,27 +841,44 @@ def _flat_hit(
     }
 
 
-def _model_dump(value: Any) -> dict[str, object]:
+def _model_dump(value: object) -> dict[str, object]:
     dump = getattr(value, "model_dump", None)
     if callable(dump):
         try:
             # Kogwistar models expose ``dump_format`` while plain Pydantic
             # models expose ``mode``.  Keep this compatibility at the app
             # boundary rather than changing either model implementation.
-            return _jsonable(dump(dump_format="json"))
+            return cast(dict[str, object], _jsonable(dump(dump_format="json")))
         except TypeError:
-            return _jsonable(dump(mode="json"))
-    return _jsonable(dict(getattr(value, "__dict__", {}) or {}))
+            return cast(dict[str, object], _jsonable(dump(mode="json")))
+    return cast(dict[str, object], _jsonable(dict(getattr(value, "__dict__", {}) or {})))
 
 
-def _jsonable(value: Any) -> Any:
+def _jsonable(value: object) -> object:
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [_jsonable(item) for item in value]
     if hasattr(value, "value") and not isinstance(value, (str, bytes)):
-        return _jsonable(value.value)
+        return _jsonable(cast(object, getattr(value, "value")))
     return value
+
+
+def _as_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise TypeError("expected an integer-compatible value")
+    return int(value)
+
+
+def _string_ids(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return ()
+    return tuple(str(item) for item in value)
+
+
+def _verified_source_evidence(hit: Mapping[str, object]) -> bool:
+    evidence = hit.get("source_evidence")
+    return isinstance(evidence, Mapping) and evidence.get("status") == "verified"
 
 
 def _stable_json(value: object) -> str:

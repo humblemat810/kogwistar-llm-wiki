@@ -10,21 +10,36 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
+from typing import Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 
 try:
     from opentelemetry import trace
-    from opentelemetry.trace import Span, Tracer
 except ModuleNotFoundError:  # pragma: no cover - exercised by minimal installs
     trace = None  # type: ignore[assignment]
-    Span = object  # type: ignore[assignment,misc]
-    Tracer = object  # type: ignore[assignment,misc]
 
 
 _provider_lock = threading.Lock()
 _provider_configured = False
 _runtime_enabled: bool | None = None
+
+
+class _OtelSpanLike(Protocol):
+    def record_exception(self, error: BaseException) -> None: ...
+
+    def set_status(self, status: object) -> None: ...
+
+    def add_event(self, name: str, *, attributes: Mapping[str, object]) -> None: ...
+
+
+class _OtelTracerLike(Protocol):
+    def start_as_current_span(
+        self,
+        name: str,
+        *,
+        attributes: Mapping[str, object],
+    ) -> AbstractContextManager[_OtelSpanLike]: ...
 
 
 class LlmWikiTelemetry:
@@ -38,16 +53,16 @@ class LlmWikiTelemetry:
             and self.packages_available
         )
         self.service_name = service_name
-        self._tracer: Tracer | None = None
+        self._tracer: _OtelTracerLike | None = None
         if self.enabled:
             self._tracer = self._configure_tracer(service_name)
 
     @staticmethod
-    def _configure_tracer(service_name: str) -> Tracer | None:
+    def _configure_tracer(service_name: str) -> _OtelTracerLike | None:
         if trace is None:
             return None
         _ensure_tracer_provider(service_name)
-        return trace.get_tracer(service_name)  # type: ignore[union-attr]
+        return cast(_OtelTracerLike, trace.get_tracer(service_name))  # type: ignore[union-attr]
 
     def set_enabled(self, enabled: bool) -> None:
         """Toggle emission for the current process without changing config."""
@@ -55,7 +70,9 @@ class LlmWikiTelemetry:
         _runtime_enabled = bool(enabled)
         self.enabled = _runtime_enabled and self.packages_available
         if self.enabled and trace is not None:
-            self._tracer = self._configure_tracer(self.service_name) or trace.get_tracer(self.service_name)
+            self._tracer = self._configure_tracer(self.service_name) or cast(
+                _OtelTracerLike, trace.get_tracer(self.service_name)
+            )
         else:
             self._tracer = None
 
@@ -64,7 +81,11 @@ class LlmWikiTelemetry:
         return cls(service_name=os.getenv("LLM_WIKI_OTEL_SERVICE_NAME", "kogwistar-llm-wiki"))
 
     @contextmanager
-    def span(self, name: str, attributes: Mapping[str, object] | None = None) -> Iterator[Span | None]:
+    def span(
+        self,
+        name: str,
+        attributes: Mapping[str, object] | None = None,
+    ) -> Iterator[_OtelSpanLike | None]:
         # Facades are constructed by several application components. Consult
         # the process-wide switch here so a settings toggle also affects
         # instances that were created before the toggle.
@@ -81,7 +102,7 @@ class LlmWikiTelemetry:
         with self._tracer.start_as_current_span(name, attributes=dict(attributes or {})) as current:
             yield current
 
-    def record_exception(self, span: Span | None, error: BaseException) -> None:
+    def record_exception(self, span: _OtelSpanLike | None, error: BaseException) -> None:
         if span is not None:
             span.record_exception(error)
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(error)))  # type: ignore[union-attr]
@@ -128,12 +149,18 @@ def _ensure_tracer_provider(service_name: str) -> None:
             return
         try:
             from opentelemetry import trace as trace_api
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # pyright: ignore[reportMissingImports]
                 OTLPSpanExporter,
             )
-            from opentelemetry.sdk.resources import Resource
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            from opentelemetry.sdk.resources import (
+                Resource,  # pyright: ignore[reportMissingImports]
+            )
+            from opentelemetry.sdk.trace import (
+                TracerProvider,  # pyright: ignore[reportMissingImports]
+            )
+            from opentelemetry.sdk.trace.export import (
+                BatchSpanProcessor,  # pyright: ignore[reportMissingImports]
+            )
 
             provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
             endpoint = _trace_exporter_endpoint()

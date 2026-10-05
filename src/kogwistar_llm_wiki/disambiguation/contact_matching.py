@@ -10,10 +10,10 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from difflib import SequenceMatcher
 from itertools import combinations, islice
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -130,7 +130,10 @@ class ContactIdentityObservation(BaseModel):
         return self
 
 
-AuthorizeContactStream = Callable[[str, str], bool]
+class AuthorizeContactStream(Protocol):
+    """Authorize reading one contact source stream in a workspace."""
+
+    def __call__(self, workspace_id: str, stream_id: str, /) -> bool: ...
 
 
 def discover_contact_match_candidates(
@@ -383,6 +386,9 @@ def _make_candidate(
         answer_risk = 0.52
         summary = "Names are similar across source observations; no shared contact point was found."
 
+    left_document_count = left.source_document_count or len(left.source_document_ids)
+    right_document_count = right.source_document_count or len(right.source_document_ids)
+
     return DisambiguationCandidate(
         artifact_id=f"contact-match:{candidate_digest}",
         workspace_id=left.workspace_id,
@@ -398,7 +404,7 @@ def _make_candidate(
             merge_likelihood=likelihood,
             distinction_pressure=0.25 if basis == "shared_contact_point" else 0.55,
             review_priority=priority,
-            usage_frequency=left.source_document_count + right.source_document_count,
+            usage_frequency=left_document_count + right_document_count,
             answer_risk=answer_risk,
         ),
         metadata={
@@ -411,11 +417,11 @@ def _make_candidate(
             "name_similarity": round(similarity, 4),
             "contact_point_verification": verification,
             "source_document_observation_count": (
-                left.source_document_count + right.source_document_count
+                left_document_count + right_document_count
             ),
             "source_document_sampled": (
-                len(left.source_document_ids) < left.source_document_count
-                or len(right.source_document_ids) < right.source_document_count
+                len(left.source_document_ids) < left_document_count
+                or len(right.source_document_ids) < right_document_count
             ),
             "automatic_merge": False,
         },

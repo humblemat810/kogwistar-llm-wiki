@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 LaunchMode = Literal["standalone", "memory", "host", "host-memory"]
 StackMode = Literal["split", "combined"]
@@ -365,7 +365,7 @@ def build_plan(
             LaunchStep(
                 "start the CA-aware Codex Compose launcher",
                 _compose_launcher(
-                    mode,
+                    cast(Literal["standalone", "memory"], mode),
                     build=build,
                     login=login,
                     project=project,

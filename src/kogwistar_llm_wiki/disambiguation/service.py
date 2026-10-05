@@ -7,7 +7,7 @@ the disambiguation domain package.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -18,6 +18,7 @@ from ..configuration.workspace import WorkspaceNamespaces
 from ..maintenance.maintenance_patches import MaintenancePatch
 from ..models import NamespaceEngines
 from ..utils import _temporary_namespace
+from .contact_matching import AuthorizeContactStream
 from .disambiguation_contracts import (
     DisambiguationCandidate,
     DisambiguationDecisionKind,
@@ -58,7 +59,7 @@ class DisambiguationService:
         self,
         candidates: Iterable[DisambiguationCandidate],
         *,
-        authorize_stream: Callable[[str, str], bool],
+        authorize_stream: AuthorizeContactStream,
     ) -> tuple[str, ...]:
         """Persist immutable contact-match snapshots in conversation graph.
 
@@ -117,6 +118,11 @@ class DisambiguationService:
                         type="entity",
                         doc_id=node_id,
                         summary=candidate.question,
+                        domain_id=None,
+                        canonical_entity_id=None,
+                        properties=None,
+                        embedding=None,
+                        level_from_root=None,
                         mentions=[Grounding(spans=[_decision_span(candidate)])],
                         metadata={
                             "workspace_id": candidate.workspace_id,
@@ -137,7 +143,7 @@ class DisambiguationService:
         self,
         *,
         workspace_id: str,
-        authorize_stream: Callable[[str, str], bool],
+        authorize_stream: AuthorizeContactStream,
         limit: int = 200,
     ) -> tuple[DisambiguationCandidate, ...]:
         """Read bounded immutable snapshots, hiding any with denied sources.
@@ -205,7 +211,7 @@ class DisambiguationService:
         self,
         *,
         workspace_id: str,
-        authorize_stream: Callable[[str, str], bool],
+        authorize_stream: AuthorizeContactStream,
         limit: int = 200,
     ) -> tuple[DisambiguationCandidate, ...]:
         """Return latest evidence snapshots with their latest persisted decision.
@@ -279,7 +285,7 @@ class DisambiguationService:
                             "conflicting contact decisions share one evidence version"
                         )
                     if prior is None or (version, node.id) > (prior[0], prior[1]):
-                        decisions_by_key[key] = (version, node.id, reconciled)
+                        decisions_by_key[key] = (version, str(node.id), reconciled)
 
         current_candidates = [
             decisions_by_key[key][2] if key in decisions_by_key else candidate
@@ -379,7 +385,7 @@ class DisambiguationService:
                 stable_id(
                     "disambiguation_answer_run",
                     candidate.artifact_id,
-                    int(update.evidence_version),
+                    str(update.evidence_version),
                     answer_source,
                 )
             ),
@@ -424,7 +430,7 @@ class DisambiguationService:
             stable_id(
                 "disambiguation_decision_node",
                 candidate.artifact_id,
-                int(update.evidence_version),
+                str(update.evidence_version),
                 answer_source,
                 reconciliation.status.value,
                 reconciliation.semantic_decision.value,
@@ -514,6 +520,11 @@ class DisambiguationService:
             type="entity",
             doc_id=node_id,
             summary=summary,
+            domain_id=None,
+            canonical_entity_id=None,
+            properties=None,
+            embedding=None,
+            level_from_root=None,
             mentions=[Grounding(spans=[span])],
             metadata=metadata,
         )
@@ -547,6 +558,7 @@ def _decision_span(candidate: DisambiguationCandidate) -> Span:
         context_before="",
         context_after="",
         chunk_id=None,
+        verification=None,
         source_cluster_id=None,
     )
 

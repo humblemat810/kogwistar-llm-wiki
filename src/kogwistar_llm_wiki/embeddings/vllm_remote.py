@@ -15,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -33,13 +32,15 @@ from .multimodal_projection import (
 from .multimodal_remote import (
     EmbeddingProtocolError,
     EmbeddingServiceUnavailable,
+    UrlOpener,
     _asset_bytes,
 )
 
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-fA-F]{64}$")
 DEFAULT_VLLM_MODEL = "pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm"
+OVIS_BNB4_VLLM_MODEL = "pt810/Ovis-Omni-Embedding-3B-bnb-4bit-vllm"
 LEGACY_VLLM_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
-SUPPORTED_VLLM_MODELS = (DEFAULT_VLLM_MODEL, LEGACY_VLLM_MODEL)
+SUPPORTED_VLLM_MODELS = (DEFAULT_VLLM_MODEL, OVIS_BNB4_VLLM_MODEL, LEGACY_VLLM_MODEL)
 DEFAULT_VLLM_DIMENSION = 1024
 MIN_VLLM_DIMENSION = 64
 MAX_VLLM_DIMENSION = 2048
@@ -49,7 +50,7 @@ DEFAULT_VLLM_CROP_TOKEN_BUDGET = 7680
 
 def _model_family(model: str) -> str:
     """Keep profile fingerprints explicit when serving different model families."""
-    if model == DEFAULT_VLLM_MODEL:
+    if model.startswith("pt810/Ovis-Omni-Embedding-3B-"):
         return "ovis-omni"
     return "qwen3-vl"
 
@@ -186,7 +187,7 @@ def _content_parts(
 class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
     """Call vLLM's Qwen3-VL Chat Embeddings API without local inference."""
 
-    def __init__(self, settings: VllmEmbeddingSettings, *, opener: Any = urlopen) -> None:
+    def __init__(self, settings: VllmEmbeddingSettings, *, opener: UrlOpener = urlopen) -> None:
         self.settings = settings
         self._profile = settings.profile
         self._opener = opener
@@ -299,7 +300,9 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             return result
         text_part = content[text_index]
         if isinstance(text_part, Mapping):
-            text_part["text"] = str(text_part.get("text", ""))[:prefix_length]
+            mutable_part = dict(text_part)
+            mutable_part["text"] = str(text_part.get("text", ""))[:prefix_length]
+            content[text_index] = mutable_part
         return result
 
     def _bounded_messages(self, messages: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -307,9 +310,10 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
         if count <= self.settings.crop_token_budget:
             return messages
         content = messages[1].get("content")
+        content_parts = content if isinstance(content, list) else []
         text_indexes = [
             index
-            for index, part in enumerate(content if isinstance(content, list) else [])
+            for index, part in enumerate(content_parts)
             if isinstance(part, Mapping) and part.get("type") == "text"
         ]
         if not text_indexes:
@@ -318,7 +322,7 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
                 "reduce image size or increase the context limit"
             )
         text_index = text_indexes[-1]
-        text_part = content[text_index]
+        text_part = content_parts[text_index]
         original = str(text_part.get("text", "")) if isinstance(text_part, Mapping) else ""
         low, high = 0, len(original)
         best: list[dict[str, object]] | None = None
@@ -342,19 +346,16 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             "encoding_format": "float",
             "dimensions": self.profile.dimension,
         }
-        if self.settings.model == DEFAULT_VLLM_MODEL:
-            # Ovis uses vLLM's pooling embeddings contract, whose multimodal
-            # input is a single OpenAI-style user message.
+        # The OpenAI-compatible pooling endpoint accepts the model input as
+        # ``input``.  Sending Chat Completions-only ``messages`` here makes
+        # current vLLM reject Qwen3-VL with HTTP 400 even though the same
+        # server is healthy and accepts a normal embeddings request. Ovis'
+        # validated pooling adapter uses one user message; Qwen keeps the
+        # full instruction-bearing chat sequence under ``input``.
+        if _model_family(self.settings.model) == "ovis-omni":
             payload["input"] = [messages[1]]
         else:
-            payload.update(
-                {
-                    "messages": messages,
-                    "continue_final_message": True,
-                    "add_generation_prompt": False,
-                    "add_special_tokens": True,
-                }
-            )
+            payload["input"] = messages
         result = self._post_json("/v1/embeddings", payload)
         if result.get("model") != self.settings.model:
             raise EmbeddingProtocolError("vLLM returned an unexpected model identity")
@@ -457,6 +458,7 @@ __all__ = [
     "LEGACY_VLLM_MODEL",
     "MAX_VLLM_DIMENSION",
     "MIN_VLLM_DIMENSION",
+    "OVIS_BNB4_VLLM_MODEL",
     "SUPPORTED_VLLM_MODELS",
     "VllmEmbeddingSettings",
     "VllmMultimodalEncoder",

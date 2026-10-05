@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from threading import Lock
-from typing import Any
+from typing import cast
 
+from kg_doc_parser.llm_structured_output import StructuredOutputModel
 from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
     WorkflowProviderSettings,
     build_chat_model,
 )
@@ -148,7 +150,7 @@ def build_observation_critic(
     observation frame and returns bounded recommendations.
     """
 
-    model: Any | None = None
+    model: StructuredOutputModel | None = None
     model_lock = Lock()
 
     def critique(frame_value: object, _context: object) -> dict[str, object]:
@@ -162,7 +164,10 @@ def build_observation_critic(
                 provider_spec = provider_settings.parser
                 copy_with = getattr(provider_spec, "model_copy", None)
                 if callable(copy_with):
-                    provider_spec = copy_with(update={"max_retries": 0})
+                    provider_spec = cast(
+                        ProviderEndpointConfig,
+                        copy_with(update={"max_retries": 0}),
+                    )
                 model = build_chat_model(provider_spec)
         messages = [
             (

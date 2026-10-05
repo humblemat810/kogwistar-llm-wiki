@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
@@ -17,6 +17,7 @@ from kg_doc_parser.workflow_ingest.providers import (
     build_embedding_function,
 )
 from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core.embedding_profile import EmbeddingProfile
 from kogwistar.engine_core.models import (  # noqa: F401 - compatibility model seam
     Node,
     Span,
@@ -105,8 +106,8 @@ def _metadata_list_value(items: list[str] | None) -> list[str] | None:
 
 
 def _resolve_embedding_function(
-    *args: object,
-    **kwargs: object,
+    *args: Any,
+    **kwargs: Any,
 ) -> tuple[EmbeddingFunctionLike, EmbeddingProviderConfig]:
     """Preserve the historical monkeypatch seam for provider-free tests."""
 
@@ -118,7 +119,7 @@ def _resolve_embedding_function(
 
 
 def _resolve_embedding_functions(
-    **kwargs: object,
+    **kwargs: Any,
 ) -> tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]:
     """Preserve provider-factory injection for all graph-space embeddings."""
 
@@ -136,7 +137,7 @@ def _build_postgres_engine(
     dsn: str,
     embedding_dim: int,
     schema: str,
-    embedding_profile: object | None = None,
+    embedding_profile: EmbeddingProfile | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
 ) -> GraphKnowledgeEngine:

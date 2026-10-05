@@ -7,17 +7,30 @@ import os
 import threading
 import time
 import traceback
-from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol, cast
 
-from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+from kg_doc_parser.workflow_ingest.page_index import (
+    PageIndexMode,
+    PageIndexParseResult,
+    PageIndexSourceFormat,
+    parse_page_index_document,
+)
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
-from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
+from kogwistar.runtime.budget import (
+    BudgetEvent,
+    StateBackedBudgetLedger,
+    budget_event_to_dict,
+)
 
 from ..diagnostics.debug_helpers import LiveTracePrinter, env_flag_enabled
+from ..parsing.layered_workflow import LayeredParseResult
 from ..parsing.longrun_support import append_trace_line as _append_trace_line
 from ..parsing.longrun_support import dump_model as _dump_model
 from ..parsing.longrun_support import now_ms as _now_ms
+from ..parsing.longrun_support import object_mapping as _object_mapping
+from ..parsing.longrun_support import payload_int as _payload_int
+from ..parsing.longrun_support import payload_path as _payload_path
 from ..parsing.longrun_support import write_json_file as _write_json_file
 from ..parsing.parse_quality import (
     basic_sense_eval_from_graph_payload as _basic_sense_eval_from_graph_payload,
@@ -29,19 +42,36 @@ from ..usage.provider import (
 )
 
 
+class WorkflowParser(Protocol):
+    """Typed parser boundary used by the isolated long-run child."""
+
+    def __call__(self, **kwargs: object) -> LayeredParseResult: ...
+
+
+class BudgetSummaryBuilder(Protocol):
+    """Summarize serialized budget events for the child-process result."""
+
+    def __call__(
+        self,
+        events: list[BudgetEvent],
+        *,
+        provider_settings: WorkflowProviderSettings,
+    ) -> dict[str, object]: ...
+
+
 def run_longrun_parser_child(
     payload: dict[str, object],
     *,
-    workflow_parser: Callable[..., object],
-    summarize_budget_events: Callable[..., dict[str, object]],
+    workflow_parser: WorkflowParser,
+    summarize_budget_events: BudgetSummaryBuilder,
 ) -> None:
-    heartbeat_path = Path(payload["heartbeat_path"])
-    result_path = Path(payload["result_path"])
-    failure_path = Path(payload["failure_path"])
+    heartbeat_path = _payload_path(payload, "heartbeat_path")
+    result_path = _payload_path(payload, "result_path")
+    failure_path = _payload_path(payload, "failure_path")
     failure_payload_path = Path(
         str(payload.get("failure_payload_path") or failure_path.with_name("failure_payload.json"))
     )
-    trace_path = Path(payload["trace_path"])
+    trace_path = _payload_path(payload, "trace_path")
     dump_trace_path = Path(str(payload["dump_trace_path"])) if payload.get("dump_trace_path") else None
     live_trace = bool(payload.get("live_trace")) or env_flag_enabled(
         "KOGWISTAR_LONGRUN_LIVE_TRACE",
@@ -109,7 +139,7 @@ def run_longrun_parser_child(
         _trace("child_loading_provider_settings")
         provider_settings = WorkflowProviderSettings.model_validate(payload["provider_settings"])
         budget_state = {
-            "token_budget": int(payload.get("token_budget") or 10_000_000),
+            "token_budget": _payload_int(payload, "token_budget", default=10_000_000),
             "budget_scope": "run",
             "budget_kind": "token",
         }
@@ -117,18 +147,19 @@ def run_longrun_parser_child(
         usage_summary = summarize_budget_events([], provider_settings=provider_settings)
         parser_lane = str(payload["parser_lane"])
         source_document_id = str(payload["source_document_id"])
+        layered_result: LayeredParseResult | None = None
         _trace(f"child_lane_selected lane={parser_lane} source_document_id={source_document_id}")
         _heartbeat("started")
         if parser_lane == "page_index":
             _trace("child_before_page_index_parse")
             _heartbeat("page_index_parse_start")
             _trace("child_page_index_parse_call_start")
-            result = parse_page_index_document(
+            page_index_result: PageIndexParseResult = parse_page_index_document(
                 document_id=source_document_id,
                 title=str(payload["title"]),
                 raw_text=str(payload["raw_text"]),
-                source_format=str(payload["source_format"]),
-                mode=str(payload["parser_mode"]),
+                source_format=cast(PageIndexSourceFormat, str(payload["source_format"])),
+                mode=cast(PageIndexMode, str(payload["parser_mode"])),
                 provider_settings=provider_settings,
                 callbacks=[
                     ProviderUsageCallback(
@@ -152,19 +183,24 @@ def run_longrun_parser_child(
 
             _trace("child_page_index_graph_payload_start")
             graph_payload = semantic_tree_to_kge_payload(
-                result.semantic_tree,
+                page_index_result.semantic_tree,
                 doc_id=source_document_id,
             )
             _trace("child_page_index_graph_payload_done")
-            title = str(getattr(result.semantic_tree, "title", payload["title"]))
+            title = str(getattr(page_index_result.semantic_tree, "title", payload["title"]))
             evaluation = _basic_sense_eval_from_graph_payload(
                 graph_payload=graph_payload,
-                diagnostics={"parser_lane": "page_index", "page_index": _dump_model(result.diagnostics)},
+                diagnostics={
+                    "parser_lane": "page_index",
+                    "page_index": _dump_model(page_index_result.diagnostics),
+                },
             )
-            page_index_diag = dict(_dump_model(result.diagnostics) or {})
+            page_index_diag = _object_mapping(_dump_model(page_index_result.diagnostics))
             evaluation.update(
                 {
-                    "assignment_attempt_count": int(page_index_diag.get("assignment_attempt_count") or 0),
+                    "assignment_attempt_count": _payload_int(
+                        page_index_diag, "assignment_attempt_count", default=0
+                    ),
                     "assignment_retry_used": bool(page_index_diag.get("assignment_retry_used")),
                     "assignment_retry_succeeded": bool(page_index_diag.get("assignment_retry_succeeded")),
                     "structure_retry_used": bool(page_index_diag.get("structure_retry_used")),
@@ -177,14 +213,14 @@ def run_longrun_parser_child(
             )
             diagnostics = {
                 "parser_lane": "page_index",
-                "page_index": _dump_model(result.diagnostics),
+                "page_index": _dump_model(page_index_result.diagnostics),
             }
         elif parser_lane == "workflow_layered":
-            engine_dir = Path(payload["parser_run_dir"]) / "workflow_engines"
+            engine_dir = _payload_path(payload, "parser_run_dir") / "workflow_engines"
             _trace(f"child_building_workflow_engines dir={engine_dir}")
             _trace("child_before_workflow_layered_parse")
             _heartbeat("workflow_layered_parse_start")
-            result = workflow_parser(
+            layered_result = workflow_parser(
                 source_document_id=source_document_id,
                 title=str(payload["title"]),
                 raw_text=str(payload["raw_text"]),
@@ -207,10 +243,10 @@ def run_longrun_parser_child(
             _trace("child_workflow_layered_parse_call_returned")
             _heartbeat("workflow_layered_parse_complete")
             title = str(payload["title"])
-            graph_payload = result.graph_payload
-            evaluation = result.evaluation
-            usage_summary = result.usage_summary
-            diagnostics = dict(result.diagnostics)
+            graph_payload = layered_result.graph_payload
+            evaluation = layered_result.evaluation
+            usage_summary = layered_result.usage_summary
+            diagnostics = dict(layered_result.diagnostics)
         else:
             raise ValueError(f"unsupported long-run parser lane: {parser_lane!r}")
         if parser_lane == "page_index":
@@ -237,21 +273,23 @@ def run_longrun_parser_child(
                 "usage_events": (
                     [budget_event_to_dict(event) for event in budget_ledger.events]
                     if parser_lane == "page_index"
-                    else list(getattr(result, "usage_events", []) or [])
+                    else list(layered_result.usage_events if layered_result is not None else [])
                 ),
                 "diagnostics": diagnostics,
                 "workflow_status": workflow_status or None,
-                "layer_log": getattr(result, "layer_log", None) if parser_lane == "workflow_layered" else None,
+                "layer_log": layered_result.layer_log if layered_result is not None else None,
             },
         )
         _heartbeat("result_written", result_path=str(result_path))
-        if parser_lane == "workflow_layered" and getattr(result, "layer_log", None):
-            _write_json_file(result_path.with_name("parser_layer_log.json"), list(result.layer_log))
+        if layered_result is not None and layered_result.layer_log:
+            _write_json_file(result_path.with_name("parser_layer_log.json"), layered_result.layer_log)
+        node_value = graph_payload.get("nodes")
+        edge_value = graph_payload.get("edges")
         _heartbeat(
             "completed",
             result_path=str(result_path),
-            node_count=len(graph_payload.get("nodes", [])),
-            edge_count=len(graph_payload.get("edges", [])),
+            node_count=len(node_value) if isinstance(node_value, list) else 0,
+            edge_count=len(edge_value) if isinstance(edge_value, list) else 0,
         )
         _trace("child_completed")
     except BaseException as exc:

@@ -188,7 +188,10 @@ class ProjectionSnapshotMixin:
             if (
                 manifest_ids is None
                 and node_space == GraphSpace.CURATED_KG.value
-                and not self.policies.projection.is_projection_eligible(dict(getattr(node, "metadata", None) or {}))
+                and self.policies.projection is not None
+                and not self.policies.projection.is_projection_eligible(
+                    dict(getattr(node, "metadata", None) or {})
+                )
             ):
                 continue
             selected.append(node)

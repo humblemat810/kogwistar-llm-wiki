@@ -5,18 +5,36 @@ import json
 import tarfile
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 from kogwistar.engine_core.event_envelope import EntityEventEnvelope
 
 from .archive_contracts import READABLE_ARCHIVE_FORMATS, ArchiveError
 
 
-def event_reader(meta: Any) -> Any:
+class EventReaderLike(Protocol):
+    """Lossless metadata event reader required by archive export/restore."""
+
+    def __call__(
+        self,
+        *,
+        namespace: str,
+        from_seq: int,
+        to_seq: int | None,
+    ) -> Iterator[EntityEventEnvelope]: ...
+
+
+class EventWriterLike(Protocol):
+    """Lossless metadata event writer required by archive restore."""
+
+    def __call__(self, event: EntityEventEnvelope) -> int: ...
+
+
+def event_reader(meta: object) -> EventReaderLike:
     reader = getattr(meta, "iter_entity_event_envelopes", None)
     if not callable(reader):
         raise ArchiveError(f"metadata store {type(meta).__name__} lacks lossless event-envelope iteration")
-    return reader
+    return cast(EventReaderLike, reader)
 
 
 def canonical_event_line(event: EntityEventEnvelope) -> bytes:

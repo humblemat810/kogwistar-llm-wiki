@@ -428,6 +428,11 @@ def _memory_node(record: MemoryRecord, memory_id: str) -> Node:
         label=f"Codex memory: {record.kind}",
         type="entity",
         summary=record.statement,
+        domain_id=record.workspace_id,
+        canonical_entity_id=memory_id,
+        properties={},
+        embedding=None,
+        level_from_root=0,
         doc_id=f"_conv:{memory_id}",
         mentions=[Grounding(spans=[span])],
         metadata={
@@ -469,6 +474,11 @@ def _evidence_node(record: MemoryRecord, evidence: MemoryEvidence, evidence_id: 
         label=f"Codex evidence: {evidence.kind}",
         type="entity",
         summary=excerpt[:10_000],
+        domain_id=record.workspace_id,
+        canonical_entity_id=evidence_id,
+        properties={},
+        embedding=None,
+        level_from_root=0,
         doc_id=f"_conv:{evidence_id}",
         mentions=[Grounding(spans=[span])],
         metadata={
@@ -489,6 +499,10 @@ def _support_edge(record: MemoryRecord, memory_id: str, evidence: Sequence[Memor
         label="Codex memory support",
         type="relationship",
         summary=f"{memory_id} is supported by {len(evidence_ids)} evidence references",
+        domain_id=record.workspace_id,
+        canonical_entity_id=edge_id,
+        properties={},
+        embedding=None,
         doc_id=f"_conv:{memory_id}",
         source_ids=[memory_id],
         target_ids=evidence_ids,
@@ -519,6 +533,10 @@ def _memory_relation_edge(
         label=f"Codex memory {relation}",
         type="relationship",
         summary=f"{memory_id} {relation} {target_id}",
+        domain_id=record.workspace_id,
+        canonical_entity_id=edge_id,
+        properties={},
+        embedding=None,
         doc_id=f"_conv:{memory_id}",
         source_ids=[memory_id],
         target_ids=[target_id],
@@ -542,9 +560,12 @@ def _env_truthy(name: str) -> bool:
 
 
 def _bounded_int(value: object, *, default: int, upper: int) -> int:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
+    if isinstance(value, (int, float, str)):
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            number = default
+    else:
         number = default
     return max(1, min(number, upper))
 
@@ -559,9 +580,9 @@ __all__ = [
     "CodexMemoryError",
     "CodexMemoryRecord",
     "CodexMemoryService",
-    "MemoryValidationError",
-    "MemoryRecord",
-    "MemoryService",
     "MemoryDisabledError",
     "MemoryEvidence",
+    "MemoryRecord",
+    "MemoryService",
+    "MemoryValidationError",
 ]

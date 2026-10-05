@@ -45,6 +45,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM ${PYTHON_IMAGE} AS runtime
 
 ARG LLM_WIKI_EMBEDDING_TORCH_BACKEND=cpu
+LABEL org.opencontainers.image.title="LLM-Wiki Qwen3-VL Embedding-2B service" \
+      org.opencontainers.image.description="Standalone Qwen3-VL Embedding-2B multimodal representation service" \
+      org.opencontainers.image.model="Qwen/Qwen3-VL-Embedding-2B"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     LLM_WIKI_EMBEDDING_TORCH_BACKEND=${LLM_WIKI_EMBEDDING_TORCH_BACKEND} \

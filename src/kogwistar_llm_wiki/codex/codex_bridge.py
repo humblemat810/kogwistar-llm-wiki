@@ -9,7 +9,7 @@ import os
 import threading
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Literal, cast
 
 from .codex_workbench_agent import CodexCliSettings, CodexProcessRunner
 
@@ -19,6 +19,14 @@ _MAX_BODY_BYTES = 256 * 1024
 _MAX_MESSAGES = 64
 _MAX_MESSAGE_CHARS = 120_000
 _MAX_SCHEMA_CHARS = 64_000
+
+
+def _codex_transport(value: object) -> Literal["exec", "app_server"]:
+    if value == "exec":
+        return "exec"
+    if value == "app_server":
+        return "app_server"
+    return "exec"
 
 
 class CodexBridgeState:
@@ -93,7 +101,8 @@ def _build_prompt(messages: list[dict[str, str]], schema: dict[str, Any]) -> str
 
 
 class _BridgeHandler(BaseHTTPRequestHandler):
-    server: _BridgeServer
+    def _bridge_server(self) -> _BridgeServer:
+        return cast(_BridgeServer, self.server)
 
     def do_GET(self) -> None:
         if self.path != "/healthz":
@@ -105,7 +114,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if self.path != "/v1/structured":
             self._send(404, {"error": "not_found"})
             return
-        expected = f"Bearer {self.server.state.token}"
+        expected = f"Bearer {self._bridge_server().state.token}"
         supplied = self.headers.get("Authorization", "")
         if not hmac.compare_digest(supplied, expected):
             self._send(401, {"error": "unauthorized"})
@@ -117,7 +126,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(payload, dict):
                 raise TypeError("request body must be an object")
-            self._send(200, self.server.state.complete(payload))
+            self._send(200, self._bridge_server().state.complete(payload))
         except TimeoutError as exc:
             self._send(504, {"error": "timeout", "message": str(exc)})
         except (TypeError, ValueError) as exc:
@@ -126,8 +135,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             logger.exception("Codex bridge completion failed")
             self._send(502, {"error": "bridge_failure", "message": str(exc)})
 
-    def log_message(self, fmt: str, *args: object) -> None:
-        logger.info("codex_bridge " + fmt, *args)
+    def log_message(self, format: str, *args: object) -> None:
+        logger.info("codex_bridge " + format, *args)
 
     def _send(self, status: int, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -159,7 +168,9 @@ def bridge_settings_from_environment() -> CodexCliSettings:
         model=os.environ.get("KOGWISTAR_MAINTENANCE_CODEX_MODEL") or None,
         profile=os.environ.get("KOGWISTAR_CODEX_PROFILE") or None,
         timeout_seconds=max(1, int(os.environ.get("KOGWISTAR_MAINTENANCE_CODEX_TIMEOUT_SECONDS", "300"))),
-        transport=os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec"),
+        transport=_codex_transport(
+            os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec")
+        ),
     )
 
 

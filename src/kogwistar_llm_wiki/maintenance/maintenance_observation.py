@@ -319,7 +319,7 @@ def build_observation_frame(
             subject.revision_id or "",
             subject.parse_member_id or "",
             active_view_id or "",
-            active_view_version or 0,
+            str(active_view_version or 0),
             evidence_digest,
         )
     )
@@ -496,7 +496,7 @@ def assess_observation_frame(
                 frame.subject.subject_id,
                 frame.subject.revision_id or "",
                 frame.active_view_id or "",
-                frame.active_view_version or 0,
+                str(frame.active_view_version or 0),
                 verdict,
                 "critic_failed" if critic_failed else "deterministic",
                 str(watermark_epoch),
@@ -542,7 +542,7 @@ def assess_observation_frame(
             frame.subject.subject_id,
             frame.subject.revision_id or "",
             frame.active_view_id or "",
-            frame.active_view_version or 0,
+            str(frame.active_view_version or 0),
             "adequate",
             "deterministic",
             str(watermark_epoch),

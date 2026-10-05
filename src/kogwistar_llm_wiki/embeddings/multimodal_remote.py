@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Protocol, Self
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -41,6 +41,24 @@ class EmbeddingServiceUnavailable(EmbeddingServiceError):
 
 class EmbeddingProtocolError(EmbeddingServiceError):
     """A non-retryable contract, authentication, or profile failure."""
+
+
+class HttpResponseLike(Protocol):
+    """Minimal response surface required by the remote embedding adapters."""
+
+    status: int
+
+    def read(self) -> bytes: ...
+
+    def __enter__(self) -> Self: ...
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None: ...
+
+
+class UrlOpener(Protocol):
+    """Injectable HTTP opener used by production and deterministic tests."""
+
+    def __call__(self, request: Request, *, timeout: float) -> HttpResponseLike: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +141,7 @@ class RemoteMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
         profile: MultimodalEmbeddingProfile,
         settings: EmbeddingServiceSettings,
         *,
-        opener: Any = urlopen,
+        opener: UrlOpener = urlopen,
     ) -> None:
         self._profile = profile
         self.settings = settings

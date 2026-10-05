@@ -5,8 +5,26 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
+from typing import Protocol, runtime_checkable
 
 from ..models import NamespaceEngines
+from .entrypoint_support import EngineBuilder
+
+
+@runtime_checkable
+class EmbeddingProfileReportingEngine(Protocol):
+    """Minimal engine capability required by profile inspection commands."""
+
+    @property
+    def embedding_profile_report(self) -> object:
+        """Return the backend's serializable embedding profile report."""
+
+
+def _profile_report(engine: object) -> object:
+    """Read the optional report capability without widening engine models."""
+    if not isinstance(engine, EmbeddingProfileReportingEngine):
+        raise TypeError("engine does not expose embedding_profile_report")
+    return engine.embedding_profile_report
 
 
 def namespace_engine_items(
@@ -24,7 +42,7 @@ def namespace_engine_items(
 def embeddings_inspect(
     args: argparse.Namespace,
     *,
-    build_engines: Callable[..., NamespaceEngines],
+    build_engines: EngineBuilder,
     close_engines: Callable[[NamespaceEngines], None],
 ) -> None:
     engines = build_engines(
@@ -40,7 +58,7 @@ def embeddings_inspect(
         print(
             json.dumps(
                 {
-                    label: engine.embedding_profile_report
+                    label: _profile_report(engine)
                     for label, engine in namespace_engine_items(engines)
                     if engine is not None
                 },
@@ -55,7 +73,7 @@ def embeddings_inspect(
 def embeddings_adopt_legacy(
     args: argparse.Namespace,
     *,
-    build_engines: Callable[..., NamespaceEngines],
+    build_engines: EngineBuilder,
     close_engines: Callable[[NamespaceEngines], None],
 ) -> None:
     if not args.acknowledge_legacy_vectors:
@@ -76,7 +94,7 @@ def embeddings_adopt_legacy(
         print(
             json.dumps(
                 {
-                    label: engine.embedding_profile_report
+                    label: _profile_report(engine)
                     for label, engine in namespace_engine_items(engines)
                     if engine is not None
                 },

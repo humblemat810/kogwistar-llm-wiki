@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
+from collections.abc import Mapping
 from typing import Literal, cast
 
 TorchBackend = Literal["none", "cpu", "cu126", "cu128"]
@@ -26,7 +27,7 @@ _CUDA_VERSION_BY_BACKEND: dict[TorchBackend, str | None] = {
 }
 
 
-def configured_torch_backend(environ: dict[str, str] | None = None) -> TorchBackend:
+def configured_torch_backend(environ: Mapping[str, str] | None = None) -> TorchBackend:
     """Resolve the explicit runtime target without making Torch a base import."""
     value = (environ if environ is not None else os.environ).get(
         "LLM_WIKI_MULTIMODAL_TORCH_BACKEND", "none"
@@ -40,7 +41,7 @@ def configured_torch_backend(environ: dict[str, str] | None = None) -> TorchBack
 
 
 def configured_multimodal_backend(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> MultimodalBackend:
     """Resolve the opt-in native model family without importing its runtime."""
     value = (environ if environ is not None else os.environ).get(
@@ -54,13 +55,13 @@ def configured_multimodal_backend(
     return cast(MultimodalBackend, value)
 
 
-def configured_multimodal_model(environ: dict[str, str] | None = None) -> str:
+def configured_multimodal_model(environ: Mapping[str, str] | None = None) -> str:
     return (environ if environ is not None else os.environ).get(
         "LLM_WIKI_MULTIMODAL_MODEL", DEFAULT_MULTIMODAL_MODEL
     ).strip() or DEFAULT_MULTIMODAL_MODEL
 
 
-def configured_multimodal_dimension(environ: dict[str, str] | None = None) -> int:
+def configured_multimodal_dimension(environ: Mapping[str, str] | None = None) -> int:
     value = (environ if environ is not None else os.environ).get(
         "LLM_WIKI_MULTIMODAL_DIMENSION", str(DEFAULT_MULTIMODAL_DIMENSION)
     ).strip()
@@ -77,7 +78,7 @@ def configured_multimodal_dimension(environ: dict[str, str] | None = None) -> in
     return dimension
 
 
-def configured_multimodal_revision(environ: dict[str, str] | None = None) -> str | None:
+def configured_multimodal_revision(environ: Mapping[str, str] | None = None) -> str | None:
     value = (environ if environ is not None else os.environ).get(
         "LLM_WIKI_MULTIMODAL_MODEL_REVISION", ""
     ).strip()
@@ -85,7 +86,7 @@ def configured_multimodal_revision(environ: dict[str, str] | None = None) -> str
 
 
 def configured_embedding_service_url(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> str | None:
     values = environ if environ is not None else os.environ
     value = values.get("LLM_WIKI_EMBEDDING_SERVICE_URL", values.get("LLM_WIKI_EMBEDDING_SERVICE_URL", "")).strip()
@@ -93,7 +94,7 @@ def configured_embedding_service_url(
 
 
 def configured_embedding_service_token(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> str | None:
     values = environ if environ is not None else os.environ
     value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TOKEN", values.get("LLM_WIKI_EMBEDDING_SERVICE_TOKEN", "")).strip()
@@ -101,7 +102,7 @@ def configured_embedding_service_token(
 
 
 def configured_embedding_service_timeout(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> float:
     values = environ if environ is not None else os.environ
     value = values.get("LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS", values.get("LLM_WIKI_EMBEDDING_SERVICE_TIMEOUT_SECONDS", "30")).strip()
@@ -117,7 +118,7 @@ def configured_embedding_service_timeout(
 
 
 def configured_embedding_service_max_request_bytes(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> int:
     values = environ if environ is not None else os.environ
     value = values.get("LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES", values.get("LLM_WIKI_EMBEDDING_SERVICE_MAX_REQUEST_BYTES", "5000000")).strip()
@@ -143,26 +144,26 @@ def configured_embedding_service_allowed_hosts(
     )
 
 
-def configured_vllm_url(environ: dict[str, str] | None = None) -> str | None:
+def configured_vllm_url(environ: Mapping[str, str] | None = None) -> str | None:
     values = environ if environ is not None else os.environ
     value = values.get("LLM_WIKI_EMBEDDING_VLLM_URL", "").strip()
     return value or None
 
 
-def configured_vllm_token(environ: dict[str, str] | None = None) -> str | None:
+def configured_vllm_token(environ: Mapping[str, str] | None = None) -> str | None:
     values = environ if environ is not None else os.environ
     value = values.get("LLM_WIKI_EMBEDDING_VLLM_TOKEN", "").strip()
     return value or None
 
 
-def configured_vllm_image(environ: dict[str, str] | None = None) -> str | None:
+def configured_vllm_image(environ: Mapping[str, str] | None = None) -> str | None:
     values = environ if environ is not None else os.environ
     value = values.get("LLM_WIKI_EMBEDDING_VLLM_IMAGE", "").strip()
     return value or None
 
 
 def configured_vllm_allowed_hosts(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     values = environ if environ is not None else os.environ
     return tuple(
@@ -173,7 +174,7 @@ def configured_vllm_allowed_hosts(
 
 
 def _positive_int_env(
-    environ: dict[str, str] | None, name: str, default: int
+    environ: Mapping[str, str] | None, name: str, default: int
 ) -> int:
     values = environ if environ is not None else os.environ
     value = values.get(name, str(default)).strip()
@@ -186,7 +187,7 @@ def _positive_int_env(
     return result
 
 
-def configured_embedding_max_model_len(environ: dict[str, str] | None = None) -> int:
+def configured_embedding_max_model_len(environ: Mapping[str, str] | None = None) -> int:
     value = _positive_int_env(
         environ,
         "LLM_WIKI_EMBEDDING_MAX_MODEL_LEN",
@@ -199,7 +200,7 @@ def configured_embedding_max_model_len(environ: dict[str, str] | None = None) ->
     return value
 
 
-def configured_embedding_crop_token_budget(environ: dict[str, str] | None = None) -> int:
+def configured_embedding_crop_token_budget(environ: Mapping[str, str] | None = None) -> int:
     values = environ if environ is not None else os.environ
     limit = configured_embedding_max_model_len(values)
     raw = values.get("LLM_WIKI_EMBEDDING_CROP_TOKEN_BUDGET")
@@ -217,7 +218,7 @@ def configured_embedding_crop_token_budget(environ: dict[str, str] | None = None
 
 
 def configured_embedding_gpu_memory_utilization(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> float:
     values = environ if environ is not None else os.environ
     raw = values.get("LLM_WIKI_EMBEDDING_GPU_MEMORY_UTILIZATION", "0.86").strip()
@@ -231,7 +232,7 @@ def configured_embedding_gpu_memory_utilization(
 
 
 def configured_embedding_vllm_enforce_eager(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> bool:
     values = environ if environ is not None else os.environ
     return values.get("LLM_WIKI_EMBEDDING_VLLM_ENFORCE_EAGER", "1").strip().lower() in {
@@ -240,7 +241,7 @@ def configured_embedding_vllm_enforce_eager(
 
 
 def configured_embedding_vllm_max_num_seqs(
-    environ: dict[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> int:
     return _positive_int_env(
         environ,

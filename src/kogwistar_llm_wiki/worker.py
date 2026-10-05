@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Mapping
 
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.resolvers import MappingStepResolver
@@ -16,7 +16,7 @@ from .disambiguation.contact_book import (
     ContactScanObservationProvider,
     compose_contact_scan_observation_providers,
 )
-from .disambiguation.contact_matching import ContactIdentityObservation
+from .disambiguation.contact_matching import AuthorizeContactStream
 from .maintenance import (
     MaintenanceJobExecutionContext,
     build_default_maintenance_strategy_registry,
@@ -46,12 +46,19 @@ from .maintenance.worker_observation import MaintenanceObservationWorkerMixin
 from .maintenance.worker_parse import DurableParseMaintenanceWorkerMixin
 from .maintenance.worker_runtime import MaintenanceRuntimeWorkerMixin
 from .maintenance.worker_selection import MaintenanceSelectionWorkerMixin
+from .maintenance.maintenance_strategies import (
+    ContactObservationProvider as MaintenanceContactObservationProvider,
+    CrosslinkCritic,
+    CrosslinkProposer,
+    LayeredMaintenanceParser,
+    MaintenanceContextLimitSink,
+    MaintenanceDocumentParser,
+    MaintenanceObservationCritic,
+    MaintenanceTraceSink,
+    MaintenanceUsageSink,
+)
 from .models import NamespaceEngines
 from .otel import LlmWikiTelemetry
-from .parsing.parse_views import (
-    ParseFrontierItem,
-    ParseSessionState,
-)
 from .policies.rules import LlmWikiPolicies, build_default_policies
 from .providers.role_config import resolve_maintenance_provider_settings
 from .utils import _temporary_namespace
@@ -61,6 +68,8 @@ logger = logging.getLogger(__name__)
 
 class BaseWorker(ABC):
     """Base class for background workers polling the Kogwistar artifact stream."""
+
+    engines: NamespaceEngines
 
     def __init__(self, engines: NamespaceEngines) -> None:
         self.engines = engines
@@ -96,6 +105,8 @@ class MaintenanceWorker(
     and the graph-native runtime for the actual distillation work.
     """
 
+    engines: NamespaceEngines
+
     def __init__(
         self,
         engines: NamespaceEngines,
@@ -108,29 +119,18 @@ class MaintenanceWorker(
         maintenance_llm_calls_per_slice: int = 0,
         maintenance_seconds_per_slice: int = 0,
         worker_id: str | None = None,
-        trace_sink: Callable[[dict[str, object]], None] | None = None,
-        usage_sink: Callable[[str, Mapping[str, float]], None] | None = None,
-        document_parser: Callable[[MaintenanceJobExecutionContext], Mapping[str, object]] | None = None,
-        layered_parser: Callable[
-            [MaintenanceJobExecutionContext, ParseSessionState, list[ParseFrontierItem]],
-            Mapping[str, object],
-        ] | None = None,
-        observation_critic: Callable[
-            [object, MaintenanceJobExecutionContext], Mapping[str, object]
-        ] | None = None,
-        context_limit_sink: Callable[[], None] | None = None,
-        crosslink_proposer: Callable[
-            [list[Mapping[str, object]], MaintenanceJobExecutionContext], Mapping[str, object]
-        ] | None = None,
-        crosslink_critic: Callable[
-            [Mapping[str, object], MaintenanceJobExecutionContext], Mapping[str, object]
-        ] | None = None,
-        contact_observation_provider: Callable[
-            [str, Mapping[str, object]], Iterable[ContactIdentityObservation]
-        ] | None = None,
+        trace_sink: MaintenanceTraceSink | None = None,
+        usage_sink: MaintenanceUsageSink | None = None,
+        document_parser: MaintenanceDocumentParser | None = None,
+        layered_parser: LayeredMaintenanceParser | None = None,
+        observation_critic: MaintenanceObservationCritic | None = None,
+        context_limit_sink: MaintenanceContextLimitSink | None = None,
+        crosslink_proposer: CrosslinkProposer | None = None,
+        crosslink_critic: CrosslinkCritic | None = None,
+        contact_observation_provider: MaintenanceContactObservationProvider | None = None,
         contact_observation_providers: Mapping[str, ContactScanObservationProvider]
         | None = None,
-        contact_stream_authorizer: Callable[[str, str], bool] | None = None,
+        contact_stream_authorizer: AuthorizeContactStream | None = None,
     ) -> None:
         """
         Initialize the MaintenanceWorker.
@@ -139,7 +139,11 @@ class MaintenanceWorker(
             engines: The namespace engines to use.
             eager_mode: If True, the worker may skip certain delays or provide hooks for immediate execution.
         """
-        super().__init__(engines)
+        # The cooperative mixins are structural contracts, not runtime bases
+        # with initialization semantics.  Initialize the concrete worker base
+        # explicitly so the shared engine bundle is always available before
+        # runtime construction.
+        BaseWorker.__init__(self, engines)
         self.eager_mode = eager_mode
         self.policies = policies or build_default_policies()
         self.provider_settings: WorkflowProviderSettings = provider_settings or resolve_maintenance_provider_settings()

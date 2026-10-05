@@ -76,6 +76,10 @@ def test_qwen3_vl_docker_gpu_service_returns_real_vectors() -> None:
         "docker", "run", "--detach", "--name", container,
         "--gpus", "all", "--publish", f"{port}:8790",
         "--volume", f"{cache_volume}:/var/lib/huggingface",
+        # The service resolves the mounted model through HF_HOME. Without this
+        # explicit path, a populated Docker volume is invisible to Transformers.
+        "--env", "HF_HOME=/var/lib/huggingface",
+        "--env", "LLM_WIKI_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-2B",
         "--env", "LLM_WIKI_EMBEDDING_DEVICE=cuda",
         "--env", "LLM_WIKI_EMBEDDING_TORCH_BACKEND=cu128",
         "--env", f"LLM_WIKI_EMBEDDING_MODEL_REVISION={revision}",

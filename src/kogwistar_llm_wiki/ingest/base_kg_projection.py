@@ -12,13 +12,14 @@ from kogwistar.logical_refs import (
 
 from ..models import IngestPipelineRequest
 from ..utils import _temporary_namespace
+from .contracts import IngestPipelineHost
 
 
 class BaseKgProjectionMixin:
     """Keep base-KG reference materialization out of ingest orchestration."""
 
     def _base_kg_reference_span(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -42,7 +43,7 @@ class BaseKgProjectionMixin:
         )
 
     def _project_base_kg_references(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,

@@ -55,17 +55,27 @@ build_and_push_embedding() {
     image_tag="${tag}-${backend}"
   fi
   local embedding_image="${docker_hub_user}/kogwistar-llm-wiki-embedding:${image_tag}"
+  local model_image_tag
+  if [[ "$tag" == latest ]]; then
+    model_image_tag="latest-qwen3-vl-embedding-2b-${backend}"
+  else
+    model_image_tag="${tag}-qwen3-vl-embedding-2b-${backend}"
+  fi
+  local model_embedding_image="${docker_hub_user}/kogwistar-llm-wiki-embedding:${model_image_tag}"
   echo "Building ${embedding_image} (${torch_backend})"
   (
     cd -- "$repo_root"
     docker_args buildx build --load \
       --build-arg "LLM_WIKI_EMBEDDING_TORCH_BACKEND=${torch_backend}" \
       --tag "$embedding_image" \
+      --tag "$model_embedding_image" \
       --file Dockerfile.embedding-service \
       .
   )
   echo "Pushing ${embedding_image}"
   docker_args push "$embedding_image"
+  echo "Pushing ${model_embedding_image}"
+  docker_args push "$model_embedding_image"
 }
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -172,11 +182,17 @@ if [[ "$target" == embedding-cpu || "$target" == all ]]; then
   embedding_tag="latest-cpu"
   [[ "$tag" == latest ]] || embedding_tag="${tag}-cpu"
   publish_images+=("${docker_hub_user}/kogwistar-llm-wiki-embedding:${embedding_tag}")
+  model_embedding_tag="latest-qwen3-vl-embedding-2b-cpu"
+  [[ "$tag" == latest ]] || model_embedding_tag="${tag}-qwen3-vl-embedding-2b-cpu"
+  publish_images+=("${docker_hub_user}/kogwistar-llm-wiki-embedding:${model_embedding_tag}")
 fi
 if [[ "$target" == embedding-cuda12.8 || "$target" == all ]]; then
   embedding_tag="latest-cuda12.8"
   [[ "$tag" == latest ]] || embedding_tag="${tag}-cuda12.8"
   publish_images+=("${docker_hub_user}/kogwistar-llm-wiki-embedding:${embedding_tag}")
+  model_embedding_tag="latest-qwen3-vl-embedding-2b-cuda12.8"
+  [[ "$tag" == latest ]] || model_embedding_tag="${tag}-qwen3-vl-embedding-2b-cuda12.8"
+  publish_images+=("${docker_hub_user}/kogwistar-llm-wiki-embedding:${model_embedding_tag}")
 fi
 if [[ "$allow_existing_tag" == false ]]; then
   for image in "${publish_images[@]}"; do

@@ -1,6 +1,5 @@
 """Public facade for Codex integration and backward-compatible memory names."""
 
-from .codex_bridge import bridge_settings_from_environment, serve_codex_bridge
 from ..memory import (
     MemoryDisabledError,
     MemoryEvidence,
@@ -8,7 +7,7 @@ from ..memory import (
     MemoryService,
     MemoryValidationError,
 )
-
+from .codex_bridge import bridge_settings_from_environment, serve_codex_bridge
 from .codex_workbench_agent import (
     CodexAppServerRunner,
     CodexCliCockpitResponder,

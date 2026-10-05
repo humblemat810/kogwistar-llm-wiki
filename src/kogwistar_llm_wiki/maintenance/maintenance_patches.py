@@ -429,6 +429,17 @@ def validate_maintenance_patch(
     return MaintenancePatchValidationReport(valid=not issues, issues=issues)
 
 
-def validate_maintenance_patch_payload(payload: dict[str, object], **kwargs: object) -> MaintenancePatchValidationReport:
+def validate_maintenance_patch_payload(
+    payload: dict[str, object],
+    *,
+    active_node_ids: set[str] | None = None,
+    active_edge_ids: set[str] | None = None,
+    namespace_prefix: str | None = None,
+) -> MaintenancePatchValidationReport:
     patch = MaintenancePatch.model_validate(payload)
-    return validate_maintenance_patch(patch, **kwargs)
+    return validate_maintenance_patch(
+        patch,
+        active_node_ids=active_node_ids,
+        active_edge_ids=active_edge_ids,
+        namespace_prefix=namespace_prefix,
+    )

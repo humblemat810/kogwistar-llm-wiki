@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from typing import Any
 
 
 def count_job_statuses(jobs: list[dict[str, object]]) -> dict[str, int]:
@@ -15,19 +14,21 @@ def count_job_statuses(jobs: list[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
-def answer_text(result: Mapping[str, Any]) -> str:
+def answer_text(result: Mapping[str, object]) -> str:
     answer = result.get("answer")
     return str(answer.get("text") if isinstance(answer, Mapping) else answer or "")
 
 
-def request_id(payload: Mapping[str, Any], prefix: str) -> str:
+def request_id(payload: Mapping[str, object], prefix: str) -> str:
     return str(payload.get("id") or f"{prefix}_{uuid.uuid4().hex}")
 
 
-def a2a_task(interaction: Mapping[str, Any], *, standard: bool = False) -> dict[str, object]:
+def a2a_task(interaction: Mapping[str, object], *, standard: bool = False) -> dict[str, object]:
     if isinstance(interaction.get("status"), Mapping):
         result = dict(interaction)
-        result.setdefault("contextId", (result.get("metadata") or {}).get("workspace_id", "default"))
+        metadata = result.get("metadata")
+        metadata_map = metadata if isinstance(metadata, Mapping) else {}
+        result.setdefault("contextId", metadata_map.get("workspace_id", "default"))
         return result
     status = str(interaction.get("status") or "pending")
     state = {
