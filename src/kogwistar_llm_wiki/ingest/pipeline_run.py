@@ -25,6 +25,18 @@ from .contracts import (  # noqa: F401 - compatibility type seam
 ParserFn = ParserCallable
 
 
+def _limit_int(value: int | float | str | None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("validated parse limit must be an integer")
+    return value
+
+
+def _limit_float(value: int | float | str | None) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("validated parse limit must be numeric")
+    return float(value)
+
+
 class IngestRunMixin:
     """Run one ingestion transaction and expose its diagnostics."""
 
@@ -61,7 +73,20 @@ class IngestRunMixin:
                 revision_document_id=parse_document_id,
                 revision=revision,
                 parser_profile=self._durable_parse_profile(request),
-                **{key: value for key, value in parse_limits.items() if key != "parser_profile"},
+                max_depth=_limit_int(parse_limits["max_depth"]),
+                max_frontier_items=_limit_int(parse_limits["max_frontier_items"]),
+                max_parser_calls=_limit_int(parse_limits["max_parser_calls"]),
+                max_region_chars=_limit_int(parse_limits["max_region_chars"]),
+                token_budget=(
+                    _limit_int(parse_limits["token_budget"])
+                    if parse_limits.get("token_budget") is not None
+                    else None
+                ),
+                wall_time_seconds=(
+                    _limit_float(parse_limits["wall_time_seconds"])
+                    if parse_limits.get("wall_time_seconds") is not None
+                    else None
+                ),
             )
         if operation_mode == "maintenance_first":
             self.seed_source_map(

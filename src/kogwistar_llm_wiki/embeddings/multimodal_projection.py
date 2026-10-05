@@ -117,6 +117,13 @@ def _mapping_value(value: object, *, field_name: str) -> dict[str, object]:
     return {str(key): item for key, item in value.items()}
 
 
+def _message_content(message: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+    raw = message.get("content", ())
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        return ()
+    return tuple(part for part in raw if isinstance(part, Mapping))
+
+
 def _projection_storage_key(workspace_id: str, view_id: str) -> str:
     """Keep public view IDs stable while making physical IDs workspace-safe."""
 
@@ -1880,12 +1887,7 @@ class Qwen3VLDenseEncoder:
                 " ".join(
                     str(part.get("text", ""))
                     for message in conversation
-                    for part in (
-                        message.get("content", [])
-                        if isinstance(message.get("content", []), Sequence)
-                        else []
-                    )
-                    if isinstance(part, Mapping)
+                    for part in _message_content(message)
                 )
                 for conversation in conversations
             ]

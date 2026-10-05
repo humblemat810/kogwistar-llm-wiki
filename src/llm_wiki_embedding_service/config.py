@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Literal
+from typing import Literal, cast
 
 from llm_wiki_embedding_contract import EmbeddingProfile
 
@@ -22,12 +23,13 @@ BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages
 MIN_DIMENSION = 64
 MAX_DIMENSION = 2048
 TORCH_BACKENDS = {"cpu", "cu126", "cu128"}
+EmbeddingEncoder = Literal["qwen3-vl", "clip-vit-b32", "bge-small-en-v1.5"]
 
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingServiceConfig:
     model: str = DEFAULT_MODEL
-    encoder: Literal["qwen3-vl", "clip-vit-b32", "bge-small-en-v1.5"] = "qwen3-vl"
+    encoder: EmbeddingEncoder = "qwen3-vl"
     model_path: str | None = None
     revision: str | None = None
     dimension: int = 1024
@@ -103,19 +105,25 @@ class EmbeddingServiceConfig:
         )
 
 
-def _env(values: dict[str, str], name: str, default: str) -> str:
+def _env(values: Mapping[str, str], name: str, default: str) -> str:
     return values.get(name, default).strip() or default
 
 
-def _embedding_env(values: dict[str, str], name: str, default: str) -> str:
+def _embedding_env(values: Mapping[str, str], name: str, default: str) -> str:
     """Read one canonical Embedding Service setting."""
     return _env(values, name, default)
 
 
-def load_config(environ: dict[str, str] | None = None) -> EmbeddingServiceConfig:
+def _encoder(value: str) -> EmbeddingEncoder:
+    if value in {"qwen3-vl", "clip-vit-b32", "bge-small-en-v1.5"}:
+        return cast(EmbeddingEncoder, value)
+    raise ValueError(f"unsupported embedding encoder {value!r}")
+
+
+def load_config(environ: Mapping[str, str] | None = None) -> EmbeddingServiceConfig:
     values = environ if environ is not None else os.environ
     revision = values.get("LLM_WIKI_EMBEDDING_MODEL_REVISION", "").strip()
-    encoder = _embedding_env(values, "LLM_WIKI_EMBEDDING_ENCODER", "qwen3-vl").lower()
+    encoder = _encoder(_embedding_env(values, "LLM_WIKI_EMBEDDING_ENCODER", "qwen3-vl").lower())
     default_model = {"clip-vit-b32": CLIP_MODEL, "bge-small-en-v1.5": BGE_SMALL_MODEL}.get(
         encoder, DEFAULT_MODEL
     )

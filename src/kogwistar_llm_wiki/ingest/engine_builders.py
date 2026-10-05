@@ -10,7 +10,7 @@ import tempfile
 from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
 from kogwistar.engine_core import GraphKnowledgeEngine
@@ -55,13 +55,13 @@ class ProfileResolver(Protocol):
 class GraphEngineFactory(Protocol):
     """Construct a graph engine while preserving the engine constructor boundary."""
 
-    def __call__(self, persist_directory: Path, **kwargs: object) -> GraphKnowledgeEngine: ...
+    def __call__(self, *args: Any, **kwargs: Any) -> GraphKnowledgeEngine: ...
 
 
 class StorageBackendFactory(Protocol):
     """Build an external storage backend for one graph engine."""
 
-    def __call__(self, engine: GraphKnowledgeEngine) -> StorageBackend: ...
+    def __call__(self, engine: GraphKnowledgeEngine, /) -> StorageBackend: ...
 
 
 def _require_profile(profile: EmbeddingProfile | None) -> EmbeddingProfile:
@@ -265,8 +265,10 @@ def build_postgres_namespace_engines(
         for space in EMBEDDING_SPACES
     }
     root.mkdir(parents=True, exist_ok=True)
-    engine_builder = engine_builder or _build_postgres_engine
-    derived_engine = engine_builder(
+    builder: GraphEngineFactory = (
+        engine_builder if engine_builder is not None else _build_postgres_engine
+    )
+    derived_engine = builder(
         root / "derived_knowledge",
         kg_graph_type="derived_knowledge",
         embedding_function=embeddings["knowledge"],
@@ -277,7 +279,7 @@ def build_postgres_namespace_engines(
         embedding_profile_mode=embedding_profile_mode,
     ) if split_derived_knowledge else None
     return NamespaceEngines(
-        conversation=engine_builder(
+        conversation=builder(
             root / "conversation",
             kg_graph_type="conversation",
             embedding_function=embeddings["conversation"],
@@ -288,7 +290,7 @@ def build_postgres_namespace_engines(
             embedding_profile_mode=embedding_profile_mode,
             persistence_mode=conversation_persistence_mode,
         ),
-        workflow=engine_builder(
+        workflow=builder(
             root / "workflow",
             kg_graph_type="workflow",
             embedding_function=embeddings["workflow"],
@@ -298,7 +300,7 @@ def build_postgres_namespace_engines(
             embedding_profile=profile_resolver(resolved_embedding_configs["workflow"]),
             embedding_profile_mode=embedding_profile_mode,
         ),
-        kg=engine_builder(
+        kg=builder(
             root / "kg",
             kg_graph_type="knowledge",
             embedding_function=embeddings["knowledge"],
@@ -308,7 +310,7 @@ def build_postgres_namespace_engines(
             embedding_profile=profile_resolver(resolved_embedding_configs["knowledge"]),
             embedding_profile_mode=embedding_profile_mode,
         ),
-        wisdom=engine_builder(
+        wisdom=builder(
             root / "wisdom",
             kg_graph_type="wisdom",
             embedding_function=embeddings["wisdom"],

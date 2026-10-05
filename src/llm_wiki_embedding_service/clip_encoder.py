@@ -30,8 +30,8 @@ class CLIPDualProjectionEncoder:
 
     def __init__(
         self,
-        model: object,
-        processor: object,
+        model: Any,
+        processor: Any,
         *,
         profile: EmbeddingProfile,
         device: str,
@@ -62,13 +62,13 @@ class CLIPDualProjectionEncoder:
                 Path(config.model_path) / "0_CLIPModel" / "model.safetensors",
                 expected=CLIP_MODEL_SHA256,
             )
-        common: dict[str, object] = {
+        common: dict[str, Any] = {
             "revision": config.revision,
             "subfolder": "0_CLIPModel",
             "cache_dir": config.model_cache_dir,
             "token": config.token,
         }
-        model = CLIPModel.from_pretrained(
+        model: Any = CLIPModel.from_pretrained(
             config.model_path or config.model,
             use_safetensors=True,
             **common,
@@ -78,7 +78,7 @@ class CLIPDualProjectionEncoder:
             raise RuntimeError(
                 f"CLIP checkpoint projection dimension {projection_dim} does not match configured dimension {config.dimension}"
             )
-        processor = CLIPProcessor.from_pretrained(config.model_path or config.model, **common)
+        processor: Any = CLIPProcessor.from_pretrained(config.model_path or config.model, **common)
         if config.device == "cuda":
             model = model.to(config.device)
         return cls(
@@ -89,7 +89,7 @@ class CLIPDualProjectionEncoder:
             batch_size=config.batch_size,
         )
 
-    def _features(self, inputs: object, *, modality: str) -> list[tuple[float, ...]]:
+    def _features(self, inputs: Any, *, modality: str) -> list[tuple[float, ...]]:
         import torch
 
         if not isinstance(inputs, Mapping):
@@ -103,7 +103,7 @@ class CLIPDualProjectionEncoder:
         if not callable(method):
             raise EmbeddingInferenceError(f"CLIP model lacks {method_name}")
         with torch.inference_mode():
-            values = method(**moved)
+            values: Any = method(**moved)
         projected_values = getattr(values, "pooler_output", None)
         if projected_values is not None:
             values = projected_values

@@ -401,11 +401,14 @@ def _manifest_unit(
         "text", "image", "audio", "video", "pdf_page", "table", "chart", "webpage", "video_frame"
     }:
         raise ValueError(f"unsupported multimodal manifest modality {modality!r}")
-    locator = dict(item.get("locator") or {})
+    raw_locator = item.get("locator")
+    locator = dict(raw_locator) if isinstance(raw_locator, Mapping) else {}
     if not locator:
         locator = {"kind": "manifest_unit", "ordinal": ordinal}
     content_ref = str(item["content_ref"]) if item.get("content_ref") else None
     text = str(item["text"]) if item.get("text") else None
+    raw_metadata = item.get("metadata")
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
     return _unit(
         workspace_id=workspace_id,
         source_id=source_id,
@@ -416,7 +419,7 @@ def _manifest_unit(
         content_ref=content_ref,
         text=text,
         asset_sha256=str(item["asset_sha256"]) if item.get("asset_sha256") else None,
-        metadata=dict(item.get("metadata") or {}),
+        metadata=metadata,
     )
 
 
@@ -462,7 +465,10 @@ def pdf_manifest_units(
 
     items: list[MultimodalSourceUnit] = []
     for page_index, page in enumerate(pages):
-        page_number = int(page.get("page_number", page_index + 1))
+        raw_page_number = page.get("page_number", page_index + 1)
+        if isinstance(raw_page_number, bool) or not isinstance(raw_page_number, int):
+            raise ValueError("PDF page_number must be an integer")
+        page_number = raw_page_number
         page_locator = {"kind": "pdf_page", "page_number": page_number}
         page_text = str(page["text"]) if page.get("text") else None
         page_ref = str(page["content_ref"]) if page.get("content_ref") else None
