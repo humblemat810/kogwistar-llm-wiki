@@ -15,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -33,6 +32,7 @@ from .multimodal_projection import (
 from .multimodal_remote import (
     EmbeddingProtocolError,
     EmbeddingServiceUnavailable,
+    UrlOpener,
     _asset_bytes,
 )
 
@@ -187,7 +187,7 @@ def _content_parts(
 class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
     """Call vLLM's Qwen3-VL Chat Embeddings API without local inference."""
 
-    def __init__(self, settings: VllmEmbeddingSettings, *, opener: Any = urlopen) -> None:
+    def __init__(self, settings: VllmEmbeddingSettings, *, opener: UrlOpener = urlopen) -> None:
         self.settings = settings
         self._profile = settings.profile
         self._opener = opener
