@@ -25,7 +25,7 @@ jobs:
       # Keep this validation aligned with the exact source revisions used by
       # the release image. The adapter source revisions are immutable merged
       # main commits and are installed directly by the release build.
-      KOGWISTAR_REVISION: 6b12861e571dc6981d1ed9e4639d177947ab101d
+      KOGWISTAR_REVISION: c27e050ef8f34523a5ef769007d5f4d98bf5e969
       KG_DOC_PARSER_REVISION: fa0429e293907a951c42a431cbf4f8bcd5f904f0
       OBSIDIAN_SINK_REVISION: 2fcea33c34bfb2d09445fe587fa25f25ef8bc6d4
       PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
@@ -97,7 +97,7 @@ jobs:
     env:
       # Keep the application image reproducible even though these packages are
       # maintained as sibling repositories rather than Git submodules.
-      KOGWISTAR_REVISION: 6b12861e571dc6981d1ed9e4639d177947ab101d
+      KOGWISTAR_REVISION: c27e050ef8f34523a5ef769007d5f4d98bf5e969
       KG_DOC_PARSER_REVISION: fa0429e293907a951c42a431cbf4f8bcd5f904f0
       OBSIDIAN_SINK_REVISION: 2fcea33c34bfb2d09445fe587fa25f25ef8bc6d4
       PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
@@ -174,7 +174,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      KOGWISTAR_REVISION: 6b12861e571dc6981d1ed9e4639d177947ab101d
+      KOGWISTAR_REVISION: c27e050ef8f34523a5ef769007d5f4d98bf5e969
       KG_DOC_PARSER_REVISION: fa0429e293907a951c42a431cbf4f8bcd5f904f0
       OBSIDIAN_SINK_REVISION: 2fcea33c34bfb2d09445fe587fa25f25ef8bc6d4
       PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c

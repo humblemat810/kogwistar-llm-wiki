@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from threading import Lock
-from typing import Any, cast
+from typing import cast
 
+from kg_doc_parser.llm_structured_output import StructuredOutputModel
 from kg_doc_parser.workflow_ingest.providers import (
-    WorkflowProviderSettings,
     ProviderEndpointConfig,
+    WorkflowProviderSettings,
     build_chat_model,
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -149,7 +150,7 @@ def build_observation_critic(
     observation frame and returns bounded recommendations.
     """
 
-    model: Any | None = None
+    model: StructuredOutputModel | None = None
     model_lock = Lock()
 
     def critique(frame_value: object, _context: object) -> dict[str, object]:
