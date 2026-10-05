@@ -128,6 +128,8 @@ class SourceParsingMixin:
                 source_document_id=source_document_id,
                 engine_dir=str(engine_dir),
             )
+        if model is None:
+            raise ValueError("parser model identity is required")
         self._persist_parser_usage_events(
             request=request,
             source_document_id=source_document_id,

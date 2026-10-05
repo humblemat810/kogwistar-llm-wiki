@@ -11,6 +11,7 @@ import os
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 try:
@@ -18,8 +19,6 @@ try:
     from opentelemetry.trace import Span, Tracer
 except ModuleNotFoundError:  # pragma: no cover - exercised by minimal installs
     trace = None  # type: ignore[assignment]
-    Span = object  # type: ignore[assignment,misc]
-    Tracer = object  # type: ignore[assignment,misc]
 
 
 _provider_lock = threading.Lock()
@@ -38,12 +37,12 @@ class LlmWikiTelemetry:
             and self.packages_available
         )
         self.service_name = service_name
-        self._tracer: Tracer | None = None
+        self._tracer: Any = None
         if self.enabled:
             self._tracer = self._configure_tracer(service_name)
 
     @staticmethod
-    def _configure_tracer(service_name: str) -> Tracer | None:
+    def _configure_tracer(service_name: str) -> Any:
         if trace is None:
             return None
         _ensure_tracer_provider(service_name)
@@ -64,7 +63,7 @@ class LlmWikiTelemetry:
         return cls(service_name=os.getenv("LLM_WIKI_OTEL_SERVICE_NAME", "kogwistar-llm-wiki"))
 
     @contextmanager
-    def span(self, name: str, attributes: Mapping[str, object] | None = None) -> Iterator[Span | None]:
+    def span(self, name: str, attributes: Mapping[str, object] | None = None) -> Iterator[Any]:
         # Facades are constructed by several application components. Consult
         # the process-wide switch here so a settings toggle also affects
         # instances that were created before the toggle.
@@ -81,7 +80,7 @@ class LlmWikiTelemetry:
         with self._tracer.start_as_current_span(name, attributes=dict(attributes or {})) as current:
             yield current
 
-    def record_exception(self, span: Span | None, error: BaseException) -> None:
+    def record_exception(self, span: Any, error: BaseException) -> None:
         if span is not None:
             span.record_exception(error)
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(error)))  # type: ignore[union-attr]
@@ -128,12 +127,12 @@ def _ensure_tracer_provider(service_name: str) -> None:
             return
         try:
             from opentelemetry import trace as trace_api
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # pyright: ignore[reportMissingImports]
                 OTLPSpanExporter,
             )
-            from opentelemetry.sdk.resources import Resource
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            from opentelemetry.sdk.resources import Resource  # pyright: ignore[reportMissingImports]
+            from opentelemetry.sdk.trace import TracerProvider  # pyright: ignore[reportMissingImports]
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor  # pyright: ignore[reportMissingImports]
 
             provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
             endpoint = _trace_exporter_endpoint()

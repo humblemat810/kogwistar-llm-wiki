@@ -300,7 +300,9 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             return result
         text_part = content[text_index]
         if isinstance(text_part, Mapping):
-            text_part["text"] = str(text_part.get("text", ""))[:prefix_length]
+            mutable_part = dict(text_part)
+            mutable_part["text"] = str(text_part.get("text", ""))[:prefix_length]
+            content[text_index] = mutable_part
         return result
 
     def _bounded_messages(self, messages: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -308,9 +310,10 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
         if count <= self.settings.crop_token_budget:
             return messages
         content = messages[1].get("content")
+        content_parts = content if isinstance(content, list) else []
         text_indexes = [
             index
-            for index, part in enumerate(content if isinstance(content, list) else [])
+            for index, part in enumerate(content_parts)
             if isinstance(part, Mapping) and part.get("type") == "text"
         ]
         if not text_indexes:
@@ -319,7 +322,7 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
                 "reduce image size or increase the context limit"
             )
         text_index = text_indexes[-1]
-        text_part = content[text_index]
+        text_part = content_parts[text_index]
         original = str(text_part.get("text", "")) if isinstance(text_part, Mapping) else ""
         low, high = 0, len(original)
         best: list[dict[str, object]] | None = None
