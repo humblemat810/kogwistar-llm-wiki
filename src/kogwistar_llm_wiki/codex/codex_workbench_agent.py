@@ -21,6 +21,10 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ..workbench.prompt_aliases import (
+    PromptAliasProjection,
+    restore_cockpit_action,
+)
 from ..workbench.semantic_lens import SemanticLensRequest, SemanticLensSnapshot
 from ..workbench.workbench_background import ProgressCallback
 from ..workbench.workbench_cockpit import (
@@ -29,6 +33,7 @@ from ..workbench.workbench_cockpit import (
     CockpitMaintenancePatch,
     CockpitObservation,
 )
+
 
 class LineSink(Protocol):
     """Receive one diagnostic line from a Codex provider."""
@@ -488,9 +493,10 @@ class CodexCliCockpitResponder:
     ) -> CockpitAction:
         callback = progress or (lambda: None)
         callback()
+        projection = PromptAliasProjection.for_snapshot(snapshot, observations)
         run_kwargs = {
             "settings": self.settings,
-            "prompt": _build_cockpit_prompt(request, snapshot, observations),
+            "prompt": _build_cockpit_prompt(request, snapshot, observations, projection),
             "progress": callback,
             "trace_line": self.trace_line,
         }
@@ -508,7 +514,7 @@ class CodexCliCockpitResponder:
             else:
                 raw = self.runner.run(**run_kwargs)
             try:
-                return _parse_cockpit_action(raw)
+                return restore_cockpit_action(_parse_cockpit_action(raw), projection)
             except (ValidationError, ValueError) as exc:
                 validation_error = exc
                 if self.trace_line is not None:
@@ -653,13 +659,18 @@ def _build_cockpit_prompt(
     request: SemanticLensRequest,
     snapshot: SemanticLensSnapshot,
     observations: tuple[CockpitObservation, ...],
+    projection: PromptAliasProjection | None = None,
 ) -> str:
+    projection = projection or PromptAliasProjection.for_snapshot(snapshot, observations)
+    projected_lens = dict(projection.context)
+    projected_observations = projected_lens.pop("observations", [])
     context = {
         "question": request.query_text,
         "workspace_id": request.workspace_id,
-        "lens": snapshot.to_dict(),
-        "observations": [observation.model_dump(mode="json") for observation in observations],
+        "lens": projected_lens,
+        "observations": projected_observations,
         "action_schema": _cockpit_transport_schema(),
+        "aliasing": projection.metadata(),
     }
     return (
         "You are the read-only central reasoning worker for the Kogwistar llm-wiki cockpit. "

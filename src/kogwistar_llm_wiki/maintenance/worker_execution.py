@@ -73,6 +73,10 @@ from ..maintenance.maintenance_planner import decide_next_maintenance_phase
 from ..models import NamespaceEngines
 from ..usage.provider import ProviderUsageCallback, resolve_token_pricing
 from ..utils import _background_namespace, _temporary_namespace
+from ..workbench.prompt_aliases import (
+    project_crosslink_payload,
+    restore_crosslink_response,
+)
 from .dependency_planning import (
     DependencyInvalidationPlan,
     plan_dependency_invalidation,
@@ -1688,13 +1692,26 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         self, evidence: list[CrosslinkEvidence], ctx: MaintenanceJobExecutionContext
     ) -> Mapping[str, object]:
         usage_callback = self._reserve_crosslink_provider_call(ctx, "crosslink_proposal")
+        neighbor_context = self._crosslink_prompt_context(evidence, ctx)
+        projection, projected_evidence, projected_context = project_crosslink_payload(
+            [item.model_dump(mode="json") for item in evidence], neighbor_context
+        )
+        callback_ctx = replace(
+            ctx,
+            payload={
+                **ctx.payload,
+                "_prompt_alias_neighbor_context": projected_context,
+                "_prompt_aliasing": projection.metadata(),
+            },
+        )
         callback = getattr(self, "crosslink_proposer", None)
         if callable(callback):
             callback_fn = cast(
                 CrosslinkProposer,
                 callback,
             )
-            return callback_fn([item.model_dump(mode="json") for item in evidence], ctx)
+            result = callback_fn(projected_evidence, callback_ctx)
+            return restore_crosslink_response(result, projection)
         from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
 
         model = build_chat_model_for_role("parser", self.provider_settings)
@@ -1709,8 +1726,9 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 "Return an empty groups list when no defensible link exists.",
                 "Do not emit hidden reasoning; rationale must be concise and evidence-based.",
             ],
-            "evidence": [item.model_dump(mode="json") for item in evidence],
-            "neighbor_context": self._crosslink_prompt_context(evidence, ctx),
+            "evidence": projected_evidence,
+            "neighbor_context": projected_context,
+            "aliasing": projection.metadata(),
         }
         result = structured.invoke([
             ("system", "You produce bounded graph-link candidates, not authoritative facts."),
@@ -1719,9 +1737,9 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         parsed = result.get("parsed") if isinstance(result, Mapping) and "parsed" in result else result
         dumped = _model_dump_mapping(parsed)
         if dumped is not None:
-            return dumped
+            return restore_crosslink_response(dumped, projection)
         if isinstance(parsed, Mapping):
-            return parsed
+            return restore_crosslink_response(parsed, projection)
         raise TypeError("crosslink proposer returned an invalid structured result")
 
     def _invoke_crosslink_critic(
@@ -1731,22 +1749,38 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         usage_callback = self._reserve_crosslink_provider_call(ctx, "crosslink_group_critic")
         callback = getattr(self, "crosslink_critic", None)
         if callable(callback):
+            critic_evidence = [CrosslinkEvidence.model_validate(item) for item in evidence]
+            neighbor_context = self._crosslink_prompt_context(critic_evidence, ctx)
+            projection, projected_evidence, projected_context = project_crosslink_payload(
+                [item.model_dump(mode="json") for item in critic_evidence], neighbor_context
+            )
+            callback_payload = {
+                "group": projection.project_mapping(group),
+                "evidence": projected_evidence,
+                "neighbor_context": projected_context,
+                "aliasing": projection.metadata(),
+            }
             callback_fn = cast(
                 CrosslinkCritic,
                 callback,
             )
-            return callback_fn({"group": dict(group), "evidence": evidence}, ctx)
+            return callback_fn(callback_payload, ctx)
         from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
 
         model = build_chat_model_for_role("parser", self.provider_settings)
         structured = model.with_structured_output(CrosslinkCriticResponse)
         critic_evidence = [CrosslinkEvidence.model_validate(item) for item in evidence]
+        neighbor_context = self._crosslink_prompt_context(critic_evidence, ctx)
+        projection, projected_evidence, projected_context = project_crosslink_payload(
+            [item.model_dump(mode="json") for item in critic_evidence], neighbor_context
+        )
         result = structured.invoke([
             ("system", "Independently review this cross-link group. Return only a verdict, concise explanation, and cited evidence IDs. Reject unsupported, redundant, or ambiguous links."),
             ("human", json.dumps({
-                "group": dict(group),
-                "evidence": evidence,
-                "neighbor_context": self._crosslink_prompt_context(critic_evidence, ctx),
+                "group": projection.project_mapping(group),
+                "evidence": projected_evidence,
+                "neighbor_context": projected_context,
+                "aliasing": projection.metadata(),
             }, ensure_ascii=False, sort_keys=True)),
         ], config={"callbacks": [usage_callback]})
         parsed = result.get("parsed") if isinstance(result, Mapping) and "parsed" in result else result
