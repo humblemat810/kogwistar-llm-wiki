@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import hmac
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
-from typing import Any
+from dataclasses import dataclass
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
 
 from llm_wiki_embedding_contract import (
     ContractValidationError,
@@ -18,35 +19,42 @@ from llm_wiki_embedding_contract import (
 )
 
 from .config import EmbeddingServiceConfig, load_config
-from .encoder import build_dense_encoder
+from .encoder import DenseEncoder, build_dense_encoder
+
+
+@dataclass
+class _EmbeddingServiceState:
+    encoder: DenseEncoder | None = None
+    load_error: str | None = None
 
 
 def _profile(config: EmbeddingServiceConfig) -> dict[str, object]:
     return config.profile.canonical_payload() | {"fingerprint": config.profile.fingerprint}
 
 
-def _error(message: str, status: int) -> Any:
-    from fastapi.responses import JSONResponse
+def _error(message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status)
 
 
-def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | None = None) -> Any:
+def create_app(
+    *, encoder: DenseEncoder | None = None, config: EmbeddingServiceConfig | None = None
+) -> FastAPI:
     selected = config or load_config()
-    if encoder is not None and getattr(encoder, "profile", None) != selected.profile:
+    if encoder is not None and encoder.profile != selected.profile:
         raise ValueError("injected encoder profile does not match service configuration")
-    state: dict[str, Any] = {"encoder": encoder, "load_error": None}
+    state = _EmbeddingServiceState(encoder=encoder)
 
     @asynccontextmanager
-    async def lifespan(_app: Any):
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         load_task: asyncio.Task[None] | None = None
-        if state["encoder"] is None:
+        if state.encoder is None:
             async def load_model() -> None:
                 try:
-                    state["encoder"] = await asyncio.to_thread(
+                    state.encoder = await asyncio.to_thread(
                         build_dense_encoder, selected
                     )
                 except Exception as exc:  # noqa: BLE001 - readiness reports model failures
-                    state["load_error"] = str(exc)
+                    state.load_error = str(exc)
 
             load_task = asyncio.create_task(load_model())
         yield
@@ -60,14 +68,14 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
     def healthz() -> dict[str, object]:
         return {"ok": True, "service": "llm-wiki-embedding"}
 
-    @app.get("/readyz")
-    def readyz() -> Any:
-        if state["encoder"] is None:
-            return _error(state["load_error"] or "model is not loaded", 503)
+    @app.get("/readyz", response_model=None)
+    def readyz() -> Response | dict[str, object]:
+        if state.encoder is None:
+            return _error(state.load_error or "model is not loaded", 503)
         return {"ready": True, "profile": _profile(selected)}
 
-    @app.get("/v1/capabilities")
-    def capabilities(request: Request) -> Any:
+    @app.get("/v1/capabilities", response_model=None)
+    def capabilities(request: Request) -> Response | dict[str, object]:
         if not _authorized(request, selected.token):
             return _error("unauthorized", 401)
         if selected.encoder == "clip-vit-b32":
@@ -78,12 +86,12 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
             modalities = ["text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"]
         return {"contract_version": "v1", "service": "llm-wiki-embedding", "embedding": "dense", "modalities": modalities, "profile": _profile(selected), "batch_size": selected.batch_size, "max_items": selected.max_items, "max_request_bytes": selected.max_request_bytes}
 
-    @app.post("/v1/represent")
-    async def represent(request: Request) -> Any:
+    @app.post("/v1/represent", response_model=None)
+    async def represent(request: Request) -> Response | dict[str, object]:
         if not _authorized(request, selected.token):
             return _error("unauthorized", 401)
-        if state["encoder"] is None:
-            return _error(state["load_error"] or "model is not ready", 503)
+        if state.encoder is None:
+            return _error(state.load_error or "model is not ready", 503)
         try:
             content_length = int(request.headers.get("content-length", "0"))
             if content_length > selected.max_request_bytes:
@@ -92,7 +100,7 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
             if len(body) > selected.max_request_bytes:
                 return _error("request exceeds configured byte limit", 413)
             payload = await request.json()
-            return _represent_payload(payload, state["encoder"], selected)
+            return _represent_payload(payload, state.encoder, selected)
         except ContractValidationError as exc:
             return _error(str(exc), 422)
         except ValueError as exc:
@@ -101,13 +109,15 @@ def create_app(*, encoder: Any | None = None, config: EmbeddingServiceConfig | N
     return app
 
 
-def _authorized(request: Any, token: str | None) -> bool:
+def _authorized(request: Request, token: str | None) -> bool:
     supplied = request.headers.get("authorization", "")
     expected = f"Bearer {token}" if token else ""
     return not token or hmac.compare_digest(supplied, expected)
 
 
-def _represent_payload(payload: object, encoder: Any, config: EmbeddingServiceConfig) -> dict[str, object]:
+def _represent_payload(
+    payload: object, encoder: DenseEncoder, config: EmbeddingServiceConfig
+) -> dict[str, object]:
     if not isinstance(payload, Mapping) or payload.get("contract_version") != "v1":
         raise ContractValidationError("unsupported embedding contract version")
     if payload.get("operation") not in {"query", "document"}:

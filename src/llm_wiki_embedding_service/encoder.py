@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from io import BytesIO
-from typing import Any
+from typing import Any, Protocol
 
 from llm_wiki_embedding_contract import (
     ContractValidationError,
@@ -25,6 +25,16 @@ class EmbeddingInferenceError(ValueError):
     """The configured model returned an unusable embedding."""
 
 
+class DenseEncoder(Protocol):
+    """Stable application boundary shared by all embedding implementations."""
+
+    profile: EmbeddingProfile
+
+    def encode(
+        self, items: Sequence[Mapping[str, object]]
+    ) -> list[tuple[tuple[float, ...], ...]]: ...
+
+
 class Qwen3VLDenseEncoder:
     """One dense vector per text, image, or mixed request item."""
 
@@ -43,7 +53,9 @@ class Qwen3VLDenseEncoder:
             raise ValueError("embedding dimension must be between 64 and 2048")
         try:
             import torch
-            from qwen_vl_utils import process_vision_info  # pyright: ignore[reportMissingImports]
+            from qwen_vl_utils import (  # pyright: ignore[reportMissingImports]
+                process_vision_info,
+            )
             from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
             raise RuntimeError("embedding service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
@@ -207,7 +219,7 @@ class BgeSmallTextEncoder:
         return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in vectors]
 
 
-def build_dense_encoder(config: EmbeddingServiceConfig) -> object:
+def build_dense_encoder(config: EmbeddingServiceConfig) -> DenseEncoder:
     """Select a standalone encoder from the explicit service profile."""
 
     if config.encoder == "clip-vit-b32":
@@ -238,4 +250,10 @@ def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
             raise RuntimeError("CUDA embedding requires accelerate") from exc
 
 
-__all__ = ["BgeSmallTextEncoder", "EmbeddingInferenceError", "Qwen3VLDenseEncoder", "build_dense_encoder"]
+__all__ = [
+    "BgeSmallTextEncoder",
+    "DenseEncoder",
+    "EmbeddingInferenceError",
+    "Qwen3VLDenseEncoder",
+    "build_dense_encoder",
+]
