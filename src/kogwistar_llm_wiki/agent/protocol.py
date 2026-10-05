@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from numbers import Real
-from typing import Any
 
 from ..models import IngestPipelineRequest
 
@@ -24,7 +23,7 @@ def content_to_text(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def request_payload(payload: Mapping[str, Any]) -> dict[str, object]:
+def request_payload(payload: Mapping[str, object]) -> dict[str, object]:
     messages = payload.get("messages")
     if isinstance(messages, list):
         text = next(
@@ -81,7 +80,7 @@ def request_payload(payload: Mapping[str, Any]) -> dict[str, object]:
     return request
 
 
-def budgets(arguments: Mapping[str, Any]) -> dict[str, object]:
+def budgets(arguments: Mapping[str, object]) -> dict[str, object]:
     names = ("max_time_seconds", "max_llm_calls", "max_tokens", "max_cost_usd", "max_steps")
     integer_names = {"max_llm_calls", "max_tokens", "max_steps"}
     result: dict[str, object] = {}
@@ -141,7 +140,7 @@ def _as_non_negative_int(value: object, name: str) -> int:
     return converted
 
 
-def bounded_lens_arguments(arguments: Mapping[str, Any]) -> dict[str, object]:
+def bounded_lens_arguments(arguments: Mapping[str, object]) -> dict[str, object]:
     """Apply server-side result bounds instead of trusting agent limits."""
     result = dict(arguments)
     limits = {"hop_limit": 8, "max_nodes": 500, "max_edges": 2000, "max_hyperedges": 250}

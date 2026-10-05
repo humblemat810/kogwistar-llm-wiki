@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 from urllib.parse import urlparse
 
-from .host import AgentGatewayHost
 from ..models import IngestPipelineRequest
 from ..parsing.parse_views import ParseViewResolver
 from ..utils import _temporary_namespace
@@ -18,6 +17,7 @@ from .gateway_source import (
     validate_agent_source_uri,
     validate_supplied_provenance,
 )
+from .host import AgentGatewayHost, ToolArguments
 
 if TYPE_CHECKING:
     from ..workbench.workbench_api import WorkbenchApi
@@ -70,15 +70,15 @@ class AgentSourceMixin(AgentGatewayHost):
 
     api: WorkbenchApi
 
-    def multimodal_capture(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def multimodal_capture(self, arguments: ToolArguments) -> dict[str, object]:
         return self.api.multimodal_capture(arguments)
 
-    def multimodal_index(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def multimodal_index(self, arguments: ToolArguments) -> dict[str, object]:
         return self.api.multimodal_index(arguments)
 
     def _source_request(
         self,
-        arguments: Mapping[str, Any],
+        arguments: ToolArguments,
         *,
         allow_existing_revision: bool = False,
     ) -> IngestPipelineRequest:

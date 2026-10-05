@@ -53,6 +53,7 @@ from .gateway_source import (
 from .gateway_source import (
     validate_supplied_provenance as _validate_supplied_provenance,  # noqa: F401 - legacy source-tools seam
 )
+from .host import ToolArguments
 from .maintenance_tools import AgentMaintenanceToolsMixin
 from .protocol import bounded_lens_arguments as _bounded_lens_arguments
 from .protocol import (
@@ -85,10 +86,10 @@ class AgentGateway(
         self.api = api
         self.telemetry = telemetry or LlmWikiTelemetry.from_environment()
 
-    def ingest(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def ingest(self, arguments: ToolArguments) -> dict[str, object]:
         return self._ingest(arguments, reingest=False)
 
-    def reingest(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def reingest(self, arguments: ToolArguments) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         source_uri = str(arguments.get("source_uri") or arguments.get("uri") or "").strip()
         source_document_id = str(arguments.get("source_document_id") or "").strip()
@@ -123,7 +124,7 @@ class AgentGateway(
                     request_arguments[key] = existing_metadata[key]
         return self._ingest(request_arguments, reingest=True)
 
-    def source(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def source(self, arguments: ToolArguments) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         source_uri = str(arguments.get("source_uri") or arguments.get("uri") or "").strip()
         source_document_id = str(arguments.get("source_document_id") or "").strip()
@@ -316,7 +317,7 @@ class AgentGateway(
             },
         }
 
-    def status(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def status(self, arguments: ToolArguments) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         if not workspace_id:
             raise ValueError("status requires workspace_id")
@@ -356,7 +357,7 @@ class AgentGateway(
             },
         }
 
-    def propose(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def propose(self, arguments: ToolArguments) -> dict[str, object]:
         validation = self.api.validate_proposal(arguments)
         if not validation.get("accepted"):
             return validation
@@ -379,10 +380,10 @@ class AgentGateway(
             "confirmation_required": True,
         }
 
-    def confirm(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def confirm(self, arguments: ToolArguments) -> dict[str, object]:
         return self.api.confirm_cockpit_proposal(arguments)
 
-    def _ingest(self, arguments: Mapping[str, Any], *, reingest: bool) -> dict[str, object]:
+    def _ingest(self, arguments: ToolArguments, *, reingest: bool) -> dict[str, object]:
         request = self._source_request(arguments, allow_existing_revision=reingest)
         if reingest and self._load_source_request(
             workspace_id=request.workspace_id,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
 
 from ..agent.protocol import (
     budgets as _budgets,
@@ -16,11 +15,11 @@ from ..agent.protocol import (
 )
 from ..maintenance.maintenance_control import configured_default_request_max_rounds
 from ..models import IngestPipelineRequest
-from .host import AgentGatewayHost
+from .host import AgentGatewayHost, ToolArguments
 
 
 class AgentMaintenanceToolsMixin(AgentGatewayHost):
-    def maintain(self, arguments: Mapping[str, Any]) -> dict[str, object]:
+    def maintain(self, arguments: ToolArguments) -> dict[str, object]:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         topic = str(arguments.get("topic") or "").strip()
         objective = str(arguments.get("objective") or arguments.get("policy") or "").strip()
