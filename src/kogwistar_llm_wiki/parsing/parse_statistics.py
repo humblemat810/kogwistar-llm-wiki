@@ -11,8 +11,9 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TypeAlias
 
-type JsonObject = dict[str, object]
+JsonObject: TypeAlias = dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)

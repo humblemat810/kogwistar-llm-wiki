@@ -177,3 +177,5 @@ target-version = "py312"
 "tests/conftest.py" = ["E402"]
 "tests/integration/test_longrun_workflow_ingestion.py" = ["E402"]
 "tests/unit/test_embedding_service.py" = ["E402"]
+"src/kogwistar_llm_wiki/agent/host.py" = ["UP040"]
+"src/kogwistar_llm_wiki/parsing/parse_statistics.py" = ["UP040"]

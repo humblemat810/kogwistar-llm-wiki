@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
 from ..models import IngestPipelineRequest
 from ..otel import LlmWikiTelemetry
 from ..workbench.workbench_api import WorkbenchApi
 
-type ToolArguments = Mapping[str, object]
+ToolArguments: TypeAlias = Mapping[str, object]
 
 
 class AgentGatewayHost(Protocol):
