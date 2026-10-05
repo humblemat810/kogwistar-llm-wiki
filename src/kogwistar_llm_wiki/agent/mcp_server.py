@@ -494,7 +494,7 @@ class AgentMcpServer:
             self.server = Server("llm-wiki")
 
             @self.server.list_tools()  # type: ignore[attr-defined]
-            async def _list_tools(*_args: Any) -> types.ListToolsResult:
+            async def _list_tools(*_args: object) -> types.ListToolsResult:
                 return await self._handle_list_tools(None, None)
 
             @self.server.call_tool(validate_input=False)  # type: ignore[attr-defined]
@@ -542,7 +542,9 @@ class AgentMcpServer:
 
         return await self.list_tools()
 
-    async def _handle_list_tools(self, _context: Any, _params: Any) -> types.ListToolsResult:
+    async def _handle_list_tools(
+        self, _context: object, _params: object
+    ) -> types.ListToolsResult:
         self._authenticate_request()
         return types.ListToolsResult(tools=list(self._tools))
 
