@@ -16,7 +16,7 @@ import time
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 from ..compose.options import ComposeOptions, validate_options
 from ..compose.rendering import render_compose
@@ -284,7 +284,7 @@ class WorkbenchApi:
             and authorizer(workspace_id, resource_type, resource_id, action)
         )
 
-    def multimodal_capture(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def multimodal_capture(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Capture trusted, revision-bound multimodal projection units.
 
         This is deliberately a capture operation only.  It does not accept
@@ -380,7 +380,7 @@ class WorkbenchApi:
         ):
             raise ValueError("multimodal asset digest does not match the source map")
 
-    def multimodal_index(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def multimodal_index(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Promote pending units using the configured, host-owned resolver."""
         workspace_id = str(payload.get("workspace_id") or "").strip()
         if not workspace_id:
@@ -461,7 +461,7 @@ class WorkbenchApi:
             "stage_counts": store.stage_counts(workspace_id=workspace_id),
         }
 
-    def multimodal_search(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def multimodal_search(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Run authorized text-to-multimodal retrieval through the host adapter."""
         workspace_id = str(payload.get("workspace_id") or "").strip()
         query_text = str(payload.get("query_text") or "").strip()
@@ -1054,7 +1054,7 @@ class WorkbenchApi:
             authorized_stream_ids=authorized_stream_ids,
         )
 
-    def compose_preview(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def compose_preview(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Return a generated Compose bundle without writing files or secrets."""
         options = ComposeOptions(
             backend=str(payload.get("backend") or "postgres"),
@@ -1076,7 +1076,7 @@ class WorkbenchApi:
         return {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None}
 
     @staticmethod
-    def compose_check(payload: Mapping[str, Any]) -> dict[str, object]:
+    def compose_check(payload: Mapping[str, object]) -> dict[str, object]:
         text = payload.get("yaml")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("yaml must be a non-empty string")
@@ -1088,7 +1088,7 @@ class WorkbenchApi:
             raise ValueError("role must be parser or maintenance")
         return available_models(role, provider=provider, base_url=base_url)
 
-    def get_lens(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def get_lens(self, payload: Mapping[str, object]) -> dict[str, object]:
         request = _lens_request(payload)
         result = self.pipeline.resolve_semantic_lens(request).to_dict()
         multimodal = self._multimodal_route(payload, query_text=request.query_text)
@@ -1098,7 +1098,7 @@ class WorkbenchApi:
 
     def _multimodal_route(
         self,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, object],
         *,
         query_text: str,
     ) -> dict[str, object] | None:
@@ -1117,7 +1117,7 @@ class WorkbenchApi:
 
     def ask(
         self,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, object],
         *,
         progress: ProgressCallback | None = None,
     ) -> dict[str, object]:
@@ -1258,7 +1258,7 @@ class WorkbenchApi:
             "proposal_request": outcome.final_request,
         }
 
-    def submit_interaction(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def submit_interaction(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Persist and schedule one Codex turn without blocking the HTTP caller."""
         if self.dispatcher is None or (self.agent_responder is None and self.cockpit_responder is None):
             raise RuntimeError("Codex background worker is not configured")
@@ -1325,7 +1325,7 @@ class WorkbenchApi:
             for record in records
         ]
 
-    def validate_proposal(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def validate_proposal(self, payload: Mapping[str, object]) -> dict[str, object]:
         request_payload = payload.get("request")
         proposal = payload.get("proposal")
         if not isinstance(request_payload, Mapping) or not isinstance(proposal, Mapping):
@@ -1354,7 +1354,7 @@ class WorkbenchApi:
             "lens_id": snapshot.lens_id,
         }
 
-    def confirm_cockpit_proposal(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def confirm_cockpit_proposal(self, payload: Mapping[str, object]) -> dict[str, object]:
         workspace_id = str(payload.get("workspace_id") or "")
         interaction_id = str(payload.get("interaction_id") or "")
         if not workspace_id or not interaction_id:
@@ -1379,7 +1379,7 @@ class WorkbenchApi:
     def _confirm_cockpit_proposal_locked(
         self,
         *,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, object],
         workspace_id: str,
         interaction_id: str,
         interaction: WorkbenchInteraction,
@@ -1460,7 +1460,7 @@ class WorkbenchApi:
             return self._confirmation_locks.setdefault(key, threading.Lock())
 
 
-def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
+def _lens_request(payload: Mapping[str, object]) -> SemanticLensRequest:
     def integer(name: str, default: int) -> int:
         value = payload.get(name)
         return default if value is None else int(value)
