@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Protocol
 
 from ..models import IngestPipelineRequest
 from ..otel import LlmWikiTelemetry
@@ -23,7 +23,7 @@ class AgentGatewayHost(Protocol):
     api: WorkbenchApi
     telemetry: LlmWikiTelemetry
 
-    def _answer(self, payload: Mapping[str, Any]) -> dict[str, object]: ...
+    def _answer(self, payload: Mapping[str, object]) -> dict[str, object]: ...
 
     def _source_documents(self, workspace_id: str) -> Sequence[Mapping[str, object]]: ...
 

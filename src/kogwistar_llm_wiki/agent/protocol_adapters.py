@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Mapping
-from typing import Any
 
 from .gateway_protocol import (
     a2a_task as _a2a_task,
@@ -29,7 +28,7 @@ from .protocol import request_payload as _request_payload
 class AgentProtocolMixin(AgentGatewayHost):
     """Expose protocol-specific envelopes over the shared gateway answer."""
 
-    def responses(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def responses(self, payload: Mapping[str, object]) -> dict[str, object]:
         request_id = _request_id(payload, "resp")
         model = str(payload.get("model") or "llm-wiki-deterministic")
         with self.telemetry.span("llm_wiki.responses", {"request_id": request_id, "model": model}):
@@ -52,7 +51,7 @@ class AgentProtocolMixin(AgentGatewayHost):
             "llm_wiki": result,
         }
 
-    def chat_completions(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def chat_completions(self, payload: Mapping[str, object]) -> dict[str, object]:
         request_id = _request_id(payload, "chatcmpl")
         model = str(payload.get("model") or "llm-wiki-deterministic")
         with self.telemetry.span(
@@ -74,7 +73,7 @@ class AgentProtocolMixin(AgentGatewayHost):
             "llm_wiki": result,
         }
 
-    def a2a_message(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def a2a_message(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Submit or execute an A2A-style message using durable interactions."""
         metadata = payload.get("metadata")
         metadata = metadata if isinstance(metadata, Mapping) else {}
@@ -98,7 +97,7 @@ class AgentProtocolMixin(AgentGatewayHost):
             return None
         return _a2a_task(interaction)
 
-    def a2a_jsonrpc(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def a2a_jsonrpc(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Handle the A2A JSON-RPC binding without duplicating task logic."""
         request_id = payload.get("id")
         if payload.get("jsonrpc") != "2.0":

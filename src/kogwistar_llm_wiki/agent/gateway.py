@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from typing import Any
 from urllib import (
     request as urllib_request,  # noqa: F401 - legacy source-fetch test seam
 )
@@ -393,7 +392,7 @@ class AgentGateway(
         artifacts = self.api.pipeline.run(request)
         return {"status": "reingested" if reingest else "ingested", "request": request.model_dump(dump_format="json"), "artifacts": asdict(artifacts)}
 
-    def _answer(self, payload: Mapping[str, Any]) -> dict[str, object]:
+    def _answer(self, payload: Mapping[str, object]) -> dict[str, object]:
         request = _request_payload(payload)
         request = _bounded_lens_arguments(request)
         return self.api.ask(request)
