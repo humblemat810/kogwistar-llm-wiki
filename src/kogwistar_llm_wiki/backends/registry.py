@@ -10,18 +10,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from importlib import import_module
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import Protocol, cast
 
-from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core import GraphKnowledgeEngine, StorageBackendFactory
 from kogwistar.engine_core.storage_backend import StorageBackend
-
-if TYPE_CHECKING:
-    from kogwistar.engine_core import StorageBackendFactory
-else:
-    class StorageBackendFactory(Protocol):
-        """Compatibility view of the core factory contract."""
-
-        def __call__(self, engine: GraphKnowledgeEngine, /) -> StorageBackend: ...
 
 SUPPORTED_BACKENDS = ("chroma", "postgres", "pinecone", "qdrant")
 

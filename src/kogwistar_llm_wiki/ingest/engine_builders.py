@@ -7,16 +7,15 @@ parent pipeline module.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
-from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.engine_core import GraphKnowledgeEngine, StorageBackendFactory
 from kogwistar.engine_core.embedding_profile import EmbeddingProfile
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
-from kogwistar.engine_core.storage_backend import StorageBackend
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
 
 from ..backends import VectorBackendSettings, build_backend_factory
@@ -52,16 +51,7 @@ class ProfileResolver(Protocol):
     def __call__(self, config: EmbeddingProviderConfig) -> EmbeddingProfile | None: ...
 
 
-class GraphEngineFactory(Protocol):
-    """Construct a graph engine while preserving the engine constructor boundary."""
-
-    def __call__(self, *args: Any, **kwargs: Any) -> GraphKnowledgeEngine: ...
-
-
-class StorageBackendFactory(Protocol):
-    """Build an external storage backend for one graph engine."""
-
-    def __call__(self, engine: GraphKnowledgeEngine, /) -> StorageBackend: ...
+GraphEngineFactory = Callable[..., GraphKnowledgeEngine]
 
 
 def _require_profile(profile: EmbeddingProfile | None) -> EmbeddingProfile:
