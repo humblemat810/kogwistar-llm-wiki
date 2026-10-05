@@ -3,6 +3,90 @@
 from __future__ import annotations
 
 from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .embedding_config_resolver import (
+        EMBEDDING_SPACES,
+        TinyEmbeddingFunction,
+        embedding_profile,
+        resolve_embedding_function,
+        resolve_embedding_functions,
+        validate_shared_postgres_embedding_profile,
+    )
+    from .multimodal_dereference import (
+        DereferenceStatus,
+        EmbeddingDereferenceResult,
+        EmbeddingReferenceDereferencer,
+        EmbeddingReferenceResolver,
+    )
+    from .multimodal_grounding import (
+        EvidenceClosureResolver,
+        EvidenceClosureValidator,
+        EvidencePack,
+        EvidencePackReference,
+        GroundingComposition,
+        GroundingValidationError,
+        HigherOrderGrounding,
+        PinnedEntityRef,
+        ResolvedEntityGrounding,
+        SourceEvidenceRef,
+    )
+    from .multimodal_projection import (
+        AssetResolver,
+        ChromaMultimodalProjectionStore,
+        ColQwenNativeEncoder,
+        EmbeddingProfileMismatch,
+        EmbeddingSet,
+        FakeMultimodalEncoder,
+        InMemoryMultimodalProjectionStore,
+        MultimodalEmbeddingProfile,
+        MultimodalEncoder,
+        MultimodalImageQueryEncoder,
+        MultimodalProjectionStore,
+        MultimodalSearchHit,
+        MultimodalSourceUnit,
+        PgVectorMultimodalProjectionStore,
+        ProjectionIntegrityError,
+        SQLiteMultimodalProjectionStore,
+        embed_pending,
+        score_embedding_sets,
+        to_core_embedding_profile,
+    )
+    from .multimodal_remote import (
+        EmbeddingProtocolError,
+        EmbeddingServiceError,
+        EmbeddingServiceSettings,
+        EmbeddingServiceUnavailable,
+        RemoteMultimodalEncoder,
+    )
+    from .multimodal_sources import (
+        LocalFileAssetResolver,
+        MappingAssetResolver,
+        MultimodalSourceBundle,
+        audio_interval_unit,
+        build_source_bundle,
+        manifest_units,
+        pdf_manifest_units,
+        split_text_units,
+        video_interval_unit,
+        video_region_track_unit,
+        webpage_units,
+    )
+    from .retrieval_experiment import (
+        EvidenceCandidate,
+        EvidenceEvent,
+        EvidenceSubscription,
+        FeedState,
+        MultimodalPipelineLike,
+        MultimodalRecallTiming,
+        MultimodalRetrievalSidecar,
+        RetrievalBatch,
+        SynchronousMultimodalRecall,
+        pipeline_multimodal_retriever,
+        synchronous_multimodal_recall,
+    )
+    from .vllm_remote import VllmEmbeddingSettings, VllmMultimodalEncoder
 
 _EXPORT_MODULES = {
     **dict.fromkeys(
