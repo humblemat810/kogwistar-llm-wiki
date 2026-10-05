@@ -258,7 +258,7 @@ def test_parser_uses_the_released_kogwistar_package() -> None:
     assert parser_pin == "0.6.2"
     assert locked_package["version"] == parser_pin
     assert "source" not in locked_package
-    assert "ref: v0.6.2" in parser_ci_workflow
+    assert "ref: c3275c74c73b33502e9f94900e0973000ec94a5e" in parser_ci_workflow
 
 
 @pytest.mark.ci
