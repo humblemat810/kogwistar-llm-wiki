@@ -22,10 +22,11 @@ from .gateway_protocol import (
 from .gateway_protocol import (
     request_id as _request_id,
 )
+from .host import AgentGatewayHost
 from .protocol import request_payload as _request_payload
 
 
-class AgentProtocolMixin:
+class AgentProtocolMixin(AgentGatewayHost):
     """Expose protocol-specific envelopes over the shared gateway answer."""
 
     def responses(self, payload: Mapping[str, Any]) -> dict[str, object]:
@@ -110,7 +111,8 @@ class AgentProtocolMixin:
             if method == "message/send":
                 return _jsonrpc_result(request_id, _a2a_task(self.a2a_message(params), standard=True))
             if method == "tasks/get":
-                metadata = params.get("metadata") if isinstance(params.get("metadata"), Mapping) else {}
+                raw_metadata = params.get("metadata")
+                metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
                 workspace_id = str(params.get("workspace_id") or metadata.get("workspace_id") or "default")
                 task_id = str(params.get("id") or params.get("taskId") or "")
                 if not task_id:

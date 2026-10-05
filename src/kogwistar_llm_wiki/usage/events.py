@@ -7,11 +7,18 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from kogwistar.id_provider import stable_id
-from kogwistar.runtime import BudgetAttribution, BudgetEvent, budget_event_to_dict
+from kogwistar.runtime import BudgetAttribution, BudgetEvent
+from kogwistar.runtime.budget import budget_event_to_dict
 
 from .usage_models import UsageMetaStore
 
 USAGE_EVENT_KIND = "usage_event"
+
+
+def _stable_part(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def _event_id(event: BudgetEvent) -> str:
@@ -20,15 +27,20 @@ def _event_id(event: BudgetEvent) -> str:
     return str(
         stable_id(
             "usage_event",
-            event.run_id,
-            event.source,
-            event.kind,
-            event.amount,
-            event.unit,
-            event.scope,
-            event.ts_ms,
-            event.meta,
-            event.attribution.as_dict() if event.attribution else {},
+            *(
+                _stable_part(value)
+                for value in (
+                    event.run_id,
+                    event.source,
+                    event.kind,
+                    event.amount,
+                    event.unit,
+                    event.scope,
+                    event.ts_ms,
+                    event.meta,
+                    event.attribution.as_dict() if event.attribution else {},
+                )
+            ),
         )
     )
 
@@ -70,7 +82,7 @@ def persist_usage_events(
     for index, event in enumerate(events):
         existing = event.attribution or BudgetAttribution()
         effective_operation_id = existing.operation_id or operation_id or str(
-            stable_id("kogwistar_llm_wiki.operation", attempt_id, index)
+            stable_id("kogwistar_llm_wiki.operation", attempt_id, str(index))
         )
         attribution = replace(
             existing,
@@ -92,8 +104,8 @@ def persist_usage_events(
                     "kogwistar_llm_wiki.usage_event",
                     workspace_id,
                     attempt_id,
-                    index,
-                    event.event_id,
+                    str(index),
+                    str(event.event_id or ""),
                 )
             ),
             attribution=attribution,

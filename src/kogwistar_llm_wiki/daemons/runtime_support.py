@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+from collections.abc import Mapping
 from pathlib import Path
 
 from kogwistar.engine_core import (
@@ -182,8 +183,9 @@ def _projection_manifest_surface(
 ) -> OutputReconciliationState:
     ns = WorkspaceNamespaces(workspace_id)
     get_projection = getattr(engines.conversation.meta_sqlite, "get_named_projection", None)
-    row = get_projection(ns.projection_manifest, workspace_id) if callable(get_projection) else None
-    payload = row.get("payload") if isinstance(row, dict) else {}
+    raw_row = get_projection(ns.projection_manifest, workspace_id) if callable(get_projection) else None
+    row: Mapping[str, object] | None = raw_row if isinstance(raw_row, Mapping) else None
+    payload = row.get("payload") if row is not None else {}
     payload = payload if isinstance(payload, dict) else {}
     status = str(
         (row or {}).get("materialization_status")

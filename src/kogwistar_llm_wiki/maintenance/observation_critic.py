@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 from kg_doc_parser.workflow_ingest.providers import (
     WorkflowProviderSettings,
+    ProviderEndpointConfig,
     build_chat_model,
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -162,7 +163,10 @@ def build_observation_critic(
                 provider_spec = provider_settings.parser
                 copy_with = getattr(provider_spec, "model_copy", None)
                 if callable(copy_with):
-                    provider_spec = copy_with(update={"max_retries": 0})
+                    provider_spec = cast(
+                        ProviderEndpointConfig,
+                        copy_with(update={"max_retries": 0}),
+                    )
                 model = build_chat_model(provider_spec)
         messages = [
             (

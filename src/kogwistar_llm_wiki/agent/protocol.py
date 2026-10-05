@@ -102,9 +102,9 @@ def limit_budgeted_sources(
 ) -> tuple[list[tuple[str, IngestPipelineRequest]], list[str]]:
     """Prevent request-level call/step quotas from multiplying per document."""
     limits = [
-        int(budget_values[name])
+        _as_non_negative_int(budget_values[name], name)
         for name in ("max_llm_calls", "max_steps")
-        if name in budget_values and int(budget_values[name]) > 0
+        if name in budget_values and _as_non_negative_int(budget_values[name], name) > 0
     ]
     if not limits:
         return source_requests, []
@@ -124,12 +124,21 @@ def partition_budgets(
             result[name] = value
             continue
         if name in {"max_llm_calls", "max_tokens", "max_steps"}:
-            total = int(value)
+            total = _as_non_negative_int(value, name)
             base, remainder = divmod(total, count)
             result[name] = base + (1 if index < remainder else 0)
         else:
             result[name] = float(value) / count
     return result
+
+
+def _as_non_negative_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError(f"{name} must be a non-negative number")
+    converted = int(float(value))
+    if converted < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return converted
 
 
 def bounded_lens_arguments(arguments: Mapping[str, Any]) -> dict[str, object]:

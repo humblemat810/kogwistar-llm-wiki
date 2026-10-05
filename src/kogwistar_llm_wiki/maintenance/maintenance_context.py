@@ -6,6 +6,7 @@ import json
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from typing import cast
 
 _MAINTENANCE_EXECUTION: ContextVar[bool] = ContextVar(
     "kogwistar_llm_wiki_maintenance_execution",
@@ -17,6 +18,21 @@ _MAX_CONTEXT_CHARACTERS = MAX_MAINTENANCE_CONTEXT_TOKENS
 _MAX_TURNS = 10
 _MAX_IDS = 64
 _MAX_REASON_ENTRIES = 24
+
+
+def _bounded_integer(value: object, *, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return default
+    return default
 
 
 def _bounded_string(value: object, *, limit: int) -> str:
@@ -54,12 +70,12 @@ def _bounded_turn(value: object) -> dict[str, object] | None:
                 }
             )
     return {
-        "round": max(0, int(value.get("round") or 0)),
+        "round": max(0, _bounded_integer(value.get("round"))),
         "summary": _bounded_string(value.get("summary"), limit=2_000),
         "touched_node_ids": _bounded_ids(value.get("touched_node_ids")),
         "touched_edge_ids": _bounded_ids(value.get("touched_edge_ids")),
         "next_seed_node_ids": _bounded_ids(value.get("next_seed_node_ids")),
-        "hop_limit": max(0, min(8, int(value.get("hop_limit") or 0))),
+        "hop_limit": max(0, min(8, _bounded_integer(value.get("hop_limit")))),
         "selection_reasons": reasons,
     }
 
@@ -93,8 +109,12 @@ def bound_maintenance_context(value: Mapping[str, object] | None) -> dict[str, o
             result["compressed_summary"] = summary[: max(0, len(summary) - 256)]
             result["truncated"] = True
             continue
-        result["compressed_node_ids"] = list(result["compressed_node_ids"])[:-8]
-        result["compressed_edge_ids"] = list(result["compressed_edge_ids"])[:-8]
+        result["compressed_node_ids"] = list(
+            cast(list[str], result["compressed_node_ids"])
+        )[:-8]
+        result["compressed_edge_ids"] = list(
+            cast(list[str], result["compressed_edge_ids"])
+        )[:-8]
         result["truncated"] = True
         if len(json.dumps(result, sort_keys=True, separators=(",", ":"))) <= _MAX_CONTEXT_CHARACTERS:
             break
@@ -114,7 +134,7 @@ def append_maintenance_round(
 ) -> dict[str, object]:
     """Append a structured round while preserving the context bound."""
     context = bound_maintenance_context(value)
-    turns = list(context.get("turns") or [])
+    turns = list(cast(list[dict[str, object]], context.get("turns") or []))
     turns.append(
         {
             "round": max(0, int(round_number)),

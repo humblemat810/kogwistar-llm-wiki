@@ -7,9 +7,10 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Protocol
 
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.engine_core.models import Grounding, Node, Span
@@ -21,9 +22,27 @@ from ..utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)
 
-ProgressCallback = Callable[[], None]
-ExecuteTurn = Callable[[Mapping[str, object], ProgressCallback], Mapping[str, object]]
-TraceSink = Callable[[dict[str, object]], None]
+class ProgressCallback(Protocol):
+    """Report that a long-running workbench turn is still making progress."""
+
+    def __call__(self, /) -> None: ...
+
+
+class ExecuteTurn(Protocol):
+    """Execute one durable workbench payload with a progress callback."""
+
+    def __call__(
+        self,
+        payload: Mapping[str, object],
+        progress: ProgressCallback,
+        /,
+    ) -> Mapping[str, object]: ...
+
+
+class TraceSink(Protocol):
+    """Receive one structured background-workbench trace event."""
+
+    def __call__(self, event: dict[str, object], /) -> None: ...
 
 _ARTIFACT_LOCKS: dict[tuple[int, str, str], threading.Lock] = {}
 _ARTIFACT_LOCKS_GUARD = threading.Lock()
@@ -37,6 +56,14 @@ def _artifact_lock(engines: NamespaceEngines, namespace: str, node_id: str) -> t
             lock = threading.Lock()
             _ARTIFACT_LOCKS[key] = lock
         return lock
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise TypeError("expected an integer-compatible value")
+    return int(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +106,7 @@ class WorkbenchInteractionStore:
         workspace_id = str(payload["workspace_id"])
         session_id = str(payload.get("session_id") or "default")
         interaction_id = str(payload.get("interaction_id") or uuid.uuid4())
-        submitted_at_ms = int(payload.get("submitted_at_ms") or int(time.time() * 1000))
+        submitted_at_ms = _as_int(payload.get("submitted_at_ms"), int(time.time() * 1000))
         stored_payload = {
             **dict(payload),
             "interaction_id": interaction_id,
@@ -127,7 +154,7 @@ class WorkbenchInteractionStore:
             workspace_id=workspace_id,
             session_id=str(request.get("session_id") or "default"),
             status="pending",
-            submitted_at_ms=int(request.get("submitted_at_ms") or 0),
+            submitted_at_ms=_as_int(request.get("submitted_at_ms")),
         )
 
     def persist_result(
@@ -247,8 +274,13 @@ class WorkbenchInteractionStore:
                         label=f"Workbench interaction: {artifact_kind}",
                         type="entity",
                         summary=str(payload.get("query_text") or payload.get("status") or artifact_kind),
+                        domain_id=None,
+                        canonical_entity_id=None,
+                        properties={},
+                        embedding=None,
                         doc_id=f"_conv:{interaction_id}",
                         mentions=[Grounding(spans=[span])],
+                        level_from_root=0,
                         metadata={
                             "workspace_id": workspace_id,
                             "graph_space": "conversation",
@@ -353,7 +385,7 @@ class CodexWorkbenchWorker:
                 workspace_id=str(job.payload["workspace_id"]),
                 interaction_id=str(job.payload["interaction_id"]),
                 session_id=str(job.payload.get("session_id") or "default"),
-                submitted_at_ms=int(job.payload.get("submitted_at_ms") or 0),
+                submitted_at_ms=_as_int(job.payload.get("submitted_at_ms")),
                 response=response,
             )
             acknowledged = self.engines.conversation.jobs.mark_done(job.job_id, claim_token=job.claim_token)
@@ -370,7 +402,7 @@ class CodexWorkbenchWorker:
                     workspace_id=str(job.payload["workspace_id"]),
                     interaction_id=str(job.payload["interaction_id"]),
                     session_id=str(job.payload.get("session_id") or "default"),
-                    submitted_at_ms=int(job.payload.get("submitted_at_ms") or 0),
+            submitted_at_ms=_as_int(job.payload.get("submitted_at_ms")),
                     error=f"{type(exc).__name__}: {exc}",
                 )
                 if not created:
@@ -497,8 +529,8 @@ def _interaction_from_payload(payload: Mapping[str, object]) -> WorkbenchInterac
         workspace_id=str(payload["workspace_id"]),
         session_id=str(payload.get("session_id") or "default"),
         status=str(payload.get("status") or "pending"),
-        submitted_at_ms=int(payload.get("submitted_at_ms") or 0),
-        completed_at_ms=None if completed is None else int(completed),
+        submitted_at_ms=_as_int(payload.get("submitted_at_ms")),
+        completed_at_ms=None if completed is None else _as_int(completed),
         response=dict(response) if isinstance(response, Mapping) else None,
         error=str(payload.get("error") or "") or None,
     )

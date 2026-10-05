@@ -11,9 +11,9 @@ from kogwistar.runtime import (
     BudgetEvent,
     ProjectionCheckpoint,
     ProjectionLoadResult,
-    budget_event_from_dict,
-    refresh_checkpointed_named_projection,
 )
+from kogwistar.runtime.budget import budget_event_from_dict
+from kogwistar.runtime.checkpointed_projection import refresh_checkpointed_named_projection
 
 from .aggregation import USAGE_PROJECTION_SCHEMA_VERSION
 from .aggregation import decode_projection as _decode_projection

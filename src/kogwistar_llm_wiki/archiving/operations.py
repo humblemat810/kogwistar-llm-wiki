@@ -78,8 +78,15 @@ def create_archive(
         getter = getattr(meta, "get_latest_entity_event_seq", None)
         if not callable(getter):
             raise ArchiveError(f"metadata store {type(meta).__name__} lacks event watermark support")
-        end = int(getter(namespace=spec.namespace) or 0)
-        start = int((parent_manifest or {}).get("watermarks", {}).get(spec.namespace, 0)) + 1
+        end_value = getter(namespace=spec.namespace)
+        end = int(end_value) if isinstance(end_value, (int, float, str)) else 0
+        parent_watermarks = (parent_manifest or {}).get("watermarks", {})
+        parent_value = (
+            parent_watermarks.get(spec.namespace, 0)
+            if isinstance(parent_watermarks, dict)
+            else 0
+        )
+        start = (int(parent_value) if isinstance(parent_value, (int, float, str)) else 0) + 1
         if end < start - 1:
             raise ArchiveError(f"event history for {spec.namespace!r} is behind parent watermark")
         watermarks[spec.namespace] = end

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.id_provider import stable_id
@@ -27,6 +29,12 @@ def _dummy_grounding() -> list[Grounding]:
                     document_page_url="",
                     collection_page_url="",
                     insertion_method="",
+                    page_number=1,
+                    context_before="",
+                    context_after="",
+                    chunk_id=None,
+                    source_cluster_id=None,
+                    verification=None,
                 )
             ]
         )
@@ -34,7 +42,7 @@ def _dummy_grounding() -> list[Grounding]:
 
 
 def _terminal_node(workflow_id: str, *, node_id: str, label: str, summary: str) -> WorkflowNode:
-    return WorkflowNode(
+    return _workflow_node(
         id=node_id,
         label=label,
         type="entity",
@@ -67,6 +75,11 @@ def _workflow_edge(
         target_edge_ids=[],
         label=label,
         summary=summary,
+        domain_id=None,
+        canonical_entity_id=None,
+        properties={},
+        embedding=None,
+        doc_id=None,
         mentions=_dummy_grounding(),
         metadata={
             "entity_type": "workflow_edge",
@@ -74,6 +87,31 @@ def _workflow_edge(
             "wf_predicate": None,
             "wf_is_default": True,
         },
+    )
+
+
+def _workflow_node(
+    *,
+    id: str,
+    label: str,
+    type: Literal["entity", "relationship", "reference_pointer"],
+    summary: str,
+    mentions: list[Grounding],
+    metadata: dict[str, object],
+) -> WorkflowNode:
+    return WorkflowNode(
+        id=id,
+        label=label,
+        type=type,
+        summary=summary,
+        domain_id=None,
+        canonical_entity_id=None,
+        properties={},
+        embedding=None,
+        doc_id=None,
+        level_from_root=None,
+        mentions=mentions,
+        metadata=metadata,
     )
 
 
@@ -85,7 +123,7 @@ def build_derived_knowledge_design(
     node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
 
     nodes = [
-        WorkflowNode(
+        _workflow_node(
             id=node_distill_id,
             label="Derive Knowledge Synthesis",
             type="entity",
@@ -99,7 +137,7 @@ def build_derived_knowledge_design(
                 "default_context_window": 4000,
             },
         ),
-        WorkflowNode(
+        _workflow_node(
             id=node_check_id,
             label="Check Derived Knowledge Complete",
             type="entity",
@@ -157,7 +195,7 @@ def build_execution_wisdom_design(
     node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
 
     nodes = [
-        WorkflowNode(
+        _workflow_node(
             id=node_extract_id,
             label="Derive Problem-Solving Wisdom From History",
             type="entity",
@@ -216,7 +254,7 @@ def build_graph_patch_design(
     node_terminal_id = str(stable_id("wf_node", workflow_id, "done"))
 
     nodes = [
-        WorkflowNode(
+        _workflow_node(
             id=node_noop_id,
             label=label,
             type="entity",
@@ -306,7 +344,7 @@ def build_crosslink_group_design(
             metadata["wf_start"] = True
         if key == "continue":
             metadata["wf_terminal"] = True
-        nodes.append(WorkflowNode(
+        nodes.append(_workflow_node(
             id=str(stable_id("wf_node", workflow_id, key)),
             label=label,
             type="entity",
@@ -388,7 +426,7 @@ def build_multimodal_retrieval_design(
         if key == "finalize":
             metadata["wf_terminal"] = True
         nodes.append(
-            WorkflowNode(
+            _workflow_node(
                 id=ids[key],
                 label=label,
                 type="entity",

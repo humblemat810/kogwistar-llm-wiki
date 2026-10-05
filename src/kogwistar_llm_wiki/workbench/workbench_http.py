@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import parse_qs, urlparse
 
 from ..agent.gateway import AgentGateway, _jsonrpc_result
@@ -63,7 +63,7 @@ def build_workbench_handler(
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
-            query = parse_qs(parsed.query)
+            query = _query_mapping(parsed.query)
             try:
                 route = extension_routes.get(("GET", parsed.path))
                 if route is not None:
@@ -239,7 +239,7 @@ def build_workbench_handler(
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")  # noqa: TRY004
-                extension_query = parse_qs(parsed.query)
+                extension_query = _query_mapping(parsed.query)
                 workspace_id = (
                     extension_route.workspace_id(extension_query, payload)
                     if extension_route is not None
@@ -276,8 +276,13 @@ def build_workbench_handler(
                     rpc = gateway.a2a_jsonrpc(payload)
                     if payload.get("method") == "message/stream" and "result" in rpc:
                         self._write_a2a_stream(
-                            rpc["result"],
-                            payload.get("params") if isinstance(payload.get("params"), dict) else {},
+                            cast(Mapping[str, object], rpc["result"]),
+                            cast(
+                                Mapping[str, object],
+                                payload.get("params")
+                                if isinstance(payload.get("params"), dict)
+                                else {},
+                            ),
                             gateway,
                             status=200,
                             jsonrpc_id=payload.get("id"),
@@ -294,12 +299,12 @@ def build_workbench_handler(
                     status = 200
                 elif parsed.path == "/a2a/v1/message:stream":
                     body = gateway.a2a_message(payload)
-                    status = 202 if body.get("status", {}).get("state") == "working" else 200
+                    status = 202 if _status_state(body) == "working" else 200
                     self._write_a2a_stream(body, payload, gateway, status=status)
                     return
                 elif parsed.path == "/a2a/v1/message:send":
                     body = gateway.a2a_message(payload)
-                    status = 202 if body.get("status", {}).get("state") == "working" else 200
+                    status = 202 if _status_state(body) == "working" else 200
                 elif parsed.path == "/mcp/tools/call":
                     name = payload.get("name")
                     arguments = payload.get("arguments") or {}
@@ -355,11 +360,11 @@ def build_workbench_handler(
                     identity = getattr(self, "_identity_context", None)
                     body = api.decide_contact_match(
                         workspace_id=str(workspace_id or ""),
-                        candidate_key=payload.get("candidate_key"),
-                        evidence_snapshot_id=payload.get("evidence_snapshot_id"),
-                        expected_evidence_version=payload.get("expected_evidence_version"),
-                        decision=payload.get("decision"),
-                        confirmed=payload.get("confirmed"),
+                        candidate_key=str(payload.get("candidate_key") or ""),
+                        evidence_snapshot_id=str(payload.get("evidence_snapshot_id") or ""),
+                        expected_evidence_version=int(payload.get("expected_evidence_version") or 0),
+                        decision=str(payload.get("decision") or ""),
+                        confirmed=bool(payload.get("confirmed", False)),
                         actor_id=getattr(identity, "principal_id", None),
                     )
                     status = 200
@@ -429,7 +434,7 @@ def build_workbench_handler(
             *,
             method: Literal["GET", "POST"],
             path: str,
-            query: dict[str, list[str]],
+            query: Mapping[str, tuple[str, ...]],
             payload: dict[str, object],
             workspace_id: str | None,
         ) -> WorkbenchExtensionResponse:
@@ -475,8 +480,8 @@ def build_workbench_handler(
 
         def _write_a2a_stream(
             self,
-            initial: dict[str, object],
-            payload: dict[str, object],
+            initial: Mapping[str, object],
+            payload: Mapping[str, object],
             gateway: AgentGateway,
             *,
             status: int,
@@ -495,8 +500,9 @@ def build_workbench_handler(
                 self.wfile.write(_sse_bytes("message" if standard else "task", value))
                 self.wfile.flush()
 
-            emit(initial)
-            if initial.get("status", {}).get("state") not in {"submitted", "working"}:
+            initial_map = dict(initial)
+            emit(initial_map)
+            if _status_state(initial_map) not in {"submitted", "working"}:
                 return
             metadata = payload.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
@@ -528,7 +534,7 @@ def build_workbench_handler(
                 if encoded != previous:
                     emit(current)
                     previous = encoded
-                if current.get("status", {}).get("state") not in {"submitted", "working"}:
+                if _status_state(cast(Mapping[str, object], current)) not in {"submitted", "working"}:
                     return
             emit({
                 "id": task_id,
@@ -537,10 +543,19 @@ def build_workbench_handler(
                 "metadata": {"workspace_id": workspace_id, "stream_timeout": True},
             })
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *_args: object) -> None:
             return
 
     return Handler
+
+
+def _query_mapping(query: str) -> dict[str, tuple[str, ...]]:
+    return {key: tuple(values) for key, values in parse_qs(query).items()}
+
+
+def _status_state(value: Mapping[str, object]) -> str:
+    status = value.get("status")
+    return str(status.get("state") or "") if isinstance(status, Mapping) else ""
 
 
 class _RouteHandled(Exception):
@@ -570,7 +585,7 @@ def create_workbench_server(
     )
 
 
-def _first(values: dict[str, list[str]], key: str, default: str) -> str:
+def _first(values: Mapping[str, Sequence[str]], key: str, default: str) -> str:
     return str((values.get(key) or [default])[0])
 
 

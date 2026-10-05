@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from ..embeddings.multimodal_projection import (
     AssetResolver,
@@ -15,12 +16,13 @@ from ..embeddings.multimodal_projection import (
 from ..embeddings.multimodal_sources import MultimodalSourceBundle, build_source_bundle
 from ..maintenance.maintenance_guards import source_revision_document_id
 from ..utils import _temporary_namespace
+from .contracts import IngestPipelineHost
 
 
 class MultimodalIngestMixin:
     """Product-facing multimodal projection operations."""
 
-    def capture_multimodal_units(self, units: Sequence[MultimodalSourceUnit]) -> int:
+    def capture_multimodal_units(self: IngestPipelineHost, units: Sequence[MultimodalSourceUnit]) -> int:
         """Capture validated retrieval views into Stage 1.
 
         Multimodal projection storage is opt-in and remains separate from the
@@ -60,7 +62,7 @@ class MultimodalIngestMixin:
         return len(units)
 
     def resolve_multimodal_source_map(
-        self, unit: MultimodalSourceUnit
+        self: IngestPipelineHost, unit: MultimodalSourceUnit
     ) -> Mapping[str, object] | None:
         """Resolve the immutable source-map record for a projection unit.
 
@@ -152,7 +154,7 @@ class MultimodalIngestMixin:
             }
 
     def capture_multimodal_source(
-        self,
+        self: IngestPipelineHost,
         *,
         workspace_id: str,
         source_id: str,
@@ -180,7 +182,7 @@ class MultimodalIngestMixin:
         return bundle
 
     def embed_multimodal_pending(
-        self,
+        self: IngestPipelineHost,
         *,
         batch_size: int | None = None,
         max_units: int | None = None,
@@ -200,7 +202,7 @@ class MultimodalIngestMixin:
         )
 
     def search_multimodal(
-        self,
+        self: IngestPipelineHost,
         query: str,
         *,
         limit: int = 10,
@@ -218,7 +220,7 @@ class MultimodalIngestMixin:
         )
 
     def search_multimodal_image(
-        self,
+        self: IngestPipelineHost,
         images: Sequence[object],
         *,
         limit: int = 10,
@@ -241,7 +243,7 @@ class MultimodalIngestMixin:
         )
 
     def search_multimodal_mixed(
-        self,
+        self: IngestPipelineHost,
         *,
         text_queries: Sequence[str] = (),
         images: Sequence[object] = (),
@@ -287,7 +289,14 @@ class MultimodalIngestMixin:
                         metadata={
                             **existing.metadata,
                             "query_contributions": {
-                                **dict(existing.metadata.get("query_contributions") or {}),
+                                **(
+                                    dict(raw_contributions)
+                                    if isinstance(
+                                        raw_contributions := existing.metadata.get("query_contributions"),
+                                        Mapping,
+                                    )
+                                    else {}
+                                ),
                                 query_key: float(hit.score),
                             },
                         },
@@ -296,7 +305,10 @@ class MultimodalIngestMixin:
 
         for index, text in enumerate(texts):
             add_hits(
-                self.search_multimodal(text, limit=limit),
+                cast(
+                    Sequence[MultimodalSearchHit],
+                    self.search_multimodal(text, limit=limit),
+                ),
                 weight=text_weight,
                 query_key=f"text:{index}",
             )

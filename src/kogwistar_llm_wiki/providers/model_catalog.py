@@ -9,8 +9,17 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
+
+
+class _UrlOpenResponse(Protocol):
+    def __enter__(self) -> "_UrlOpenResponse": ...
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None: ...
+
+    def read(self, amount: int = -1) -> bytes: ...
 
 
 def _safe_endpoint(value: str) -> str:
@@ -33,7 +42,7 @@ def available_models(
     *,
     provider: str | None = None,
     base_url: str | None = None,
-    opener: Callable[..., object] | None = None,
+    opener: Callable[..., _UrlOpenResponse] | None = None,
 ) -> dict[str, object]:
     role = role.strip().lower()
     prefix = "KOGWISTAR_PARSER" if role == "parser" else "KOGWISTAR_MAINTENANCE"

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal, Protocol, TypedDict, cast
 
 from kg_doc_parser.workflow_ingest.layerwise_llm import (
-    LayerwiseCallback,
+    LayerwiseLLMCallbacks,
     build_layerwise_llm_callbacks,
 )
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
-from kogwistar.runtime.budget import StateBackedBudgetLedger, budget_event_to_dict
+from kogwistar.runtime.budget import (
+    BudgetEvent,
+    StateBackedBudgetLedger,
+    budget_event_to_dict,
+)
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 
 from ..diagnostics.debug_helpers import summarize_stage_timings
@@ -32,7 +36,62 @@ from .parse_quality import (
 )
 
 
-def _summarize_budget_events(events: list[object], *, provider_settings: WorkflowProviderSettings) -> dict[str, object]:
+class _EngineBuildOptions(TypedDict, total=False):
+    provider_settings: WorkflowProviderSettings
+    conversation_persistence_mode: Literal["single_stage", "two_stage"]
+
+
+class LayerEventSink(Protocol):
+    """Receive structured events from the bounded parser workflow."""
+
+    def __call__(self, stage: str, **extra: object) -> None: ...
+
+
+class LayerCallbackBuilder(Protocol):
+    """Build provider callbacks without exposing an untyped factory."""
+
+    def __call__(
+        self,
+        provider_settings: WorkflowProviderSettings,
+        *,
+        event_sink: LayerEventSink | None = None,
+        model_callbacks: list[ProviderUsageCallback] | None = None,
+    ) -> LayerwiseLLMCallbacks: ...
+
+
+class BasicSenseEvaluator(Protocol):
+    """Evaluate the exported graph payload at the parser boundary."""
+
+    def __call__(
+        self,
+        *,
+        graph_payload: dict[str, object],
+        diagnostics: dict[str, object],
+    ) -> dict[str, object]: ...
+
+
+@dataclass(slots=True)
+class LayeredParseResult:
+    """Typed result crossing the long-run parser child-process boundary."""
+
+    graph_payload: dict[str, object]
+    evaluation: dict[str, object]
+    diagnostics: dict[str, object]
+    usage_summary: dict[str, object]
+    usage_events: list[dict[str, object]]
+    layer_log: list[dict[str, object]]
+
+    @property
+    def workflow_status(self) -> str | None:
+        """Expose the workflow status without duplicating diagnostic state."""
+
+        value = self.diagnostics.get("workflow_status")
+        return value if isinstance(value, str) else None
+
+
+def _summarize_budget_events(
+    events: list[BudgetEvent], *, provider_settings: WorkflowProviderSettings
+) -> dict[str, object]:
     provider_summary = provider_config_summary(provider_settings)
     summary = {
         "provider": provider_summary.get("provider"),
@@ -76,14 +135,14 @@ def _summarize_budget_events(events: list[object], *, provider_settings: Workflo
 def _build_provider_layer_callbacks(
     provider_settings: WorkflowProviderSettings,
     *,
-    layer_event: Callable[..., None] | None = None,
+    layer_event: LayerEventSink | None = None,
     budget_ledger: StateBackedBudgetLedger | None = None,
     run_id: str = "",
     source_document_id: str = "",
-    usage_event_sink: Callable[[object], None] | None = None,
-    build_callbacks: Callable[..., dict[str, LayerwiseCallback | int | bool]] | None = None,
-) -> dict[str, LayerwiseCallback | int | bool]:
-    model_callbacks: list[object] = []
+    usage_event_sink: Callable[[BudgetEvent], None] | None = None,
+    build_callbacks: LayerCallbackBuilder | None = None,
+) -> LayerwiseLLMCallbacks:
+    model_callbacks: list[ProviderUsageCallback] = []
     if budget_ledger is not None:
         parser = provider_settings.parser
         model_callbacks.append(
@@ -121,9 +180,9 @@ def run_workflow_layered_parse(
     resume_from_checkpoint: bool = False,
     usage_event_path: Path | None = None,
     conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
-    build_callbacks: Callable[..., dict[str, LayerwiseCallback | int | bool]] | None = None,
-    basic_sense_eval: Callable[..., dict[str, object]] | None = None,
-) -> SimpleNamespace:
+    build_callbacks: LayerCallbackBuilder | None = None,
+    basic_sense_eval: BasicSenseEvaluator | None = None,
+) -> LayeredParseResult:
     from kg_doc_parser.workflow_ingest.models import (
         WorkflowExportBundle,
         WorkflowIngestInput,
@@ -158,11 +217,11 @@ def run_workflow_layered_parse(
             "budget_kind": "token",
         }
     )
-    usage_event_sink: Callable[[object], None] | None = None
+    usage_event_sink: Callable[[BudgetEvent], None] | None = None
     if usage_event_path is not None:
         usage_event_path.parent.mkdir(parents=True, exist_ok=True)
 
-        def _append_usage_event(event: object) -> None:
+        def _append_usage_event(event: BudgetEvent) -> None:
             with usage_event_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(budget_event_to_dict(event), sort_keys=True) + "\n")
                 handle.flush()
@@ -179,7 +238,7 @@ def run_workflow_layered_parse(
         resume_from_checkpoint=resume_from_checkpoint,
     )
     _layer_event("workflow_layered_engines_build_start", engine_dir=str(engine_dir))
-    engine_kwargs: dict[str, object] = {"provider_settings": provider_settings}
+    engine_kwargs: _EngineBuildOptions = {"provider_settings": provider_settings}
     # Do not add a new keyword on the historical default path. This keeps
     # parser-service wrappers compatible while making the opt-in explicit.
     if conversation_persistence_mode != "single_stage":
@@ -242,7 +301,10 @@ def run_workflow_layered_parse(
         has_export_bundle="export_bundle" in final_state,
         workflow_error_count=len(list(final_state.get("workflow_errors") or [])),
     )
-    parse_session = final_state.get("parse_session") or {}
+    raw_parse_session = final_state.get("parse_session")
+    parse_session: Mapping[str, object] = (
+        raw_parse_session if isinstance(raw_parse_session, Mapping) else {}
+    )
     proposal_summary = _proposal_mode_summary(final_state)
     _layer_event(
         "workflow_layered_parse_summary_ready",
@@ -305,7 +367,7 @@ def run_workflow_layered_parse(
         graph_edge_count=len(bundle.graph_payload.get("edges", []) or []),
     )
 
-    graph_payload = _dump_model(bundle.graph_payload)
+    graph_payload = cast(dict[str, object], _dump_model(bundle.graph_payload))
     evaluation = (basic_sense_eval or _basic_sense_eval_from_graph_payload)(
         graph_payload=graph_payload,
         diagnostics={
@@ -328,7 +390,7 @@ def run_workflow_layered_parse(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
     )
-    timing_summary = summarize_stage_timings(layer_log)
+    timing_summary = summarize_stage_timings(cast(list[Mapping[str, Any]], layer_log))
     usage_summary["timing_summary"] = timing_summary
     if proposal_summary:
         usage_summary["proposal_summary"] = proposal_summary
@@ -356,22 +418,20 @@ def run_workflow_layered_parse(
             "workflow-layered parser did not run in workflow_layered mode; "
             f"got {diagnostics['parse_session_mode']!r}"
         )
+    graph_nodes = graph_payload.get("nodes")
+    graph_edges = graph_payload.get("edges")
     _layer_event(
         "workflow_layered_parse_complete",
-        node_count=len(graph_payload.get("nodes", [])),
-        edge_count=len(graph_payload.get("edges", [])),
+        node_count=len(graph_nodes) if isinstance(graph_nodes, list) else 0,
+        edge_count=len(graph_edges) if isinstance(graph_edges, list) else 0,
         total_cost=usage_summary["total_cost"],
         parse_session_mode=parse_session.get("mode"),
     )
-    return SimpleNamespace(
-        semantic_tree=SimpleNamespace(title=str(title)),
+    return LayeredParseResult(
         graph_payload=graph_payload,
         evaluation=evaluation,
         diagnostics=diagnostics,
         usage_summary=usage_summary,
         usage_events=[budget_event_to_dict(event) for event in budget_ledger.events],
         layer_log=layer_log,
-        parse_session=parse_session,
-        workflow_status=getattr(run_result, "status", None),
-        workflow_run_id=getattr(run_result, "run_id", None),
     )

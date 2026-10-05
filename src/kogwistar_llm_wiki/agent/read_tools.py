@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .host import AgentGatewayHost
 from .protocol import bounded_lens_arguments as _bounded_lens_arguments
 
 
-class AgentReadToolsMixin:
+class AgentReadToolsMixin(AgentGatewayHost):
     def _authorized_memory_stream_ids(self, arguments: Mapping[str, Any], workspace_id: str) -> tuple[str, ...]:
         raw_stream_ids = arguments.get("stream_ids") or []
         if not isinstance(raw_stream_ids, list) or not all(

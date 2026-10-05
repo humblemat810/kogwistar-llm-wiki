@@ -3,6 +3,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    return default
+
 DEFAULT_DOCUMENT_MAINTENANCE_PLAN: tuple[str, ...] = (
     "document_seed_graph",
     "document_parse_graph",
@@ -51,9 +59,9 @@ def decide_next_maintenance_phase(
     if not bool(payload.get("durable_layered_parse")):
         plan = tuple(kind for kind in plan if kind != "document_expand_parse_children")
     current_kind = str(completed_kind).strip()
-    current_index = int(payload.get("maintenance_phase_index") or 0)
-    completed_rounds = int(payload.get("maintenance_round") or 0)
-    max_rounds = int(payload.get("maintenance_max_rounds") or 0)
+    current_index = _as_int(payload.get("maintenance_phase_index"))
+    completed_rounds = _as_int(payload.get("maintenance_round"))
+    max_rounds = _as_int(payload.get("maintenance_max_rounds"))
     if payload.get("maintenance_stop_requested"):
         return MaintenancePlanDecision(
             current_kind=current_kind,

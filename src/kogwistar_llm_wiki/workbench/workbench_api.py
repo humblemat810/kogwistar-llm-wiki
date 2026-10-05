@@ -14,13 +14,14 @@ import json
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from ..compose.options import ComposeOptions, validate_options
 from ..compose.rendering import render_compose
 from ..compose.validation import check_compose_text
+from ..configuration.resource_authorizer import ResourceAuthorizer
 from ..configuration.settings_service import SettingsService
 from ..configuration.workspace import GraphSpace
 from ..disambiguation.contact_book import (
@@ -30,6 +31,7 @@ from ..disambiguation.contact_book import (
     compose_contact_observation_providers,
 )
 from ..disambiguation.contact_matching import (
+    AuthorizeContactStream,
     ContactIdentityObservation,
     contact_evidence_snapshot_id,
     contact_match_basis,
@@ -43,7 +45,10 @@ from ..embeddings.multimodal_projection import (
     MultimodalSourceUnit,
 )
 from ..embeddings.multimodal_remote import EmbeddingServiceUnavailable
-from ..embeddings.retrieval_experiment import pipeline_multimodal_retriever
+from ..embeddings.retrieval_experiment import (
+    RetrievalBatch,
+    pipeline_multimodal_retriever,
+)
 from ..ingest_pipeline import IngestPipeline
 from ..maintenance.crosslink_reviews import CrosslinkGroupReviewService
 from ..maintenance.maintenance_patch_apply import apply_maintenance_patch_for_scope
@@ -53,6 +58,7 @@ from ..providers.model_catalog import available_models
 from .investigation_history import InvestigationHistoryRecord
 from .semantic_lens import (
     InvestigationOutcome,
+    RetrievalMode,
     SemanticLensRequest,
     SemanticLensSnapshot,
     validate_edit_proposal,
@@ -71,8 +77,42 @@ from .workbench_cockpit import (
     validate_cockpit_proposal,
 )
 
-AgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot], str]
-ProgressAgentResponder = Callable[[SemanticLensRequest, SemanticLensSnapshot, ProgressCallback], str]
+class AgentResponder(Protocol):
+    """Produce a synchronous answer for one semantic-lens request."""
+
+    def __call__(self, request: SemanticLensRequest, snapshot: SemanticLensSnapshot, /) -> str: ...
+
+
+class ProgressAgentResponder(Protocol):
+    """Produce an answer while reporting bounded progress callbacks."""
+
+    def __call__(
+        self,
+        request: SemanticLensRequest,
+        snapshot: SemanticLensSnapshot,
+        progress: ProgressCallback,
+        /,
+    ) -> str: ...
+
+
+class TraceSink(Protocol):
+    """Receive one structured workbench trace event."""
+
+    def __call__(self, event: dict[str, object], /) -> None: ...
+
+
+class MultimodalNamespaceResolver(Protocol):
+    """Return namespaces visible to a workspace for multimodal retrieval."""
+
+    def __call__(self, workspace_id: str, /) -> Sequence[str]: ...
+
+
+class MultimodalSourceMapResolver(Protocol):
+    """Resolve one source unit to an authorized source-map payload."""
+
+    def __call__(
+        self, unit: MultimodalSourceUnit, /
+    ) -> Mapping[str, object] | None: ...
 
 _MAX_CONTACT_PAGE_SIZE = 1000
 _MAX_CONTACT_SNAPSHOT_ITEMS = 5000
@@ -102,8 +142,8 @@ def _multimodal_hit_payload(hit: MultimodalSearchHit) -> dict[str, object]:
 @dataclass(frozen=True, slots=True)
 class _ContactObservationSource:
     provider: ContactObservationProvider
-    owns_stream: Callable[[str, str], bool]
-    authorize_stream: Callable[[str, str], bool]
+    owns_stream: AuthorizeContactStream
+    authorize_stream: AuthorizeContactStream
     scan_provider: ContactScanObservationProvider | None = None
 
 
@@ -187,17 +227,15 @@ class WorkbenchApi:
         agent_responder: AgentResponder | ProgressAgentResponder | None = None,
         cockpit_responder: CockpitResponder | None = None,
         codex_worker_count: int = 0,
-        trace_sink: Callable[[dict[str, object]], None] | None = None,
+        trace_sink: TraceSink | None = None,
         settings_path: str | None = None,
-        resource_authorizer: Callable[[str, str, str, str], bool] | None = None,
-        contact_authorize_stream: Callable[[str, str], bool] | None = None,
+        resource_authorizer: ResourceAuthorizer | None = None,
+        contact_authorize_stream: AuthorizeContactStream | None = None,
         contact_observation_provider: ContactObservationProvider | None = None,
         multimodal_asset_resolver: AssetResolver | None = None,
         multimodal_dereferencer: EmbeddingReferenceDereferencer | None = None,
-        multimodal_allowed_namespaces: Callable[[str], Sequence[str]] | None = None,
-        multimodal_source_map_resolver: Callable[
-            [MultimodalSourceUnit], Mapping[str, object] | None
-        ] | None = None,
+        multimodal_allowed_namespaces: MultimodalNamespaceResolver | None = None,
+        multimodal_source_map_resolver: MultimodalSourceMapResolver | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.codex_memory = MemoryService(pipeline.engines)
@@ -285,6 +323,8 @@ class WorkbenchApi:
             source_map = source_map_resolver(unit)
             if source_map is None:
                 raise PermissionError("authoritative source map revision is unavailable")
+            if not isinstance(source_map, Mapping):
+                raise PermissionError("authoritative source map has invalid shape")
             self._validate_multimodal_source_map(unit, source_map)
             units.append(unit)
         count = self.pipeline.capture_multimodal_units(units)
@@ -466,8 +506,9 @@ class WorkbenchApi:
                 content_ref=image_content_ref,
             )
             image_query = self._multimodal_asset_resolver.resolve(query_unit)
-            if hasattr(image_query, "read"):
-                image_query = image_query.read()
+            read = getattr(image_query, "read", None)
+            if callable(read):
+                image_query = read()
 
         def authorize_source(unit: MultimodalSourceUnit) -> None:
             source_namespace = unit.source_namespace or unit.workspace_id
@@ -500,6 +541,8 @@ class WorkbenchApi:
             allowed_namespaces=namespaces,
         )
         batch = retrieve(query_text, None)
+        if not isinstance(batch, RetrievalBatch):
+            raise TypeError("multimodal retriever returned an invalid result")
         return {
             "status": "ok",
             "workspace_id": workspace_id,
@@ -553,8 +596,8 @@ class WorkbenchApi:
         source_id: str,
         *,
         provider: ContactObservationProvider,
-        owns_stream: Callable[[str, str], bool],
-        authorize_stream: Callable[[str, str], bool],
+        owns_stream: AuthorizeContactStream,
+        authorize_stream: AuthorizeContactStream,
         scan_provider: ContactScanObservationProvider | None = None,
     ) -> None:
         """Register a trusted channel adapter without adding channel policy here."""
@@ -1119,9 +1162,11 @@ class WorkbenchApi:
             else:
                 agent_status = "active"
 
+                agent_responder = self.agent_responder
+
                 def answer_from_agent(snapshot: SemanticLensSnapshot) -> str:
                     return _invoke_agent_responder(
-                        self.agent_responder,
+                        agent_responder,
                         request,
                         snapshot,
                         progress or _ignore_progress,
@@ -1425,7 +1470,7 @@ def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
         graph_spaces=tuple(payload.get("graph_spaces") or (GraphSpace.CURATED_KG.value,)),
         query_text=str(payload.get("query_text") or ""),
         semantic_retrieval=bool(payload.get("semantic_retrieval", False)),
-        retrieval_mode=str(payload.get("retrieval_mode") or "auto"),
+        retrieval_mode=_retrieval_mode(payload.get("retrieval_mode")),
         retrieval_required=bool(payload.get("retrieval_required", False)),
         similarity_threshold=(
             None
@@ -1442,6 +1487,13 @@ def _lens_request(payload: Mapping[str, Any]) -> SemanticLensRequest:
         source_watermark=payload.get("source_watermark"),
         include_tombstones=bool(payload.get("include_tombstones", False)),
     )
+
+
+def _retrieval_mode(value: object) -> RetrievalMode:
+    mode = str(value or "auto")
+    if mode not in {"auto", "graph", "semantic", "flat"}:
+        raise ValueError("retrieval_mode must be auto, graph, semantic, or flat")
+    return cast(RetrievalMode, mode)
 
 
 def _workbench_mode(value: object) -> WorkbenchMode:

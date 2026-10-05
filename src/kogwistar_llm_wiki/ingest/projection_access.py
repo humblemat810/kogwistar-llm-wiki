@@ -6,13 +6,14 @@ from pathlib import Path
 
 from ..configuration.workspace import GraphSpace
 from ..models import ObsidianBuildResult
+from .contracts import IngestPipelineHost
 
 
 class ProjectionAccessMixin:
     """Delegate projection operations through the pipeline's manager."""
 
     def build_obsidian_vault(
-        self,
+        self: IngestPipelineHost,
         vault_root: str | Path,
         *,
         workspace_id: str,
@@ -31,7 +32,7 @@ class ProjectionAccessMixin:
         )
 
     def sync_obsidian_vault(
-        self,
+        self: IngestPipelineHost,
         vault_root: str | Path,
         *,
         workspace_id: str,

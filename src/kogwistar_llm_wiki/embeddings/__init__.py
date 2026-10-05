@@ -99,6 +99,7 @@ _EXPORT_MODULES = {
             "FeedState",
             "MultimodalRecallTiming",
             "MultimodalRetrievalSidecar",
+            "MultimodalPipelineLike",
             "RetrievalBatch",
             "SynchronousMultimodalRecall",
             "pipeline_multimodal_retriever",
@@ -141,6 +142,7 @@ __all__ = [
     "MultimodalEmbeddingProfile",
     "MultimodalEncoder",
     "MultimodalImageQueryEncoder",
+    "MultimodalPipelineLike",
     "MultimodalProjectionStore",
     "MultimodalRecallTiming",
     "MultimodalRetrievalSidecar",
@@ -179,7 +181,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     module_name = _EXPORT_MODULES.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

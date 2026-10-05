@@ -16,11 +16,13 @@ from collections import OrderedDict, deque
 from collections.abc import AsyncIterable, Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import Protocol
 
 from kogwistar.engine_core import MultimodalSpan
 
 from .multimodal_dereference import EmbeddingReferenceDereferencer
 from .multimodal_projection import (
+    MultimodalEncoder,
     MultimodalImageQueryEncoder,
     MultimodalProjectionStore,
     MultimodalSearchHit,
@@ -105,11 +107,31 @@ class EvidenceEvent:
 RetrieveResult = (
     RetrievalBatch | Iterable[EvidenceCandidate] | AsyncIterable[EvidenceCandidate]
 )
-Retrieve = Callable[
-    [str, frozenset[str] | None],
-    RetrieveResult | Awaitable[RetrieveResult],
-]
-HitValidator = Callable[[EvidenceCandidate], None]
+
+
+class MultimodalPipelineLike(Protocol):
+    """Minimal host pipeline surface required by the retrieval adapter."""
+
+    @property
+    def multimodal_encoder(self) -> MultimodalEncoder | None: ...
+
+    @property
+    def multimodal_projection_store(self) -> MultimodalProjectionStore | None: ...
+class Retrieve(Protocol):
+    """Retrieve bounded evidence synchronously or asynchronously."""
+
+    def __call__(
+        self,
+        query: str,
+        source_scope: frozenset[str] | None,
+        /,
+    ) -> RetrieveResult | Awaitable[RetrieveResult]: ...
+
+
+class HitValidator(Protocol):
+    """Validate one candidate before it becomes a recall result."""
+
+    def __call__(self, candidate: EvidenceCandidate, /) -> None: ...
 
 
 def _clock_ms() -> float:
@@ -232,7 +254,7 @@ def _validate_candidate(
 
 
 def pipeline_multimodal_retriever(
-    pipeline: object,
+    pipeline: MultimodalPipelineLike,
     *,
     workspace_id: str,
     authorize_source: Callable[[MultimodalSourceUnit], None],
@@ -260,8 +282,8 @@ def pipeline_multimodal_retriever(
             "workspace_id, result limit, overfetch factor, and candidate scan bound "
             "must be valid"
         )
-    encoder = getattr(pipeline, "multimodal_encoder", None)
-    store = getattr(pipeline, "multimodal_projection_store", None)
+    encoder = pipeline.multimodal_encoder
+    store = pipeline.multimodal_projection_store
     if encoder is None or store is None:
         raise RuntimeError(
             "pipeline multimodal encoder and projection store are required"

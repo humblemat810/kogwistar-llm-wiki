@@ -7,19 +7,51 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 from hashlib import sha256
 from pathlib import Path
+from typing import Literal, Protocol
 
+from ..cli.entrypoint_support import EngineBuilder, PersistenceKwargs
+from ..models import NamespaceEngines
 from ..providers.model_catalog import _safe_endpoint
 
 logger = logging.getLogger(__name__)
 
-EngineBuilder = Callable[..., object]
-EngineCloser = Callable[[object], None]
-PersistenceOptions = Callable[[argparse.Namespace], Mapping[str, str]]
-EnvLoader = Callable[[Path], None]
+class EngineCloser(Protocol):
+    """Close an engine bundle, including compatible test doubles."""
+
+    def __call__(self, engines: NamespaceEngines, /) -> None: ...
+
+
+class PersistenceOptions(Protocol):
+    """Build command-specific persistence keyword arguments."""
+
+    def __call__(self, args: argparse.Namespace, /) -> PersistenceKwargs: ...
+
+
+class EnvLoader(Protocol):
+    """Load environment settings for a CLI service."""
+
+    def __call__(self, path: Path, /) -> None: ...
+
+
+def _codex_transport(value: object) -> Literal["exec", "app_server"]:
+    if value == "exec":
+        return "exec"
+    if value == "app_server":
+        return "app_server"
+    return "exec"
+
+
+def _persistence_mode(options: Mapping[str, object]) -> Literal["single_stage", "two_stage"]:
+    value = options.get("conversation_persistence_mode", "single_stage")
+    if value == "single_stage":
+        return "single_stage"
+    if value == "two_stage":
+        return "two_stage"
+    raise ValueError("invalid conversation persistence mode")
 
 
 def codex_memory(
@@ -186,13 +218,20 @@ def seed_bundle(
                     model=args.codex_model,
                     profile=args.codex_profile,
                     timeout_seconds=args.codex_timeout,
-                    transport=getattr(args, "codex_transport", None)
-                    or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec"),
+                    transport=_codex_transport(
+                        getattr(args, "codex_transport", None)
+                        or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec")
+                    ),
                 ),
                 trace_line=lambda line: logger.info("seed_cockpit_trace %s", line),
             )
             api = WorkbenchApi(
-                IngestPipeline(engines, **persistence_kwargs(args)),
+                IngestPipeline(
+                    engines,
+                    conversation_persistence_mode=_persistence_mode(
+                        persistence_kwargs(args)
+                    ),
+                ),
                 cockpit_responder=responder,
             )
             cockpit_response = api.ask(
@@ -220,7 +259,8 @@ def seed_bundle(
         if cockpit_response is not None:
             cockpit_path = output_path.with_name(output_path.stem + ".cockpit.json")
             cockpit_path.write_text(json.dumps(cockpit_response, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            answer = dict(cockpit_response.get("answer") or {})
+            raw_answer = cockpit_response.get("answer")
+            answer = dict(raw_answer) if isinstance(raw_answer, Mapping) else {}
             cockpit_summary = {
                 "agent_status": cockpit_response.get("agent_status"),
                 "interaction_id": cockpit_response.get("interaction_id"),

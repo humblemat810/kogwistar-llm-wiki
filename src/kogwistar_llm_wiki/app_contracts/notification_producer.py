@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from itertools import islice
@@ -251,6 +251,7 @@ class SQLiteNotificationScheduleStore(SQLiteNotificationCursorStore):
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            timing_changed = False
             existing = connection.execute(
                 "SELECT start_us, cadence_seconds, revision FROM notification_schedules "
                 "WHERE workspace_id = ? AND recipient_id = ?",
@@ -379,10 +380,25 @@ class SQLiteNotificationScheduleStore(SQLiteNotificationCursorStore):
         )
 
 
-ListNotificationSources = Callable[[str, str], Iterable[str]]
-ReadNotificationWindow = Callable[
-    [str, str, tuple[str, ...], datetime, datetime, int], Iterable[NotificationEvent]
-]
+class ListNotificationSources(Protocol):
+    """List source IDs visible to one authenticated notification recipient."""
+
+    def __call__(self, workspace_id: str, recipient_id: str, /) -> Iterable[str]: ...
+
+
+class ReadNotificationWindow(Protocol):
+    """Read bounded notification events for one finalized time window."""
+
+    def __call__(
+        self,
+        workspace_id: str,
+        recipient_id: str,
+        source_ids: tuple[str, ...],
+        window_start: datetime,
+        window_end: datetime,
+        limit: int,
+        /,
+    ) -> Iterable[NotificationEvent]: ...
 
 
 @dataclass(frozen=True, slots=True)

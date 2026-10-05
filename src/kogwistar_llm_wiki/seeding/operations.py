@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 
-from kogwistar.engine_core.models import Edge, Grounding, Node, Span
+from kogwistar.engine_core.models import (
+    Edge,
+    Grounding,
+    JsonPrimitive,
+    MentionVerification,
+    Node,
+    Span,
+)
+
+SeedGraphProperties = Mapping[
+    str, JsonPrimitive | list[JsonPrimitive] | Mapping[str, JsonPrimitive]
+]
 
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -34,6 +47,15 @@ class SeedBundleResult:
     @property
     def total_added(self) -> int:
         return self.source_nodes_added + self.nodes_added + self.edges_added + self.hyperedges_added
+
+
+def _seed_text_kind(value: object) -> str:
+    """Validate persisted seed metadata before narrowing its literal type."""
+
+    text_kind = str(value)
+    if text_kind not in {"curated_paraphrase", "verbatim"}:
+        raise ValueError(f"unsupported seed source text kind: {text_kind!r}")
+    return text_kind
 
 
 def load_seed_bundle(path: str | Path) -> GraphSeedBundle:
@@ -136,7 +158,10 @@ def export_graph_seed_bundle(
             url=str(item.metadata["seed_source_url"]),
             revision=str(item.metadata["seed_source_revision"]),
             text=str(item.metadata["seed_source_text"]),
-            text_kind=str(item.metadata["seed_source_text_kind"]),
+            text_kind=cast(
+                Literal["curated_paraphrase", "verbatim"],
+                _seed_text_kind(item.metadata["seed_source_text_kind"]),
+            ),
         )
         for item in source_nodes
     ]
@@ -215,6 +240,10 @@ def _source_node(workspace_id: str, bundle: GraphSeedBundle, source: SeedSource)
             seed_bundle_created_at=bundle.created_at,
             seed_acceptance_queries_json=acceptance,
         ),
+        domain_id=None,
+        canonical_entity_id=None,
+        embedding=None,
+        level_from_root=0,
     )
 
 
@@ -231,8 +260,12 @@ def _knowledge_node(
         summary=node.summary,
         doc_id=node.mentions[0].source_id,
         mentions=_groundings(node.mentions, sources),
-        properties=_seed_properties(node.properties, bundle=bundle, kind="node"),
+        properties=cast(SeedGraphProperties, _seed_properties(node.properties, bundle=bundle, kind="node")),
         metadata=_metadata(workspace_id, bundle, artifact_kind="seed_knowledge", seed_kind=node.kind),
+        domain_id=None,
+        canonical_entity_id=None,
+        embedding=None,
+        level_from_root=0,
     )
 
 
@@ -256,10 +289,13 @@ def _relation_edge(
         source_edge_ids=[],
         target_edge_ids=[],
         mentions=_groundings(relation.mentions, sources),
-        properties=_seed_properties(
-            relation.properties,
-            bundle=bundle,
-            kind="hyperedge" if is_hyperedge else "edge",
+        properties=cast(
+            SeedGraphProperties,
+            _seed_properties(
+                relation.properties,
+                bundle=bundle,
+                kind="hyperedge" if is_hyperedge else "edge",
+            ),
         ),
         metadata=_metadata(
             workspace_id,
@@ -267,6 +303,9 @@ def _relation_edge(
             artifact_kind="seed_relation",
             seed_relation_kind="hyperedge" if is_hyperedge else "edge",
         ),
+        domain_id=None,
+        canonical_entity_id=None,
+        embedding=None,
     )
 
 
@@ -293,6 +332,12 @@ def _span(source: SeedSource, start: int, end: int, excerpt: str) -> Span:
         context_after=source.text[end : end + 80],
         chunk_id=None,
         source_cluster_id=source.id,
+        verification=MentionVerification(
+            method="system",
+            is_verified=True,
+            score=1.0,
+            notes="seed bundle source grounding",
+        ),
     )
 
 

@@ -6,8 +6,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from kogwistar.runtime.checkpointed_projection import CheckpointedProjectionStore
 
-class UsageMetaStore(Protocol):
+
+class UsageMetaStore(CheckpointedProjectionStore, Protocol):
     def append_entity_event(
         self,
         *,

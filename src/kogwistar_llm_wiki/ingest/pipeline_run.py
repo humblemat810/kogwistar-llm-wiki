@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from typing import Protocol
-
 from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
     parser_llm_cache_transaction,
 )
@@ -18,23 +15,20 @@ from ..diagnostics.debug_helpers import (
 )
 from ..models import IngestPipelineArtifacts, IngestPipelineRequest
 from ..providers.role_config import normalize_provider_name
+from .contracts import (  # noqa: F401 - compatibility type seam
+    IngestPipelineHost,
+    ParserCallable,
+    ParseSourceResult,
+    SemanticTreeLike,
+)
 
-
-class SemanticTreeLike(Protocol):
-    title: str
-
-
-class ParseSourceResult(Protocol):
-    semantic_tree: SemanticTreeLike
-
-
-ParserFn = Callable[..., ParseSourceResult]
+ParserFn = ParserCallable
 
 
 class IngestRunMixin:
     """Run one ingestion transaction and expose its diagnostics."""
 
-    def run(self, request: IngestPipelineRequest) -> IngestPipelineArtifacts:
+    def run(self: IngestPipelineHost, request: IngestPipelineRequest) -> IngestPipelineArtifacts:
         ns = self.namespaces_for(request.workspace_id)
         source_document_id = self._source_document_id(request)
         operation_mode = self._operation_mode(request)
@@ -174,7 +168,10 @@ class IngestRunMixin:
         )
 
         promoted_entity_id: str | None = None
-        promotion_decision = self.policies.promotion.decide(
+        promotion_policy = self.policies.promotion
+        if promotion_policy is None:
+            raise RuntimeError("promotion policy is not initialized")
+        promotion_decision = promotion_policy.decide(
             promotion_mode=request.promotion_mode,
             auto_accept_threshold=request.auto_accept_threshold,
             metadata={
@@ -214,10 +211,10 @@ class IngestRunMixin:
             graph_status="expanding" if operation_mode == "hybrid" else "stable",
         )
 
-    def _trace_text(self, message: str) -> None:
+    def _trace_text(self: IngestPipelineHost, message: str) -> None:
         self._trace_event("trace", message=message)
 
-    def _trace_event(self, stage: str, **fields: object) -> None:
+    def _trace_event(self: IngestPipelineHost, stage: str, **fields: object) -> None:
         payload = {
             "timestamp_ms": now_ms(),
             "stage": stage,
@@ -230,7 +227,7 @@ class IngestRunMixin:
         self.telemetry.instrument_event(payload)
 
     def _record_parse_statistics(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -282,7 +279,7 @@ class IngestRunMixin:
         )
 
     def _trace_step(
-        self,
+        self: IngestPipelineHost,
         stage: str,
         *,
         request: IngestPipelineRequest,

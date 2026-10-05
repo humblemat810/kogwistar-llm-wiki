@@ -23,13 +23,14 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Mapping, Sequence
+import sys
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from io import BytesIO
 from math import sqrt
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from kogwistar.engine_core import (
     EmbeddingProfile as CoreEmbeddingProfile,
@@ -67,6 +68,53 @@ DEFAULT_COLQWEN_REVISION = "ddc07d2317c80f75fc742b7362ee9ad1912908f9"
 DEFAULT_QWEN3_VL_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
 QWEN3_VL_MIN_DIMENSION = 64
 QWEN3_VL_MAX_DIMENSION = 2048
+
+
+def _as_int(value: object, *, field_name: str) -> int:
+    """Narrow a legacy payload scalar before constructing a typed locator."""
+
+    if isinstance(value, bool):
+        raise ProjectionIntegrityError(f"{field_name} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ProjectionIntegrityError(
+                f"{field_name} must be an integer"
+            ) from exc
+    raise ProjectionIntegrityError(f"{field_name} must be an integer")
+
+
+def _as_float(value: object, *, field_name: str) -> float:
+    """Narrow a legacy payload scalar before constructing a typed locator."""
+
+    if isinstance(value, bool):
+        raise ProjectionIntegrityError(f"{field_name} must be a number")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ProjectionIntegrityError(
+                f"{field_name} must be a number"
+            ) from exc
+    raise ProjectionIntegrityError(f"{field_name} must be a number")
+
+
+def _optional_int(payload: Mapping[str, object], field_name: str) -> int | None:
+    value = payload.get(field_name)
+    return None if value is None or value == "" else _as_int(value, field_name=field_name)
+
+
+def _mapping_value(value: object, *, field_name: str) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise ProjectionIntegrityError(f"{field_name} must be an object")
+    return {str(key): item for key, item in value.items()}
 
 
 def _projection_storage_key(workspace_id: str, view_id: str) -> str:
@@ -149,33 +197,36 @@ class MultimodalSourceUnit:
         kind = str(locator.get("kind", "legacy"))
         if kind in {"legacy", "text_span", "text_range"} and "start_char" in locator and "end_char" in locator:
             typed_locator = TextRangeLocator(
-                start_char=int(locator["start_char"]),
-                end_char=int(locator["end_char"]),
-                page_number=(int(locator["page_number"]) if locator.get("page_number") else None),
+                start_char=_as_int(locator["start_char"], field_name="start_char"),
+                end_char=_as_int(locator["end_char"], field_name="end_char"),
+                page_number=_optional_int(locator, "page_number"),
             )
         elif kind in {"whole_image", "image_region", "dom_image"}:
             typed_locator = SpatialRegionLocator(
-                x=float(locator.get("x", 0.0)),
-                y=float(locator.get("y", 0.0)),
-                width=float(locator.get("width", 1.0)),
-                height=float(locator.get("height", 1.0)),
+                x=_as_float(locator.get("x", 0.0), field_name="x"),
+                y=_as_float(locator.get("y", 0.0), field_name="y"),
+                width=_as_float(locator.get("width", 1.0), field_name="width"),
+                height=_as_float(locator.get("height", 1.0), field_name="height"),
                 coordinate_system=str(locator.get("coordinate_system", "normalized_0_1")),  # type: ignore[arg-type]
-                page_number=(int(locator["page_number"]) if locator.get("page_number") else None),
-                frame_index=(int(locator["frame_index"]) if locator.get("frame_index") is not None else None),
-                timestamp_ms=(int(locator["timestamp_ms"]) if locator.get("timestamp_ms") is not None else None),
+                page_number=_optional_int(locator, "page_number"),
+                frame_index=_optional_int(locator, "frame_index"),
+                timestamp_ms=_optional_int(locator, "timestamp_ms"),
             )
         elif kind in {"audio_interval", "video_interval", "temporal_interval"}:
             typed_locator = TemporalIntervalLocator(
-                start_ms=int(locator["start_ms"]),
-                end_ms=int(locator["end_ms"]),
+                start_ms=_as_int(locator["start_ms"], field_name="start_ms"),
+                end_ms=_as_int(locator["end_ms"], field_name="end_ms"),
             )
         elif kind == "video_region_track":
             typed_locator = VideoRegionTrackLocator(
-                start_ms=int(locator["start_ms"]),
-                end_ms=int(locator["end_ms"]),
+                start_ms=_as_int(locator["start_ms"], field_name="start_ms"),
+                end_ms=_as_int(locator["end_ms"], field_name="end_ms"),
                 track_manifest_ref=str(locator["track_manifest_ref"]),
                 track_manifest_sha256=str(locator["track_manifest_sha256"]),
-                manifest_schema_version=int(locator.get("manifest_schema_version", 1)),
+                manifest_schema_version=_as_int(
+                    locator.get("manifest_schema_version", 1),
+                    field_name="manifest_schema_version",
+                ),
             )
         elif self.modality in {"text", "webpage", "pdf_page", "table"} and self.text:
             # Historical text/table units often carried only a semantic locator
@@ -184,7 +235,7 @@ class MultimodalSourceUnit:
             typed_locator = TextRangeLocator(
                 start_char=0,
                 end_char=len(self.text),
-                page_number=(int(locator["page_number"]) if locator.get("page_number") else None),
+                page_number=_optional_int(locator, "page_number"),
             )
         else:
             typed_locator = LegacyLocator(payload=locator)
@@ -217,11 +268,11 @@ class MultimodalSourceUnit:
                 else None
             ),
             modality=str(payload["modality"]),  # type: ignore[arg-type]
-            locator=dict(payload.get("locator") or {}),
+            locator=_mapping_value(payload.get("locator") or {}, field_name="locator"),
             content_ref=str(payload["content_ref"]) if payload.get("content_ref") else None,
             text=str(payload["text"]) if payload.get("text") else None,
             asset_sha256=str(payload["asset_sha256"]) if payload.get("asset_sha256") else None,
-            metadata=dict(payload.get("metadata") or {}),
+            metadata=_mapping_value(payload.get("metadata") or {}, field_name="metadata"),
             embedding_reference=(
                 EmbeddingReference.model_validate(payload["embedding_reference"])
                 if payload.get("embedding_reference")
@@ -267,6 +318,8 @@ def to_core_embedding_profile(profile: MultimodalEmbeddingProfile) -> CoreEmbedd
 class MultimodalEncoder(Protocol):
     @property
     def profile(self) -> MultimodalEmbeddingProfile: ...
+
+    def readiness(self) -> Mapping[str, object]: ...
 
     def encode_queries(self, queries: Sequence[str], *, batch_size: int | None = None) -> Sequence[EmbeddingSet]: ...
 
@@ -764,7 +817,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         max_search_vectors: int = 100_000,
     ) -> None:
         try:
-            import chromadb
+            import chromadb  # pyright: ignore[reportMissingImports]
         except ImportError as exc:
             raise RuntimeError(
                 "Chroma multimodal projection requires the chromadb extra"
@@ -948,7 +1001,7 @@ class PgVectorMultimodalProjectionStore:
         self,
         dsn: str | None = None,
         *,
-        engine: object | None = None,
+        engine: Any | None = None,
         scope: str,
         profile: MultimodalEmbeddingProfile,
         schema: str = "public",
@@ -956,7 +1009,7 @@ class PgVectorMultimodalProjectionStore:
     ) -> None:
         try:
             import sqlalchemy as sa
-            from pgvector.sqlalchemy import Vector
+            from pgvector.sqlalchemy import Vector  # pyright: ignore[reportMissingImports]
         except ImportError as exc:
             raise RuntimeError(
                 "PostgreSQL multimodal projection requires sqlalchemy and pgvector"
@@ -1198,7 +1251,7 @@ class PgVectorMultimodalProjectionStore:
         return {"stage1": stage1, "stage2": stage2, "pending_stage2": stage1 - stage2}
 
     def _load_unit_by_storage_key(
-        self, connection: object, storage_key: str
+        self, connection: Any, storage_key: str
     ) -> MultimodalSourceUnit | None:
         sa = __import__("sqlalchemy")
         row = connection.execute(
@@ -1329,6 +1382,8 @@ class PgVectorMultimodalProjectionStore:
 def _legacy_sidecar_matches(path: Path, *, scope: str, fingerprint: str) -> bool:
     """Check an old Chroma sidecar without opening it through the new store."""
 
+    rows: list[tuple[object, ...]] = []
+    connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(path)
         rows = connection.execute(
@@ -1339,7 +1394,8 @@ def _legacy_sidecar_matches(path: Path, *, scope: str, fingerprint: str) -> bool
         return False
     finally:
         try:
-            connection.close()
+            if connection is not None:
+                connection.close()
         except (NameError, sqlite3.Error):
             pass
     return not rows or all(str(row[0]) == fingerprint for row in rows)
@@ -1354,6 +1410,11 @@ class FakeMultimodalEncoder:
             provider="fake", model="fake-colqwen-compatible", embedding="late_interaction", dimension=8
         )
     )
+
+    def readiness(self) -> dict[str, object]:
+        """Return the deterministic provider-free encoder's readiness state."""
+
+        return {"ready": True, "provider": self.profile.provider}
 
     def _vector(self, value: str, ordinal: int) -> tuple[float, ...]:
         digest = sha256(f"{value}\x00{ordinal}".encode()).digest()
@@ -1395,8 +1456,8 @@ class ColQwenNativeEncoder:
 
     def __init__(
         self,
-        model: object,
-        processor: object,
+        model: Any,
+        processor: Any,
         *,
         profile: MultimodalEmbeddingProfile,
         device: str,
@@ -1412,6 +1473,11 @@ class ColQwenNativeEncoder:
     def profile(self) -> MultimodalEmbeddingProfile:
         return self._profile
 
+    def readiness(self) -> dict[str, object]:
+        """Report readiness without forcing an additional model probe."""
+
+        return {"ready": self._model is not None, "provider": self._profile.provider}
+
     @classmethod
     def from_pretrained(
         cls,
@@ -1426,8 +1492,6 @@ class ColQwenNativeEncoder:
         max_image_patches: int = 768,
     ) -> ColQwenNativeEncoder:
         try:
-            import sys
-
             import torch
             from transformers import AutoProcessor, ColQwen2ForRetrieval
         except ImportError as exc:
@@ -1463,7 +1527,7 @@ class ColQwenNativeEncoder:
             if model_id == DEFAULT_COLQWEN_MODEL
             else revision
         )
-        model_kwargs: dict[str, object] = {"revision": effective_revision} if effective_revision else {}
+        model_kwargs: dict[str, Any] = {"revision": effective_revision} if effective_revision else {}
         if selected_device == "cuda" and load_in_4bit:
             try:
                 from transformers import BitsAndBytesConfig
@@ -1510,7 +1574,7 @@ class ColQwenNativeEncoder:
         )
         return cls(model, processor, profile=profile, device=selected_device, batch_size=batch_size)
 
-    def _run(self, inputs: object) -> Sequence[EmbeddingSet]:
+    def _run(self, inputs: Any) -> Sequence[EmbeddingSet]:
         import torch
 
         if hasattr(inputs, "to"):
@@ -1617,8 +1681,12 @@ class ColQwenNativeEncoder:
                         image = value
                     elif isinstance(value, (bytes, bytearray, memoryview)):
                         image = Image.open(BytesIO(bytes(value)))
-                    else:
+                    elif isinstance(value, (str, Path)):
                         image = Image.open(value)
+                    else:
+                        raise ProjectionIntegrityError(
+                            "image query must be bytes, a path, or an image object"
+                        )
                     images.append(image)
                     if image is not value:
                         owned.append(image)
@@ -1647,13 +1715,13 @@ class Qwen3VLDenseEncoder:
 
     def __init__(
         self,
-        model: object,
-        processor: object,
+        model: Any,
+        processor: Any,
         *,
         profile: MultimodalEmbeddingProfile,
         device: str,
         batch_size: int = 1,
-        vision_processor: object | None = None,
+        vision_processor: Any | None = None,
         instruction: str = "Represent the user's input.",
     ) -> None:
         if profile.embedding != "dense":
@@ -1675,6 +1743,11 @@ class Qwen3VLDenseEncoder:
     def profile(self) -> MultimodalEmbeddingProfile:
         return self._profile
 
+    def readiness(self) -> dict[str, object]:
+        """Report readiness without importing or probing optional runtimes."""
+
+        return {"ready": self._model is not None, "provider": self._profile.provider}
+
     @classmethod
     def from_pretrained(
         cls,
@@ -1694,10 +1767,8 @@ class Qwen3VLDenseEncoder:
                 f"{QWEN3_VL_MAX_DIMENSION}; got {dimension}"
             )
         try:
-            import sys
-
             import torch
-            from qwen_vl_utils import process_vision_info
+            from qwen_vl_utils import process_vision_info  # pyright: ignore[reportMissingImports]
             from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
             raise RuntimeError(
@@ -1725,7 +1796,7 @@ class Qwen3VLDenseEncoder:
                     f'install "{sys.executable}" -m pip install -e ".[multimodal-cuda]"'
                 ) from exc
 
-        model_kwargs: dict[str, object] = {"trust_remote_code": True}
+        model_kwargs: dict[str, Any] = {"trust_remote_code": True}
         if revision:
             model_kwargs["revision"] = revision
         if selected_device == "cuda":
@@ -1733,7 +1804,7 @@ class Qwen3VLDenseEncoder:
         else:
             model_kwargs["torch_dtype"] = torch.float32
         model = AutoModelForMultimodalLM.from_pretrained(model_id, **model_kwargs).eval()
-        processor_kwargs: dict[str, object] = {"trust_remote_code": True}
+        processor_kwargs: dict[str, Any] = {"trust_remote_code": True}
         if revision:
             processor_kwargs["revision"] = revision
         try:
@@ -1809,7 +1880,12 @@ class Qwen3VLDenseEncoder:
                 " ".join(
                     str(part.get("text", ""))
                     for message in conversation
-                    for part in message.get("content", [])
+                    for part in (
+                        message.get("content", [])
+                        if isinstance(message.get("content", []), Sequence)
+                        else []
+                    )
+                    if isinstance(part, Mapping)
                 )
                 for conversation in conversations
             ]
@@ -1852,7 +1928,7 @@ class Qwen3VLDenseEncoder:
         kwargs.update(video_kwargs)
         return self._processor(**kwargs)
 
-    def _run(self, inputs: object) -> Sequence[EmbeddingSet]:
+    def _run(self, inputs: Any) -> Sequence[EmbeddingSet]:
         import torch
 
         if hasattr(inputs, "to"):
@@ -2051,6 +2127,8 @@ def build_configured_multimodal_encoder(
         )
         from .multimodal_runtime import (
             configured_embedding_service_allowed_hosts,
+            configured_embedding_crop_token_budget,
+            configured_embedding_max_model_len,
             configured_embedding_service_max_request_bytes,
             configured_embedding_service_timeout,
             configured_embedding_service_token,
@@ -2151,8 +2229,9 @@ def embed_pending(
                 f"asset resolver is required to verify pending unit {unit.view_id!r}"
             )
         raw = resolver.resolve(unit)
-        if hasattr(raw, "read"):
-            raw = raw.read()
+        read = getattr(raw, "read", None)
+        if callable(read):
+            raw = cast(Callable[[], object], read)()
         if not isinstance(raw, (bytes, bytearray, memoryview)):
             raise ProjectionIntegrityError(
                 f"asset resolver returned non-byte content for {unit.view_id!r}"
@@ -2169,12 +2248,12 @@ def embed_pending(
     encode_resolver = resolver
     if resolved_assets:
         class _ResolvedAssetResolver:
-            def resolve(self, item: MultimodalSourceUnit) -> object:
-                if item.view_id in resolved_assets:
-                    return resolved_assets[item.view_id]
+            def resolve(self, unit: MultimodalSourceUnit) -> object:
+                if unit.view_id in resolved_assets:
+                    return resolved_assets[unit.view_id]
                 if resolver is None:
                     raise ProjectionIntegrityError("asset resolver is unavailable")
-                return resolver.resolve(item)
+                return resolver.resolve(unit)
 
         encode_resolver = _ResolvedAssetResolver()
     vectors = _normalise_sets(

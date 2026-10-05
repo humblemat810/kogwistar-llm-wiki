@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+from typing import cast
 
 from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
+    ChatProviderName,
+    ProposalMode,
     ProviderEndpointConfig,
     WorkflowProviderSettings,
 )
@@ -207,7 +210,7 @@ def build_provider_endpoint_config(
     )
 
     return ProviderEndpointConfig(
-        provider=str(resolved_provider or "ollama"),
+        provider=cast(ChatProviderName, str(resolved_provider or "ollama")),
         model=str(resolved_model),
         temperature=resolved_temperature,
         base_url=resolved_base_url,
@@ -229,10 +232,14 @@ def build_workflow_provider_settings(
     parser_spec = parser or build_provider_endpoint_config("parser")
     ocr_spec = ocr or ProviderEndpointConfig()
     embedding_spec = embedding or EmbeddingProviderConfig()
-    settings_kwargs: dict[str, object] = {"parser": parser_spec, "ocr": ocr_spec, "embedding": embedding_spec}
-    if proposal_mode is not None:
-        settings_kwargs["proposal_mode"] = proposal_mode
-    return WorkflowProviderSettings(**settings_kwargs)
+    if proposal_mode is None:
+        return WorkflowProviderSettings(parser=parser_spec, ocr=ocr_spec, embedding=embedding_spec)
+    return WorkflowProviderSettings(
+        parser=parser_spec,
+        ocr=ocr_spec,
+        embedding=embedding_spec,
+        proposal_mode=cast(ProposalMode, proposal_mode),
+    )
 
 
 def resolve_parser_provider_settings(
@@ -305,15 +312,16 @@ def resolve_maintenance_provider_settings(
     ]
     if not provider_names or any(value is None for value in provider_names):
         raise ValueError("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN contains an invalid provider")
-    if len(set(provider_names)) != len(provider_names):
+    resolved_provider_names = [value for value in provider_names if value is not None]
+    if len(set(resolved_provider_names)) != len(resolved_provider_names):
         raise ValueError("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN must not contain duplicates")
-    if provider_names[0] != primary.provider:
-        primary = _provider_spec_from_chain_name(provider_names[0], primary)
+    if resolved_provider_names[0] != primary.provider:
+        primary = _provider_spec_from_chain_name(resolved_provider_names[0], primary)
     else:
         # Provider-specific settings must also apply when the provider is the
         # primary entry, not only when it is reached as a fallback.
-        primary = _provider_spec_from_chain_name(provider_names[0], primary)
-    fallbacks = [_provider_spec_from_chain_name(name, primary) for name in provider_names[1:]]
+        primary = _provider_spec_from_chain_name(resolved_provider_names[0], primary)
+    fallbacks = [_provider_spec_from_chain_name(name, primary) for name in resolved_provider_names[1:]]
     primary.fallback_specs = fallbacks
     return build_workflow_provider_settings(parser=primary)
 
@@ -332,7 +340,7 @@ def _provider_spec_from_chain_name(
         default_key_env = "LLM_WIKI_CODEX_BRIDGE_TOKEN"
     return build_provider_endpoint_config(
         "maintenance",
-        provider=provider,
+        provider=cast(ChatProviderName, provider),
         model=_first_env(f"{prefix}_MODEL", default=default_model),
         temperature=float(_first_env(f"{prefix}_TEMPERATURE", default=str(primary.temperature)) or primary.temperature),
         base_url=_first_env(f"{prefix}_BASE_URL", default=default_base_url),
@@ -342,8 +350,8 @@ def _provider_spec_from_chain_name(
 
 
 def provider_config_summary(settings: WorkflowProviderSettings | ProviderEndpointConfig) -> dict[str, object]:
-    parser = settings.parser if hasattr(settings, "parser") else settings
-    proposal_mode = getattr(settings, "proposal_mode", None)
+    parser = settings.parser if isinstance(settings, WorkflowProviderSettings) else settings
+    proposal_mode = settings.proposal_mode if isinstance(settings, WorkflowProviderSettings) else None
     return {
         "proposal_mode": proposal_mode,
         "provider": getattr(parser, "provider", None),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
@@ -110,7 +111,9 @@ class CrosslinkGroupReviewService:
             if decision.decision == "approve":
                 self._enqueue_revalidation(workspace_id, metadata, authority_claims)
             return {"artifact_id": decision.artifact_id, "status": "already_decided", "decision": decision.decision}
-        if decision.expected_version != int(metadata.get("decision_version") or 1):
+        raw_version = metadata.get("decision_version")
+        version = int(cast(str | int | float, raw_version or 1))
+        if decision.expected_version != version:
             raise CrosslinkReviewConflict("cross-link review artifact version is stale")
         event = {
             "workspace_id": workspace_id,
@@ -289,6 +292,11 @@ class CrosslinkGroupReviewService:
             type="entity",
             summary=f"Reviewer {event['actor_id']} selected {event['decision']}.",
             doc_id=artifact_id,
+            domain_id=None,
+            canonical_entity_id=None,
+            properties={},
+            embedding=None,
+            level_from_root=None,
             mentions=[Grounding(spans=[Span.from_dummy_for_workflow(artifact_id)])],
             metadata={
                 "artifact_kind": "crosslink_group_decision",

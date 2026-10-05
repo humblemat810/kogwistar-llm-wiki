@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+
+from kogwistar.engine_core import GraphKnowledgeEngine
 
 ARCHIVE_FORMAT_VERSION = 2
 READABLE_ARCHIVE_FORMATS = {1, ARCHIVE_FORMAT_VERSION}
@@ -16,7 +17,7 @@ class ArchiveError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class ArchiveNamespace:
     label: str
-    engine: Any
+    engine: GraphKnowledgeEngine
     namespace: str
 
 
@@ -30,7 +31,7 @@ class RestoreReport:
     replayed_namespaces: int
     rebuilt_vectors: bool
 
-    def as_dict(self) -> dict[str, Any]:
+    def as_dict(self) -> dict[str, object]:
         return {
             "archive_id": self.archive_id,
             "workspace_id": self.workspace_id,

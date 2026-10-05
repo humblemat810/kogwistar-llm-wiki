@@ -24,6 +24,12 @@ class GroundingValidationError(ValueError):
     """Raised when a higher-order grounding cannot be proven safely."""
 
 
+def _payload_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError(f"{field} must be an integer")
+    return int(value)
+
+
 def _mapping_sequence(
     payload: Mapping[str, object], key: str, *, required: bool = False
 ) -> tuple[Mapping[str, object], ...]:
@@ -132,7 +138,7 @@ class PinnedEntityRef:
                 target_id=str(raw_ref["target_id"]),
             ),
             revision_id=str(payload["revision_id"]),
-            event_seq=int(payload["event_seq"]),
+            event_seq=_payload_int(payload["event_seq"], field="event_seq"),
             role=str(payload.get("role", "support")),
         )
 

@@ -13,13 +13,14 @@ from ..workbench.semantic_lens import (
     SemanticLensRequest,
     SemanticLensSnapshot,
 )
+from .contracts import IngestPipelineHost
 
 
 class WorkbenchAccessMixin:
     """Expose bounded, app-owned workbench services through ``IngestPipeline``."""
 
     def build_projection_snapshot(
-        self,
+        self: IngestPipelineHost,
         workspace_id: str,
         *,
         graph_spaces: list[GraphSpace | str] | None = None,
@@ -32,7 +33,7 @@ class WorkbenchAccessMixin:
         )
 
     def query_nodes(
-        self,
+        self: IngestPipelineHost,
         *,
         workspace_id: str,
         graph_spaces: list[GraphSpace | str],
@@ -46,12 +47,12 @@ class WorkbenchAccessMixin:
             resolve_mode=resolve_mode,
         )
 
-    def resolve_semantic_lens(self, request: SemanticLensRequest) -> SemanticLensSnapshot:
+    def resolve_semantic_lens(self: IngestPipelineHost, request: SemanticLensRequest) -> SemanticLensSnapshot:
         """Resolve a bounded workbench lens through the app-owned service."""
         return self.semantic_lens_service.resolve(request)
 
     def record_investigation(
-        self,
+        self: IngestPipelineHost,
         *,
         workspace_id: str,
         session_id: str,
@@ -74,7 +75,7 @@ class WorkbenchAccessMixin:
         )
 
     def query_investigation_history(
-        self,
+        self: IngestPipelineHost,
         *,
         workspace_id: str,
         session_id: str | None = None,

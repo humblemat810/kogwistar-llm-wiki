@@ -9,25 +9,45 @@ import os
 import re
 import signal
 import threading
-from collections.abc import Callable
 from importlib.metadata import entry_points
 from pathlib import Path
+from typing import Literal, Protocol
 
 from ..models import NamespaceEngines
+from .entrypoint_support import EngineBuilder, PersistenceKwargsFactory
 
 logger = logging.getLogger("kogwistar_llm_wiki")
 
-BuildEngines = Callable[..., NamespaceEngines]
-CloseEngines = Callable[[NamespaceEngines], None]
-PersistenceKwargs = Callable[[argparse.Namespace], dict[str, str]]
+BuildEngines = EngineBuilder
+
+
+class CloseEngines(Protocol):
+    """Release the engines created for one CLI command."""
+
+    def __call__(self, engines: NamespaceEngines, /) -> None: ...
+
+
+class AuthorizeNotificationSource(Protocol):
+    """Authorize a notification source for a workspace and caller."""
+
+    def __call__(self, workspace_id: str, source_id: str, principal_id: str, /) -> bool: ...
 NOTIFICATION_SOURCE_ENTRY_POINT_GROUP = "kogwistar_llm_wiki.notification_sources"
 _NOTIFICATION_SOURCE_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+
+
+def _codex_transport(value: object) -> Literal["exec", "app_server"]:
+    """Narrow CLI/environment input to the supported Codex transports."""
+    if value == "exec":
+        return "exec"
+    if value == "app_server":
+        return "app_server"
+    return "exec"
 
 
 def _load_notification_source_plugins(
     data_dir: str,
     enabled: str,
-    authorize_source: Callable[[str, str, str], bool],
+    authorize_source: AuthorizeNotificationSource,
 ) -> dict[str, object]:
     """Load only explicitly enabled trusted notification source adapters."""
 
@@ -71,7 +91,7 @@ def daemon_projection(
     *,
     build_engines: BuildEngines,
     close_engines: CloseEngines,
-    persistence_kwargs: PersistenceKwargs,
+    persistence_kwargs: PersistenceKwargsFactory,
 ) -> None:
     from ..daemon import ProjectionDaemon
 
@@ -105,7 +125,7 @@ def daemon_maintenance(
     *,
     build_engines: BuildEngines,
     close_engines: CloseEngines,
-    persistence_kwargs: PersistenceKwargs,
+    persistence_kwargs: PersistenceKwargsFactory,
 ) -> None:
     from ..app_contracts.workbench_extensions import load_workbench_extensions
     from ..configuration.resource_authorizer import load_resource_authorizer
@@ -319,7 +339,7 @@ def workbench(
     *,
     build_engines: BuildEngines,
     close_engines: CloseEngines,
-    persistence_kwargs: PersistenceKwargs,
+    persistence_kwargs: PersistenceKwargsFactory,
 ) -> None:
     from ..codex.codex_workbench_agent import (
         CodexCliCockpitResponder,
@@ -358,7 +378,7 @@ def workbench(
                 float(
                     os.environ.get(
                         "LLM_WIKI_COCKPIT_CALLBACK_TIMEOUT_SECONDS",
-                        args.codex_timeout,
+                        str(args.codex_timeout),
                     )
                 ),
             ),
@@ -371,8 +391,10 @@ def workbench(
                 model=args.codex_model,
                 profile=args.codex_profile,
                 timeout_seconds=args.codex_timeout,
-                transport=getattr(args, "codex_transport", None)
-                or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec"),
+                transport=_codex_transport(
+                    getattr(args, "codex_transport", None)
+                    or os.environ.get("KOGWISTAR_CODEX_TRANSPORT", "exec")
+                ),
             ),
             trace_line=trace_line,
         )
@@ -405,7 +427,7 @@ def mcp(
     *,
     build_engines: BuildEngines,
     close_engines: CloseEngines,
-    persistence_kwargs: PersistenceKwargs,
+    persistence_kwargs: PersistenceKwargsFactory,
 ) -> None:
     """Serve the full MCP protocol through the official MCP SDK."""
     from ..agent.gateway import AgentGateway
@@ -437,9 +459,15 @@ def mcp(
             args.host,
             args.port,
         )
-        run_kwargs: dict[str, object] = {"transport": args.transport}
-        if args.transport != "stdio":
-            run_kwargs.update({"host": args.host, "port": args.port, "path": args.path})
-        mcp_server.run(**run_kwargs)
+        transport = str(args.transport)
+        if transport == "stdio":
+            mcp_server.run(transport="stdio")
+        else:
+            mcp_server.run(
+                transport=transport,
+                host=str(args.host),
+                port=int(args.port),
+                path=str(args.path),
+            )
     finally:
         close_engines(engines)

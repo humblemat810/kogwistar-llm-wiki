@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import cast
 
 
 def now_ms() -> int:
@@ -22,6 +24,37 @@ def append_trace_line(path: Path, message: str) -> None:
         handle.write(f"{now_ms()} | {message}\n")
 
 
+def object_mapping(value: object) -> dict[str, object]:
+    """Narrow a decoded JSON object at an external process boundary."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
+def payload_path(payload: Mapping[str, object], key: str) -> Path:
+    value = payload.get(key)
+    if not isinstance(value, (str, Path)):
+        raise ValueError(f"parser child payload field {key!r} must be a path")
+    return Path(value)
+
+
+def payload_int(payload: Mapping[str, object], key: str, *, default: int) -> int:
+    value = payload.get(key)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"parser child payload field {key!r} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValueError(f"parser child payload field {key!r} must be an integer") from exc
+    raise ValueError(f"parser child payload field {key!r} must be an integer")
+
+
 def close_resources_quietly(*resources: object) -> None:
     """Close child-owned backend resources without masking the parse result."""
 
@@ -36,11 +69,13 @@ def close_resources_quietly(*resources: object) -> None:
 
 
 def dump_model(value: object) -> object:
-    if hasattr(value, "model_dump"):
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        model_dump_fn = cast(Callable[..., object], model_dump)
         try:
-            return value.model_dump(field_mode="backend", dump_format="json")
+            return model_dump_fn(field_mode="backend", dump_format="json")
         except TypeError:
-            return value.model_dump()
+            return model_dump_fn()
     if isinstance(value, dict):
         return {str(key): dump_model(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -49,8 +84,8 @@ def dump_model(value: object) -> object:
 
 
 def proposal_mode_summary(final_state: dict[str, object]) -> dict[str, object]:
-    current_layer_result = dict(final_state.get("current_layer_result") or {})
-    metadata = dict(current_layer_result.get("metadata") or {})
+    current_layer_result = object_mapping(final_state.get("current_layer_result"))
+    metadata = object_mapping(current_layer_result.get("metadata"))
     if not metadata:
         return {}
     summary: dict[str, object] = {

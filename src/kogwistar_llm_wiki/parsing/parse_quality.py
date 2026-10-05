@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
+
+
+def _mapping_items(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def basic_sense_eval_from_graph_payload(
@@ -13,7 +20,7 @@ def basic_sense_eval_from_graph_payload(
     def _normalize_excerpt(text: object) -> str:
         return " ".join(str(text or "").split()).strip()
 
-    nodes = list(graph_payload.get("nodes") or [])
+    nodes = _mapping_items(graph_payload.get("nodes"))
     node_count = len(nodes)
     node_types: set[str] = set()
     excerpt_spans_by_cluster: dict[str, dict[str, list[tuple[int, int]]]] = defaultdict(
@@ -23,15 +30,16 @@ def basic_sense_eval_from_graph_payload(
     max_depth = 0
 
     for node in nodes:
-        metadata = dict(node.get("metadata") or {})
+        metadata = node.get("metadata")
+        metadata = metadata if isinstance(metadata, Mapping) else {}
         node_type = str(metadata.get("semantic_node_type") or node.get("type") or "").strip()
         if node_type:
             node_types.add(node_type)
         level_from_root = metadata.get("level_from_root")
         if isinstance(level_from_root, int):
             max_depth = max(max_depth, level_from_root + 1)
-        for mention in node.get("mentions") or []:
-            for span in mention.get("spans") or []:
+        for mention in _mapping_items(node.get("mentions")):
+            for span in _mapping_items(mention.get("spans")):
                 excerpt = _normalize_excerpt(span.get("excerpt"))
                 source_cluster_id = span.get("source_cluster_id")
                 start_char = span.get("start_char")
@@ -81,7 +89,8 @@ def basic_sense_eval_from_graph_payload(
                     cur_start, cur_end = start_char, end_char
             merged_span_count += 1
             duplicate_excerpt_hits += max(0, len(intervals) - merged_span_count)
-    page_index_diag = dict(diagnostics.get("page_index") or {})
+    page_index_diag = diagnostics.get("page_index")
+    page_index_diag = page_index_diag if isinstance(page_index_diag, Mapping) else {}
     assignment_mode = str(page_index_diag.get("assignment_mode") or diagnostics.get("assignment_mode") or "")
     fallback_used = bool(
         page_index_diag.get("fallback_reason")

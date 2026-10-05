@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .host import AgentGatewayHost
 
-class AgentToolCatalogMixin:
+
+class AgentToolCatalogMixin(AgentGatewayHost):
     def mcp_tool_names(self) -> tuple[str, ...]:
         return (
             "query",

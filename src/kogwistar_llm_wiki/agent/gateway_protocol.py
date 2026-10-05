@@ -27,7 +27,9 @@ def request_id(payload: Mapping[str, Any], prefix: str) -> str:
 def a2a_task(interaction: Mapping[str, Any], *, standard: bool = False) -> dict[str, object]:
     if isinstance(interaction.get("status"), Mapping):
         result = dict(interaction)
-        result.setdefault("contextId", (result.get("metadata") or {}).get("workspace_id", "default"))
+        metadata = result.get("metadata")
+        metadata_map = metadata if isinstance(metadata, Mapping) else {}
+        result.setdefault("contextId", metadata_map.get("workspace_id", "default"))
         return result
     status = str(interaction.get("status") or "pending")
     state = {

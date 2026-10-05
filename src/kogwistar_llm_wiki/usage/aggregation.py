@@ -11,6 +11,19 @@ from kogwistar.runtime.budget_adapters import summarize_budget_events
 USAGE_PROJECTION_SCHEMA_VERSION = 1
 
 
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _number(value: object, *, default: float = 0.0) -> float:
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
 def empty_aggregate() -> dict[str, object]:
     return {
         "input_tokens": 0,
@@ -30,29 +43,33 @@ def empty_aggregate() -> dict[str, object]:
 def merge_event(aggregate: dict[str, object], event: BudgetEvent) -> None:
     summary = summarize_budget_events([event])
     for key in ("input_tokens", "output_tokens", "total_tokens", "time_ms", "event_count"):
-        aggregate[key] = int(aggregate.get(key, 0) or 0) + int(summary.get(key, 0) or 0)
+        aggregate[key] = int(_number(aggregate.get(key))) + int(_number(summary.get(key)))
     cost_observed = bool(aggregate.get("cost_observed")) or event.kind == "cost" or event.unit == "total_cost"
     aggregate["cost_observed"] = cost_observed
     aggregate["total_cost"] = (
         round(
-            float(aggregate.get("total_cost", 0.0) or 0.0)
-            + float(summary.get("total_cost", 0.0) or 0.0),
+            _number(aggregate.get("total_cost"))
+            + _number(summary.get("total_cost")),
             6,
         )
         if cost_observed
         else None
     )
     for field in ("event_counts", "by_unit"):
-        target = dict(aggregate.get(field) or {})
-        for key, value in dict(summary.get(field) or {}).items():
-            target[str(key)] = int(target.get(str(key), 0) or 0) + int(value or 0)
+        target = dict(_mapping(aggregate.get(field)))
+        for key, value in _mapping(summary.get(field)).items():
+            target[str(key)] = int(_number(target.get(str(key)))) + int(_number(value))
         aggregate[field] = target
     attribution = event.attribution
     if attribution is not None:
-        if attribution.provider and attribution.provider not in aggregate["providers"]:
-            aggregate["providers"] = sorted([*aggregate["providers"], attribution.provider])
-        if attribution.model and attribution.model not in aggregate["models"]:
-            aggregate["models"] = sorted([*aggregate["models"], attribution.model])
+        providers_value = aggregate.get("providers")
+        providers = [str(item) for item in providers_value] if isinstance(providers_value, list) else []
+        if attribution.provider and attribution.provider not in providers:
+            aggregate["providers"] = sorted([*providers, attribution.provider])
+        models_value = aggregate.get("models")
+        models = [str(item) for item in models_value] if isinstance(models_value, list) else []
+        if attribution.model and attribution.model not in models:
+            aggregate["models"] = sorted([*models, attribution.model])
 
 
 def event_groups(event: BudgetEvent) -> dict[str, list[str]]:

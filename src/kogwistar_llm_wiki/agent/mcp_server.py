@@ -10,11 +10,18 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    MutableMapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, cast
 
 from mcp import types
 from mcp.server.lowlevel import Server
@@ -32,6 +39,26 @@ from .gateway import AgentGateway
 _MCP_REQUEST_HEADERS: ContextVar[dict[str, str] | None] = ContextVar(
     "llm_wiki_mcp_request_headers", default=None
 )
+
+
+ASGIMessage = MutableMapping[str, Any]
+
+
+class _ASGIReceive(Protocol):
+    def __call__(self) -> Awaitable[ASGIMessage]: ...
+
+
+class _ASGISend(Protocol):
+    def __call__(self, message: ASGIMessage, /) -> Awaitable[None]: ...
+
+
+class _ASGIApplication(Protocol):
+    async def __call__(
+        self,
+        scope: MutableMapping[str, Any],
+        receive: _ASGIReceive,
+        send: _ASGISend,
+    ) -> None: ...
 
 READ_TOOL_NAMES = frozenset(
     {
@@ -65,6 +92,35 @@ def _env_value(name: str, fallback_name: str, default: str = "") -> str:
 
 def _truthy(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _make_tool(
+    name: str, description: str, input_schema: dict[str, object]
+) -> types.Tool:
+    """Construct a Tool across MCP SDK naming generations.
+
+    The installed SDK currently exposes the protocol's ``inputSchema`` field,
+    while some generated type stubs spell the Python keyword as
+    ``input_schema``.  Keep this compatibility at the SDK boundary only.
+    """
+
+    constructor = cast(Callable[..., types.Tool], types.Tool)
+    return constructor(name=name, description=description, inputSchema=input_schema)
+
+
+def _make_call_result(
+    *,
+    content: list[types.TextContent],
+    structured_content: dict[str, object] | None = None,
+    is_error: bool = False,
+) -> types.CallToolResult:
+    """Construct a result without leaking SDK keyword-version details."""
+
+    constructor = cast(Callable[..., types.CallToolResult], types.CallToolResult)
+    kwargs: dict[str, object] = {"content": content, "isError": is_error}
+    if structured_content is not None:
+        kwargs["structuredContent"] = structured_content
+    return constructor(**kwargs)
 
 
 def _object_schema(
@@ -422,7 +478,7 @@ class AgentMcpServer:
     def __init__(self, gateway: AgentGateway) -> None:
         self.gateway = gateway
         self._tools = tuple(
-            types.Tool(name=name, description=description, inputSchema=schema)
+            _make_tool(name, description, schema)
             for name, description, schema in _tool_specs()
         )
         # MCP V2 registers low-level handlers through the Server constructor.
@@ -437,11 +493,11 @@ class AgentMcpServer:
         except TypeError:
             self.server = Server("llm-wiki")
 
-            @self.server.list_tools()
+            @self.server.list_tools()  # type: ignore[attr-defined]
             async def _list_tools(*_args: Any) -> types.ListToolsResult:
                 return await self._handle_list_tools(None, None)
 
-            @self.server.call_tool(validate_input=False)
+            @self.server.call_tool(validate_input=False)  # type: ignore[attr-defined]
             async def _call_tool(
                 name: str, arguments: dict[str, object]
             ) -> types.CallToolResult:
@@ -501,13 +557,13 @@ class AgentMcpServer:
                 identity=identity,
             )
         except Exception as exc:  # noqa: BLE001 - expose failures as tool results
-            return types.CallToolResult(
+            return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
-                isError=True,
+                is_error=True,
             )
-        return types.CallToolResult(
+        return _make_call_result(
             content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
-            structuredContent=result,
+            structured_content=result,
         )
 
     async def _server_list_tools(self) -> list[types.Tool]:
@@ -521,13 +577,13 @@ class AgentMcpServer:
             identity = self._authenticate_request()
             result = self._dispatch(name, arguments, identity=identity)
         except Exception as exc:  # noqa: BLE001 - expose failures as tool results
-            return types.CallToolResult(
+            return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
-                isError=True,
+                is_error=True,
             )
-        return types.CallToolResult(
+        return _make_call_result(
             content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
-            structuredContent=result,
+            structured_content=result,
         )
 
     def _authenticate_request(self) -> LlmWikiIdentity | None:
@@ -538,14 +594,25 @@ class AgentMcpServer:
         return authenticate_bearer(authorization)
 
     @staticmethod
-    def _headers_from_scope(scope: Any) -> dict[str, str]:
-        return {
-            key.decode("latin-1").lower(): value.decode("latin-1")
-            for key, value in scope.get("headers", ())
-        }
+    def _headers_from_scope(scope: Mapping[str, Any]) -> dict[str, str]:
+        raw_headers = scope.get("headers", ())
+        if not isinstance(raw_headers, Sequence):
+            return {}
+        headers: dict[str, str] = {}
+        for item in raw_headers:
+            if (
+                isinstance(item, Sequence)
+                and len(item) == 2
+                and isinstance(item[0], bytes)
+                and isinstance(item[1], bytes)
+            ):
+                headers[item[0].decode("latin-1").lower()] = item[1].decode("latin-1")
+        return headers
 
     async def _with_request_headers(
-        self, scope: Any, operation: Any
+        self,
+        scope: Mapping[str, Any],
+        operation: Callable[[], Awaitable[None]],
     ) -> None:
         token = _MCP_REQUEST_HEADERS.set(self._headers_from_scope(scope))
         try:
@@ -595,13 +662,13 @@ class AgentMcpServer:
         try:
             result = self._dispatch(name, arguments or {})
         except Exception as exc:  # noqa: BLE001 - MCP tools expose errors as protocol results
-            return types.CallToolResult(
+            return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
-                isError=True,
+                is_error=True,
             )
-        return types.CallToolResult(
+        return _make_call_result(
             content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
-            structuredContent=result,
+            structured_content=result,
         )
 
     async def _run_stdio(self) -> None:
@@ -614,7 +681,7 @@ class AgentMcpServer:
                 self.server.create_initialization_options(),
             )
 
-    def _streamable_http_app(self, path: str) -> Any:
+    def _streamable_http_app(self, path: str) -> _ASGIApplication:
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
         from starlette.applications import Starlette
         from starlette.responses import PlainTextResponse
@@ -633,7 +700,11 @@ class AgentMcpServer:
                 finally:
                     manager_holder.pop("manager", None)
 
-        async def scoped_handler(scope: Any, receive: Any, send: Any) -> None:
+        async def scoped_handler(
+            scope: MutableMapping[str, Any],
+            receive: _ASGIReceive,
+            send: _ASGISend,
+        ) -> None:
             if scope.get("type") == "http":
                 request_path = str(scope.get("path") or "")
                 if request_path not in {endpoint, endpoint + "/"}:
@@ -659,7 +730,7 @@ class AgentMcpServer:
             lifespan=lifespan,
         )
 
-    def _sse_app(self, path: str) -> Any:
+    def _sse_app(self, path: str) -> _ASGIApplication:
         from mcp.server.sse import SseServerTransport
         from starlette.responses import PlainTextResponse
 
@@ -667,7 +738,11 @@ class AgentMcpServer:
         messages_path = f"{endpoint}/messages/"
         transport = SseServerTransport(messages_path)
 
-        async def app(scope: dict[str, object], receive: Any, send: Any) -> None:
+        async def app(
+            scope: MutableMapping[str, Any],
+            receive: _ASGIReceive,
+            send: _ASGISend,
+        ) -> None:
             request_path = str(scope.get("path") or "")
             if request_path == endpoint:
                 async with transport.connect_sse(scope, receive, send) as streams:

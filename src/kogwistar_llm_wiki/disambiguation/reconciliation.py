@@ -316,7 +316,7 @@ def build_disambiguation_patch(
         operations = [
             MaintenancePatchOperation(
                 operation_id=str(
-                    f"ws:{candidate.workspace_id}:op:{stable_id('disambiguation_review_request', candidate.artifact_id, result.new_evidence_version)}"
+                    f"ws:{candidate.workspace_id}:op:{stable_id('disambiguation_review_request', candidate.artifact_id, str(result.new_evidence_version))}"
                 ),
                 kind=MaintenanceOperationKind.REQUEST_REVIEW,
                 reason=result.reason,
@@ -331,7 +331,7 @@ def build_disambiguation_patch(
                 candidate.artifact_id,
                 result.semantic_decision.value,
                 result.status.value,
-                result.new_evidence_version,
+                str(result.new_evidence_version),
             )
         ),
         intent=intent,

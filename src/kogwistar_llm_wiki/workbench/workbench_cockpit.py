@@ -7,7 +7,6 @@ the proposal non-authoritative until a user explicitly confirms it.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -102,13 +101,33 @@ class CockpitTurnResult(BaseModel):
     final_request: dict[str, object]
 
 
+class ProgressReporter(Protocol):
+    """Report one unit of bounded cockpit work."""
+
+    def __call__(self) -> None: ...
+
+
+class LensResolver(Protocol):
+    """Resolve a request into the caller's already-authorized lens."""
+
+    def __call__(self, request: SemanticLensRequest) -> SemanticLensSnapshot: ...
+
+
+class HistoryQuery(Protocol):
+    """Read bounded history for one workspace and cockpit session."""
+
+    def __call__(
+        self, workspace_id: str, target_session_id: str, limit: int
+    ) -> list[dict[str, object]]: ...
+
+
 class CockpitResponder(Protocol):
     def __call__(
         self,
         request: SemanticLensRequest,
         snapshot: SemanticLensSnapshot,
         observations: tuple[CockpitObservation, ...],
-        progress: Callable[[], None],
+        progress: ProgressReporter,
     ) -> CockpitAction: ...
 
 
@@ -128,8 +147,8 @@ class WorkbenchCockpit:
     def __init__(
         self,
         *,
-        resolve_lens: Callable[[SemanticLensRequest], SemanticLensSnapshot],
-        query_history: Callable[[str, str, int], list[dict[str, object]]],
+        resolve_lens: LensResolver,
+        query_history: HistoryQuery,
         limits: CockpitLimits | None = None,
     ) -> None:
         self._resolve_lens = resolve_lens
@@ -143,7 +162,7 @@ class WorkbenchCockpit:
         request: SemanticLensRequest,
         session_id: str,
         responder: CockpitResponder,
-        progress: Callable[[], None],
+        progress: ProgressReporter,
     ) -> CockpitTurnResult:
         snapshot = self._resolve_lens(request)
         self.last_snapshot = snapshot
@@ -227,7 +246,9 @@ def validate_cockpit_proposal(
     visible_edges = (*snapshot.edges, *snapshot.hyperedges)
     visible_edge_ids = {edge.id for edge in visible_edges}
     visible_ids = visible_node_ids | visible_edge_ids
-    evidence_ids = {str(value) for value in (proposal.get("evidence_ids") or ())}
+    raw_evidence_ids = proposal.get("evidence_ids")
+    evidence_values = raw_evidence_ids if isinstance(raw_evidence_ids, (list, tuple, set)) else ()
+    evidence_ids = {str(value) for value in evidence_values}
     if not evidence_ids or not evidence_ids <= visible_ids:
         return False, "evidence_not_in_scoped_lens"
     evidence_documents = _evidence_document_ids(snapshot, evidence_ids)

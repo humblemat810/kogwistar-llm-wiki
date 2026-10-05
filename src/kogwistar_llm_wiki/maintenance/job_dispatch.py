@@ -16,11 +16,11 @@ from ..maintenance import (
     is_execution_wisdom_kind,
 )
 from ..maintenance.maintenance_context import maintenance_execution_context
+from .maintenance_strategies import MaintenanceWorkerLike
 
 logger = logging.getLogger(__name__)
 
-
-class MaintenanceJobDispatchMixin:
+class MaintenanceJobDispatchMixin(MaintenanceWorkerLike):
     """Dispatch claimed jobs through the selected bounded strategy."""
 
     def _handle_job(self, workspace_id: str, job: JobQueueItem) -> None:

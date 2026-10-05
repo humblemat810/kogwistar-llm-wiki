@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from urllib.parse import urlparse
 
+from .host import AgentGatewayHost
 from ..models import IngestPipelineRequest
 from ..parsing.parse_views import ParseViewResolver
 from ..utils import _temporary_namespace
@@ -18,11 +19,56 @@ from .gateway_source import (
     validate_supplied_provenance,
 )
 
+if TYPE_CHECKING:
+    from ..workbench.workbench_api import WorkbenchApi
+
 _MAX_SOURCE_DISCOVERY_NODES = 128
 
 
-class AgentSourceMixin:
+def _candidate_uri(candidate: Mapping[str, object]) -> str:
+    metadata = candidate.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return ""
+    return str(metadata.get("source_uri") or "")
+
+
+class SourceDocumentRecord(TypedDict):
+    """Typed source-map record shared by gateway and source tools."""
+
+    id: str
+    metadata: dict[str, object]
+    content: str
+    revision_document_id: str
+
+
+ProvenancePolicy = Literal["required", "optional", "disabled"]
+ParseLimitValue = int | float | str
+
+
+def _provenance_policy(value: object) -> ProvenancePolicy:
+    policy = str(value or "optional").strip().lower()
+    if policy not in {"required", "optional", "disabled"}:
+        raise ValueError("provenance_policy must be required, optional, or disabled")
+    return policy  # type: ignore[return-value]
+
+
+def _parse_limits(value: object) -> dict[str, ParseLimitValue]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("parse_limits must be an object when supplied")
+    limits: dict[str, ParseLimitValue] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, (int, float, str)):
+            raise TypeError("parse_limits values must be scalar JSON values")
+        limits[key] = item
+    return limits
+
+
+class AgentSourceMixin(AgentGatewayHost):
     """Keep source discovery and queue inspection out of the protocol façade."""
+
+    api: WorkbenchApi
 
     def multimodal_capture(self, arguments: Mapping[str, Any]) -> dict[str, object]:
         return self.api.multimodal_capture(arguments)
@@ -46,17 +92,13 @@ class AgentSourceMixin:
         if not isinstance(raw_text, str) or not raw_text.strip():
             raise ValueError("ingest requires non-empty raw_text or a fetchable source_uri")
         validate_agent_source_uri(source_uri)
-        policy = str(arguments.get("provenance_policy") or "optional").strip().lower()
-        if policy not in {"required", "optional", "disabled"}:
-            raise ValueError("provenance_policy must be required, optional, or disabled")
+        policy = _provenance_policy(arguments.get("provenance_policy"))
         provenance = arguments.get("provenance")
         if provenance is not None and not isinstance(provenance, Mapping):
             raise ValueError("provenance must be an object when supplied")
         if policy == "required" and not isinstance(provenance, Mapping):
             raise ValueError("required provenance was not supplied")
-        parse_limits = arguments.get("parse_limits") or {}
-        if not isinstance(parse_limits, Mapping):
-            raise TypeError("parse_limits must be an object when supplied")
+        parse_limits = _parse_limits(arguments.get("parse_limits"))
         if isinstance(provenance, Mapping):
             validate_supplied_provenance(
                 provenance,
@@ -89,7 +131,7 @@ class AgentSourceMixin:
             else None,
             provenance_policy=policy,
             provenance=dict(provenance) if isinstance(provenance, Mapping) else None,
-            parse_limits=dict(parse_limits),
+            parse_limits=parse_limits,
         )
         declared_source_id = (
             str((provenance or {}).get("source_document_id") or "").strip()
@@ -108,7 +150,7 @@ class AgentSourceMixin:
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
-        candidates: list[dict[str, object]] | None = None,
+        candidates: Sequence[Mapping[str, object]] | None = None,
     ) -> IngestPipelineRequest | None:
         if candidates is None:
             candidates = self._source_documents(workspace_id)
@@ -116,26 +158,21 @@ class AgentSourceMixin:
             (item for item in candidates if source_document_id and str(item["id"]) == source_document_id),
             None,
         )
-        by_uri = next(
-            (
-                item
-                for item in candidates
-                if source_uri and str(item["metadata"].get("source_uri") or "") == source_uri
-            ),
-            None,
-        )
+        by_uri = next((item for item in candidates if source_uri and _candidate_uri(item) == source_uri), None)
         if by_id is not None and by_uri is not None and str(by_id["id"]) != str(by_uri["id"]):
             raise ValueError("source_document_id and source_uri identify different sources")
         candidate = by_id or by_uri
         if candidate is None:
             return None
+        raw_metadata = candidate.get("metadata")
+        if not isinstance(raw_metadata, Mapping):
+            raise TypeError("source metadata is not a mapping")
         return self._source_request_from_candidate(
             workspace_id=workspace_id,
-            source_id=str(candidate["id"]),
-            metadata=dict(candidate["metadata"]),
-            content=str(candidate["content"] or ""),
+            source_id=str(candidate.get("id") or ""),
+            metadata={str(key): value for key, value in raw_metadata.items()},
+            content=str(candidate.get("content") or ""),
         )
-
     def _load_source_request_by_id(
         self, *, workspace_id: str, source_document_id: str
     ) -> IngestPipelineRequest | None:
@@ -194,12 +231,12 @@ class AgentSourceMixin:
             parser_mode=str(metadata.get("parser_mode") or "heuristic"),
             parser_lane=str(metadata.get("parser_lane") or "page_index"),
             promotion_mode=str(metadata.get("promotion_mode") or "pending"),
-            provenance_policy=str(metadata.get("provenance_policy") or "optional"),
+            provenance_policy=_provenance_policy(metadata.get("provenance_policy")),
             provenance=decode_metadata_mapping(metadata.get("provenance")),
-            parse_limits=dict(metadata.get("parse_limits") or {}),
+            parse_limits=_parse_limits(metadata.get("parse_limits")),
         )
 
-    def _source_documents(self, workspace_id: str) -> list[dict[str, object]]:
+    def _source_documents(self, workspace_id: str) -> list[SourceDocumentRecord]:
         ns = self.api.pipeline.namespaces_for(workspace_id)
         with _temporary_namespace(self.api.pipeline.engines.kg, ns.source_space):
             nodes = self.api.pipeline.engines.kg.read.get_nodes(
@@ -216,7 +253,7 @@ class AgentSourceMixin:
             self.api.pipeline.engines.conversation.meta_sqlite,
             workspace_id=workspace_id,
         )
-        candidates_by_source: dict[str, list[tuple[int, str, dict[str, object]]]] = {}
+        candidates_by_source: dict[str, list[tuple[int, str, SourceDocumentRecord]]] = {}
         for node in nodes:
             metadata = dict(getattr(node, "metadata", {}) or {})
             if metadata.get("graph_space") != "source" and metadata.get("artifact_kind") != "source_revision":
@@ -242,7 +279,7 @@ class AgentSourceMixin:
                 created_at_ms = int(metadata.get("created_at_ms") or 0)
             except (TypeError, ValueError):
                 created_at_ms = 0
-            candidate = {
+            candidate: SourceDocumentRecord = {
                 "id": source_id,
                 "metadata": metadata,
                 "content": raw_text,
@@ -252,7 +289,7 @@ class AgentSourceMixin:
                 (created_at_ms, revision_document_id, candidate)
             )
 
-        result: list[dict[str, object]] = []
+        result: list[SourceDocumentRecord] = []
         for source_id, candidates in candidates_by_source.items():
             fallback_revision = max(candidates, key=lambda item: item[0])[1]
             resolution = resolver.resolve(
@@ -281,7 +318,7 @@ class AgentSourceMixin:
         workspace_id: str,
         topic: str,
         *,
-        candidates: list[dict[str, object]] | None = None,
+        candidates: Sequence[Mapping[str, object]] | None = None,
     ) -> list[str]:
         terms = {term.lower() for term in topic.split() if len(term) > 2}
         matches = []

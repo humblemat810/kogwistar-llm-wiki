@@ -7,7 +7,7 @@ authentication and enforces each route's declared scope before dispatch.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from typing import Literal, Protocol
@@ -17,9 +17,16 @@ from ..configuration.identity import LlmWikiIdentity
 ExtensionMethod = Literal["GET", "POST"]
 ExtensionScope = Literal["read", "write"]
 ExtensionContentType = Literal["application/json", "text/html"]
-WorkspaceIdResolver = Callable[
-    [Mapping[str, tuple[str, ...]], Mapping[str, object]], str | None
-]
+
+class WorkspaceIdResolver(Protocol):
+    """Resolve the workspace selected by an extension request."""
+
+    def __call__(
+        self,
+        query: Mapping[str, tuple[str, ...]],
+        payload: Mapping[str, object],
+        /,
+    ) -> str | None: ...
 
 _EXTENSION_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 WORKBENCH_EXTENSION_ENTRY_POINT_GROUP = "kogwistar_llm_wiki.workbench_extensions"
@@ -50,9 +57,10 @@ class WorkbenchExtensionResponse:
             raise TypeError("HTML extension responses must contain a string body")
 
 
-ExtensionHandler = Callable[
-    [WorkbenchExtensionRequest], WorkbenchExtensionResponse
-]
+class ExtensionHandler(Protocol):
+    """Handle one already-authenticated extension request."""
+
+    def __call__(self, request: WorkbenchExtensionRequest, /) -> WorkbenchExtensionResponse: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +192,8 @@ __all__ = [
     "ExtensionContentType",
     "ExtensionMethod",
     "ExtensionScope",
+    "ExtensionHandler",
+    "WorkspaceIdResolver",
     "WorkbenchExtension",
     "WorkbenchExtensionFactory",
     "WorkbenchExtensionRequest",

@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
-from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+from kg_doc_parser.workflow_ingest.semantics import SemanticNode, semantic_tree_to_kge_payload
 from kogwistar.engine_core.models import GraphExtractionWithIDs
 from kogwistar.id_provider import stable_id
 
 from ..models import IngestPipelineRequest
 from ..parsing.parse_views import SourceRegion
 from ..utils import _temporary_namespace
+from .contracts import IngestPipelineHost, ParseSourceResult
 
 
 class GraphPersistenceMixin:
     """Keep parser output validation and graph writes out of orchestration."""
 
     def translate_parse_result(
-        self,
+        self: IngestPipelineHost,
         *,
-        parse_result: object,
+        parse_result: ParseSourceResult,
         source_document_id: str,
     ) -> GraphExtractionWithIDs:
         self._trace_event(
@@ -34,7 +36,7 @@ class GraphPersistenceMixin:
             result = GraphExtractionWithIDs.model_validate(payload)
         else:
             payload = semantic_tree_to_kge_payload(
-                parse_result.semantic_tree,
+                cast(SemanticNode, parse_result.semantic_tree),
                 doc_id=source_document_id,
             )
             result = GraphExtractionWithIDs.model_validate(payload)
@@ -47,7 +49,7 @@ class GraphPersistenceMixin:
         return result
 
     def _repair_graph_extraction_spans(
-        self,
+        self: IngestPipelineHost,
         *,
         graph_extraction: GraphExtractionWithIDs,
         source_document_id: str,
@@ -116,7 +118,7 @@ class GraphPersistenceMixin:
                         )
 
     def ingest_parse_result(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -269,7 +271,7 @@ class GraphPersistenceMixin:
         return enriched
 
     def _source_graph_extraction(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -281,7 +283,7 @@ class GraphPersistenceMixin:
     ) -> GraphExtractionWithIDs:
         enriched = graph_extraction.model_copy(deep=True)
         logical_source_document_id = self._source_document_id(request)
-        metadata = {
+        metadata: dict[str, object] = {
             "workspace_id": request.workspace_id,
             "graph_space": "source",
             "source_document_id": logical_source_document_id,

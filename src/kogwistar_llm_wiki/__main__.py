@@ -43,7 +43,7 @@ import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from .cli.archive_commands import (
     archive_catalog as _archive_catalog_command,
@@ -86,6 +86,7 @@ from .cli.embedding_commands import (
 from .cli.embedding_commands import (
     embeddings_inspect as _embeddings_inspect_command,
 )
+from .cli.entrypoint_support import PersistenceKwargs
 from .cli.entrypoint_support import build_demo_engines as _build_demo_engines_impl
 from .cli.entrypoint_support import build_engines as _build_engines_impl
 from .cli.entrypoint_support import close_engines as _close_engines_impl
@@ -136,7 +137,7 @@ def _load_env_file(path: Path) -> None:
     return _load_env_file_impl(path)
 
 
-def _conversation_persistence_kwargs(args: argparse.Namespace) -> dict[str, str]:
+def _conversation_persistence_kwargs(args: argparse.Namespace) -> PersistenceKwargs:
     return _conversation_persistence_kwargs_impl(args)
 
 
@@ -165,8 +166,9 @@ def _build_engines(
     dsn: str | None,
     *,
     split_derived_knowledge: bool = False,
-    conversation_persistence_mode: str = "single_stage",
-    embedding_profile_mode: str = "enforce",
+    conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
+    vector_backend: str | None = None,
 ) -> NamespaceEngines:
     return _build_engines_impl(
         workspace_id,
@@ -176,6 +178,7 @@ def _build_engines(
         split_derived_knowledge=split_derived_knowledge,
         conversation_persistence_mode=conversation_persistence_mode,
         embedding_profile_mode=embedding_profile_mode,
+        vector_backend=vector_backend,
     )
 
 

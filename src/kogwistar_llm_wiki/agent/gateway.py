@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 from urllib import (
@@ -13,7 +13,12 @@ from ..models import IngestPipelineRequest
 from ..otel import LlmWikiTelemetry
 from ..parsing.parse_generation_store import ParseGenerationStore
 from ..parsing.parse_session_store import ParseSessionStore
-from ..parsing.parse_views import ParseViewResolver, parse_session_id
+from ..parsing.parse_views import (
+    ParseFrontierItem,
+    ParseSessionState,
+    ParseViewResolver,
+    parse_session_id,
+)
 from ..utils import _temporary_namespace
 from ..workbench.inspection import build_workspace_quality_report
 from ..workbench.workbench_api import WorkbenchApi
@@ -149,9 +154,13 @@ class AgentGateway(
                 limit=100,
             )
         jobs = self._maintenance_jobs(workspace_id, source_document_id=source_document_id)
-        metadata = _redact_source_text(dict(source_item["metadata"]))
-        if isinstance(metadata, dict):
-            metadata["provenance"] = _decode_metadata_mapping(metadata.get("provenance"))
+        redacted_metadata = _redact_source_text(dict(source_item["metadata"]))
+        metadata: dict[str, object] = (
+            {str(key): value for key, value in redacted_metadata.items()}
+            if isinstance(redacted_metadata, Mapping)
+            else {}
+        )
+        metadata["provenance"] = _decode_metadata_mapping(metadata.get("provenance"))
         parse_status = self._parse_status(
             workspace_id=workspace_id,
             source_document_id=source_document_id,
@@ -207,7 +216,7 @@ class AgentGateway(
                 session_rows = [stored]
 
         def session_payload(
-            stored: tuple[object, list[object], int],
+            stored: tuple[ParseSessionState, Sequence[ParseFrontierItem], int],
         ) -> dict[str, object]:
             session, frontier, version = stored
             counts: dict[str, int] = {}
@@ -229,17 +238,15 @@ class AgentGateway(
                     }
                 )
             parser_state = session.parser_state
-            linked_jobs = [
-                str(job.get("job_id") or "")
-                for job in (maintenance_jobs or [])
-                if isinstance(job, Mapping)
-                and (
-                    str((job.get("payload") or {}).get("parse_session_id") or "")
-                    == session.session_id
-                    if isinstance(job.get("payload"), Mapping)
-                    else False
-                )
-            ]
+            linked_jobs: list[str] = []
+            for job in maintenance_jobs or []:
+                if not isinstance(job, Mapping):
+                    continue
+                payload = job.get("payload")
+                if not isinstance(payload, Mapping):
+                    continue
+                if str(payload.get("parse_session_id") or "") == session.session_id:
+                    linked_jobs.append(str(job.get("job_id") or ""))
             return {
                 "session_id": session.session_id,
                 "phase": session.phase.value,

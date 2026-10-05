@@ -9,28 +9,24 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Protocol
+from typing import cast
 
-from kogwistar.runtime.budget import budget_event_from_dict
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
+from kogwistar.runtime.budget import budget_event_from_dict
 
 from ..models import IngestPipelineRequest
-from ..providers.role_config import normalize_provider_name, resolve_parser_provider_settings
+from ..providers.role_config import (
+    normalize_provider_name,
+    resolve_parser_provider_settings,
+)
 from ..usage.events import persist_usage_events
-
-
-class SemanticTreeLike(Protocol):
-    title: str
-
-
-class ParseSourceResult(Protocol):
-    semantic_tree: SemanticTreeLike
+from .contracts import IngestPipelineHost, ParseSourceResult
 
 
 class SourceParsingMixin:
     """Provide parser dispatch without enlarging the orchestration façade."""
 
-    def parse_source(self, *, request: IngestPipelineRequest, source_document_id: str) -> ParseSourceResult:
+    def parse_source(self: IngestPipelineHost, *, request: IngestPipelineRequest, source_document_id: str) -> ParseSourceResult:
         self._trace_event(
             "parse_source_start",
             workspace_id=request.workspace_id,
@@ -77,11 +73,11 @@ class SourceParsingMixin:
         return result
 
     def _parse_workflow_layered_source(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
-    ) -> SimpleNamespace:
+    ) -> ParseSourceResult:
         provider = request.llm_provider or self._provider_from_mode(request.parser_mode)
         model = request.llm_model or self._model_from_env(provider)
         if provider is None:
@@ -168,7 +164,7 @@ class SourceParsingMixin:
             if getattr(result, "parse_session", None)
             else None,
         )
-        return SimpleNamespace(
+        return cast(ParseSourceResult, SimpleNamespace(
             semantic_tree=result.semantic_tree,
             graph_payload=result.graph_payload,
             evaluation=result.evaluation,
@@ -177,10 +173,10 @@ class SourceParsingMixin:
             usage_events=list(getattr(result, "usage_events", []) or []),
             layer_log=result.layer_log,
             parse_session=getattr(result, "parse_session", None),
-        )
+        ))
 
     def _persist_parser_usage_events(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
@@ -210,7 +206,7 @@ class SourceParsingMixin:
         )
 
     def _build_parser_kwargs(
-        self,
+        self: IngestPipelineHost,
         *,
         request: IngestPipelineRequest,
         source_document_id: str,

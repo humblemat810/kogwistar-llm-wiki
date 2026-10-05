@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from itertools import islice
 from typing import Protocol
 
 from .notification_digest import NotificationEvent
 
-AuthorizeNotificationSource = Callable[[str, str, str], bool]
+
+class AuthorizeNotificationSource(Protocol):
+    """Authorize one notification source for a recipient."""
+
+    def __call__(self, workspace_id: str, recipient_id: str, source_id: str, /) -> bool: ...
 
 
 class NotificationSourceAdapter(Protocol):
@@ -146,4 +150,8 @@ class NotificationSourceCollection:
         return tuple(sorted(self._source_ownership(workspace_id, recipient_id)))
 
 
-__all__ = ["NotificationSourceAdapter", "NotificationSourceCollection"]
+__all__ = [
+    "AuthorizeNotificationSource",
+    "NotificationSourceAdapter",
+    "NotificationSourceCollection",
+]

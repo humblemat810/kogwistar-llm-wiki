@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any, cast
+
 from kogwistar.engine_core import NamedProjectionStore
 
 from .parse_views import ParseFrontierItem, ParseSessionState, SourceRegion
@@ -128,7 +131,10 @@ class ParseSessionStore:
     ) -> list[tuple[ParseSessionState, list[ParseFrontierItem], int]]:
         """List durable sessions for one source using Kogwistar's projection index."""
 
-        list_projections = getattr(self.metadata, "list_named_projections", None)
+        list_projections = cast(
+            Callable[[str], list[dict[str, Any]]] | None,
+            getattr(self.metadata, "list_named_projections", None),
+        )
         if not callable(list_projections):
             return []
         result: list[tuple[ParseSessionState, list[ParseFrontierItem], int]] = []

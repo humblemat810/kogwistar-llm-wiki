@@ -8,12 +8,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..models import NamespaceEngines
+from .entrypoint_support import EngineBuilder
 
 
 def archive_create(
     args: argparse.Namespace,
     *,
-    build_engines: Callable[..., NamespaceEngines],
+    build_engines: EngineBuilder,
     close_engines: Callable[[NamespaceEngines], None],
 ) -> None:
     from ..archiving.operations import create_archive
@@ -55,7 +56,7 @@ def archive_verify(args: argparse.Namespace) -> None:
 def archive_restore(
     args: argparse.Namespace,
     *,
-    build_engines: Callable[..., NamespaceEngines],
+    build_engines: EngineBuilder,
     close_engines: Callable[[NamespaceEngines], None],
 ) -> None:
     from ..archiving.operations import restore_archive, restore_backend_snapshot
@@ -118,16 +119,23 @@ def archive_catalog(args: argparse.Namespace) -> None:
         except Exception as exc:  # noqa: BLE001
             rows.append({"path": str(path), "status": "invalid", "error": str(exc)})
             continue
-        if args.before_ms is not None and int(manifest.get("captured_at_ms", 0)) > args.before_ms:
+        captured_at_ms = manifest.get("captured_at_ms", 0)
+        if not isinstance(captured_at_ms, (int, float, str)):
+            captured_at_ms = 0
+        if args.before_ms is not None and int(captured_at_ms) > args.before_ms:
             continue
         rows.append(
             {
                 "path": str(path),
                 "status": "complete",
                 "archive_id": manifest.get("archive_id"),
-                "captured_at_ms": manifest.get("captured_at_ms"),
+                "captured_at_ms": captured_at_ms,
                 "archive_kind": manifest.get("archive_kind"),
             }
         )
-    rows.sort(key=lambda item: int(item.get("captured_at_ms") or 0))
+    def _sort_key(item: dict[str, object]) -> int:
+        value = item.get("captured_at_ms")
+        return int(value) if isinstance(value, (int, float, str)) else 0
+
+    rows.sort(key=_sort_key)
     print(json.dumps(rows, indent=2, sort_keys=True))

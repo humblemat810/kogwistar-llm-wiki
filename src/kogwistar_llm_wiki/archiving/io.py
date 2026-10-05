@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import tarfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -14,7 +14,23 @@ from ..utils import _temporary_namespace
 from .archive_contracts import ARTIFACT_DIRS as _ARTIFACT_DIRS
 from .archive_contracts import SECRET_NAMES as _SECRET_NAMES
 from .archive_contracts import ArchiveError, ArchiveNamespace
+from .validation import EventWriterLike
 from .validation import event_reader as _event_reader
+
+
+class IndexJobLister(Protocol):
+    """Minimal ordered-job query needed by archive quiescence checks."""
+
+    def __call__(
+        self,
+        *,
+        status: str | None = None,
+        entity_kind: str | None = None,
+        entity_id: str | None = None,
+        index_kind: str | None = None,
+        namespace: str | None = "default",
+        limit: int = 1000,
+    ) -> Iterable[object]: ...
 
 
 def workspace_archive_namespaces(
@@ -48,13 +64,13 @@ def workspace_archive_namespaces(
     return tuple(values)
 
 
-def event_writer(meta: Any) -> Any:
+def event_writer(meta: object) -> EventWriterLike:
     writer = getattr(meta, "append_entity_event_envelope", None)
     if not callable(writer):
         raise ArchiveError(
             f"metadata store {type(meta).__name__} lacks lossless event-envelope import"
         )
-    return writer
+    return cast(EventWriterLike, writer)
 
 
 def _known_queue_activity(engines: NamespaceEngines) -> list[str]:
@@ -68,6 +84,7 @@ def _known_queue_activity(engines: NamespaceEngines) -> list[str]:
         list_jobs = getattr(meta, "list_index_jobs", None)
         if not callable(list_jobs):
             continue
+        list_jobs = cast(IndexJobLister, list_jobs)
         for status in ("PENDING", "DOING"):
             for job in list_jobs(status=status, namespace=None, limit=1000):
                 activity.append(f"{getattr(job, 'job_id', 'unknown')}:{status}")

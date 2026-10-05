@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
 from kogwistar.engine_core.models import Node
 from kogwistar.policy import (
@@ -105,14 +106,14 @@ class LlmWikiDerivedKnowledgePolicy:
         )
 
     def source_where(self, *, workspace_id: str) -> dict[str, object]:
-        return self.source_query(workspace_id=workspace_id).where
+        return cast(dict[str, object], self.source_query(workspace_id=workspace_id).where)
 
     def match_where(self, *, workspace_id: str, label: str) -> dict[str, object]:
-        return _and_where(
+        return cast(dict[str, object], _and_where(
             {"artifact_kind": self.taxonomy.derived_knowledge},
             {"workspace_id": workspace_id},
             {"label": label},
-        )
+        ))
 
     def build_metadata(
         self,
@@ -124,14 +125,14 @@ class LlmWikiDerivedKnowledgePolicy:
         created_at_ms: int,
         artifact_kind: str | None = None,
     ) -> dict[str, object]:
-        return self._core.build_metadata(
+        return cast(dict[str, object], self._core.build_metadata(
             workspace_id=workspace_id,
             label=label,
             source_node_ids=source_node_ids,
             replaces_ids=replaces_ids,
             created_at_ms=created_at_ms,
             artifact_kind=artifact_kind or self.taxonomy.derived_knowledge,
-        )
+        ))
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,14 +153,14 @@ class LlmWikiWisdomPolicy:
         )
 
     def source_where(self, *, workspace_id: str) -> dict[str, object]:
-        return self.source_query(workspace_id=workspace_id).where
+        return cast(dict[str, object], self.source_query(workspace_id=workspace_id).where)
 
     def match_where(self, *, workspace_id: str, step_op: str) -> dict[str, object]:
-        return _and_where(
+        return cast(dict[str, object], _and_where(
             {"artifact_kind": self.taxonomy.execution_wisdom},
             {"workspace_id": workspace_id},
             {"step_op": step_op},
-        )
+        ))
 
     def build_metadata(
         self,
@@ -172,7 +173,7 @@ class LlmWikiWisdomPolicy:
         created_at_ms: int,
         artifact_kind: str | None = None,
     ) -> dict[str, object]:
-        return self._core.build_metadata(
+        return cast(dict[str, object], self._core.build_metadata(
             workspace_id=workspace_id,
             step_op=step_op,
             failure_count=failure_count,
@@ -180,7 +181,7 @@ class LlmWikiWisdomPolicy:
             replaces_ids=replaces_ids,
             created_at_ms=created_at_ms,
             artifact_kind=artifact_kind or self.taxonomy.execution_wisdom,
-        )
+        ))
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,10 +246,14 @@ class LlmWikiPolicies:
                 LlmWikiWisdomPolicy(taxonomy=self.taxonomy),
             )
         if self.projection is None:
+            visibility = self.visibility
+            if visibility is None:
+                visibility = LlmWikiVisibilityPolicy(taxonomy=self.taxonomy)
+                object.__setattr__(self, "visibility", visibility)
             object.__setattr__(
                 self,
                 "projection",
-                LlmWikiProjectionPolicy(visibility=self.visibility),
+                LlmWikiProjectionPolicy(visibility=visibility),
             )
         if self.lifecycle is None:
             object.__setattr__(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
+from typing import Literal, cast
 
 from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
@@ -16,6 +17,7 @@ from kogwistar.engine_core.embedding_profile import (
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
 
 EMBEDDING_SPACES = ("conversation", "workflow", "knowledge", "wisdom")
+EmbeddingProvider = Literal["fake", "openai", "vertex", "ollama"]
 
 
 class TinyEmbeddingFunction:
@@ -26,13 +28,39 @@ class TinyEmbeddingFunction:
     def name(self) -> str:
         return self._name
 
-    def __call__(self, input: list[str]) -> list[list[float]]:
+    def __call__(self, documents_or_texts: list[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
-        for value in input:
+        for value in documents_or_texts:
             text = str(value or "")
             checksum = float((sum(ord(ch) for ch in text) % 97) + 1)
             vectors.append([float(len(text) + 1), checksum])
         return vectors
+
+
+def _function_name(function: EmbeddingFunctionLike) -> str:
+    name = getattr(function, "name", None)
+    if callable(name):
+        return str(name())
+    return type(function).__name__
+
+
+def _provider(value: str | None) -> EmbeddingProvider:
+    if value in {"fake", "openai", "vertex", "ollama"}:
+        return cast(EmbeddingProvider, value)
+    raise ValueError(f"unsupported embedding provider {value!r}")
+
+
+def _required_model(value: str | None) -> str:
+    if value is None or not value.strip():
+        raise ValueError("embedding model is required")
+    return value
+
+
+def _integer(value: int | str | None, *, field: str, default: int | None = None) -> int:
+    candidate: int | str | None = value if value is not None else default
+    if candidate is None:
+        raise ValueError(f"embedding {field} is required")
+    return int(candidate)
 
 
 def resolve_embedding_function(
@@ -100,7 +128,7 @@ def resolve_embedding_function(
 
     if embedding_function is not None:
         config = embedding_config or EmbeddingProviderConfig(
-            provider="fake", model=embedding_function.name(), dimension=2
+            provider="fake", model=_function_name(embedding_function), dimension=2
         )
         return embedding_function, config
     if embedding_config is None and not configured:
@@ -108,16 +136,19 @@ def resolve_embedding_function(
         return tiny, EmbeddingProviderConfig(provider="fake", model=tiny.name(), dimension=2)
 
     config = embedding_config or EmbeddingProviderConfig(
-        provider=embedding_provider or embedding_env("PROVIDER", "fake"),
-        model=embedding_model or embedding_env("MODEL", "kg-doc-parser-workflow-embedding-v1"),
-        dimension=int(embedding_dimension or embedding_env("DIMENSION", "2")),
+        provider=_provider(embedding_provider or embedding_env("PROVIDER", "fake")),
+        model=_required_model(embedding_model or embedding_env("MODEL", "kg-doc-parser-workflow-embedding-v1")),
+        dimension=_integer(
+            embedding_dimension or embedding_env("DIMENSION", "2"),
+            field="dimension",
+        ),
         base_url=embedding_base_url or embedding_env("BASE_URL"),
         api_key_env=embedding_api_key_env or embedding_env("API_KEY_ENV"),
         max_sequence_length=(
             embedding_max_sequence_length
             if embedding_max_sequence_length is not None
             else (
-                int(value)
+                _integer(value, field="max_sequence_length")
                 if (value := embedding_env("MAX_SEQUENCE_LENGTH")) is not None
                 else None
             )
@@ -126,7 +157,7 @@ def resolve_embedding_function(
             embedding_crop_token_budget
             if embedding_crop_token_budget is not None
             else (
-                int(value)
+                _integer(value, field="crop_token_budget")
                 if (value := embedding_env("CROP_TOKEN_BUDGET")) is not None
                 else None
             )

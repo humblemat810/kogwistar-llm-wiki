@@ -9,6 +9,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..models import NamespaceEngines
+from .entrypoint_support import DemoEngineBuilder, EngineBuilder, PersistenceKwargs
+
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest
 
@@ -85,9 +88,9 @@ def read_demo_requests_from_source(
 def run_demo(
     args: argparse.Namespace,
     *,
-    build_demo_engines: Callable[..., object],
-    close_engines: Callable[[object], None],
-    persistence_kwargs: Callable[[argparse.Namespace], dict[str, str]],
+    build_demo_engines: DemoEngineBuilder,
+    close_engines: Callable[[NamespaceEngines], None],
+    persistence_kwargs: Callable[[argparse.Namespace], PersistenceKwargs],
 ) -> None:
     """Run the ephemeral, single-process demonstration flow."""
     from kogwistar_llm_wiki.configuration.workspace import GraphSpace
@@ -159,9 +162,9 @@ def run_demo(
 def run_ingest(
     args: argparse.Namespace,
     *,
-    build_engines: Callable[..., object],
-    close_engines: Callable[[object], None],
-    persistence_kwargs: Callable[[argparse.Namespace], dict[str, str]],
+    build_engines: EngineBuilder,
+    close_engines: Callable[[NamespaceEngines], None],
+    persistence_kwargs: Callable[[argparse.Namespace], PersistenceKwargs],
 ) -> None:
     """Run one persistent ingest command."""
     from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline
@@ -200,9 +203,9 @@ def run_ingest(
 def run_report(
     args: argparse.Namespace,
     *,
-    build_engines: Callable[..., object],
-    close_engines: Callable[[object], None],
-    persistence_kwargs: Callable[[argparse.Namespace], dict[str, str]],
+    build_engines: EngineBuilder,
+    close_engines: Callable[[NamespaceEngines], None],
+    persistence_kwargs: Callable[[argparse.Namespace], PersistenceKwargs],
 ) -> None:
     """Build and print a persisted workspace quality report."""
     from kogwistar_llm_wiki.workbench.inspection import (

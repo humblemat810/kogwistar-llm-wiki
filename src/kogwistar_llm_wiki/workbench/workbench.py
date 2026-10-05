@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -24,6 +24,18 @@ WorkbenchMode = Literal["deterministic", "codex"]
 
 class MutationExecutor(Protocol):
     def __call__(self, proposal: Mapping[str, object]) -> Mapping[str, object]: ...
+
+
+class Clock(Protocol):
+    """Return the current wall-clock time in milliseconds."""
+
+    def __call__(self, /) -> int: ...
+
+
+class AgentAnswerer(Protocol):
+    """Render one grounded snapshot into an answer string."""
+
+    def __call__(self, snapshot: SemanticLensSnapshot, /) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +68,7 @@ class KnowledgeWorkbench:
         *,
         lens_service: SemanticLensService,
         history_service: InvestigationHistoryService,
-        clock_ms: Callable[[], int],
+        clock_ms: Clock,
     ) -> None:
         self.lens_service = lens_service
         self.history_service = history_service
@@ -68,7 +80,7 @@ class KnowledgeWorkbench:
         request: SemanticLensRequest,
         session_id: str,
         mode: WorkbenchMode,
-        agent_answer: Callable[[SemanticLensSnapshot], str] | None = None,
+        agent_answer: AgentAnswerer | None = None,
     ) -> WorkbenchTurn:
         snapshot = self.lens_service.resolve(request)
         cited = tuple(node.id for node in snapshot.nodes if node.grounding)
@@ -141,4 +153,12 @@ class KnowledgeWorkbench:
         return dict(execute(proposal))
 
 
-__all__ = ["GroundedAnswer", "KnowledgeWorkbench", "MutationExecutor", "WorkbenchMode", "WorkbenchTurn"]
+__all__ = [
+    "AgentAnswerer",
+    "Clock",
+    "GroundedAnswer",
+    "KnowledgeWorkbench",
+    "MutationExecutor",
+    "WorkbenchMode",
+    "WorkbenchTurn",
+]

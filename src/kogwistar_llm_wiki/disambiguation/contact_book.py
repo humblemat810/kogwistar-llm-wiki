@@ -7,8 +7,10 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import islice
+from typing import Protocol
 
 from .contact_matching import (
+    AuthorizeContactStream,
     ContactIdentityObservation,
     ContactPointClaim,
     contact_evidence_snapshot_id,
@@ -19,14 +21,29 @@ from .disambiguation_contracts import (
     DisambiguationDecisionKind,
 )
 
-AuthorizeContactStream = Callable[[str, str], bool]
-ContactObservationProvider = Callable[
-    [str, int, AuthorizeContactStream], Sequence[ContactIdentityObservation]
-]
-ContactScanObservationProvider = Callable[
-    [str, Mapping[str, object], AuthorizeContactStream],
-    Sequence[ContactIdentityObservation],
-]
+
+class ContactObservationProvider(Protocol):
+    """Read a bounded set of contact observations after ACL authorization."""
+
+    def __call__(
+        self,
+        workspace_id: str,
+        limit: int,
+        authorize_stream: AuthorizeContactStream,
+        /,
+    ) -> Sequence[ContactIdentityObservation]: ...
+
+
+class ContactScanObservationProvider(Protocol):
+    """Read observations for one validated contact-maintenance scan."""
+
+    def __call__(
+        self,
+        workspace_id: str,
+        payload: Mapping[str, object],
+        authorize_stream: AuthorizeContactStream,
+        /,
+    ) -> Sequence[ContactIdentityObservation]: ...
 
 
 def compose_contact_scan_observation_providers(

@@ -7,15 +7,16 @@ parent pipeline module.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.embedding_profile import EmbeddingProfile
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
+from kogwistar.engine_core.storage_backend import StorageBackend
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
 
 from ..backends import VectorBackendSettings, build_backend_factory
@@ -25,8 +26,48 @@ from ..embeddings.embedding_config_resolver import (
 )
 from ..models import NamespaceEngines
 
-EmbeddingResolver = Callable[..., tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]]
-ProfileResolver = Callable[[EmbeddingProviderConfig], EmbeddingProfile | None]
+
+
+class EmbeddingResolver(Protocol):
+    """Resolve per-graph embedding functions and their provider settings."""
+
+    def __call__(
+        self,
+        *,
+        embedding_function: EmbeddingFunctionLike | None = None,
+        embedding_config: EmbeddingProviderConfig | None = None,
+        embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
+        embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+        embedding_provider: str | None = None,
+        embedding_model: str | None = None,
+        embedding_dimension: int | None = None,
+        embedding_base_url: str | None = None,
+        embedding_api_key_env: str | None = None,
+    ) -> tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]: ...
+
+
+class ProfileResolver(Protocol):
+    """Build the core profile for one resolved provider configuration."""
+
+    def __call__(self, config: EmbeddingProviderConfig) -> EmbeddingProfile | None: ...
+
+
+class GraphEngineFactory(Protocol):
+    """Construct a graph engine while preserving the engine constructor boundary."""
+
+    def __call__(self, persist_directory: Path, **kwargs: object) -> GraphKnowledgeEngine: ...
+
+
+class StorageBackendFactory(Protocol):
+    """Build an external storage backend for one graph engine."""
+
+    def __call__(self, engine: GraphKnowledgeEngine) -> StorageBackend: ...
+
+
+def _require_profile(profile: EmbeddingProfile | None) -> EmbeddingProfile:
+    if profile is None:
+        raise ValueError("an embedding profile is required for isolated storage")
+    return profile
 
 
 def profile_isolated_postgres_schema(base_schema: str, profile: EmbeddingProfile) -> str:
@@ -41,7 +82,7 @@ def profile_isolated_postgres_schema(base_schema: str, profile: EmbeddingProfile
     base = str(base_schema).strip()
     if not base:
         raise ValueError("PostgreSQL schema must not be empty")
-    digest = sha256(f"{base}\0{profile.fingerprint}".encode("utf-8")).hexdigest()[:40]
+    digest = sha256(f"{base}\0{profile.fingerprint}".encode()).hexdigest()[:40]
     return f"kw_{digest}"
 
 def build_in_memory_namespace_engines(
@@ -181,7 +222,7 @@ def build_postgres_namespace_engines(
     postgres_embedding_layout: Literal["shared", "profile_isolated"] = "shared",
     embedding_resolver: EmbeddingResolver,
     profile_resolver: ProfileResolver,
-    engine_builder: Callable[..., GraphKnowledgeEngine] | None = None,
+    engine_builder: GraphEngineFactory | None = None,
 ) -> NamespaceEngines:
     root = Path(base_dir)
     embeddings, resolved_embedding_configs = embedding_resolver(
@@ -198,14 +239,15 @@ def build_postgres_namespace_engines(
     # A global ``embedding_dim`` remains a fallback. The PostgreSQL bundle
     # validates the resolved profiles below because its graph spaces share the
     # same physical vector tables.
-    embedding_dimensions = {
-        space: (
-            (embedding_configs or {}).get(space).dimension
-            if (embedding_configs or {}).get(space) is not None
-            else embedding_dim or resolved_embedding_configs[space].dimension
+    embedding_dimensions: dict[str, int] = {}
+    for space in EMBEDDING_SPACES:
+        explicit_config = (embedding_configs or {}).get(space)
+        resolved_config = resolved_embedding_configs[space]
+        embedding_dimensions[space] = (
+            explicit_config.dimension
+            if explicit_config is not None
+            else embedding_dim or resolved_config.dimension
         )
-        for space in EMBEDDING_SPACES
-    }
     if postgres_embedding_layout not in {"shared", "profile_isolated"}:
         raise ValueError(
             "postgres_embedding_layout must be 'shared' or 'profile_isolated'"
@@ -217,7 +259,7 @@ def build_postgres_namespace_engines(
             schema
             if postgres_embedding_layout == "shared"
             else profile_isolated_postgres_schema(
-                schema, profile_resolver(resolved_embedding_configs[space])
+                schema, _require_profile(profile_resolver(resolved_embedding_configs[space]))
             )
         )
         for space in EMBEDDING_SPACES
@@ -331,7 +373,7 @@ def _build_external_engine(
     embedding_profile: EmbeddingProfile | None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"],
     persistence_mode: Literal["single_stage", "two_stage"],
-    backend_factory: Callable[[GraphKnowledgeEngine], object] | None,
+    backend_factory: StorageBackendFactory | None,
 ) -> GraphKnowledgeEngine:
     if backend_factory is None:
         raise ValueError("An external vector backend requires a backend factory")
@@ -359,7 +401,7 @@ def _build_postgres_engine(
     embedding_profile: EmbeddingProfile | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
-    graph_engine_factory: Callable[..., GraphKnowledgeEngine] = GraphKnowledgeEngine,
+    graph_engine_factory: GraphEngineFactory = GraphKnowledgeEngine,
 ) -> GraphKnowledgeEngine:
     from kogwistar.engine_core.engine_postgres import (
         EnginePostgresConfig,

@@ -149,8 +149,11 @@ def authenticate_bearer(value: str | None) -> LlmWikiIdentity | None:
             "security_scope": os.getenv("LLM_WIKI_SECURITY_SCOPE", "llm-wiki"),
             "workspaces": ["*"],
         }
+        principal_id = claims["sub"]
+        if not isinstance(principal_id, str):
+            raise IdentityError("static identity subject is invalid", status=500)
         return LlmWikiIdentity(
-            claims["sub"],
+            principal_id,
             frozenset(scopes),
             str(claims["role"]),
             str(claims["security_scope"]),
