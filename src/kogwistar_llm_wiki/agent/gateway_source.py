@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from typing import Any, NoReturn
+from typing import NoReturn
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 
 def validate_supplied_provenance(
-    provenance: Mapping[str, Any],
+    provenance: Mapping[str, object],
     *,
     workspace_id: str,
     source_uri: str,
@@ -55,7 +55,7 @@ def validate_agent_source_uri(source_uri: str) -> None:
         raise ValueError("source_uri must be a credential-free http(s) URL")
 
 
-def validate_reingest_revision(existing: Mapping[str, Any], provenance: object) -> None:
+def validate_reingest_revision(existing: Mapping[str, object], provenance: object) -> None:
     if not isinstance(provenance, Mapping):
         return
     requested = str(provenance.get("source_revision_id") or "").strip()
