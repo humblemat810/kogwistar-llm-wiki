@@ -549,7 +549,7 @@ class AgentMcpServer:
         return types.ListToolsResult(tools=list(self._tools))
 
     async def _handle_call_tool(
-        self, _context: Any, params: types.CallToolRequestParams
+        self, _context: object, params: types.CallToolRequestParams
     ) -> types.CallToolResult:
         try:
             identity = self._authenticate_request()
