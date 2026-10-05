@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import cast
 
 from kogwistar.engine_core import NamedProjectionStore
+from kogwistar.runtime import ProjectionPayload
 
 from .parse_views import (
     ParseGeneration,
@@ -82,7 +83,7 @@ class ParseGenerationStore:
         """List generation headers for one logical source for operator inspection."""
 
         list_projections = cast(
-            Callable[[str], list[dict[str, Any]]] | None,
+            Callable[[str], list[ProjectionPayload]] | None,
             getattr(self.metadata, "list_named_projections", None),
         )
         if not callable(list_projections):
