@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 from kogwistar.runtime import BudgetEvent
 from kogwistar.runtime.budget_adapters import summarize_budget_events
@@ -95,7 +94,7 @@ def event_groups(event: BudgetEvent) -> dict[str, list[str]]:
     return {dimension: keys for dimension, keys in groups.items() if keys}
 
 
-def decode_projection(row: Mapping[str, Any]) -> dict[str, Any]:
+def decode_projection(row: Mapping[str, object]) -> dict[str, object]:
     payload = row.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("usage projection payload must be an object")  # noqa: TRY004
@@ -103,4 +102,4 @@ def decode_projection(row: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("usage projection schema version is incompatible")
     if int(payload.get("projection_schema_version") or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
         raise ValueError("usage projection payload schema version is incompatible")
-    return payload
+    return dict(payload)
