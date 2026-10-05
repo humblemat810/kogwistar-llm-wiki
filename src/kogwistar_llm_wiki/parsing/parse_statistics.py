@@ -11,7 +11,8 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+
+type JsonObject = dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +164,7 @@ class ParseStatisticsStore:
                 },
             )
 
-    def latest_rows(self, *, limit: int = 20) -> list[dict[str, Any]]:
+    def latest_rows(self, *, limit: int = 20) -> list[JsonObject]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -195,23 +196,23 @@ def build_parse_statistics_record(
     model: str | None,
     parse_runtime_ms: int,
     semantic_tree: object,
-    graph_payload: Mapping[str, Any] | None,
-    diagnostics: Mapping[str, Any] | None,
-    evaluation: Mapping[str, Any] | None,
+    graph_payload: Mapping[str, object] | None,
+    diagnostics: Mapping[str, object] | None,
+    evaluation: Mapping[str, object] | None,
     status: str,
 ) -> ParseStatisticsRecord:
     from ..diagnostics.debug_helpers import dump_json, now_ms, summarize_semantic_tree
 
     tree_summary = summarize_semantic_tree(semantic_tree)
-    graph_nodes = list((graph_payload or {}).get("nodes") or [])
-    graph_edges = list((graph_payload or {}).get("edges") or [])
-    diagnostics_dict = dict(diagnostics or {})
-    evaluation_dict = dict(evaluation or {})
+    graph_nodes = _object_records((graph_payload or {}).get("nodes"))
+    graph_edges = _object_records((graph_payload or {}).get("edges"))
+    diagnostics_dict: JsonObject = dict(diagnostics or {})
+    evaluation_dict: JsonObject = dict(evaluation or {})
     details = {
         "diagnostics": diagnostics_dict,
         "evaluation": evaluation_dict,
-        "graph_node_ids": [str(node.get("id") or "") for node in graph_nodes if isinstance(node, Mapping)],
-        "graph_edge_ids": [str(edge.get("id") or "") for edge in graph_edges if isinstance(edge, Mapping)],
+        "graph_node_ids": [str(node.get("id") or "") for node in graph_nodes],
+        "graph_edge_ids": [str(edge.get("id") or "") for edge in graph_edges],
         "parser_lane": parser_lane,
         "proposal_mode": proposal_mode,
         "provider": provider,
@@ -264,3 +265,9 @@ def build_parse_statistics_record(
         status=status,
         details_json=dump_json(details),
     )
+
+
+def _object_records(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
