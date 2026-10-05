@@ -12,9 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from itertools import pairwise
-from typing import Any
-
 from kogwistar.engine_core import NamedProjectionStore
+from kogwistar.runtime import ProjectionPayload
 from kogwistar.id_provider import stable_id
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -140,7 +139,7 @@ class ParseGenerationMember(BaseModel):
     semantic_fingerprint: str | None = None
     parent_member_id: str | None = None
     depth: int = Field(default=0, ge=0)
-    payload: Mapping[str, Any] = Field(default_factory=dict)
+    payload: Mapping[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _region_is_pinned_to_revision(self) -> ParseGenerationMember:
@@ -236,10 +235,10 @@ class ParseSessionState(BaseModel):
     last_progress_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     failure_reason: str | None = None
     # Inputs are revision-pinned and JSON-safe; raw bytes remain in the source document.
-    parser_state: dict[str, Any] = Field(default_factory=dict)
+    parser_state: ProjectionPayload = Field(default_factory=dict)
     # A view activation is a two-phase operation. Keeping the proposed view in
     # the session makes a crash between session CAS and view CAS recoverable.
-    pending_view: dict[str, Any] | None = None
+    pending_view: ProjectionPayload | None = None
     # Idempotent outbox watermark: dependent maintenance must be queued before
     # the pending view is cleared after activation.
     dependents_enqueued_view_version: int | None = Field(default=None, ge=1)
@@ -608,7 +607,7 @@ class ParseViewResolver:
     def is_active_metadata(
         self,
         source_document_id: str,
-        metadata: Mapping[str, Any],
+        metadata: Mapping[str, object],
         *,
         fallback_revision_document_id: str | None = None,
     ) -> bool:
