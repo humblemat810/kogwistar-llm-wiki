@@ -28,7 +28,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
-from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 

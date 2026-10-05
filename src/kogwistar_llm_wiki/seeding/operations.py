@@ -17,10 +17,6 @@ from kogwistar.engine_core.models import (
     Span,
 )
 
-SeedGraphProperties = Mapping[
-    str, JsonPrimitive | list[JsonPrimitive] | Mapping[str, JsonPrimitive]
-]
-
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
 from ..utils import _temporary_namespace
@@ -33,6 +29,10 @@ from .bundle_models import (
     SeedSource,
     _resolve_mention,
 )
+
+SeedGraphProperties = Mapping[
+    str, JsonPrimitive | list[JsonPrimitive] | Mapping[str, JsonPrimitive]
+]
 
 
 @dataclass(frozen=True, slots=True)

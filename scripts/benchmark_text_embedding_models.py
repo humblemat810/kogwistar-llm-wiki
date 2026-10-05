@@ -172,7 +172,6 @@ def _measure_model(
     import torch
     from sentence_transformers import SentenceTransformer
 
-    load_started = time.perf_counter()
     model = SentenceTransformer(
         model_id,
         device=device,
