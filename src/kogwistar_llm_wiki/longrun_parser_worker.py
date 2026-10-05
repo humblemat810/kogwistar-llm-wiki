@@ -1,10 +1,11 @@
 """Compatibility facade for long-run parser execution."""
 
-from typing import Any, cast
+from typing import cast
 
 from kg_doc_parser.workflow_ingest.layerwise_llm import build_layerwise_llm_callbacks
 
 from .parsing.layered_workflow import (
+    LayeredParseResult,
     _build_provider_layer_callbacks,  # noqa: F401 - compatibility export
     _summarize_budget_events,
 )
@@ -17,10 +18,10 @@ from .parsing.parse_quality import (
 )
 
 
-def run_workflow_layered_parse(**kwargs: object) -> Any:
+def run_workflow_layered_parse(**kwargs: object) -> LayeredParseResult:
     """Run the layered parser while preserving root-level patch seams."""
     return _run_workflow_layered_parse(
-        **cast(dict[str, Any], kwargs),
+        **cast(dict[str, object], kwargs),
         build_callbacks=build_layerwise_llm_callbacks,
         basic_sense_eval=_basic_sense_eval_from_graph_payload,
     )
