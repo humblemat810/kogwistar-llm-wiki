@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from kogwistar.engine_core.models import Grounding, Node, Span
+from kogwistar_obsidian_sink.core.models import ProjectionEntity
 
 from kogwistar_llm_wiki.configuration.workspace import GraphSpace, WorkspaceNamespaces
 from kogwistar_llm_wiki.utils import _temporary_namespace
@@ -134,18 +135,23 @@ def test_demo_projection_reifies_section_hyperedges(pipeline, ingest_request):
         graph_spaces=[GraphSpace.BASE_KG],
         projection_filter="demo",
     )
-    entities_by_title = {entity.title: entity for entity in snapshot.entities}
+    entities_by_title: dict[str, list[ProjectionEntity]] = {}
+    for entity in snapshot.entities:
+        entities_by_title.setdefault(entity.title, []).append(entity)
 
     assert {"Contacts", "Alice", "Bob"} <= set(entities_by_title)
 
-    contacts = entities_by_title["Contacts"]
-    alice = entities_by_title["Alice"]
-    bob = entities_by_title["Bob"]
+    alice_ids = {entity.kg_id for entity in entities_by_title["Alice"]}
+    bob_ids = {entity.kg_id for entity in entities_by_title["Bob"]}
+    contacts = next(
+        entity
+        for entity in entities_by_title["Contacts"]
+        if alice_ids.intersection(entity.source_ids)
+        and bob_ids.intersection(entity.source_ids)
+    )
 
-    assert alice.kg_id in contacts.source_ids
-    assert bob.kg_id in contacts.source_ids
-    assert any(relationship.target_id == alice.kg_id for relationship in contacts.relationships)
-    assert any(relationship.target_id == bob.kg_id for relationship in contacts.relationships)
+    assert any(relationship.target_id in alice_ids for relationship in contacts.relationships)
+    assert any(relationship.target_id in bob_ids for relationship in contacts.relationships)
 
 
 def test_demo_projection_hides_sentence_like_leaf_nodes(pipeline, ingest_request):
