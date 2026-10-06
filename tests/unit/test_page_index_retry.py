@@ -47,7 +47,7 @@ def _build_assignments(candidates: list[dict[str, Any]], *, nested: bool) -> lis
         block_id = str(candidate["block_id"])
         title = str(candidate.get("title_hint") or candidate.get("title") or candidate.get("text") or block_id)
         parent_id: str | None = None
-        if nested and node_type in {"SECTION", "SUBSECTION"}:
+        if nested and node_type in {"HEADING", "SECTION", "SUBSECTION"}:
             parent_id = last_heading_id
             last_heading_id = block_id
         elif nested:
