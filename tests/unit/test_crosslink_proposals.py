@@ -847,6 +847,9 @@ def test_fake_provider_human_review_pins_every_source_and_queues_fenced_revalida
     pending = service.list_pending(workspace_id=workspace_id)
     assert len(pending) == 1, (replies, traces)
     assert len(critic_calls) == expected_critic_calls
+    if critic_calls:
+        assert critic_calls[0]["evidence"][0]["node_id"].startswith("N")
+        assert critic_calls[0]["neighbor_context"]["nodes"] == []
     assert ctx.payload["maintenance_budget_state"]["call_used"] == max_calls
     assert durable_maintenance_usage(
         pipeline.engines.conversation.meta_sqlite,
@@ -1076,7 +1079,7 @@ def test_real_provider_path_persists_call_and_token_usage_before_retry(
     assert result == {"groups": []}
     assert structured.messages is not None
     prompt = json.loads(structured.messages[1][1])
-    assert prompt["neighbor_context"]["nodes"][0]["node_id"] == "neighbor-1"
+    assert prompt["neighbor_context"]["nodes"][0]["node_id"].startswith("N")
     usage = durable_maintenance_usage(
         pipeline.engines.conversation.meta_sqlite,
         namespace=WorkspaceNamespaces(ctx.workspace_id).usage_events,

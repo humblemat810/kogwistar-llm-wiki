@@ -40,6 +40,7 @@ class ProjectionSnapshotMixin:
         all_nodes = self._read_workspace_nodes(
             workspace_id=workspace_id,
             namespaces=namespaces,
+            graph_spaces=[space.value for space in requested_spaces],
         )
         all_nodes = [node for node in all_nodes if self._is_active_artifact(node, resolver)]
         # Edge reads are workspace-scoped first, with endpoint filtering kept as a
@@ -47,6 +48,7 @@ class ProjectionSnapshotMixin:
         all_edges = self._read_workspace_edges(
             workspace_id=workspace_id,
             namespaces=namespaces,
+            graph_spaces=[space.value for space in requested_spaces],
         )
         all_edges = [edge for edge in all_edges if self._is_active_artifact(edge, resolver)]
         manifest_ids = self._load_projection_manifest_ids(workspace_id) if requested_spaces == [GraphSpace.CURATED_KG] else None
@@ -232,20 +234,44 @@ class ProjectionSnapshotMixin:
             return True
         return bool(re.search(r"\s{3,}", text))
 
-    def _read_workspace_nodes(self, *, workspace_id: str, namespaces: list[str]) -> list[Node]:
+    def _read_workspace_nodes(
+        self,
+        *,
+        workspace_id: str,
+        namespaces: list[str],
+        graph_spaces: list[str],
+    ) -> list[Node]:
         node_by_id: dict[str, Node] = {}
         for namespace in namespaces:
-            for node in self._read_nodes(namespace=namespace, where={"workspace_id": workspace_id}):
+            for node in self._read_nodes(
+                namespace=namespace,
+                where={
+                    "workspace_id": workspace_id,
+                    "graph_space": {"$in": graph_spaces},
+                },
+            ):
                 node_id = str(getattr(node, "id", "") or "")
                 if not node_id or node_id in node_by_id:
                     continue
                 node_by_id[node_id] = node
         return list(node_by_id.values())
 
-    def _read_workspace_edges(self, *, workspace_id: str, namespaces: list[str]) -> list[Edge]:
+    def _read_workspace_edges(
+        self,
+        *,
+        workspace_id: str,
+        namespaces: list[str],
+        graph_spaces: list[str],
+    ) -> list[Edge]:
         edge_by_id: dict[str, Edge] = {}
         for namespace in namespaces:
-            for edge in self._read_edges(namespace=namespace, where={"workspace_id": workspace_id}):
+            for edge in self._read_edges(
+                namespace=namespace,
+                where={
+                    "workspace_id": workspace_id,
+                    "graph_space": {"$in": graph_spaces},
+                },
+            ):
                 edge_id = str(getattr(edge, "id", "") or "")
                 if not edge_id or edge_id in edge_by_id:
                     continue
