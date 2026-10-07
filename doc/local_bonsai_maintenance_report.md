@@ -104,7 +104,8 @@ evidence that Bonsai performed maintenance.
 - `docker compose --env-file doc/local_bonsai_maintenance.env.example
   --file compose.embedding-clip-cpu.yml config --quiet` passed. The standalone
   profile remains CPU-only, capped at 1 CPU/2 GiB by default, publishes only on
-  loopback, and mounts the pinned D-drive checkpoint read-only. This validates
+  loopback, and mounts the pinned checkpoint from the configured model root
+  read-only. This validates
   configuration rendering, not container service health.
 - The encoder uses CLIP's checkpoint-resident learned text and vision
   projections into one shared semantic space. It does not require a separate
@@ -369,11 +370,11 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 
 - The pinned `sentence-transformers/clip-ViT-B-32` checkpoint is already
   available at `<MODEL_ROOT>/sentence-transformers-clip-vit-b32-327ab672`, the
-  exact host path used by `compose.embedding-clip-cpu.yml`. Its safetensors file
+  configured source path used by `compose.embedding-clip-cpu.yml`. Its safetensors file
   is 605,157,884 bytes and its SHA-256 matches the configured pinned digest
   `99d28a652e6ec46629ab7047a0ac82c69b1fe11e0ce672c43af65d3a9a3fc05d`. It is
   now also cached under the configured Hugging Face cache tree.
-  The Compose profile still mounts the D-drive copy read-only. The checkpoint
+  The Compose profile still mounts the configured model-root copy read-only. The checkpoint
   hash is checked by the encoder on startup.
 - Source enumeration for topic/status lookup now queries source-graph and
   legacy source-revision metadata separately, deduplicates by node ID, and no
@@ -655,7 +656,7 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 - Ruff passed on the embedding service implementation and its focused tests.
 - Ran the cached `llm-wiki-embedding:local-cpu-smoke` image as a disposable
   container with `--network none`, `--memory=2g`, `--cpus=1.0`, and the pinned
-  D-drive CLIP checkpoint mounted read-only. Real CPU inference loaded the
+  configured CLIP checkpoint mounted read-only. Real CPU inference loaded the
   model in **27.111s**, encoded one text and one synthetic image in **19.142s**,
   returned two normalized 512-D vectors, and peaked at **869.4 MiB RSS**. This
   verifies bounded encoder inference under the configured 1-CPU/2-GiB limits;
@@ -686,7 +687,7 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 ## Post-restart Local Readiness Snapshot (2026-09-30)
 
 - The custom llama-server executable and both Bonsai files are present at the
-  documented D-drive paths. The executable reports llama.cpp
+  configured runtime paths. The executable reports llama.cpp
   `0.2.0-dev`/build `10706`, commit `1a07bfa5f`, MSVC `19.42.34438.0`, x64.
 - `scripts/start_local_bonsai.ps1` defaults to `-c 8192`. This is the
   conservative previously exercised operating point, not a proven maximum;

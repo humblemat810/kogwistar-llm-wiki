@@ -100,8 +100,9 @@ both map to its shared 512-D space. It does not need a separate llama.cpp-style
 This CLIP projection is separate from Bonsai's vision `mmproj` and cannot be
 substituted for it.
 
-Back up or re-download the actual model files at those D-drive paths separately
-from the redacted environment backup. If the Hugging Face cache root is changed
+Back up or re-download the actual model files under the configured
+`<MODEL_ROOT>` separately from the redacted environment backup. If the Hugging
+Face cache root is changed
 with `HF_HOME` or `HF_HUB_CACHE`, record that override with the local operator
 configuration; do not assume Compose mounts the cache automatically.
 
