@@ -36,10 +36,10 @@ flowchart LR
 The reproducible inventory command is:
 
 ```powershell
-python scripts/ovis/inventory_ovis_checkpoint.py D:\models\Ovis-Omni-Embedding-3B
-python scripts/ovis/inventory_ovis_checkpoint.py D:\models\Ovis-Omni-Embedding-3B-bnb-4bit-vllm-bundle
-python scripts/ovis/inventory_ovis_checkpoint.py D:\models\Ovis-Omni-Embedding-3B-bnb-8bit-vllm-bundle
-python scripts/ovis/inventory_ovis_checkpoint.py D:\models\Ovis-Omni-Embedding-3B-boundary-bf16-w2-w4-ct
+python scripts/ovis/inventory_ovis_checkpoint.py <MODEL_ROOT>/Ovis-Omni-Embedding-3B
+python scripts/ovis/inventory_ovis_checkpoint.py <MODEL_ROOT>/Ovis-Omni-Embedding-3B-bnb-4bit-vllm-bundle
+python scripts/ovis/inventory_ovis_checkpoint.py <MODEL_ROOT>/Ovis-Omni-Embedding-3B-bnb-8bit-vllm-bundle
+python scripts/ovis/inventory_ovis_checkpoint.py <MODEL_ROOT>/Ovis-Omni-Embedding-3B-boundary-bf16-w2-w4-ct
 ```
 
 This reads safetensors headers only; it does not load tensor data into CPU or
@@ -173,7 +173,7 @@ model card/report entry.
 ### Vision tower W8A16 screen
 
 The new model-free converter `scripts/ovis/build_ovis_tower_w8_compressed_tensors.py`
-generated `D:\models\Ovis-Omni-Embedding-3B-vision-w8-rt-ct` using per-channel
+generated `<MODEL_ROOT>/Ovis-Omni-Embedding-3B-vision-w8-rt-ct` using per-channel
 W8A16 RTN. It quantized 452 two-dimensional vision projection tensors and
 preserved 2,091 other tensors in their source dtype. Group-size-128 was
 rejected by the converter because a vision projection width of 3420 is not
@@ -182,7 +182,7 @@ small-group screen. Norm vectors, biases, and the 5-D patch embedding remain
 BF16 because the tested packed linear path accepts 2-D weights only.
 
 That tower was overlaid onto the validated Thinker GPTQ W4/W4/W8 checkpoint as
-`D:\models\Ovis-Omni-Embedding-3B-gptq-w4-vision-w8`. The resulting checkpoint
+`<MODEL_ROOT>/Ovis-Omni-Embedding-3B-gptq-w4-vision-w8`. The resulting checkpoint
 is 7,244,154,992 bytes (6.75 GiB), with BF16 audio/talker/token2wav and packed
 vision tensors. vLLM 0.30.0 reached the 32K engine initialization path and
 logged `AllSparkLinearKernel` and `MarlinLinearKernel`, proving packed
@@ -367,10 +367,10 @@ limitations:
 ### Audio tower W8A16 screen
 
 The complementary B candidate was generated at
-`D:\models\Ovis-Omni-Embedding-3B-audio-w8-rt-ct` with per-channel W8A16 RTN:
+`<MODEL_ROOT>/Ovis-Omni-Embedding-3B-audio-w8-rt-ct` with per-channel W8A16 RTN:
 352 audio projection tensors were packed and the remaining audio tensors were
 preserved BF16. It was overlaid onto the validated Thinker GPTQ W4/W4/W8
-checkpoint as `D:\models\Ovis-Omni-Embedding-3B-gptq-w4-audio-w8`.
+checkpoint as `<MODEL_ROOT>/Ovis-Omni-Embedding-3B-gptq-w4-audio-w8`.
 The resulting checkpoint is 7,281,544,840 bytes (6.78 GiB); the audio tower
 stored bytes fell from 1,275,353,088 BF16 bytes to 646,947,840 packed bytes.
 
@@ -446,7 +446,7 @@ constraint while streaming the 5.3-GiB experimental bundle.
 ## Verified corrected 4-bit serve
 
 The corrected bundle is local at
-`D:\\models\\Ovis-Omni-Embedding-3B-bnb-4bit-vllm-bundle`. It contains
+`<MODEL_ROOT>/Ovis-Omni-Embedding-3B-bnb-4bit-vllm-bundle`. It contains
 quantized language/Thinker weights plus the original BF16 audio and vision
 towers, with a fresh safetensors index. The local runtime image is
 `profchan/kogwistar-llm-wiki-embedding:vllm-bnb-4bit`.
@@ -521,7 +521,7 @@ allocation with `torch.OutOfMemoryError` while allocating an additional 86 MiB
 failure mode.
 
 An attempted slimmer high–low–high variant
-(`D:\\models\\Ovis-Omni-Embedding-3B-high-low-high-lite-ct`), with only layers
+(`<MODEL_ROOT>/Ovis-Omni-Embedding-3B-high-low-high-lite-ct`), with only layers
 0–1 and 26–27 at W8A16 and all 24 interior layers at W2A16, produced 48 W8
 and 288 W2 quantized tensors. vLLM rejected its metadata before memory
 allocation because the first W8 `down_proj` was not associated with the
@@ -537,7 +537,7 @@ the supported boundary for production use on this GPU.
 ## Verified corrected 8-bit serve
 
 The corrected 8-bit bundle is local at
-`D:\\models\\Ovis-Omni-Embedding-3B-bnb-8bit-vllm-bundle` and published at
+`<MODEL_ROOT>/Ovis-Omni-Embedding-3B-bnb-8bit-vllm-bundle` and published at
 `pt810/Ovis-Omni-Embedding-3B-bnb-8bit-vllm`. It uses prequantized Thinker
 language weights, restores BF16 audio/vision towers, and sets
 `llm_int8_skip_modules` to the vLLM module prefixes `visual`, `audio_tower`,
@@ -570,7 +570,7 @@ startup I/O pressure, not a quantization or vLLM error.
 ### Tower W8 screening result
 
 The original all-layer BnB 8-bit derivative at
-`D:\\models\\Ovis-Omni-Embedding-3B-bnb-8bit` is the first tower-W8 screen:
+`<MODEL_ROOT>/Ovis-Omni-Embedding-3B-bnb-8bit` is the first tower-W8 screen:
 its vision and audio tensors are stored with INT8/scale metadata instead of
 the corrected bundle's BF16 towers. Header inventory reports about 6.25 GB on
 disk, including approximately 0.60 GiB stored vision tensors and 0.60 GiB
@@ -716,7 +716,7 @@ embedding architecture remains vLLM or the Transformers/BitsAndBytes runtime.
 ## Verified experimental mixed compressed-tensors serve
 
 The local artifact
-`D:\\models\\Ovis-Omni-Embedding-3B-mixed-w2-w4-w8-ct` uses W2A16 for
+`<MODEL_ROOT>/Ovis-Omni-Embedding-3B-mixed-w2-w4-w8-ct` uses W2A16 for
 Thinker layers 0–13, W4A16 for layers 14–26, and W8A16 for layer 27. The
 multimodal towers remain BF16. It is published at
 `pt810/Ovis-Omni-Embedding-3B-mixed-w2-w4-w8-ct` with a model card that calls
@@ -743,9 +743,9 @@ validation omitted that flag and therefore exercised the native 2048 output.
 
 Two additional RTN compressed-tensors layouts were generated locally:
 
-- `D:\\models\\Ovis-Omni-Embedding-3B-high-low-high-ct`: W8A16 on Thinker
+- `<MODEL_ROOT>/Ovis-Omni-Embedding-3B-high-low-high-ct`: W8A16 on Thinker
   layers 0–5 and 22–27, W2A16 on layers 6–21. The package is about 8.03 GB.
-- `D:\\models\\Ovis-Omni-Embedding-3B-high-mid-high-ct`: W8A16 on layers 0–5
+- `<MODEL_ROOT>/Ovis-Omni-Embedding-3B-high-mid-high-ct`: W8A16 on layers 0–5
   and 22–27, W4A16 on layers 6–21. The package is about 8.33 GB.
 
 Both layouts reached the vLLM Qwen2.5-Omni model-resolution path, but neither

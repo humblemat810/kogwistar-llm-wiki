@@ -21,8 +21,8 @@ job is still running now.
   compatible adapter at `http://host.docker.internal:8181/v1`, model
   `Ternary-Bonsai-2-27B-PTQ1_0`.
 - The host-side custom llama.cpp process is running from
-  `D:\prism-llama.cpp` on port 8181 with the Bonsai language model and its
-  matching vision `mmproj` at `D:\models\bonsai2`.
+  `<LLAMA_CPP_ROOT>` on port 8181 with the Bonsai language model and its
+  matching vision `mmproj` at `<MODEL_ROOT>/bonsai2`.
 - The server reports an 8,192-token context. A real maintenance inference
   completed with a 3,167-token prompt and 1,024 generated tokens and was not
   truncated. This verifies 8,192 as operational for the current setup; it does
@@ -48,9 +48,9 @@ job is still running now.
 - PostgreSQL's active graph tables use `vector(2)`, which is a demo embedding
   layout. No production CPU embedding encoder is running in this minimal
   profile, so retrieval quality from vector similarity is not yet established.
-- The existing C-drive Hugging Face cache is
-  `C:\Users\chanh\.cache\huggingface`; the Bonsai GGUF weights are stored on
-  D. The embedding model's vision projection belongs to its own checkpoint and
+- The configured Hugging Face cache is `$HF_HOME`; the Bonsai GGUF weights are
+  stored under `<MODEL_ROOT>`. The embedding model's vision projection belongs
+  to its own checkpoint and
   profile. Bonsai's `mmproj` cannot be reused by the embedding model.
 - `scripts/start_local_bonsai.ps1` now defaults to the verified 8,192-token
   context and fails fast when required files are missing.
@@ -76,7 +76,7 @@ evidence that Bonsai performed maintenance.
 
 - Downloaded the pinned `sentence-transformers/clip-ViT-B-32` revision
   `327ab6726d33c0e22f920c83f2ff9e4bd38ca37f` into the default Hugging Face Hub
-  cache at `C:\Users\chanh\.cache\huggingface\hub`. The 605,157,884-byte
+  cache at `$HF_HOME/hub`. The 605,157,884-byte
   `0_CLIPModel/model.safetensors` digest matched the pinned SHA-256
   `99d28a652e6ec46629ab7047a0ac82c69b1fe11e0ce672c43af65d3a9a3fc05d`.
 - An offline CPU-device inference using the repository venv loaded this exact
@@ -104,7 +104,8 @@ evidence that Bonsai performed maintenance.
 - `docker compose --env-file doc/local_bonsai_maintenance.env.example
   --file compose.embedding-clip-cpu.yml config --quiet` passed. The standalone
   profile remains CPU-only, capped at 1 CPU/2 GiB by default, publishes only on
-  loopback, and mounts the pinned D-drive checkpoint read-only. This validates
+  loopback, and mounts the pinned checkpoint from the configured model root
+  read-only. This validates
   configuration rendering, not container service health.
 - The encoder uses CLIP's checkpoint-resident learned text and vision
   projections into one shared semantic space. It does not require a separate
@@ -368,12 +369,12 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 ## CPU encoder and resolver follow-up
 
 - The pinned `sentence-transformers/clip-ViT-B-32` checkpoint is already
-  available at `D:\models\sentence-transformers-clip-vit-b32-327ab672`, the
-  exact host path used by `compose.embedding-clip-cpu.yml`. Its safetensors file
+  available at `<MODEL_ROOT>/sentence-transformers-clip-vit-b32-327ab672`, the
+  configured source path used by `compose.embedding-clip-cpu.yml`. Its safetensors file
   is 605,157,884 bytes and its SHA-256 matches the configured pinned digest
   `99d28a652e6ec46629ab7047a0ac82c69b1fe11e0ce672c43af65d3a9a3fc05d`. It is
-  now also cached under the default `C:\Users\chanh\.cache\huggingface` tree.
-  The Compose profile still mounts the D-drive copy read-only. The checkpoint
+  now also cached under the configured Hugging Face cache tree.
+  The Compose profile still mounts the configured model-root copy read-only. The checkpoint
   hash is checked by the encoder on startup.
 - Source enumeration for topic/status lookup now queries source-graph and
   legacy source-revision metadata separately, deduplicates by node ID, and no
@@ -425,7 +426,7 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 ## Offline revalidation (2026-09-30)
 
 - Parsed the local language GGUF header read-only with the matching
-  `D:\prism-llama.cpp\gguf-py` reader: `general.architecture=qwen35` and
+  `<LLAMA_CPP_ROOT>/gguf-py` reader: `general.architecture=qwen35` and
   `qwen35.context_length=262144`. This confirms the model-declared ceiling
   independently of the upstream model-card text; it does not show that this
   host can load or run the model at that context. Runtime evidence still only
@@ -655,7 +656,7 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 - Ruff passed on the embedding service implementation and its focused tests.
 - Ran the cached `llm-wiki-embedding:local-cpu-smoke` image as a disposable
   container with `--network none`, `--memory=2g`, `--cpus=1.0`, and the pinned
-  D-drive CLIP checkpoint mounted read-only. Real CPU inference loaded the
+  configured CLIP checkpoint mounted read-only. Real CPU inference loaded the
   model in **27.111s**, encoded one text and one synthetic image in **19.142s**,
   returned two normalized 512-D vectors, and peaked at **869.4 MiB RSS**. This
   verifies bounded encoder inference under the configured 1-CPU/2-GiB limits;
@@ -686,7 +687,7 @@ live embedding Compose/graph integration, and maximum-context gaps remain open.
 ## Post-restart Local Readiness Snapshot (2026-09-30)
 
 - The custom llama-server executable and both Bonsai files are present at the
-  documented D-drive paths. The executable reports llama.cpp
+  configured runtime paths. The executable reports llama.cpp
   `0.2.0-dev`/build `10706`, commit `1a07bfa5f`, MSVC `19.42.34438.0`, x64.
 - `scripts/start_local_bonsai.ps1` defaults to `-c 8192`. This is the
   conservative previously exercised operating point, not a proven maximum;
@@ -1095,7 +1096,7 @@ background cycle is scheduled or that direct maintenance has been exercised.
   remains stopped, so OTLP exporter warnings continue but have not prevented
   scheduling or Bonsai calls.
 - A byte-for-byte verified copy of the active local `.env` was saved outside
-  the repository at `C:\Users\chanh\Documents\llm-wiki-bonsai-runtime-backup-2026-10-01.env`.
+  the repository at a private runtime backup path.
   It contains private runtime credentials; do not commit or print it.
 - Focused verification after these changes: 54 unit tests passed, the CI Ruff
   selector passed, and `git diff --check` passed. The ten-hour observation
@@ -1496,8 +1497,8 @@ checkpoint. This alternative is recorded for evaluation, not adopted.
 ### Local Bonsai Artifact And CLI Check (2026-10-01)
 
 - Confirmed the custom executable exists at
-  `D:\prism-llama.cpp\build\bin\Release\llama-server.exe`; the Bonsai GGUF
-  and mmproj files both exist under `D:\models\bonsai2`.
+  `<LLAMA_CPP_ROOT>/build/bin/Release/llama-server.exe`; the Bonsai GGUF
+  and mmproj files both exist under `<MODEL_ROOT>/bonsai2`.
 - Ran only `llama-server.exe --help` (exit 0), without loading weights or
   starting a listener. The help output recognizes every flag used by
   `scripts/start_local_bonsai.ps1`: model/mmproj, context, GPU layers,
