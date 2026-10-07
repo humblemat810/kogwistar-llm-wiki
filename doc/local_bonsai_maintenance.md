@@ -6,12 +6,12 @@ and it does not put the Bonsai model or its vision projector in the container.
 
 ## Host Model Server
 
-The custom build is expected at `D:\prism-llama.cpp`. The model files must be
+The custom build is expected at `<LLAMA_CPP_ROOT>`. The model files must be
 present before starting the worker:
 
   ```text
-D:\models\bonsai2\Ternary-Bonsai-2-27B-PTQ1_0.gguf
-D:\models\bonsai2\Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf
+<MODEL_ROOT>/bonsai2/Ternary-Bonsai-2-27B-PTQ1_0.gguf
+<MODEL_ROOT>/bonsai2/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf
   ```
 
 The second file is the Bonsai **multimodal projection** (`mmproj`) for its
@@ -84,13 +84,13 @@ dimension into it.
 
 ## Model Cache And Backup Locations
 
-For this Windows account, the default Hugging Face Hub cache root is
-`C:\Users\chanh\.cache\huggingface`. It is a cache, not the authoritative
-runtime location for every model used here. The Bonsai GGUF and matching
-`mmproj` used by llama.cpp are under `D:\models\bonsai2`. The pinned CLIP
+Configure the Hugging Face Hub cache root with `$HF_HOME`; it is a cache, not
+the authoritative runtime location for every model used here. The Bonsai GGUF
+and matching
+`mmproj` used by llama.cpp are under `<MODEL_ROOT>/bonsai2`. The pinned CLIP
 checkpoint used by the optional CPU encoder is under
-`D:\models\sentence-transformers-clip-vit-b32-327ab672` and is now also cached
-at the default C-drive Hub location under
+`<MODEL_ROOT>/sentence-transformers-clip-vit-b32-327ab672` and is now also cached
+at the configured Hugging Face Hub location under
 `models--sentence-transformers--clip-ViT-B-32`, revision
 `327ab6726d33c0e22f920c83f2ff9e4bd38ca37f`.
 
@@ -251,7 +251,7 @@ Download the exact BGE snapshot outside the repository, for example:
 ```powershell
 huggingface-cli download BAAI/bge-small-en-v1.5 `
   --revision 5c38ec7c405ec4b44b94cc5a9bb96e735b38267a `
-  --local-dir D:/models/bge-small-en-v1.5
+  --local-dir <MODEL_ROOT>/bge-small-en-v1.5
 ```
 
 Run its optional standalone CPU service independently:
@@ -274,9 +274,9 @@ The standalone service now supports the existing Qwen3-VL encoder and an
 optional CLIP ViT-B/32 CPU encoder. The CLIP checkpoint is pinned to revision
 `327ab6726d33c0e22f920c83f2ff9e4bd38ca37f`; only its `model.safetensors` and
 processor/tokenizer files are available both at
-`D:\models\sentence-transformers-clip-vit-b32-327ab672` and in the default
+`<MODEL_ROOT>/sentence-transformers-clip-vit-b32-327ab672` and in the default
 Hugging Face cache at
-`C:\Users\chanh\.cache\huggingface\hub\models--sentence-transformers--clip-ViT-B-32`
+`$HF_HOME/hub/models--sentence-transformers--clip-ViT-B-32`
 (revision snapshot `327ab6726d33c0e22f920c83f2ff9e4bd38ca37f`). The weights are
 about 605 MB. Their SHA-256 is
 `99d28a652e6ec46629ab7047a0ac82c69b1fe11e0ce672c43af65d3a9a3fc05d`, verified
