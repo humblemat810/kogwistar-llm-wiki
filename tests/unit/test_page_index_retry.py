@@ -174,7 +174,7 @@ def test_page_index_llm_first_pass_success_skips_retry(monkeypatch):
     assert len(chat.prompts) == 1
 
 
-def test_page_index_llm_retry_falls_back_after_second_flatten(monkeypatch):
+def test_page_index_llm_retry_salvages_after_second_flatten(monkeypatch):
     chat = _make_parser("flat_only", monkeypatch)
     result = parse_page_index_document(
         document_id="doc-3",
@@ -186,7 +186,7 @@ def test_page_index_llm_retry_falls_back_after_second_flatten(monkeypatch):
     )
 
     diag = result.diagnostics
-    assert diag["assignment_mode"] == "deterministic_fallback"
+    assert diag["assignment_mode"] == "ollama_branch_local_salvage"
     assert diag["assignment_attempt_count"] == 2
     assert diag["assignment_retry_used"] is True
     assert diag["assignment_retry_succeeded"] is False
@@ -194,10 +194,12 @@ def test_page_index_llm_retry_falls_back_after_second_flatten(monkeypatch):
     assert diag["structure_retry_succeeded"] is False
     assert diag["retry_used"] is True
     assert diag["retry_succeeded"] is False
-    assert diag["assignment_validation_errors"]
+    assert diag["assignment_validation_errors"] == []
     assert diag["structure_validation_errors"] == []
-    assert diag["first_validation_errors"]
-    assert diag["retry_validation_errors"]
+    assert diag["first_validation_errors"] == []
+    assert diag["retry_validation_errors"] == []
+    assert diag["branch_local_salvage_used"] is True
+    assert diag["branch_local_salvage"]
     assert len(chat.prompts) == 2
     assert "heading structure was flattened" in chat.prompts[1]
 
@@ -245,7 +247,7 @@ def test_page_index_structure_retry_succeeds_after_tree_validation_failure(monke
     assert "reuse only existing block_id values" in chat.prompts[1]
 
 
-def test_page_index_structure_retry_falls_back_after_repair_failure(monkeypatch):
+def test_page_index_structure_retry_salvages_after_repair_failure(monkeypatch):
     chat = _make_parser("structure_retry_invalid", monkeypatch)
     original_validator = page_index._validate_page_index_block_structure
     calls = {"count": 0}
@@ -272,16 +274,18 @@ def test_page_index_structure_retry_falls_back_after_repair_failure(monkeypatch)
     )
 
     diag = result.diagnostics
-    assert diag["assignment_mode"] == "deterministic_fallback"
-    assert diag["final_outcome"] == "deterministic_fallback"
+    assert diag["assignment_mode"] == "ollama_branch_local_salvage"
+    assert diag["final_outcome"] == "branch_local_salvage"
     assert diag["assignment_attempt_count"] == 2
-    assert diag["assignment_retry_used"] is False
+    assert diag["assignment_retry_used"] is True
     assert diag["assignment_retry_succeeded"] is False
     assert diag["structure_retry_used"] is True
     assert diag["structure_retry_succeeded"] is False
     assert diag["retry_used"] is True
     assert diag["retry_succeeded"] is False
     assert diag["assignment_validation_errors"] == []
-    assert diag["structure_validation_errors"]
+    assert diag["structure_validation_errors"] == []
+    assert diag["branch_local_salvage_used"] is True
+    assert diag["branch_local_salvage"]
     assert len(chat.prompts) == 2
     assert "Previous structure build failed validation." in chat.prompts[1]
