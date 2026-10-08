@@ -6,7 +6,6 @@ import inspect
 import shutil
 import tempfile
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -20,7 +19,7 @@ from ..providers.role_config import (
     resolve_parser_provider_settings,
 )
 from ..usage.events import persist_usage_events
-from .contracts import IngestPipelineHost, ParseSourceResult
+from .contracts import IngestPipelineHost, ParseSourceResult, TraceLog
 
 
 class SourceParsingMixin:
@@ -212,7 +211,7 @@ class SourceParsingMixin:
         *,
         request: IngestPipelineRequest,
         source_document_id: str,
-        trace_log: Callable[[str], None] | None = None,
+        trace_log: TraceLog | None = None,
     ) -> dict[str, object]:
         parser_kwargs: dict[str, object] = {
             "document_id": source_document_id,

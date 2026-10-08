@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -62,6 +62,12 @@ class ParserCallable(Protocol):
     """Keyword-driven parser boundary used by direct ingestion."""
 
     def __call__(self, **kwargs: object) -> ParseSourceResult: ...
+
+
+class TraceLog(Protocol):
+    """Receive one bounded parser trace message."""
+
+    def __call__(self, message: str, /) -> None: ...
 
 
 class IngestPipelineHost(Protocol):
@@ -455,7 +461,7 @@ class IngestPipelineHost(Protocol):
         *,
         request: "IngestPipelineRequest",
         source_document_id: str,
-        trace_log: Callable[[str], None] | None = None,
+        trace_log: TraceLog | None = None,
     ) -> dict[str, object]: ...
     def _persist_parser_usage_events(
         self,
