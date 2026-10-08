@@ -8,7 +8,12 @@ def test_root_package_uses_parser_published_distribution_name() -> None:
     root = Path(__file__).resolve().parents[2]
     project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert "graph-knowledge-doc-parser" in project["project"]["dependencies"]
+    dependencies = project["project"]["dependencies"]
+    assert any(
+        requirement.startswith("graph-knowledge-doc-parser")
+        for requirement in dependencies
+    )
+    assert "graph-knowledge-doc-parser>=0.2.6,<0.3" in dependencies
     assert "kg-doc-parser" not in project["project"]["dependencies"]
     assert project["tool"]["uv"]["sources"]["graph-knowledge-doc-parser"] == {
         "path": "kg-doc-parser",
