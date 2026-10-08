@@ -9,7 +9,9 @@ import os
 import threading
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Literal, cast
+from typing import Literal, cast
+
+from kogwistar.json_types import JsonValue
 
 from .codex_workbench_agent import CodexCliSettings, CodexProcessRunner
 
@@ -19,6 +21,8 @@ _MAX_BODY_BYTES = 256 * 1024
 _MAX_MESSAGES = 64
 _MAX_MESSAGE_CHARS = 120_000
 _MAX_SCHEMA_CHARS = 64_000
+
+JsonObject = dict[str, JsonValue]
 
 
 def _codex_transport(value: object) -> Literal["exec", "app_server"]:
@@ -40,7 +44,7 @@ class CodexBridgeState:
         self.runner = CodexProcessRunner()
         self.lock = threading.Lock()
 
-    def complete(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def complete(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         messages = payload.get("messages")
         schema = payload.get("response_schema")
         if not isinstance(messages, list) or not messages or len(messages) > _MAX_MESSAGES:
@@ -87,7 +91,7 @@ class CodexBridgeState:
         return {"output": output, "provider": "codex", "model": model or "default"}
 
 
-def _build_prompt(messages: list[dict[str, str]], schema: dict[str, Any]) -> str:
+def _build_prompt(messages: list[dict[str, str]], schema: JsonObject) -> str:
     return (
         "You are a bounded maintenance reasoning provider. Return only a JSON object "
         "matching the supplied response schema. Use only the supplied messages. "
@@ -123,7 +127,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > _MAX_BODY_BYTES:
                 raise ValueError("request body exceeds the bridge limit")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            payload = cast(JsonValue, json.loads(self.rfile.read(length).decode("utf-8")))
             if not isinstance(payload, dict):
                 raise TypeError("request body must be an object")
             self._send(200, self._bridge_server().state.complete(payload))
@@ -138,7 +142,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         logger.info("codex_bridge " + format, *args)
 
-    def _send(self, status: int, payload: dict[str, Any]) -> None:
+    def _send(self, status: int, payload: JsonObject) -> None:
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
