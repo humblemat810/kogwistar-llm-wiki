@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Literal, cast
 from urllib.parse import parse_qs, urlparse
 
+from kogwistar.json_types import JsonObject, JsonValue
+
 from ..agent.gateway import AgentGateway, _jsonrpc_result
 from ..app_contracts.workbench_extensions import (
     WorkbenchExtension,
@@ -236,7 +238,7 @@ def build_workbench_handler(
                 return
             try:
                 size = int(self.headers.get("content-length", "0"))
-                payload = json.loads(self.rfile.read(size))
+                payload = cast(JsonObject, json.loads(self.rfile.read(size)))
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")  # noqa: TRY004
                 extension_query = _query_mapping(parsed.query)
@@ -420,7 +422,7 @@ def build_workbench_handler(
                 self._identity_context_manager = None
             super().finish()
 
-        def _write_json(self, body: object, *, status: int = 200) -> None:
+        def _write_json(self, body: JsonValue, *, status: int = 200) -> None:
             encoded = json.dumps(body, sort_keys=True, default=str).encode("utf-8")
             self.send_response(status)
             self.send_header("content-type", "application/json; charset=utf-8")
@@ -435,7 +437,7 @@ def build_workbench_handler(
             method: Literal["GET", "POST"],
             path: str,
             query: Mapping[str, tuple[str, ...]],
-            payload: dict[str, object],
+            payload: JsonObject,
             workspace_id: str | None,
         ) -> WorkbenchExtensionResponse:
             response = route.handler(
@@ -443,7 +445,7 @@ def build_workbench_handler(
                     method=method,
                     path=path,
                     query={key: tuple(values) for key, values in query.items()},
-                    payload=payload,
+                    payload=cast(JsonObject, payload),
                     workspace_id=workspace_id,
                     identity=getattr(self, "_identity_context", None),
                 )
@@ -589,7 +591,7 @@ def _first(values: Mapping[str, Sequence[str]], key: str, default: str) -> str:
     return str((values.get(key) or [default])[0])
 
 
-def _payload_workspace(payload: dict[str, object]) -> str | None:
+def _payload_workspace(payload: JsonObject) -> str | None:
     """Resolve a protocol envelope's workspace without silently inventing one."""
     metadata = payload.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
@@ -620,7 +622,7 @@ def _payload_workspace(payload: dict[str, object]) -> str | None:
 
 
 def _payload_string_sequence(
-    payload: dict[str, object],
+    payload: JsonObject,
     key: str,
 ) -> tuple[str, ...] | None:
     value = payload.get(key)
