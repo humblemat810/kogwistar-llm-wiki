@@ -9,18 +9,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import cast
+
+JsonScalar = None | bool | int | float | str
+JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+JsonObject = dict[str, JsonValue]
 
 
-def _read_json(path: Path, default: Any) -> Any:
+def _read_json(path: Path, default: JsonValue) -> JsonValue:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return cast(JsonValue, json.loads(path.read_text(encoding="utf-8")))
     except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
         return default
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def _as_object(value: JsonValue) -> JsonObject:
+    return value if isinstance(value, dict) else {}
+
+
+def _read_jsonl(path: Path) -> list[JsonObject]:
+    rows: list[JsonObject] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (FileNotFoundError, OSError, UnicodeError):
@@ -31,13 +39,14 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):
-            rows.append(value)
+            rows.append(cast(JsonObject, value))
     return rows
 
 
-def _run_doc_rows(run_dir: Path) -> dict[str, dict[str, Any]]:
+def _run_doc_rows(run_dir: Path) -> dict[str, JsonObject]:
     dump_dir = run_dir / "dump"
-    evaluation = _read_json(dump_dir / "progress_summary.json", {}).get("parser_eval", {})
+    progress = _as_object(_read_json(dump_dir / "progress_summary.json", {}))
+    evaluation = _as_object(progress.get("parser_eval", {}))
     quality_rows = {
         str(row.get("doc_id")): dict(row)
         for row in evaluation.get("documents", [])
@@ -53,7 +62,7 @@ def _run_doc_rows(run_dir: Path) -> dict[str, dict[str, Any]]:
         for row in _read_jsonl(dump_dir / "manifest.jsonl")
         if row.get("doc_id")
     }
-    rows: dict[str, dict[str, Any]] = {}
+    rows: dict[str, JsonObject] = {}
     for doc_id in set(quality_rows) | set(usage_rows) | set(manifest_rows):
         row = {"doc_id": doc_id}
         row.update(manifest_rows.get(doc_id, {}))
@@ -104,11 +113,11 @@ def _retry_and_boundary_metrics(run_dir: Path, doc_id: str) -> dict[str, int]:
     }
 
 
-def load_parse_run(run_dir: str | Path) -> dict[str, Any]:
+def load_parse_run(run_dir: str | Path) -> JsonObject:
     """Load the stable comparison surface from one completed or partial run."""
     path = Path(run_dir).expanduser().resolve()
-    config = _read_json(path / "dump" / "run_config.json", {})
-    progress = _read_json(path / "dump" / "progress_summary.json", {})
+    config = _as_object(_read_json(path / "dump" / "run_config.json", {}))
+    progress = _as_object(_read_json(path / "dump" / "progress_summary.json", {}))
     rows = _run_doc_rows(path)
     for doc_id, row in rows.items():
         row.update(_retry_and_boundary_metrics(path, doc_id))
@@ -125,14 +134,14 @@ def load_parse_run(run_dir: str | Path) -> dict[str, Any]:
     }
 
 
-def compare_parse_runs(left_dir: str | Path, right_dir: str | Path) -> dict[str, Any]:
+def compare_parse_runs(left_dir: str | Path, right_dir: str | Path) -> JsonObject:
     """Compare two persisted runs and return JSON-serializable metrics."""
     left = load_parse_run(left_dir)
     right = load_parse_run(right_dir)
     left_docs = left["documents"]
     right_docs = right["documents"]
     doc_ids = sorted(set(left_docs) | set(right_docs))
-    rows: list[dict[str, Any]] = []
+    rows: list[JsonObject] = []
     for doc_id in doc_ids:
         left_doc = left_docs.get(doc_id, {})
         right_doc = right_docs.get(doc_id, {})
@@ -154,7 +163,7 @@ def compare_parse_runs(left_dir: str | Path, right_dir: str | Path) -> dict[str,
     }
 
 
-def _comparison_metrics(row: dict[str, Any]) -> dict[str, Any]:
+def _comparison_metrics(row: JsonObject) -> JsonObject:
     return {
         key: row.get(key)
         for key in (
@@ -167,7 +176,7 @@ def _comparison_metrics(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _numeric_delta(right: dict[str, Any], left: dict[str, Any]) -> dict[str, float]:
+def _numeric_delta(right: JsonObject, left: JsonObject) -> dict[str, float]:
     keys = (
         "basic_sense_score", "coverage_ratio", "llm_call_count", "total_tokens",
         "total_cost", "time_ms", "proposal_retries", "review_retries",
@@ -183,7 +192,7 @@ def _numeric_delta(right: dict[str, Any], left: dict[str, Any]) -> dict[str, flo
     return result
 
 
-def render_parse_comparison_markdown(comparison: dict[str, Any]) -> str:
+def render_parse_comparison_markdown(comparison: JsonObject) -> str:
     """Render a compact human-review table from ``compare_parse_runs``."""
     left = comparison["left"]
     right = comparison["right"]
@@ -217,7 +226,7 @@ def write_parse_comparison(
     left_dir: str | Path,
     right_dir: str | Path,
     output_dir: str | Path,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Persist ``comparison.json`` and ``comparison.md`` for later review."""
     comparison = compare_parse_runs(left_dir, right_dir)
     output = Path(output_dir).expanduser().resolve()
