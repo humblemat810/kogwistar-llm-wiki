@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from typing import NoReturn
+from typing import NoReturn, cast
 from urllib import request as urllib_request
 from urllib.parse import urlparse
+
+from kogwistar.json_types import JsonValue
+
+JsonObject = dict[str, JsonValue]
 
 
 def validate_supplied_provenance(
@@ -123,16 +127,16 @@ def redact_source_text(value: object) -> object:
     return value
 
 
-def decode_metadata_mapping(value: object) -> dict[str, object] | None:
+def decode_metadata_mapping(value: object) -> JsonObject | None:
     if isinstance(value, Mapping):
-        return {str(key): item for key, item in value.items()}
+        return cast(JsonObject, {str(key): item for key, item in value.items()})
     if isinstance(value, str) and value:
         try:
             decoded = json.loads(value)
         except json.JSONDecodeError:
             return None
         if isinstance(decoded, dict):
-            return {str(key): item for key, item in decoded.items()}
+            return cast(JsonObject, {str(key): item for key, item in decoded.items()})
     return None
 
 
@@ -140,7 +144,7 @@ def node_json(
     node: object | None,
     *,
     redact_source_text: bool = False,
-) -> dict[str, object] | None:
+) -> JsonObject | None:
     if node is None:
         return None
     dump = getattr(node, "model_dump", None)
@@ -155,14 +159,14 @@ def node_json(
     return _json_object(value, redact_source_text=redact_source_text)
 
 
-def _json_object(value: object, *, redact_source_text: bool) -> dict[str, object] | None:
+def _json_object(value: object, *, redact_source_text: bool) -> JsonObject | None:
     if not isinstance(value, Mapping):
         return None
     result = {str(key): item for key, item in value.items()}
     redacted = redact_source_text_value(result) if redact_source_text else result
     if not isinstance(redacted, Mapping):
         return None
-    return {str(key): item for key, item in redacted.items()}
+    return cast(JsonObject, {str(key): item for key, item in redacted.items()})
 
 
 def redact_source_text_value(value: object) -> object:
