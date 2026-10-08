@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
@@ -56,7 +56,10 @@ class ParseSourceResult(Protocol):
     def semantic_tree(self) -> SemanticTreeLike: ...
 
 
-ParserCallable: TypeAlias = Callable[..., ParseSourceResult]
+class ParserCallable(Protocol):
+    """Keyword-driven parser boundary used by direct ingestion."""
+
+    def __call__(self, **kwargs: object) -> ParseSourceResult: ...
 
 
 class IngestPipelineHost(Protocol):
