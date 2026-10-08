@@ -8,6 +8,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import cast
 
+from kogwistar.json_types import JsonValue
+
+JsonObject = dict[str, JsonValue]
+
 _MAINTENANCE_EXECUTION: ContextVar[bool] = ContextVar(
     "kogwistar_llm_wiki_maintenance_execution",
     default=False,
@@ -52,11 +56,11 @@ def _bounded_ids(value: object) -> list[str]:
     return result
 
 
-def _bounded_turn(value: object) -> dict[str, object] | None:
+def _bounded_turn(value: object) -> JsonObject | None:
     if not isinstance(value, Mapping):
         return None
     reasons_value = value.get("selection_reasons")
-    reasons: list[dict[str, object]] = []
+    reasons: list[JsonObject] = []
     if isinstance(reasons_value, Sequence) and not isinstance(reasons_value, (str, bytes, bytearray)):
         for reason in reasons_value[:_MAX_REASON_ENTRIES]:
             if not isinstance(reason, Mapping):
@@ -80,18 +84,18 @@ def _bounded_turn(value: object) -> dict[str, object] | None:
     }
 
 
-def bound_maintenance_context(value: Mapping[str, object] | None) -> dict[str, object]:
+def bound_maintenance_context(value: Mapping[str, JsonValue] | None) -> JsonObject:
     """Keep structured continuation state bounded without accepting transcripts."""
     if not isinstance(value, Mapping):
         return {"version": 1, "turns": [], "compressed_summary": "", "truncated": False}
     turns_value = value.get("turns")
-    turns: list[dict[str, object]] = []
+    turns: list[JsonObject] = []
     if isinstance(turns_value, Sequence) and not isinstance(turns_value, (str, bytes, bytearray)):
         for item in turns_value[-_MAX_TURNS:]:
             turn = _bounded_turn(item)
             if turn is not None:
                 turns.append(turn)
-    result: dict[str, object] = {
+    result: JsonObject = {
         "version": 1,
         "turns": turns,
         "compressed_summary": _bounded_string(value.get("compressed_summary"), limit=4_000),
@@ -122,7 +126,7 @@ def bound_maintenance_context(value: Mapping[str, object] | None) -> dict[str, o
 
 
 def append_maintenance_round(
-    value: Mapping[str, object] | None,
+    value: Mapping[str, JsonValue] | None,
     *,
     round_number: int,
     summary: str,
@@ -130,11 +134,11 @@ def append_maintenance_round(
     touched_edge_ids: Sequence[str] = (),
     next_seed_node_ids: Sequence[str] = (),
     hop_limit: int = 0,
-    selection_reasons: Sequence[Mapping[str, object]] = (),
-) -> dict[str, object]:
+    selection_reasons: Sequence[Mapping[str, JsonValue]] = (),
+) -> JsonObject:
     """Append a structured round while preserving the context bound."""
     context = bound_maintenance_context(value)
-    turns = list(cast(list[dict[str, object]], context.get("turns") or []))
+    turns = list(cast(list[JsonObject], context.get("turns") or []))
     turns.append(
         {
             "round": max(0, int(round_number)),
