@@ -52,13 +52,17 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
 
     def _step_distill(self, ctx: StepContext) -> StepRunResult:
         """Aggregate promoted knowledge into derived-knowledge artifacts."""
-        workspace_id = ctx.state_view.get("workspace_id")
+        raw_workspace_id = ctx.state_view.get("workspace_id")
+        workspace_id = raw_workspace_id if isinstance(raw_workspace_id, str) else None
         deps_raw = ctx.state_view.get("_deps")
         if isinstance(deps_raw, dict):
-            engines: NamespaceEngines | None = deps_raw.get("engines")
+            raw_engines = deps_raw.get("engines")
+            engines: NamespaceEngines | None = (
+                raw_engines if isinstance(raw_engines, NamespaceEngines) else None
+            )
             before_write = deps_raw.get("before_authoritative_write")
         else:
-            engines = deps_raw
+            engines = deps_raw if isinstance(deps_raw, NamespaceEngines) else None
             before_write = None
         if not workspace_id or not engines:
             logger.error("Missing workspace_id or engines in distillation step context")
@@ -66,9 +70,10 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
 
         ns = WorkspaceNamespaces(workspace_id)
         maintenance_mode = str(ctx.state_view.get("maintenance_mode") or "request")
+        raw_candidates = ctx.state_view.get("maintenance_candidates")
         selected_ids = {
             str(item.get("candidate_id") or "")
-            for item in (ctx.state_view.get("maintenance_candidates") or [])
+            for item in (raw_candidates if isinstance(raw_candidates, list) else [])
             if isinstance(item, Mapping) and str(item.get("candidate_id") or "").strip()
         }
         derived_policy = cast(LlmWikiDerivedKnowledgePolicy, self.policies.derived_knowledge)
@@ -76,7 +81,10 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         if maintenance_mode == "background":
             if not selected_ids:
                 return RunSuccess(state_update=[("u", {"distillation_complete": True, "candidate_count": 0})])
-            source_where = _and_where(source_where, {"id": {"$in": sorted(selected_ids)}})
+            source_where = _and_where(
+                cast(dict[str, object], source_where),
+                cast(dict[str, object], {"id": {"$in": sorted(selected_ids)}}),
+            )
         with _temporary_namespace(engines.kg, ns.curated_kg_space):
             promoted_nodes = list(engines.kg.read.get_nodes(where=source_where))
 
@@ -165,9 +173,14 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
 
     def _step_check_done(self, ctx: StepContext) -> StepRunResult:
         """Resolver step that cleanly finalizes derived-knowledge maintenance."""
-        workspace_id = ctx.state_view.get("workspace_id")
+        raw_workspace_id = ctx.state_view.get("workspace_id")
+        workspace_id = raw_workspace_id if isinstance(raw_workspace_id, str) else None
         deps_raw = ctx.state_view.get("_deps")
-        engines: NamespaceEngines | None = deps_raw.get("engines") if isinstance(deps_raw, dict) else deps_raw
+        if isinstance(deps_raw, dict):
+            raw_engines = deps_raw.get("engines")
+            engines = raw_engines if isinstance(raw_engines, NamespaceEngines) else None
+        else:
+            engines = deps_raw if isinstance(deps_raw, NamespaceEngines) else None
         if not workspace_id or not engines:
             logger.error("Missing workspace_id or engines in maintenance completion step context")
             return RunSuccess(state_update=[("u", {"error": "Missing context"})])
