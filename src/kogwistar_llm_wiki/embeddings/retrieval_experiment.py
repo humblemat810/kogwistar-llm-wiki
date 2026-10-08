@@ -13,7 +13,7 @@ import inspect
 import json
 import time
 from collections import OrderedDict, deque
-from collections.abc import AsyncIterable, Awaitable, Callable, Iterable, Mapping
+from collections.abc import AsyncIterable, Awaitable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Protocol
@@ -132,6 +132,12 @@ class HitValidator(Protocol):
     """Validate one candidate before it becomes a recall result."""
 
     def __call__(self, candidate: EvidenceCandidate, /) -> None: ...
+
+
+class SourceAuthorizer(Protocol):
+    """Authorize access to one resolved multimodal source unit."""
+
+    def __call__(self, source: MultimodalSourceUnit, /) -> None: ...
 
 
 def _clock_ms() -> float:
@@ -257,7 +263,7 @@ def pipeline_multimodal_retriever(
     pipeline: MultimodalPipelineLike,
     *,
     workspace_id: str,
-    authorize_source: Callable[[MultimodalSourceUnit], None],
+    authorize_source: SourceAuthorizer,
     limit: int = 10,
     overfetch_factor: int = 4,
     max_candidate_scan: int = 4096,
