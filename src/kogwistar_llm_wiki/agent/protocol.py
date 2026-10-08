@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from numbers import Real
 
+from kogwistar.json_types import JsonValue
+
 from ..models import IngestPipelineRequest
 
 
@@ -23,7 +25,7 @@ def content_to_text(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def request_payload(payload: Mapping[str, object]) -> dict[str, object]:
+def request_payload(payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     messages = payload.get("messages")
     if isinstance(messages, list):
         text = next(
@@ -50,7 +52,7 @@ def request_payload(payload: Mapping[str, object]) -> dict[str, object]:
             text = content_to_text(value)
     metadata = payload.get("metadata")
     metadata = metadata if isinstance(metadata, Mapping) else {}
-    request: dict[str, object] = {
+    request: dict[str, JsonValue] = {
         "workspace_id": str(payload.get("workspace_id") or metadata.get("workspace_id") or "default"),
         "query_text": text,
         "session_id": str(payload.get("session_id") or metadata.get("session_id") or "default"),
@@ -80,10 +82,10 @@ def request_payload(payload: Mapping[str, object]) -> dict[str, object]:
     return request
 
 
-def budgets(arguments: Mapping[str, object]) -> dict[str, object]:
+def budgets(arguments: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     names = ("max_time_seconds", "max_llm_calls", "max_tokens", "max_cost_usd", "max_steps")
     integer_names = {"max_llm_calls", "max_tokens", "max_steps"}
-    result: dict[str, object] = {}
+    result: dict[str, JsonValue] = {}
     for name in names:
         if name in arguments and arguments[name] is not None:
             value = arguments[name]
@@ -97,7 +99,7 @@ def budgets(arguments: Mapping[str, object]) -> dict[str, object]:
 
 def limit_budgeted_sources(
     source_requests: list[tuple[str, IngestPipelineRequest]],
-    budget_values: Mapping[str, object],
+    budget_values: Mapping[str, JsonValue],
 ) -> tuple[list[tuple[str, IngestPipelineRequest]], list[str]]:
     """Prevent request-level call/step quotas from multiplying per document."""
     limits = [
@@ -112,12 +114,12 @@ def limit_budgeted_sources(
 
 
 def partition_budgets(
-    budget_values: Mapping[str, object], count: int, index: int
-) -> dict[str, object]:
+    budget_values: Mapping[str, JsonValue], count: int, index: int
+) -> dict[str, JsonValue]:
     """Partition additive request budgets deterministically across source jobs."""
     if count <= 0:
         return dict(budget_values)
-    result: dict[str, object] = {}
+    result: dict[str, JsonValue] = {}
     for name, value in budget_values.items():
         if not isinstance(value, Real) or isinstance(value, bool):
             result[name] = value
@@ -140,7 +142,7 @@ def _as_non_negative_int(value: object, name: str) -> int:
     return converted
 
 
-def bounded_lens_arguments(arguments: Mapping[str, object]) -> dict[str, object]:
+def bounded_lens_arguments(arguments: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """Apply server-side result bounds instead of trusting agent limits."""
     result = dict(arguments)
     limits = {"hop_limit": 8, "max_nodes": 500, "max_edges": 2000, "max_hyperedges": 250}
