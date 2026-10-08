@@ -11,10 +11,13 @@ from typing import Protocol, cast
 
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonValue
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
 from .notification_digest import NotificationDigest, NotificationDigestItem
+
+JsonObject = dict[str, JsonValue]
 
 
 class NotificationDeliveryAdapter(Protocol):
@@ -85,7 +88,7 @@ class NotificationDeliveryScheduler:
             raise ValueError("max_retries must be positive")
         self._authorize(recipient, digest, authorize_recipient, authorize_source)
 
-        deliveries: list[tuple[str, dict[str, object]]] = []
+        deliveries: list[tuple[str, JsonObject]] = []
         # Queue urgent events individually and first; routine items remain one
         # concise notification with full drill-down references.
         for item in digest.urgent:
@@ -115,9 +118,9 @@ class NotificationDeliveryScheduler:
 
         queue = self.engines.conversation.jobs
         queue.require_available(enqueue=True)
-        prepared: list[tuple[str, str, dict[str, object]]] = []
+        prepared: list[tuple[str, str, JsonObject]] = []
         for delivery_class, serialized in deliveries:
-            payload: dict[str, object] = {
+            payload: JsonObject = {
                 "job_type": self._JOB_KIND,
                 "workspace_id": digest.workspace_id,
                 "recipient_id": recipient,
@@ -290,8 +293,8 @@ class NotificationDeliveryScheduler:
                 raise PermissionError("notification source is not authorized")
 
 
-def _serialize_digest(digest: NotificationDigest) -> dict[str, object]:
-    def item_payload(item: NotificationDigestItem) -> dict[str, object]:
+def _serialize_digest(digest: NotificationDigest) -> JsonObject:
+    def item_payload(item: NotificationDigestItem) -> JsonObject:
         return {
             "item_id": item.item_id,
             "workspace_id": item.workspace_id,

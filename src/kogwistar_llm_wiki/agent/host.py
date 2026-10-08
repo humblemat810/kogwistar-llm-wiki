@@ -28,14 +28,14 @@ class AgentGatewayHost(Protocol):
 
     def _answer(self, payload: Mapping[str, JsonValue]) -> JsonObject: ...
 
-    def _source_documents(self, workspace_id: str) -> Sequence[Mapping[str, object]]: ...
+    def _source_documents(self, workspace_id: str) -> Sequence[JsonObject]: ...
 
     def _source_ids_for_topic(
         self,
         workspace_id: str,
         topic: str,
         *,
-        candidates: Sequence[Mapping[str, object]] | None = None,
+        candidates: Sequence[JsonObject] | None = None,
     ) -> list[str]: ...
 
     def _load_source_request(
@@ -44,7 +44,7 @@ class AgentGatewayHost(Protocol):
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
-        candidates: Sequence[Mapping[str, object]] | None = None,
+        candidates: Sequence[JsonObject] | None = None,
     ) -> IngestPipelineRequest | None: ...
 
     def _load_source_request_by_id(

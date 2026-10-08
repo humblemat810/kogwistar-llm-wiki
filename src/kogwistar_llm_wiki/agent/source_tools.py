@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from ..models import IngestPipelineRequest
 from ..parsing.parse_views import ParseViewResolver
 from ..utils import _temporary_namespace
+from kogwistar.json_types import JsonValue
 from .gateway_source import (
     decode_metadata_mapping,
     fetch_source_text,
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 _MAX_SOURCE_DISCOVERY_NODES = 128
 
 
-def _candidate_uri(candidate: Mapping[str, object]) -> str:
+def _candidate_uri(candidate: Mapping[str, JsonValue]) -> str:
     metadata = candidate.get("metadata")
     if not isinstance(metadata, Mapping):
         return ""
@@ -36,7 +37,7 @@ class SourceDocumentRecord(TypedDict):
     """Typed source-map record shared by gateway and source tools."""
 
     id: str
-    metadata: dict[str, object]
+    metadata: JsonObject
     content: str
     revision_document_id: str
 
@@ -150,7 +151,7 @@ class AgentSourceMixin(AgentGatewayHost):
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
-        candidates: Sequence[Mapping[str, object]] | None = None,
+        candidates: Sequence[JsonObject] | None = None,
     ) -> IngestPipelineRequest | None:
         if candidates is None:
             candidates = self._source_documents(workspace_id)
@@ -218,7 +219,7 @@ class AgentSourceMixin(AgentGatewayHost):
         *,
         workspace_id: str,
         source_id: str,
-        metadata: dict[str, object],
+        metadata: JsonObject,
         content: str,
     ) -> IngestPipelineRequest:
         return IngestPipelineRequest(
@@ -318,7 +319,7 @@ class AgentSourceMixin(AgentGatewayHost):
         workspace_id: str,
         topic: str,
         *,
-        candidates: Sequence[Mapping[str, object]] | None = None,
+        candidates: Sequence[JsonObject] | None = None,
     ) -> list[str]:
         terms = {term.lower() for term in topic.split() if len(term) > 2}
         matches = []
