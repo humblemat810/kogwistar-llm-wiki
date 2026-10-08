@@ -9,16 +9,20 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
+
+from kogwistar.json_types import JsonValue
 
 from ..parsing import parse_statistics as _parse_statistics
+
+JsonObject = dict[str, JsonValue]
 
 
 def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def summarize_stage_timings(layer_log: list[Mapping[str, Any]]) -> dict[str, Any]:
+def summarize_stage_timings(layer_log: list[Mapping[str, JsonValue]]) -> JsonObject:
     """Summarize paired ``*_start``/completion events from a parser layer log.
 
     This is deliberately derived from the existing event log so it remains useful
@@ -50,7 +54,7 @@ def summarize_stage_timings(layer_log: list[Mapping[str, Any]]) -> dict[str, Any
     for base, pending in starts.items():
         if pending:
             open_counts[base] = len(pending)
-    stages: dict[str, dict[str, Any]] = {}
+    stages: dict[str, JsonObject] = {}
     for base in sorted(set(durations) | set(open_counts)):
         values = durations.get(base, [])
         stages[base] = {
@@ -75,7 +79,7 @@ def summarize_stage_timings(layer_log: list[Mapping[str, Any]]) -> dict[str, Any
     }
 
 
-def aggregate_stage_timings(summaries: list[Mapping[str, Any]]) -> dict[str, Any]:
+def aggregate_stage_timings(summaries: list[Mapping[str, JsonValue]]) -> JsonObject:
     """Aggregate per-document timing summaries for a run-level report."""
     stages: dict[str, dict[str, int | float]] = {}
     for summary in summaries:
@@ -121,7 +125,7 @@ def dump_json(obj: object, *, indent: int | None = None) -> str:
     return json.dumps(obj, indent=indent, sort_keys=True, default=_json_default)
 
 
-def append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
+def append_jsonl(path: Path, payload: Mapping[str, JsonValue]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(dump_json(dict(payload)))
@@ -191,7 +195,7 @@ def _compact_live_trace_value(value: object) -> str:
     return text
 
 
-def _decode_payload_json(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _decode_payload_json(payload: Mapping[str, JsonValue]) -> JsonObject:
     raw_payload = payload.get("payload_json")
     if not isinstance(raw_payload, str) or not raw_payload.strip():
         return {}
@@ -202,7 +206,7 @@ def _decode_payload_json(payload: Mapping[str, Any]) -> dict[str, Any]:
     return dict(decoded) if isinstance(decoded, Mapping) else {}
 
 
-def format_live_trace(prefix: str, payload: Mapping[str, Any]) -> str:
+def format_live_trace(prefix: str, payload: Mapping[str, JsonValue]) -> str:
     stage = payload.get("stage") or payload.get("type") or payload.get("phase") or "event"
     parts = [f"[{prefix}] {stage}"]
     decoded_payload = _decode_payload_json(payload)
@@ -219,7 +223,7 @@ class LiveTracePrinter:
     def __init__(self, *, prefix: str = "llm-wiki") -> None:
         self.prefix = prefix
 
-    def emit(self, event: Mapping[str, Any]) -> None:
+    def emit(self, event: Mapping[str, JsonValue]) -> None:
         print(format_live_trace(self.prefix, event), file=sys.stderr, flush=True)
 
 
