@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from kogwistar.json_types import JsonValue
+
 if TYPE_CHECKING:
     from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
     from kogwistar.engine_core.engine import GraphKnowledgeEngine
@@ -180,7 +182,7 @@ class IngestPipelineHost(Protocol):
         visibility: str,
         label: str,
         summary: str,
-        extra_metadata: dict[str, object] | None = None,
+        extra_metadata: dict[str, JsonValue] | None = None,
     ) -> "Node": ...
     def _node_exists(
         self,
@@ -197,7 +199,7 @@ class IngestPipelineHost(Protocol):
         entity_kind: str,
         entity_id: str,
         job_kind: str,
-        payload_matches: Mapping[str, object] | None = None,
+        payload_matches: Mapping[str, JsonValue] | None = None,
     ) -> bool: ...
     def _leading_span(self, source_document_id: str, raw_text: str, *, insertion_method: str) -> "Span": ...
     def _base_kg_reference_span(
@@ -272,11 +274,11 @@ class IngestPipelineHost(Protocol):
         maintenance_kind: str | None = None,
         topic: str | None = None,
         objective: str | None = None,
-        budgets: Mapping[str, object] | None = None,
+        budgets: Mapping[str, JsonValue] | None = None,
         seed_node_ids: Sequence[str] | None = None,
-        maintenance_context: Mapping[str, object] | None = None,
+        maintenance_context: Mapping[str, JsonValue] | None = None,
         max_rounds: int | None = None,
-        parse_target: "ParseTarget | Mapping[str, object] | None" = None,
+        parse_target: "ParseTarget | Mapping[str, JsonValue] | None" = None,
     ) -> str: ...
     def create_parse_retry_history(
         self,
@@ -301,7 +303,7 @@ class IngestPipelineHost(Protocol):
         source_document_id: str,
         candidate_link_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, object] | None = None,
+        promotion_evidence_pack_digest: dict[str, JsonValue] | None = None,
         lineage_node_ids: list[str] | None = None,
         lineage_edge_ids: list[str] | None = None,
         namespace: str,
@@ -314,7 +316,7 @@ class IngestPipelineHost(Protocol):
         candidate_link_id: str,
         graph_extraction: "GraphExtractionWithIDs",
         namespace: str,
-    ) -> tuple[str, dict[str, object]]: ...
+    ) -> tuple[str, dict[str, JsonValue]]: ...
     def promote_to_knowledge(
         self,
         *,
@@ -322,7 +324,7 @@ class IngestPipelineHost(Protocol):
         source_document_id: str,
         promotion_candidate_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, object] | None = None,
+        promotion_evidence_pack_digest: dict[str, JsonValue] | None = None,
         promotion_decision: "PromotionDecision | None" = None,
         namespace: str,
     ) -> str: ...
@@ -340,10 +342,10 @@ class IngestPipelineHost(Protocol):
         revision_document_id: str = "",
         required_stage: str = "parsed_graph_persisted",
         objective: str | None = None,
-        budgets: Mapping[str, object] | None = None,
+        budgets: Mapping[str, JsonValue] | None = None,
         topic: str | None = None,
         seed_node_ids: Sequence[str] | None = None,
-        maintenance_context: Mapping[str, object] | None = None,
+        maintenance_context: Mapping[str, JsonValue] | None = None,
         max_rounds: int | None = None,
         parse_target: "ParseTarget | None" = None,
         parse_session_id_override: str | None = None,
@@ -367,7 +369,7 @@ class IngestPipelineHost(Protocol):
         *,
         workspace_id: str,
         graph_spaces: list[GraphSpace | str],
-        where: Mapping[str, object] | None = None,
+        where: Mapping[str, JsonValue] | None = None,
         resolve_mode: str = "pointer_only",
     ) -> list["GraphSpaceQueryResult"]: ...
     def resolve_semantic_lens(self, request: "SemanticLensRequest") -> "SemanticLensSnapshot": ...
@@ -392,7 +394,7 @@ class IngestPipelineHost(Protocol):
     def capture_multimodal_units(self, units: Sequence["MultimodalSourceUnit"]) -> int: ...
     def resolve_multimodal_source_map(
         self, unit: "MultimodalSourceUnit"
-    ) -> Mapping[str, object] | None: ...
+    ) -> Mapping[str, JsonValue] | None: ...
     def capture_multimodal_source(
         self,
         *,
@@ -403,7 +405,7 @@ class IngestPipelineHost(Protocol):
         source_uri: str | None = None,
         raw_text: str | None = None,
         content_ref: str | None = None,
-        manifest: Mapping[str, object] | None = None,
+        manifest: Mapping[str, JsonValue] | None = None,
         max_chars: int = 4000,
     ) -> "MultimodalSourceBundle": ...
     def embed_multimodal_pending(

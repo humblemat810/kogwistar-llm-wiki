@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Node, Span
+from kogwistar.json_types import JsonValue
 
 from ..maintenance.maintenance_guards import SourceRevision
 from ..models import IngestPipelineRequest
@@ -28,7 +29,7 @@ class IngestArtifactSupportMixin:
         visibility: str,
         label: str,
         summary: str,
-        extra_metadata: dict[str, object] | None = None,
+        extra_metadata: dict[str, JsonValue] | None = None,
     ) -> Node:
         span = self._leading_span(source_document_id, request.raw_text, insertion_method=artifact_kind)
         extra_meta = dict(extra_metadata or {})
@@ -109,7 +110,7 @@ class IngestArtifactSupportMixin:
         entity_kind: str,
         entity_id: str,
         job_kind: str,
-        payload_matches: Mapping[str, object] | None = None,
+        payload_matches: Mapping[str, JsonValue] | None = None,
     ) -> bool:
         jobs = self.engines.conversation.jobs.list(namespace=namespace, limit=10_000)
         for job in jobs:
