@@ -25,6 +25,7 @@ from typing import Protocol, cast
 
 from mcp import types
 from mcp.server.lowlevel import Server
+from kogwistar.json_types import JsonValue
 
 from ..configuration.identity import (
     LlmWikiIdentity,
@@ -35,6 +36,8 @@ from ..configuration.identity import (
 )
 from ..memory import MemoryRecord
 from .gateway import AgentGateway
+
+JsonObject = dict[str, JsonValue]
 
 _MCP_REQUEST_HEADERS: ContextVar[dict[str, str] | None] = ContextVar(
     "llm_wiki_mcp_request_headers", default=None
@@ -95,7 +98,7 @@ def _truthy(value: str) -> bool:
 
 
 def _make_tool(
-    name: str, description: str, input_schema: dict[str, object]
+    name: str, description: str, input_schema: JsonObject
 ) -> types.Tool:
     """Construct a Tool across MCP SDK naming generations.
 
@@ -111,7 +114,7 @@ def _make_tool(
 def _make_call_result(
     *,
     content: list[types.TextContent],
-    structured_content: dict[str, object] | None = None,
+    structured_content: JsonObject | None = None,
     is_error: bool = False,
 ) -> types.CallToolResult:
     """Construct a result without leaking SDK keyword-version details."""
@@ -124,10 +127,10 @@ def _make_call_result(
 
 
 def _object_schema(
-    properties: dict[str, dict[str, object]],
+    properties: dict[str, JsonObject],
     *,
     required: tuple[str, ...] = (),
-) -> dict[str, object]:
+) -> JsonObject:
     return {
         "additionalProperties": False,
         "properties": properties,
@@ -136,7 +139,7 @@ def _object_schema(
     }
 
 
-def _memory_record_schema() -> dict[str, object]:
+def _memory_record_schema() -> JsonObject:
     """Expose the same nested contract used by memory persistence.
 
     The MCP SDK publishes this schema to clients, but the gateway still
@@ -151,13 +154,13 @@ def _memory_record_schema() -> dict[str, object]:
         definitions = {}
     schema.pop("title", None)
     schema["$defs"] = definitions
-    return schema
+    return cast(JsonObject, schema)
 
 
-def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
+def _tool_specs() -> tuple[tuple[str, str, JsonObject], ...]:
     """Return the frozen input contracts emitted by the previous adapter."""
 
-    def string(**extra: object) -> dict[str, object]:
+    def string(**extra: JsonValue) -> JsonObject:
         return {"type": "string", **extra}
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None}
     object_value = {"additionalProperties": True, "type": "object"}
