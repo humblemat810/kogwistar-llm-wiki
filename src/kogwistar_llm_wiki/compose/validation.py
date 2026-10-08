@@ -5,10 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from kogwistar.json_types import JsonValue
+
 from .options import ComposeOptions
 
+JsonObject = dict[str, JsonValue]
 
-def check_compose_text(text: str) -> dict[str, object]:
+
+def check_compose_text(text: str) -> JsonObject:
     """Perform dependency-free structural checks on generated or hand-written YAML."""
     checks: dict[str, str] = {}
     errors: list[str] = []
