@@ -9,6 +9,7 @@ from kogwistar.engine_core.models import (
     GraphExtractionWithIDs,
 )
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonValue
 from kogwistar.policy import PromotionDecision
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 
@@ -36,7 +37,7 @@ from ..utils import _background_namespace, _temporary_namespace
 from .contracts import ParseSourceResult
 
 
-def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
+def _metadata_digest_value(digest: dict[str, JsonValue] | None) -> str | None:
     if digest is None:
         return None
     return json.dumps(digest, sort_keys=True, separators=(",", ":"))
@@ -60,11 +61,11 @@ class MaintenanceRequestMixin:
         maintenance_kind: str | None = None,
         topic: str | None = None,
         objective: str | None = None,
-        budgets: Mapping[str, object] | None = None,
+        budgets: Mapping[str, JsonValue] | None = None,
         seed_node_ids: Sequence[str] | None = None,
-        maintenance_context: Mapping[str, object] | None = None,
+        maintenance_context: Mapping[str, JsonValue] | None = None,
         max_rounds: int | None = None,
-        parse_target: Mapping[str, object] | ParseTarget | None = None,
+        parse_target: Mapping[str, JsonValue] | ParseTarget | None = None,
     ) -> str:
         if maintenance_execution_active():
             raise RuntimeError(
@@ -528,7 +529,7 @@ class MaintenanceRequestMixin:
         source_document_id: str,
         candidate_link_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, object] | None = None,
+        promotion_evidence_pack_digest: dict[str, JsonValue] | None = None,
         lineage_node_ids: list[str] | None = None,
         lineage_edge_ids: list[str] | None = None,
         namespace: str,
@@ -603,7 +604,7 @@ class MaintenanceRequestMixin:
         candidate_link_id: str,
         graph_extraction: GraphExtractionWithIDs,
         namespace: str,
-    ) -> tuple[str, dict[str, object]]:
+    ) -> tuple[str, dict[str, JsonValue]]:
         node_ids = sorted(
             str(node.id) for node in (graph_extraction.nodes or []) if str(getattr(node, "id", "") or "")
         )
@@ -685,7 +686,7 @@ class MaintenanceRequestMixin:
         source_document_id: str,
         promotion_candidate_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, object] | None = None,
+        promotion_evidence_pack_digest: dict[str, JsonValue] | None = None,
         promotion_decision: PromotionDecision | None = None,
         namespace: str,
     ) -> str:
@@ -780,10 +781,10 @@ class MaintenanceRequestMixin:
         revision_document_id: str = "",
         required_stage: str = "parsed_graph_persisted",
         objective: str | None = None,
-        budgets: Mapping[str, object] | None = None,
+        budgets: Mapping[str, JsonValue] | None = None,
         topic: str | None = None,
         seed_node_ids: Sequence[str] | None = None,
-        maintenance_context: Mapping[str, object] | None = None,
+        maintenance_context: Mapping[str, JsonValue] | None = None,
         max_rounds: int | None = None,
         parse_target: ParseTarget | None = None,
         parse_session_id_override: str | None = None,
