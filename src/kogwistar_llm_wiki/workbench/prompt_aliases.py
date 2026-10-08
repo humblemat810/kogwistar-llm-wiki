@@ -12,7 +12,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol, cast
 
 from kogwistar.engine_core.utils import AliasBook
 
@@ -31,6 +31,19 @@ _EDGE_KEYS = frozenset({
 
 class PromptAliasError(ValueError):
     """Raised when a provider returns an invalid prompt alias."""
+
+
+class CockpitActionLike(Protocol):
+    """Typed surface required to restore a model-facing cockpit action."""
+
+    def model_dump(self, *, mode: str) -> dict[str, object]: ...
+
+
+class CockpitActionFactory(Protocol):
+    """Pydantic-like class surface used after alias restoration."""
+
+    @classmethod
+    def model_validate(cls, value: Mapping[str, object]) -> CockpitActionLike: ...
 
 
 def _canonical_json(value: object) -> str:
@@ -280,7 +293,10 @@ class PromptAliasProjection:
         }
 
 
-def restore_cockpit_action(action: Any, projection: PromptAliasProjection) -> Any:
+def restore_cockpit_action(
+    action: CockpitActionLike,
+    projection: PromptAliasProjection,
+) -> CockpitActionLike:
     """Restore graph references in a typed cockpit action before host validation."""
     restored = action.model_dump(mode="python")
     restored["entity_ids"] = [projection.resolve_any(value) for value in restored.get("entity_ids", [])]
@@ -320,7 +336,8 @@ def restore_cockpit_action(action: Any, projection: PromptAliasProjection) -> An
                     if operation.get(field):
                         operation[field] = projection.resolve_edge(operation[field])
         restored["patch"] = patch
-    return action.__class__.model_validate(restored)
+    factory = cast(CockpitActionFactory, type(action))
+    return factory.model_validate(restored)
 
 
 def project_crosslink_payload(
@@ -367,6 +384,7 @@ def restore_crosslink_response(
 
 __all__ = [
     "PromptAliasError",
+    "CockpitActionLike",
     "PromptAliasProjection",
     "project_crosslink_payload",
     "restore_cockpit_action",
