@@ -16,6 +16,40 @@ JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject = dict[str, JsonValue]
 
 
+def _objects(value: JsonValue | None) -> list[JsonObject]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _object_map(value: JsonValue | None) -> dict[str, JsonObject]:
+    return {
+        str(key): item
+        for key, item in value.items()
+        if isinstance(value, dict) and isinstance(item, dict)
+    } if isinstance(value, dict) else {}
+
+
+def _int_value(value: JsonValue | None, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def _float_value(value: JsonValue | None) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _read_json(path: Path, default: JsonValue) -> JsonValue:
     try:
         return cast(JsonValue, json.loads(path.read_text(encoding="utf-8")))
@@ -49,13 +83,13 @@ def _run_doc_rows(run_dir: Path) -> dict[str, JsonObject]:
     evaluation = _as_object(progress.get("parser_eval", {}))
     quality_rows = {
         str(row.get("doc_id")): dict(row)
-        for row in evaluation.get("documents", [])
-        if isinstance(row, dict) and row.get("doc_id")
+        for row in _objects(evaluation.get("documents"))
+        if row.get("doc_id")
     }
     usage_rows = {
         str(row.get("doc_id")): dict(row)
-        for row in evaluation.get("usage_documents", [])
-        if isinstance(row, dict) and row.get("doc_id")
+        for row in _objects(evaluation.get("usage_documents"))
+        if row.get("doc_id")
     }
     manifest_rows = {
         str(row.get("doc_id")): dict(row)
@@ -64,7 +98,7 @@ def _run_doc_rows(run_dir: Path) -> dict[str, JsonObject]:
     }
     rows: dict[str, JsonObject] = {}
     for doc_id in set(quality_rows) | set(usage_rows) | set(manifest_rows):
-        row = {"doc_id": doc_id}
+        row: JsonObject = {"doc_id": doc_id}
         row.update(manifest_rows.get(doc_id, {}))
         row.update(quality_rows.get(doc_id, {}))
         row.update(usage_rows.get(doc_id, {}))
@@ -92,14 +126,14 @@ def _retry_and_boundary_metrics(run_dir: Path, doc_id: str) -> dict[str, int]:
         if not isinstance(event, dict):
             continue
         stage = str(event.get("stage", ""))
-        retry_count = int(event.get("retry_count") or 0)
+        retry_count = _int_value(event.get("retry_count"))
         if "proposal_result" in stage:
             proposal_retries = max(proposal_retries, retry_count)
-            proposed += int(event.get("boundary_count") or 0)
-            accepted += int(event.get("accepted_boundary_count") or 0)
-            rejected += int(event.get("rejected_boundary_count") or 0)
-            shifted += int(event.get("shifted_boundary_count") or 0)
-            unresolved += int(event.get("unresolved_interval_count") or 0)
+            proposed += _int_value(event.get("boundary_count"))
+            accepted += _int_value(event.get("accepted_boundary_count"))
+            rejected += _int_value(event.get("rejected_boundary_count"))
+            shifted += _int_value(event.get("shifted_boundary_count"))
+            unresolved += _int_value(event.get("unresolved_interval_count"))
         elif "review_result" in stage or "review_completed" in stage:
             review_retries = max(review_retries, retry_count)
     return {
@@ -130,7 +164,7 @@ def load_parse_run(run_dir: str | Path) -> JsonObject:
         "doc_limit": config.get("doc_limit"),
         "completed_count": progress.get("completed_count"),
         "failed_count": progress.get("failed_count"),
-        "documents": rows,
+        "documents": cast(JsonValue, rows),
     }
 
 
@@ -138,8 +172,8 @@ def compare_parse_runs(left_dir: str | Path, right_dir: str | Path) -> JsonObjec
     """Compare two persisted runs and return JSON-serializable metrics."""
     left = load_parse_run(left_dir)
     right = load_parse_run(right_dir)
-    left_docs = left["documents"]
-    right_docs = right["documents"]
+    left_docs = _object_map(left.get("documents"))
+    right_docs = _object_map(right.get("documents"))
     doc_ids = sorted(set(left_docs) | set(right_docs))
     rows: list[JsonObject] = []
     for doc_id in doc_ids:
@@ -150,7 +184,9 @@ def compare_parse_runs(left_dir: str | Path, right_dir: str | Path) -> JsonObjec
                 "doc_id": doc_id,
                 "left": _comparison_metrics(left_doc),
                 "right": _comparison_metrics(right_doc),
-                "delta_right_minus_left": _numeric_delta(right_doc, left_doc),
+                "delta_right_minus_left": cast(
+                    JsonValue, _numeric_delta(right_doc, left_doc)
+                ),
             }
         )
     return {
@@ -159,7 +195,7 @@ def compare_parse_runs(left_dir: str | Path, right_dir: str | Path) -> JsonObjec
         "corpus_fingerprint_right": right.get("corpus_fingerprint"),
         "left": {key: value for key, value in left.items() if key != "documents"},
         "right": {key: value for key, value in right.items() if key != "documents"},
-        "documents": rows,
+        "documents": cast(JsonValue, rows),
     }
 
 
@@ -186,7 +222,10 @@ def _numeric_delta(right: JsonObject, left: JsonObject) -> dict[str, float]:
     for key in keys:
         try:
             if right.get(key) is not None and left.get(key) is not None:
-                result[key] = float(right[key]) - float(left[key])
+                right_value = _float_value(right.get(key))
+                left_value = _float_value(left.get(key))
+                if right_value is not None and left_value is not None:
+                    result[key] = right_value - left_value
         except (TypeError, ValueError):
             continue
     return result
@@ -194,8 +233,8 @@ def _numeric_delta(right: JsonObject, left: JsonObject) -> dict[str, float]:
 
 def render_parse_comparison_markdown(comparison: JsonObject) -> str:
     """Render a compact human-review table from ``compare_parse_runs``."""
-    left = comparison["left"]
-    right = comparison["right"]
+    left = _as_object(comparison.get("left"))
+    right = _as_object(comparison.get("right"))
     lines = [
         "# Parser Run Comparison",
         "",
@@ -206,9 +245,9 @@ def render_parse_comparison_markdown(comparison: JsonObject) -> str:
         "| Document | Model | Status | Score | Calls | Tokens | Cost USD | Time ms | Rejects | Retries |",
         "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for row in comparison["documents"]:
+    for row in _objects(comparison.get("documents")):
         for side in ("left", "right"):
-            metrics = row[side]
+            metrics = _as_object(row.get(side))
             lines.append(
                 "| {doc} | {model} | {status} | {score} | {calls} | {tokens} | {cost} | {time} | {rejects} | {retries} |".format(
                     doc=row["doc_id"], model=(left if side == "left" else right).get("model"),
@@ -216,7 +255,8 @@ def render_parse_comparison_markdown(comparison: JsonObject) -> str:
                     calls=metrics.get("llm_call_count"), tokens=metrics.get("total_tokens"),
                     cost=metrics.get("total_cost"), time=metrics.get("time_ms"),
                     rejects=metrics.get("boundaries_rejected"),
-                    retries=(metrics.get("proposal_retries", 0) or 0) + (metrics.get("review_retries", 0) or 0),
+                    retries=_int_value(metrics.get("proposal_retries"))
+                    + _int_value(metrics.get("review_retries")),
                 )
             )
     return "\n".join(lines) + "\n"
