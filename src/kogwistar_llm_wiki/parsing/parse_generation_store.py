@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import cast
-
 from kogwistar.engine_core import NamedProjectionStore
-from kogwistar.runtime import ProjectionPayload
 
 from .parse_views import (
     ParseGeneration,
@@ -82,14 +78,8 @@ class ParseGenerationStore:
     ) -> list[tuple[ParseGeneration, int]]:
         """List generation headers for one logical source for operator inspection."""
 
-        list_projections = cast(
-            Callable[[str], list[ProjectionPayload]] | None,
-            getattr(self.metadata, "list_named_projections", None),
-        )
-        if not callable(list_projections):
-            return []
         result: list[tuple[ParseGeneration, int]] = []
-        for row in list_projections(self.namespace):
+        for row in self.metadata.list_named_projections(self.namespace):
             if not str(row.get("key") or "").startswith("parse_generation:"):
                 continue
             payload = row.get("payload")
