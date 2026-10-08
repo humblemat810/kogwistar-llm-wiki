@@ -7,6 +7,8 @@ import json
 from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
+from kogwistar.json_types import JsonObject
+
 from ..models import NamespaceEngines
 from .entrypoint_support import EngineBuilder
 
@@ -16,11 +18,11 @@ class EmbeddingProfileReportingEngine(Protocol):
     """Minimal engine capability required by profile inspection commands."""
 
     @property
-    def embedding_profile_report(self) -> object:
+    def embedding_profile_report(self) -> JsonObject:
         """Return the backend's serializable embedding profile report."""
 
 
-def _profile_report(engine: object) -> object:
+def _profile_report(engine: object) -> JsonObject:
     """Read the optional report capability without widening engine models."""
     if not isinstance(engine, EmbeddingProfileReportingEngine):
         raise TypeError("engine does not expose embedding_profile_report")
