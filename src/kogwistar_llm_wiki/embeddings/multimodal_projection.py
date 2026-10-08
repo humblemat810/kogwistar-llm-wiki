@@ -25,7 +25,6 @@ import re
 import sqlite3
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from io import BytesIO
@@ -36,6 +35,7 @@ from typing import Any, Protocol, cast, runtime_checkable
 from kogwistar.engine_core import (
     EmbeddingProfile as CoreEmbeddingProfile,
 )
+from kogwistar.typing_interfaces import SqlAlchemyEngineLike
 from kogwistar.engine_core import (
     EmbeddingReference,
     LegacyLocator,
@@ -137,21 +137,6 @@ class EmbeddingProfileMismatch(ValueError):
 
 class ProjectionIntegrityError(ValueError):
     """Raised when a stage transition or vector payload is invalid."""
-
-
-class SqlAlchemyEngineLike(Protocol):
-    """Minimal injected-engine surface used by the pgvector adapter.
-
-    SQLAlchemy statement and result objects remain opaque optional-dependency
-    details; the application only requires these lifecycle operations from an
-    injected engine.
-    """
-
-    def begin(self) -> AbstractContextManager[Any]: ...
-
-    def connect(self) -> AbstractContextManager[Any]: ...
-
-    def dispose(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
