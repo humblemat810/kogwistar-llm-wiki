@@ -30,12 +30,15 @@ from hashlib import sha256
 from io import BytesIO
 from math import sqrt
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from kogwistar.engine_core import (
     EmbeddingProfile as CoreEmbeddingProfile,
 )
-from kogwistar.typing_interfaces import SqlAlchemyEngineLike
+from kogwistar.typing_interfaces import (
+    SqlAlchemyConnectionLike,
+    SqlAlchemyEngineLike,
+)
 from kogwistar.engine_core import (
     EmbeddingReference,
     LegacyLocator,
@@ -1084,19 +1087,22 @@ class PgVectorMultimodalProjectionStore:
     def _ensure_schema(self) -> None:
         if self.schema == "public":
             return
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             connection.exec_driver_sql(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
 
     def _ensure_vector_extension(self) -> None:
         """Make the pgvector type available before creating profile tables."""
 
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
 
     def _bind_profile(self) -> None:
         import sqlalchemy as sqlalchemy_module
 
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             row = connection.execute(
                 sqlalchemy_module.select(self._profile_table).where(
                     self._profile_table.c.scope == self.scope
@@ -1135,7 +1141,8 @@ class PgVectorMultimodalProjectionStore:
 
         pending = tuple(units)
         seen: set[str] = set()
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             rows: list[tuple[str, str]] = []
             for unit in pending:
                 _validate_captured_unit(unit, profile=self.profile)
@@ -1203,7 +1210,8 @@ class PgVectorMultimodalProjectionStore:
         _validate_captured_unit(unit, profile=self.profile)
         storage_key = _projection_storage_key(unit.workspace_id, unit.view_id)
         payload = json.dumps(unit.to_payload(), sort_keys=True)
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             existing = connection.execute(
                 sa.select(self._unit_table.c.unit_json).where(
                     self._unit_table.c.view_id == storage_key
@@ -1249,7 +1257,8 @@ class PgVectorMultimodalProjectionStore:
     def stage_counts(self, *, workspace_id: str | None = None) -> dict[str, int]:
         import sqlalchemy as sa
 
-        with self._engine.connect() as connection:
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             rows = connection.execute(sa.select(self._unit_table.c.unit_json))
             units = tuple(MultimodalSourceUnit.from_payload(json.loads(str(row[0]))) for row in rows)
             if workspace_id is not None:
@@ -1274,7 +1283,7 @@ class PgVectorMultimodalProjectionStore:
         return {"stage1": stage1, "stage2": stage2, "pending_stage2": stage1 - stage2}
 
     def _load_unit_by_storage_key(
-        self, connection: Any, storage_key: str
+        self, connection: SqlAlchemyConnectionLike, storage_key: str
     ) -> MultimodalSourceUnit | None:
         sa = __import__("sqlalchemy")
         row = connection.execute(
@@ -1294,10 +1303,12 @@ class PgVectorMultimodalProjectionStore:
         import sqlalchemy as sa
 
         self._check_profile(profile)
-        with self._engine.connect() as connection:
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             if workspace_id is not None:
                 unit = self._load_unit_by_storage_key(
-                    connection, _projection_storage_key(workspace_id, view_id)
+                    cast(SqlAlchemyConnectionLike, connection),
+                    _projection_storage_key(workspace_id, view_id),
                 )
             else:
                 rows = connection.execute(sa.select(self._unit_table.c.unit_json)).scalars().all()
@@ -1316,7 +1327,8 @@ class PgVectorMultimodalProjectionStore:
     ) -> Sequence[MultimodalSourceUnit]:
         import sqlalchemy as sa
 
-        with self._engine.connect() as connection:
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             rows = connection.execute(
                 sa.select(self._unit_table.c.unit_json)
                 .select_from(
@@ -1346,7 +1358,8 @@ class PgVectorMultimodalProjectionStore:
 
         self._check_profile(profile)
         query = _normalise_embedding_set(query_vectors, dimension=profile.dimension)
-        with self._engine.connect() as connection:
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             count = int(
                 connection.execute(sa.select(sa.func.count()).select_from(self._vector_table)).scalar_one()
             )
@@ -1369,7 +1382,9 @@ class PgVectorMultimodalProjectionStore:
                 )
             scored: list[tuple[float, MultimodalSourceUnit]] = []
             for view_id, values in grouped.items():
-                unit = self._load_unit_by_storage_key(connection, view_id)
+                unit = self._load_unit_by_storage_key(
+                    cast(SqlAlchemyConnectionLike, connection), view_id
+                )
                 if unit is None:
                     raise ProjectionIntegrityError(f"vector row references unknown source view {view_id!r}")
                 if workspace_id is not None and unit.workspace_id != workspace_id:
