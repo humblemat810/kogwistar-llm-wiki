@@ -5,11 +5,20 @@ import json
 import tarfile
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 from kogwistar.engine_core.event_envelope import EntityEventEnvelope
+from kogwistar.json_types import JsonValue
 
 from .archive_contracts import READABLE_ARCHIVE_FORMATS, ArchiveError
+
+JsonObject = dict[str, JsonValue]
+
+
+def _as_object(value: JsonValue) -> JsonObject:
+    if not isinstance(value, dict):
+        raise ArchiveError("archive manifest must be a JSON object")
+    return value
 
 
 class EventReaderLike(Protocol):
@@ -43,19 +52,19 @@ def canonical_event_line(event: EntityEventEnvelope) -> bytes:
     ).encode("utf-8")
 
 
-def read_manifest(path: str | Path) -> dict[str, Any]:
+def read_manifest(path: str | Path) -> JsonObject:
     with tarfile.open(path, "r:gz") as archive:
         member = archive.getmember("manifest.json")
         raw = archive.extractfile(member)
         if raw is None:
             raise ArchiveError("archive has no manifest.json")
-        value = json.load(raw)
+        value = _as_object(cast(JsonValue, json.load(raw)))
     if value.get("archive_format_version") not in READABLE_ARCHIVE_FORMATS:
         raise ArchiveError(f"unsupported archive format: {value.get('archive_format_version')!r}")
     return value
 
 
-def verify_artifact_payloads(*, archive_path: str | Path, manifest: Mapping[str, Any]) -> None:
+def verify_artifact_payloads(*, archive_path: str | Path, manifest: Mapping[str, JsonValue]) -> None:
     """Verify every declared artifact and v2 snapshot file before restore."""
     version = int(manifest.get("archive_format_version", 1))
     artifacts: dict[str, str] = {}
@@ -103,7 +112,7 @@ def verify_artifact_payloads(*, archive_path: str | Path, manifest: Mapping[str,
             raise ArchiveError(f"archive payload is missing: {min(missing)!r}")
 
 
-def verify_archive(path: str | Path) -> dict[str, Any]:
+def verify_archive(path: str | Path) -> JsonObject:
     manifest = read_manifest(path)
     expected_count = 0
     digest = hashlib.sha256()
@@ -152,7 +161,7 @@ def verify_archive(path: str | Path) -> dict[str, Any]:
     return manifest
 
 
-def inspect_archive(path: str | Path) -> dict[str, Any]:
+def inspect_archive(path: str | Path) -> JsonObject:
     """Read and structurally validate an archive without writing anything."""
     manifest = read_manifest(path)
     verify_archive(path)
@@ -169,7 +178,7 @@ def iter_archive_events(path: str | Path) -> Iterator[EntityEventEnvelope]:
                 yield EntityEventEnvelope.from_mapping(json.loads(line))
 
 
-def load_chain(path: str | Path, parents: Iterable[str | Path]) -> tuple[dict[str, Any], list[EntityEventEnvelope]]:
+def load_chain(path: str | Path, parents: Iterable[str | Path]) -> tuple[JsonObject, list[EntityEventEnvelope]]:
     paths = [Path(item) for item in parents] + [Path(path)]
     manifests = [verify_archive(item) for item in paths]
     for index, manifest in enumerate(manifests):
