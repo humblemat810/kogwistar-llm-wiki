@@ -12,7 +12,7 @@ import shutil
 import tarfile
 import tempfile
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import cast
 
@@ -56,6 +56,25 @@ from .validation import inspect_archive, verify_archive
 from .validation import load_chain as _load_chain
 
 JsonObject = dict[str, JsonValue]
+
+
+def _payload_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _object_items(value: object) -> list[Mapping[str, JsonValue]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def create_archive(
@@ -284,7 +303,7 @@ def restore_archive(
     _assert_target_empty(target_specs)
 
     if not apply:
-        return RestoreReport(manifest["archive_id"], source_workspace, target_workspace, True, len(events), 0, False)
+        return RestoreReport(str(manifest["archive_id"]), source_workspace, target_workspace, True, len(events), 0, False)
 
     if target_data_dir is not None:
         data_root = Path(target_data_dir).expanduser().resolve()
@@ -294,7 +313,7 @@ def restore_archive(
             archive_manifest = verify_archive(archive_path)
             expected = {
                 str(item["path"]): str(item["sha256"])
-                for item in archive_manifest.get("artifact_entries", [])
+                for item in _object_items(archive_manifest.get("artifact_entries"))
             }
             with tarfile.open(archive_path, "r:gz") as incoming:
                 _restore_artifacts(incoming, data_root, expected, predecessor_entries=previous_artifacts)
@@ -315,7 +334,7 @@ def restore_archive(
         replayed += 1
     # Portable replay always regenerates derived vector/index state.  Workspace
     # remapping is a separate concern from whether those projections are rebuilt.
-    return RestoreReport(manifest["archive_id"], source_workspace, target_workspace, False, len(events), replayed, True)
+    return RestoreReport(str(manifest["archive_id"]), source_workspace, target_workspace, False, len(events), replayed, True)
 
 
 def restore_backend_snapshot(
@@ -335,21 +354,21 @@ def restore_backend_snapshot(
     expected = str(manifest.get("embedding_fingerprint") or "")
     if not embedding_fingerprint or embedding_fingerprint != expected:
         raise ArchiveError("exact embedding_fingerprint is required to restore a backend snapshot")
-    entries = list(manifest.get("backend_snapshot_entries") or [])
+    entries = _object_items(manifest.get("backend_snapshot_entries"))
     if not entries:
         raise ArchiveError("archive does not contain a backend snapshot")
-    if int(manifest.get("archive_format_version", 1)) < 2:
+    if _payload_int(manifest.get("archive_format_version"), 1) < 2:
         raise ArchiveError("legacy snapshots without per-file checksums are not eligible for fast restore")
     target = Path(target_data_dir).expanduser().resolve()
     if target.exists() and any(target.iterdir()):
         raise ArchiveError(f"snapshot restore target is not empty: {target}")
     artifact_expected = {
         str(item["path"]): str(item["sha256"])
-        for item in manifest.get("artifact_entries", [])
+        for item in _object_items(manifest.get("artifact_entries"))
     }
     if not apply:
         return {
-            "archive_id": manifest["archive_id"],
+            "archive_id": str(manifest["archive_id"]),
             "target_data_dir": str(target),
             "backend": backend,
             "embedding_fingerprint": expected,
@@ -383,7 +402,7 @@ def restore_backend_snapshot(
                 destination.write_bytes(source.read())
         _restore_artifacts(incoming, target, artifact_expected)
     return {
-        "archive_id": manifest["archive_id"],
+        "archive_id": str(manifest["archive_id"]),
         "target_data_dir": str(target),
         "backend": backend,
         "embedding_fingerprint": str(manifest.get("embedding_fingerprint") or ""),
