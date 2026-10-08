@@ -12,7 +12,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from math import isnan
@@ -24,6 +24,7 @@ from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
 from ..utils import _temporary_namespace
 from .query import GraphSpaceQueryResult, GraphSpaceQueryService
+from .contracts import Clock
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]*", re.IGNORECASE)
 logger = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ class SemanticLensService:
         engines: NamespaceEngines,
         *,
         query_service: GraphSpaceQueryService | None = None,
-        clock_ms: Callable[[], int] | None = None,
+        clock_ms: Clock | None = None,
     ) -> None:
         self.engines = engines
         self.query_service = query_service or GraphSpaceQueryService(engines)
