@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Protocol, cast
 
 from llm_wiki_embedding_contract import EmbeddingProfile, validate_dense_vectors
 
@@ -20,6 +20,19 @@ from .config import (
 from .encoder import EmbeddingInferenceError, _validate_torch
 
 
+class _ClipModelLike(Protocol):
+    config: object
+
+    def eval(self) -> "_ClipModelLike": ...
+    def to(self, device: str) -> "_ClipModelLike": ...
+    def get_text_features(self, **kwargs: object) -> object: ...
+    def get_image_features(self, **kwargs: object) -> object: ...
+
+
+class _ClipProcessorLike(Protocol):
+    def __call__(self, **kwargs: object) -> Mapping[str, object]: ...
+
+
 class CLIPDualProjectionEncoder:
     """Encode text and images through CLIP's learned 512-D shared space.
 
@@ -30,8 +43,8 @@ class CLIPDualProjectionEncoder:
 
     def __init__(
         self,
-        model: Any,
-        processor: Any,
+        model: _ClipModelLike,
+        processor: _ClipProcessorLike,
         *,
         profile: EmbeddingProfile,
         device: str,
@@ -62,23 +75,26 @@ class CLIPDualProjectionEncoder:
                 Path(config.model_path) / "0_CLIPModel" / "model.safetensors",
                 expected=CLIP_MODEL_SHA256,
             )
-        common: dict[str, Any] = {
+        common: dict[str, object] = {
             "revision": config.revision,
             "subfolder": "0_CLIPModel",
             "cache_dir": config.model_cache_dir,
             "token": config.token,
         }
-        model: Any = CLIPModel.from_pretrained(
+        model = cast(_ClipModelLike, CLIPModel.from_pretrained(
             config.model_path or config.model,
             use_safetensors=True,
             **common,
-        ).eval()
+        ).eval())
         projection_dim = int(getattr(model.config, "projection_dim", 0))
         if projection_dim != config.dimension:
             raise RuntimeError(
                 f"CLIP checkpoint projection dimension {projection_dim} does not match configured dimension {config.dimension}"
             )
-        processor: Any = CLIPProcessor.from_pretrained(config.model_path or config.model, **common)
+        processor = cast(
+            _ClipProcessorLike,
+            CLIPProcessor.from_pretrained(config.model_path or config.model, **common),
+        )
         if config.device == "cuda":
             model = model.to(config.device)
         return cls(
@@ -89,21 +105,28 @@ class CLIPDualProjectionEncoder:
             batch_size=config.batch_size,
         )
 
-    def _features(self, inputs: Any, *, modality: str) -> list[tuple[float, ...]]:
+    def _features(
+        self, inputs: object, *, modality: str
+    ) -> list[tuple[float, ...]]:
         import torch
 
         if not isinstance(inputs, Mapping):
             raise EmbeddingInferenceError("CLIP processor returned invalid inputs")
+        typed_inputs = cast(Mapping[str, object], inputs)
         moved = {
-            key: value.to(self.device) if hasattr(value, "to") else value
-            for key, value in inputs.items()
+            key: (
+                cast(Callable[[str], object], getattr(value, "to"))(self.device)
+                if callable(getattr(value, "to", None))
+                else value
+            )
+            for key, value in typed_inputs.items()
         }
         method_name = "get_text_features" if modality == "text" else "get_image_features"
         method = getattr(self._model, method_name, None)
         if not callable(method):
             raise EmbeddingInferenceError(f"CLIP model lacks {method_name}")
         with torch.inference_mode():
-            values: Any = method(**moved)
+            values = method(**moved)
         projected_values = getattr(values, "pooler_output", None)
         if projected_values is not None:
             values = projected_values
@@ -115,7 +138,7 @@ class CLIPDualProjectionEncoder:
     def encode(self, items: Sequence[Mapping[str, object]]) -> list[tuple[tuple[float, ...], ...]]:
         from PIL import Image
 
-        owned: list[Any] = []
+        owned: list[object] = []
         texts: list[tuple[int, str]] = []
         images: list[tuple[int, object]] = []
         try:
