@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
@@ -106,8 +106,8 @@ def _metadata_list_value(items: list[str] | None) -> list[str] | None:
 
 
 def _resolve_embedding_function(
-    *args: Any,
-    **kwargs: Any,
+    *args: object,
+    **kwargs: object,
 ) -> tuple[EmbeddingFunctionLike, EmbeddingProviderConfig]:
     """Preserve the historical monkeypatch seam for provider-free tests."""
 
@@ -119,7 +119,7 @@ def _resolve_embedding_function(
 
 
 def _resolve_embedding_functions(
-    **kwargs: Any,
+    **kwargs: object,
 ) -> tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]:
     """Preserve provider-factory injection for all graph-space embeddings."""
 
