@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from itertools import pairwise
+from typing import cast
 from kogwistar.engine_core import NamedProjectionStore
 from kogwistar.runtime import ProjectionPayload
 from kogwistar.id_provider import stable_id
@@ -43,6 +44,25 @@ class ParseFrontierStatus(StrEnum):
 class ParseViewStatus(StrEnum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
+
+
+def _payload_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _payload_mapping(value: object) -> Mapping[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[str, object], value)
 
 
 class SourceRegion(BaseModel):
@@ -454,8 +474,8 @@ class ParseViewStore:
                 raise ParseViewConflict("ParseView version changed before activation")
             if view.view_version <= current.view_version:
                 raise ValueError("ParseView version must increase when replacing an active view")
-            expected_authoritative = int(existing.get("last_authoritative_seq", -1))
-            expected_materialized = int(existing.get("last_materialized_seq", -1))
+            expected_authoritative = _payload_int(existing.get("last_authoritative_seq"), -1)
+            expected_materialized = _payload_int(existing.get("last_materialized_seq"), -1)
         inserted = self.metadata.compare_and_swap_named_projection(
             namespace,
             key,
@@ -482,7 +502,9 @@ class ParseViewStore:
             )
             if row is None or not isinstance(row.get("payload"), Mapping):
                 raise ValueError("ParseView selection references an unknown generation")
-            payload = row["payload"]
+            payload = _payload_mapping(row["payload"])
+            if payload is None:
+                raise TypeError("ParseView selection references malformed generation evidence")
             generation_payload = payload.get("generation")
             members = payload.get("members")
             if not isinstance(generation_payload, Mapping) or not isinstance(members, Mapping):
