@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -60,7 +59,7 @@ from .cli.archive_commands import (
 from .cli.archive_commands import (
     archive_verify as _archive_verify_command,
 )
-from .cli.argument_parser import build_argument_parser
+from .cli.argument_parser import CommandHandler, build_argument_parser
 from .cli.compose_commands import (
     compose_check as _compose_check_command,
 )
@@ -355,7 +354,7 @@ def _cmd_compose_check(args: argparse.Namespace) -> None:
     return _compose_check_command(args)
 
 
-def _command_handlers() -> dict[str, Callable[[argparse.Namespace], None]]:
+def _command_handlers() -> dict[str, CommandHandler]:
     return {
         "demo": _cmd_demo,
         "ingest": _cmd_ingest,
