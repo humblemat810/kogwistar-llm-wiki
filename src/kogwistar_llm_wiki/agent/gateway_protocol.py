@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from kogwistar.json_types import JsonValue
 
 
-def count_job_statuses(jobs: list[Mapping[str, JsonValue]]) -> dict[str, int]:
+def count_job_statuses(jobs: Sequence[Mapping[str, JsonValue]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for job in jobs:
         status = str(job.get("status") or "unknown")
