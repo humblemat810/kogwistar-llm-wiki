@@ -15,7 +15,7 @@ JsonObject = dict[str, JsonValue]
 
 
 def validate_supplied_provenance(
-    provenance: Mapping[str, object],
+    provenance: Mapping[str, JsonValue],
     *,
     workspace_id: str,
     source_uri: str,
@@ -59,7 +59,9 @@ def validate_agent_source_uri(source_uri: str) -> None:
         raise ValueError("source_uri must be a credential-free http(s) URL")
 
 
-def validate_reingest_revision(existing: Mapping[str, object], provenance: object) -> None:
+def validate_reingest_revision(
+    existing: Mapping[str, JsonValue], provenance: JsonValue | None
+) -> None:
     if not isinstance(provenance, Mapping):
         return
     requested = str(provenance.get("source_revision_id") or "").strip()
@@ -115,7 +117,7 @@ def fetch_source_text(source_uri: str) -> str:
     return data.decode("utf-8")
 
 
-def redact_source_text(value: object) -> object:
+def redact_source_text(value: JsonValue) -> JsonValue:
     if isinstance(value, Mapping):
         return {
             str(key): redact_source_text(item)
@@ -169,6 +171,6 @@ def _json_object(value: object, *, redact_source_text: bool) -> JsonObject | Non
     return cast(JsonObject, {str(key): item for key, item in redacted.items()})
 
 
-def redact_source_text_value(value: object) -> object:
+def redact_source_text_value(value: JsonValue) -> JsonValue:
     """Compatibility alias used internally by ``node_json``."""
     return redact_source_text(value)
