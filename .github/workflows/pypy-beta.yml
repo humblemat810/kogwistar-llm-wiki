@@ -30,7 +30,7 @@ permissions:
 
 env:
   # Keep the experimental profile aligned with the revisions tested by CI.
-  KOGWISTAR_REVISION: 5ec1d4d2cbf9280c628a622c20ca5c6780ad7539
+  KOGWISTAR_REVISION: c0080570025c2766f3dd8404abc43f21d18fbffd
   KG_DOC_PARSER_REVISION: 83289039bb33a0ce6d7d0282108d9a4e0c1b0f3e
   OBSIDIAN_SINK_REVISION: 36f51e5c23522cd3e467ee49bc7127461b4753c2
 
