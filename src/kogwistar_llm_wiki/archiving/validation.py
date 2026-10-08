@@ -21,6 +21,53 @@ def _as_object(value: JsonValue) -> JsonObject:
     return value
 
 
+def _as_object_list(value: JsonValue | None, *, field: str) -> list[JsonObject]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ArchiveError(f"archive manifest field {field!r} must be an array of objects")
+    result: list[JsonObject] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ArchiveError(f"archive manifest field {field!r} must be an array of objects")
+        result.append(item)
+    return result
+
+
+def _as_object_map(value: JsonValue | None, *, field: str) -> dict[str, JsonObject]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ArchiveError(f"archive manifest field {field!r} must be an object of objects")
+    result: dict[str, JsonObject] = {}
+    for key, item in value.items():
+        if not isinstance(item, dict):
+            raise ArchiveError(f"archive manifest field {field!r} must be an object of objects")
+        result[str(key)] = item
+    return result
+
+
+def _as_value_map(value: JsonValue | None, *, field: str) -> dict[str, JsonValue]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ArchiveError(f"archive manifest field {field!r} must be an object")
+    return value
+
+
+def _as_int(value: JsonValue | None, *, field: str, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    raise ArchiveError(f"archive manifest field {field!r} must be an integer")
+
+
 class EventReaderLike(Protocol):
     """Lossless metadata event reader required by archive export/restore."""
 
@@ -66,10 +113,10 @@ def read_manifest(path: str | Path) -> JsonObject:
 
 def verify_artifact_payloads(*, archive_path: str | Path, manifest: Mapping[str, JsonValue]) -> None:
     """Verify every declared artifact and v2 snapshot file before restore."""
-    version = int(manifest.get("archive_format_version", 1))
+    version = _as_int(manifest.get("archive_format_version"), field="archive_format_version", default=1)
     artifacts: dict[str, str] = {}
-    for item in manifest.get("artifact_entries", []):
-        if not isinstance(item, Mapping) or not item.get("path") or not item.get("sha256"):
+    for item in _as_object_list(manifest.get("artifact_entries"), field="artifact_entries"):
+        if not item.get("path") or not item.get("sha256"):
             if version >= 2:
                 raise ArchiveError("v2 artifact entry has no checksum")
             continue
@@ -78,16 +125,18 @@ def verify_artifact_payloads(*, archive_path: str | Path, manifest: Mapping[str,
         if path in artifacts and artifacts[path] != checksum:
             raise ArchiveError(f"artifact has conflicting checksums: {path!r}")
         artifacts[path] = checksum
-    snapshots = [item for item in manifest.get("backend_snapshot_entries", []) if isinstance(item, Mapping)]
+    snapshots = _as_object_list(
+        manifest.get("backend_snapshot_entries"), field="backend_snapshot_entries"
+    )
     snapshot_files: dict[str, str] = {}
     for entry in snapshots:
         files = entry.get("files")
         if files is None:
-            if manifest.get("archive_format_version", 1) >= 2:
+            if version >= 2:
                 raise ArchiveError("v2 snapshot entry has no per-file checksums")
             continue
-        for item in files:
-            if not isinstance(item, Mapping) or not item.get("path") or not item.get("sha256"):
+        for item in _as_object_list(files, field="backend_snapshot_entries.files"):
+            if not item.get("path") or not item.get("sha256"):
                 raise ArchiveError("snapshot checksum entry is malformed")
             snapshot_files[str(item["path"])] = str(item["sha256"])
     with tarfile.open(archive_path, "r:gz") as archive:
@@ -136,18 +185,18 @@ def verify_archive(path: str | Path) -> JsonObject:
             previous[event.namespace] = event.seq
             first.setdefault(event.namespace, event.seq)
             expected_count += 1
-    if expected_count != int(manifest.get("event_count", -1)):
+    if expected_count != _as_int(manifest.get("event_count"), field="event_count", default=-1):
         raise ArchiveError("archive event count does not match manifest")
     if digest.hexdigest() != str(manifest.get("events_sha256")):
         raise ArchiveError("archive event checksum does not match manifest")
-    ranges = manifest.get("ranges") or {}
-    watermarks = manifest.get("watermarks") or {}
+    ranges = _as_object_map(manifest.get("ranges"), field="ranges")
+    watermarks = _as_value_map(manifest.get("watermarks"), field="watermarks")
     for namespace, spec in ranges.items():
-        start = int(spec.get("from_seq", 1))
-        end = int(spec.get("to_seq", 0))
+        start = _as_int(spec.get("from_seq"), field=f"ranges.{namespace}.from_seq", default=1)
+        end = _as_int(spec.get("to_seq"), field=f"ranges.{namespace}.to_seq", default=0)
         if end < start - 1:
             raise ArchiveError(f"invalid archive range for {namespace!r}")
-        if int(watermarks.get(namespace, -1)) != end:
+        if _as_int(watermarks.get(namespace), field=f"watermarks.{namespace}", default=-1) != end:
             raise ArchiveError(f"archive watermark does not match range for {namespace!r}")
         if end == start - 1:
             if namespace in first:
@@ -191,18 +240,28 @@ def load_chain(path: str | Path, parents: Iterable[str | Path]) -> tuple[JsonObj
         if str(manifest.get("workspace_id")) != str(manifests[0].get("workspace_id")):
             raise ArchiveError("archive chain workspace IDs do not match")
         if index:
-            parent_watermarks = manifests[index - 1].get("watermarks") or {}
-            for namespace, spec in (manifest.get("ranges") or {}).items():
-                expected_start = int(parent_watermarks.get(namespace, 0)) + 1
-                if int(spec.get("from_seq", 1)) != expected_start:
+            parent_watermarks = _as_value_map(
+                manifests[index - 1].get("watermarks"), field="watermarks"
+            )
+            for namespace, spec in _as_object_map(manifest.get("ranges"), field="ranges").items():
+                expected_start = _as_int(
+                    parent_watermarks.get(namespace),
+                    field=f"watermarks.{namespace}",
+                    default=0,
+                ) + 1
+                if _as_int(spec.get("from_seq"), field=f"ranges.{namespace}.from_seq", default=1) != expected_start:
                     raise ArchiveError(f"archive chain range does not continue {namespace!r}")
     events: list[EntityEventEnvelope] = []
     prior_by_ns: dict[str, int] = {}
     for item_path, manifest in zip(paths, manifests):
-        expected_from = manifest.get("ranges", {})
+        expected_from = _as_object_map(manifest.get("ranges"), field="ranges")
         for event in iter_archive_events(item_path):
             prior = prior_by_ns.get(event.namespace, 0)
-            start = int(expected_from.get(event.namespace, {}).get("from_seq", 1))
+            start = _as_int(
+                expected_from.get(event.namespace, {}).get("from_seq"),
+                field=f"ranges.{event.namespace}.from_seq",
+                default=1,
+            )
             if event.seq < start or event.seq != prior + 1:
                 raise ArchiveError(f"archive chain has a gap or overlap in {event.namespace!r}")
             prior_by_ns[event.namespace] = event.seq
