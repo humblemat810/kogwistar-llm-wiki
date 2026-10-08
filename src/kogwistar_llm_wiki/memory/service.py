@@ -7,10 +7,11 @@ import os
 import re
 import time
 from collections.abc import Collection, Mapping, Sequence
-from typing import Literal
+from typing import Literal, cast
 
 from kogwistar.engine_core.models import Edge, Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..configuration.workspace import WorkspaceNamespaces
@@ -20,6 +21,7 @@ from ..utils import _temporary_namespace
 MemoryKind = Literal["decision", "constraint", "convention", "finding", "task_outcome"]
 MemoryConfidence = Literal["verified", "inferred"]
 EvidenceKind = Literal["source_span", "repository"]
+JsonObject = dict[str, JsonValue]
 
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 _REVISION = re.compile(r"^[0-9a-fA-F]{7,64}$")
@@ -48,7 +50,7 @@ class MemoryEvidence(BaseModel):
     kind: EvidenceKind
     evidence_id: str | None = Field(default=None, min_length=1, max_length=200)
     source_document_id: str | None = Field(default=None, max_length=200)
-    span: dict[str, object] | None = None
+    span: JsonObject | None = None
     repository_path: str | None = Field(default=None, max_length=500)
     revision: str | None = Field(default=None, max_length=64)
     content_sha256: str | None = None
@@ -129,7 +131,7 @@ class MemoryRecord(BaseModel):
     capture_policy_version: str = Field(default="1", min_length=1, max_length=40)
     lifecycle_status: Literal["candidate", "reviewed", "superseded", "retired"] = "candidate"
     created_at_ms: int = Field(default_factory=lambda: int(time.time() * 1000), ge=0)
-    metadata: dict[str, object] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
     @field_validator("workspace_id", "session_id", "statement", "rationale")
     @classmethod
@@ -152,9 +154,9 @@ class MemoryRecord(BaseModel):
             raise MemoryValidationError("memory relationship IDs must be non-empty")
         return cleaned
 
-    @field_validator("metadata")
+    @field_validator("metadata", mode="before")
     @classmethod
-    def _bounded_json_metadata(cls, value: dict[str, object]) -> dict[str, object]:
+    def _bounded_json_metadata(cls, value: object) -> JsonObject:
         try:
             encoded = json.dumps(
                 value,
@@ -168,7 +170,7 @@ class MemoryRecord(BaseModel):
             raise MemoryValidationError("memory metadata must be JSON-serializable") from exc
         if not isinstance(decoded, dict) or len(encoded) > 16_000:
             raise MemoryValidationError("memory metadata must be a bounded JSON object")
-        return decoded
+        return cast(JsonObject, decoded)
 
     @model_validator(mode="after")
     def _require_grounding(self) -> MemoryRecord:
@@ -225,7 +227,7 @@ class MemoryService:
             upper=100,
         )
 
-    def capture(self, payload: Mapping[str, object] | Sequence[Mapping[str, object]]) -> dict[str, object]:
+    def capture(self, payload: Mapping[str, JsonValue] | Sequence[Mapping[str, JsonValue]]) -> JsonObject:
         if not self.enabled:
             raise MemoryDisabledError(
                 "autonomous Codex memory is disabled; set LLM_WIKI_CODEX_MEMORY_ENABLED=true"
@@ -235,7 +237,7 @@ class MemoryService:
             raise MemoryValidationError(
                 f"memory capture accepts 1..{self.max_records_per_capture} records"
             )
-        records: list[dict[str, object]] = []
+        records: list[JsonObject] = []
         validated: list[MemoryRecord] = []
         for raw in raw_records:
             record = MemoryRecord.model_validate(raw)
@@ -255,7 +257,7 @@ class MemoryService:
         include_inferred: bool = True,
         limit: int | None = None,
         authorized_stream_ids: Collection[str] | None = None,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         if not workspace_id.strip():
             raise MemoryValidationError("memory recall requires workspace_id")
         records = [
@@ -294,7 +296,7 @@ class MemoryService:
         lifecycle_status: str | None = None,
         limit: int = 50,
         authorized_stream_ids: Collection[str] | None = None,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         if not workspace_id.strip():
             raise MemoryValidationError("memory review requires workspace_id")
         if kind is not None and kind not in {"decision", "constraint", "convention", "finding", "task_outcome"}:
@@ -324,7 +326,7 @@ class MemoryService:
             "count": len(selected),
         }
 
-    def _persist(self, record: MemoryRecord) -> dict[str, object]:
+    def _persist(self, record: MemoryRecord) -> JsonObject:
         memory_id = record.memory_id()
         evidence = [item.model_copy(update={"evidence_id": item.evidence_id or item.stable_id()}) for item in record.evidence]
         record = record.model_copy(update={"evidence": tuple(evidence)})
@@ -409,7 +411,7 @@ class MemoryService:
                     continue
         return records
 
-    def _record_payload(self, record: MemoryRecord, **extra: object) -> dict[str, object]:
+    def _record_payload(self, record: MemoryRecord, **extra: JsonValue) -> JsonObject:
         payload = record.model_dump(mode="json")
         payload["memory_id"] = record.memory_id()
         payload["evidence"] = [
