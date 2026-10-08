@@ -512,6 +512,7 @@ Full reference: [doc/cli_reference.md](doc/cli_reference.md)
 | [doc/release_0.5.5.md](doc/release_0.5.5.md) | Version 0.5.5 bounded cross-link context budgets |
 | [doc/release_0.5.6.md](doc/release_0.5.6.md) | Version 0.5.6 strict prompt alias adoption and Kogwistar 0.6.3 alignment |
 | [doc/release_0.5.7.md](doc/release_0.5.7.md) | Version 0.5.7 parser 0.2.5 downstream alignment |
+| [doc/release_0.5.8.md](doc/release_0.5.8.md) | Version 0.5.8 parser 0.2.6 downstream alignment |
 | [doc/mcp_v2_migration.md](doc/mcp_v2_migration.md) | MCP V2 migration, compatibility, and upgrade order |
 | [doc/glossary.md](doc/glossary.md) | Term definitions |
 | [doc/distillation_core_migration.md](doc/distillation_core_migration.md) | Notes on migrating distillation to kogwistar core |
