@@ -21,7 +21,7 @@ from collections.abc import (
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 from mcp import types
 from mcp.server.lowlevel import Server
@@ -41,7 +41,7 @@ _MCP_REQUEST_HEADERS: ContextVar[dict[str, str] | None] = ContextVar(
 )
 
 
-ASGIMessage = MutableMapping[str, Any]
+ASGIMessage = MutableMapping[str, object]
 
 
 class _ASGIReceive(Protocol):
@@ -55,7 +55,7 @@ class _ASGISend(Protocol):
 class _ASGIApplication(Protocol):
     async def __call__(
         self,
-        scope: MutableMapping[str, Any],
+        scope: MutableMapping[str, object],
         receive: _ASGIReceive,
         send: _ASGISend,
     ) -> None: ...
@@ -596,7 +596,7 @@ class AgentMcpServer:
         return authenticate_bearer(authorization)
 
     @staticmethod
-    def _headers_from_scope(scope: Mapping[str, Any]) -> dict[str, str]:
+    def _headers_from_scope(scope: Mapping[str, object]) -> dict[str, str]:
         raw_headers = scope.get("headers", ())
         if not isinstance(raw_headers, Sequence):
             return {}
@@ -613,7 +613,7 @@ class AgentMcpServer:
 
     async def _with_request_headers(
         self,
-        scope: Mapping[str, Any],
+        scope: Mapping[str, object],
         operation: Callable[[], Awaitable[None]],
     ) -> None:
         token = _MCP_REQUEST_HEADERS.set(self._headers_from_scope(scope))
@@ -703,7 +703,7 @@ class AgentMcpServer:
                     manager_holder.pop("manager", None)
 
         async def scoped_handler(
-            scope: MutableMapping[str, Any],
+            scope: MutableMapping[str, object],
             receive: _ASGIReceive,
             send: _ASGISend,
         ) -> None:
@@ -741,7 +741,7 @@ class AgentMcpServer:
         transport = SseServerTransport(messages_path)
 
         async def app(
-            scope: MutableMapping[str, Any],
+            scope: MutableMapping[str, object],
             receive: _ASGIReceive,
             send: _ASGISend,
         ) -> None:
