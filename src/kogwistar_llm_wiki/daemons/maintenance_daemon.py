@@ -6,7 +6,6 @@ import logging
 import os
 import threading
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -39,7 +38,12 @@ class ProviderResolver(Protocol):
     def __call__(self) -> WorkflowProviderSettings: ...
 
 
-WorkerFactory = Callable[..., MaintenanceWorker]
+
+
+class WorkerFactory(Protocol):
+    """Construct a maintenance worker with injected runtime dependencies."""
+
+    def __call__(self, *args: object, **kwargs: object) -> MaintenanceWorker: ...
 
 
 class MaintenanceDaemonRuntime(MaintenanceBudgetMixin):

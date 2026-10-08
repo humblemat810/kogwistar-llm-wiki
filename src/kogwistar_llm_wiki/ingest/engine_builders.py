@@ -7,7 +7,7 @@ parent pipeline module.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal, Protocol
@@ -24,7 +24,6 @@ from ..embeddings.embedding_config_resolver import (
     validate_shared_postgres_embedding_profile,
 )
 from ..models import NamespaceEngines
-
 
 
 class EmbeddingResolver(Protocol):
@@ -51,7 +50,12 @@ class ProfileResolver(Protocol):
     def __call__(self, config: EmbeddingProviderConfig) -> EmbeddingProfile | None: ...
 
 
-GraphEngineFactory = Callable[..., GraphKnowledgeEngine]
+
+
+class GraphEngineFactory(Protocol):
+    """Construct one graph engine for an application-owned graph space."""
+
+    def __call__(self, *args: object, **kwargs: object) -> GraphKnowledgeEngine: ...
 
 
 def _require_profile(profile: EmbeddingProfile | None) -> EmbeddingProfile:
