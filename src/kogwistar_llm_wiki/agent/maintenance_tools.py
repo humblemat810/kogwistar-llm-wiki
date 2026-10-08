@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from ..agent.protocol import (
     budgets as _budgets,
@@ -96,7 +97,7 @@ class AgentMaintenanceToolsMixin(AgentGatewayHost):
                 parse_target=parse_target,
             )
             jobs.append(job_id)
-        return {
+        return cast(JsonObject, {
             "workspace_id": workspace_id,
             "topic": topic,
             "objective": objective,
@@ -104,5 +105,5 @@ class AgentMaintenanceToolsMixin(AgentGatewayHost):
             "job_ids": jobs,
             "budgets": budgets,
             "skipped_source_document_ids": skipped_source_ids,
-        }
+        })
 
