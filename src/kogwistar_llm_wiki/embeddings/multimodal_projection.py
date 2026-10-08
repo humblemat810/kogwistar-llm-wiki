@@ -25,6 +25,7 @@ import re
 import sqlite3
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from io import BytesIO
@@ -136,6 +137,21 @@ class EmbeddingProfileMismatch(ValueError):
 
 class ProjectionIntegrityError(ValueError):
     """Raised when a stage transition or vector payload is invalid."""
+
+
+class SqlAlchemyEngineLike(Protocol):
+    """Minimal injected-engine surface used by the pgvector adapter.
+
+    SQLAlchemy statement and result objects remain opaque optional-dependency
+    details; the application only requires these lifecycle operations from an
+    injected engine.
+    """
+
+    def begin(self) -> AbstractContextManager[Any]: ...
+
+    def connect(self) -> AbstractContextManager[Any]: ...
+
+    def dispose(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -1021,7 +1037,7 @@ class PgVectorMultimodalProjectionStore:
         self,
         dsn: str | None = None,
         *,
-        engine: Any | None = None,
+        engine: SqlAlchemyEngineLike | None = None,
         scope: str,
         profile: MultimodalEmbeddingProfile,
         schema: str = "public",
@@ -1046,7 +1062,9 @@ class PgVectorMultimodalProjectionStore:
         self.schema = str(schema)
         self.max_search_vectors = int(max_search_vectors)
         self._owns_engine = engine is None
-        self._engine = engine if engine is not None else sa.create_engine(str(dsn))
+        self._engine: SqlAlchemyEngineLike = (
+            engine if engine is not None else sa.create_engine(str(dsn))
+        )
         self._metadata = sa.MetaData(schema=self.schema)
         profile_key = sha256(profile.fingerprint.encode("utf-8")).hexdigest()[:32]
         self._profile_key = profile_key
