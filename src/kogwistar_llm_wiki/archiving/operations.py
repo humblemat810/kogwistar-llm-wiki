@@ -14,9 +14,10 @@ import tempfile
 import uuid
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from kogwistar.engine_core.event_envelope import EntityEventEnvelope
+from kogwistar.json_types import JsonValue
 
 from ..models import NamespaceEngines
 from ..utils import _temporary_namespace
@@ -54,6 +55,8 @@ from .validation import event_reader as _event_reader
 from .validation import inspect_archive, verify_archive
 from .validation import load_chain as _load_chain
 
+JsonObject = dict[str, JsonValue]
+
 
 def create_archive(
     engines: NamespaceEngines,
@@ -65,7 +68,7 @@ def create_archive(
     include_backend_snapshot: bool = False,
     require_quiescent: bool = True,
     backend: str | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Create a full or incremental archive at fixed namespace watermarks."""
     if require_quiescent:
         assert_quiescent(engines)
@@ -117,7 +120,7 @@ def create_archive(
                 if expected != end + 1:
                     raise ArchiveError(f"watermark {end} is not fully readable for {spec.namespace!r}")
 
-        artifact_entries: list[dict[str, Any]] = []
+        artifact_entries: list[JsonObject] = []
         if data_dir is not None:
             root = Path(data_dir).expanduser().resolve()
             for source, arcname in _artifact_files(root):
@@ -126,7 +129,7 @@ def create_archive(
                 shutil.copy2(source, target)
                 artifact_entries.append({"path": arcname, "sha256": _sha256_file(target)})
 
-        snapshot_entries: list[dict[str, Any]] = []
+        snapshot_entries: list[JsonObject] = []
         if include_backend_snapshot:
             seen_paths: set[Path] = set()
             for spec in specs:
@@ -190,9 +193,23 @@ def create_archive(
     return manifest
 
 
-def _remap_value(value: Any, *, old_workspace: str, new_workspace: str, key: str | None = None) -> Any:
+def _remap_value(
+    value: JsonValue,
+    *,
+    old_workspace: str,
+    new_workspace: str,
+    key: str | None = None,
+) -> JsonValue:
     if isinstance(value, dict):
-        return {str(k): _remap_value(v, old_workspace=old_workspace, new_workspace=new_workspace, key=str(k)) for k, v in value.items()}
+        return {
+            key: _remap_value(
+                item,
+                old_workspace=old_workspace,
+                new_workspace=new_workspace,
+                key=key,
+            )
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_remap_value(item, old_workspace=old_workspace, new_workspace=new_workspace, key=key) for item in value]
     if isinstance(value, str) and key in {"workspace_id", "workspace", "namespace", "source_namespace", "projection_namespace", "graph_namespace"}:
@@ -205,7 +222,7 @@ def _remap_value(value: Any, *, old_workspace: str, new_workspace: str, key: str
 
 
 def _remapped_event(event: EntityEventEnvelope, *, old_workspace: str, new_workspace: str) -> EntityEventEnvelope:
-    payload = json.loads(event.payload_json)
+    payload = cast(JsonValue, json.loads(event.payload_json))
     payload = _remap_value(payload, old_workspace=old_workspace, new_workspace=new_workspace)
     return EntityEventEnvelope(
         namespace=_remap_namespace(event.namespace, old_workspace=old_workspace, new_workspace=new_workspace),
@@ -308,7 +325,7 @@ def restore_backend_snapshot(
     backend: str,
     embedding_fingerprint: str | None = None,
     apply: bool = False,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Validate, and optionally extract, an exact compatible local snapshot."""
     manifest = verify_archive(archive)
     if manifest.get("archive_kind") != "base":
