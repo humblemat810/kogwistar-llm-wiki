@@ -6,6 +6,8 @@ import time
 import uuid
 from collections.abc import Mapping
 
+from kogwistar.json_types import JsonValue
+
 from .gateway_protocol import (
     a2a_task as _a2a_task,
 )
@@ -28,7 +30,7 @@ from .protocol import request_payload as _request_payload
 class AgentProtocolMixin(AgentGatewayHost):
     """Expose protocol-specific envelopes over the shared gateway answer."""
 
-    def responses(self, payload: Mapping[str, object]) -> dict[str, object]:
+    def responses(self, payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         request_id = _request_id(payload, "resp")
         model = str(payload.get("model") or "llm-wiki-deterministic")
         with self.telemetry.span("llm_wiki.responses", {"request_id": request_id, "model": model}):
@@ -51,7 +53,7 @@ class AgentProtocolMixin(AgentGatewayHost):
             "llm_wiki": result,
         }
 
-    def chat_completions(self, payload: Mapping[str, object]) -> dict[str, object]:
+    def chat_completions(self, payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         request_id = _request_id(payload, "chatcmpl")
         model = str(payload.get("model") or "llm-wiki-deterministic")
         with self.telemetry.span(
@@ -73,7 +75,7 @@ class AgentProtocolMixin(AgentGatewayHost):
             "llm_wiki": result,
         }
 
-    def a2a_message(self, payload: Mapping[str, object]) -> dict[str, object]:
+    def a2a_message(self, payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         """Submit or execute an A2A-style message using durable interactions."""
         metadata = payload.get("metadata")
         metadata = metadata if isinstance(metadata, Mapping) else {}
@@ -91,13 +93,13 @@ class AgentProtocolMixin(AgentGatewayHost):
             "metadata": {"llm_wiki": result},
         }
 
-    def a2a_task(self, *, workspace_id: str, task_id: str) -> dict[str, object] | None:
+    def a2a_task(self, *, workspace_id: str, task_id: str) -> dict[str, JsonValue] | None:
         interaction = self.api.get_interaction(workspace_id=workspace_id, interaction_id=task_id)
         if interaction is None:
             return None
         return _a2a_task(interaction)
 
-    def a2a_jsonrpc(self, payload: Mapping[str, object]) -> dict[str, object]:
+    def a2a_jsonrpc(self, payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         """Handle the A2A JSON-RPC binding without duplicating task logic."""
         request_id = payload.get("id")
         if payload.get("jsonrpc") != "2.0":
