@@ -8,6 +8,8 @@ from urllib import (
     request as urllib_request,  # noqa: F401 - legacy source-fetch test seam
 )
 
+from kogwistar.json_types import JsonValue
+
 from ..models import IngestPipelineRequest
 from ..otel import LlmWikiTelemetry
 from ..parsing.parse_generation_store import ParseGenerationStore
@@ -63,12 +65,14 @@ from .read_tools import AgentReadToolsMixin
 from .source_tools import AgentSourceMixin
 from .tool_catalog import AgentToolCatalogMixin
 
+JsonObject = dict[str, JsonValue]
+
 
 @dataclass(frozen=True, slots=True)
 class AgentTurn:
     request_id: str
     model: str
-    response: dict[str, object]
+    response: JsonObject
     status: str = "completed"
 
 
@@ -85,10 +89,10 @@ class AgentGateway(
         self.api = api
         self.telemetry = telemetry or LlmWikiTelemetry.from_environment()
 
-    def ingest(self, arguments: ToolArguments) -> dict[str, object]:
+    def ingest(self, arguments: ToolArguments) -> JsonObject:
         return self._ingest(arguments, reingest=False)
 
-    def reingest(self, arguments: ToolArguments) -> dict[str, object]:
+    def reingest(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         source_uri = str(arguments.get("source_uri") or arguments.get("uri") or "").strip()
         source_document_id = str(arguments.get("source_document_id") or "").strip()
@@ -123,7 +127,7 @@ class AgentGateway(
                     request_arguments[key] = existing_metadata[key]
         return self._ingest(request_arguments, reingest=True)
 
-    def source(self, arguments: ToolArguments) -> dict[str, object]:
+    def source(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         source_uri = str(arguments.get("source_uri") or arguments.get("uri") or "").strip()
         source_document_id = str(arguments.get("source_document_id") or "").strip()
@@ -155,7 +159,7 @@ class AgentGateway(
             )
         jobs = self._maintenance_jobs(workspace_id, source_document_id=source_document_id)
         redacted_metadata = _redact_source_text(dict(source_item["metadata"]))
-        metadata: dict[str, object] = (
+        metadata: JsonObject = (
             {str(key): value for key, value in redacted_metadata.items()}
             if isinstance(redacted_metadata, Mapping)
             else {}
@@ -189,10 +193,10 @@ class AgentGateway(
         *,
         workspace_id: str,
         source_document_id: str,
-        metadata: Mapping[str, object],
+        metadata: Mapping[str, JsonValue],
         request: IngestPipelineRequest,
-        maintenance_jobs: list[dict[str, object]] | None = None,
-    ) -> dict[str, object]:
+        maintenance_jobs: list[JsonObject] | None = None,
+    ) -> JsonObject:
         """Expose durable session/view state without exposing raw source bytes."""
 
         revision_id = str(metadata.get("source_revision_id") or "")
@@ -217,11 +221,11 @@ class AgentGateway(
 
         def session_payload(
             stored: tuple[ParseSessionState, Sequence[ParseFrontierItem], int],
-        ) -> dict[str, object]:
+        ) -> JsonObject:
             session, frontier, version = stored
             counts: dict[str, int] = {}
             depth_distribution: dict[str, int] = {}
-            frontier_items: list[dict[str, object]] = []
+            frontier_items: list[JsonObject] = []
             for item in frontier:
                 status = getattr(getattr(item, "status", None), "value", "unknown")
                 counts[status] = counts.get(status, 0) + 1
@@ -316,7 +320,7 @@ class AgentGateway(
             },
         }
 
-    def status(self, arguments: ToolArguments) -> dict[str, object]:
+    def status(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         if not workspace_id:
             raise ValueError("status requires workspace_id")
@@ -328,7 +332,7 @@ class AgentGateway(
         maintenance_errors: list[str] = []
         jobs = self._maintenance_jobs(workspace_id, errors=maintenance_errors)
         usage_error: str | None = None
-        usage_snapshot: dict[str, object] | None = None
+        usage_snapshot: JsonObject | None = None
         try:
             snapshot = self.api.pipeline.usage_projection(workspace_id).snapshot()
             usage_snapshot = snapshot.as_dict() if snapshot is not None else None
@@ -356,7 +360,7 @@ class AgentGateway(
             },
         }
 
-    def propose(self, arguments: ToolArguments) -> dict[str, object]:
+    def propose(self, arguments: ToolArguments) -> JsonObject:
         validation = self.api.validate_proposal(arguments)
         if not validation.get("accepted"):
             return validation
@@ -379,10 +383,10 @@ class AgentGateway(
             "confirmation_required": True,
         }
 
-    def confirm(self, arguments: ToolArguments) -> dict[str, object]:
+    def confirm(self, arguments: ToolArguments) -> JsonObject:
         return self.api.confirm_cockpit_proposal(arguments)
 
-    def _ingest(self, arguments: ToolArguments, *, reingest: bool) -> dict[str, object]:
+    def _ingest(self, arguments: ToolArguments, *, reingest: bool) -> JsonObject:
         request = self._source_request(arguments, allow_existing_revision=reingest)
         if reingest and self._load_source_request(
             workspace_id=request.workspace_id,
@@ -392,7 +396,7 @@ class AgentGateway(
         artifacts = self.api.pipeline.run(request)
         return {"status": "reingested" if reingest else "ingested", "request": request.model_dump(dump_format="json"), "artifacts": asdict(artifacts)}
 
-    def _answer(self, payload: Mapping[str, object]) -> dict[str, object]:
+    def _answer(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         request = _request_payload(payload)
         request = _bounded_lens_arguments(request)
         return self.api.ask(request)
