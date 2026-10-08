@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from numbers import Real
+from typing import cast
 
 from kogwistar.json_types import JsonValue
 
@@ -38,8 +39,10 @@ def request_payload(payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         )
     else:
         value = payload.get("input", payload.get("query_text", ""))
-        if isinstance(payload.get("message"), Mapping):
-            parts = payload["message"].get("parts")
+        message_value = payload.get("message")
+        if isinstance(message_value, Mapping):
+            message = cast(Mapping[str, JsonValue], message_value)
+            parts = message.get("parts")
             if isinstance(parts, list):
                 value = "\n".join(content_to_text(part) for part in parts)
         if isinstance(value, list):
@@ -50,8 +53,12 @@ def request_payload(payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
             )
         else:
             text = content_to_text(value)
-    metadata = payload.get("metadata")
-    metadata = metadata if isinstance(metadata, Mapping) else {}
+    metadata_value = payload.get("metadata")
+    metadata = (
+        cast(Mapping[str, JsonValue], metadata_value)
+        if isinstance(metadata_value, Mapping)
+        else {}
+    )
     request: dict[str, JsonValue] = {
         "workspace_id": str(payload.get("workspace_id") or metadata.get("workspace_id") or "default"),
         "query_text": text,
@@ -89,7 +96,7 @@ def budgets(arguments: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     for name in names:
         if name in arguments and arguments[name] is not None:
             value = arguments[name]
-            if isinstance(value, bool) or not isinstance(value, Real) or value < 0:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
                 raise ValueError(f"{name} must be a non-negative number")
             if name in integer_names and not isinstance(value, int):
                 raise ValueError(f"{name} must be a non-negative integer")
@@ -121,7 +128,7 @@ def partition_budgets(
         return dict(budget_values)
     result: dict[str, JsonValue] = {}
     for name, value in budget_values.items():
-        if not isinstance(value, Real) or isinstance(value, bool):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
             result[name] = value
             continue
         if name in {"max_llm_calls", "max_tokens", "max_steps"}:
@@ -153,7 +160,7 @@ def bounded_lens_arguments(arguments: Mapping[str, JsonValue]) -> dict[str, Json
         if isinstance(value, bool):
             raise TypeError(f"{name} must be a non-negative integer")
         try:
-            value = int(value)
+            value = int(str(value))
         except (TypeError, ValueError) as exc:
             raise TypeError(f"{name} must be a non-negative integer") from exc
         result[name] = max(0, min(value, upper_bound))
