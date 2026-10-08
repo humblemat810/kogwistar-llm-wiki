@@ -73,7 +73,7 @@ def _bounded_turn(value: object) -> JsonObject | None:
                     "score": score if isinstance(score, (int, float)) else None,
                 }
             )
-    return {
+    return cast(JsonObject, {
         "round": max(0, _bounded_integer(value.get("round"))),
         "summary": _bounded_string(value.get("summary"), limit=2_000),
         "touched_node_ids": _bounded_ids(value.get("touched_node_ids")),
@@ -81,7 +81,7 @@ def _bounded_turn(value: object) -> JsonObject | None:
         "next_seed_node_ids": _bounded_ids(value.get("next_seed_node_ids")),
         "hop_limit": max(0, min(8, _bounded_integer(value.get("hop_limit")))),
         "selection_reasons": reasons,
-    }
+    })
 
 
 def bound_maintenance_context(value: Mapping[str, JsonValue] | None) -> JsonObject:
@@ -95,14 +95,14 @@ def bound_maintenance_context(value: Mapping[str, JsonValue] | None) -> JsonObje
             turn = _bounded_turn(item)
             if turn is not None:
                 turns.append(turn)
-    result: JsonObject = {
+    result = cast(JsonObject, {
         "version": 1,
         "turns": turns,
         "compressed_summary": _bounded_string(value.get("compressed_summary"), limit=4_000),
         "compressed_node_ids": _bounded_ids(value.get("compressed_node_ids")),
         "compressed_edge_ids": _bounded_ids(value.get("compressed_edge_ids")),
         "truncated": bool(value.get("truncated", False)),
-    }
+    })
     while len(json.dumps(result, sort_keys=True, separators=(",", ":"))) > _MAX_CONTEXT_CHARACTERS:
         if turns:
             turns.pop(0)
@@ -113,12 +113,12 @@ def bound_maintenance_context(value: Mapping[str, JsonValue] | None) -> JsonObje
             result["compressed_summary"] = summary[: max(0, len(summary) - 256)]
             result["truncated"] = True
             continue
-        result["compressed_node_ids"] = list(
-            cast(list[str], result["compressed_node_ids"])
-        )[:-8]
-        result["compressed_edge_ids"] = list(
-            cast(list[str], result["compressed_edge_ids"])
-        )[:-8]
+        result["compressed_node_ids"] = cast(
+            JsonValue, list(cast(list[str], result["compressed_node_ids"]))[:-8]
+        )
+        result["compressed_edge_ids"] = cast(
+            JsonValue, list(cast(list[str], result["compressed_edge_ids"]))[:-8]
+        )
         result["truncated"] = True
         if len(json.dumps(result, sort_keys=True, separators=(",", ":"))) <= _MAX_CONTEXT_CHARACTERS:
             break
@@ -140,7 +140,7 @@ def append_maintenance_round(
     context = bound_maintenance_context(value)
     turns = list(cast(list[JsonObject], context.get("turns") or []))
     turns.append(
-        {
+        cast(JsonObject, {
             "round": max(0, int(round_number)),
             "summary": summary,
             "touched_node_ids": list(touched_node_ids),
@@ -148,9 +148,9 @@ def append_maintenance_round(
             "next_seed_node_ids": list(next_seed_node_ids),
             "hop_limit": hop_limit,
             "selection_reasons": list(selection_reasons),
-        }
+        })
     )
-    context["turns"] = turns
+    context["turns"] = cast(JsonValue, turns)
     return bound_maintenance_context(context)
 
 
