@@ -6,6 +6,8 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from kogwistar.json_types import JsonObject, JsonValue
+
 from ..embeddings.multimodal_projection import (
     AssetResolver,
     MultimodalImageQueryEncoder,
@@ -63,7 +65,7 @@ class MultimodalIngestMixin:
 
     def resolve_multimodal_source_map(
         self: IngestPipelineHost, unit: MultimodalSourceUnit
-    ) -> Mapping[str, object] | None:
+    ) -> Mapping[str, JsonValue] | None:
         """Resolve the immutable source-map record for a projection unit.
 
         The source graph is the authority for source bytes and revision
@@ -141,7 +143,7 @@ class MultimodalIngestMixin:
             source_digest = str(metadata.get("source_digest") or "").strip() or None
             if isinstance(raw_text, str) and source_digest is None:
                 source_digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
-            return {
+            return cast(JsonObject, {
                 "workspace_id": unit.workspace_id,
                 "source_namespace": source_namespace,
                 "source_id": source_id,
@@ -151,7 +153,7 @@ class MultimodalIngestMixin:
                 "source_digest": source_digest,
                 "content_ref": metadata.get("source_content_ref") or metadata.get("content_ref"),
                 "asset_sha256": metadata.get("source_asset_sha256") or metadata.get("asset_sha256"),
-            }
+            })
 
     def capture_multimodal_source(
         self: IngestPipelineHost,

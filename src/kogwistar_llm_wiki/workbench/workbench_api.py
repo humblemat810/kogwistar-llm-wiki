@@ -18,6 +18,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from kogwistar.json_types import JsonObject, JsonValue
+
 from ..compose.options import ComposeOptions, validate_options
 from ..compose.rendering import render_compose
 from ..compose.validation import check_compose_text
@@ -118,6 +120,38 @@ _MAX_CONTACT_PAGE_SIZE = 1000
 _MAX_CONTACT_SNAPSHOT_ITEMS = 5000
 _MAX_CONTACT_CURSOR_CHARS = 4096
 _MAX_CONTACT_QUERY_CHARS = 200
+
+
+def _payload_int(value: object, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    try:
+        return int(str(value))
+    except ValueError:
+        return default
+
+
+def _payload_float(value: object, default: float) -> float:
+    if value is None:
+        return default
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    try:
+        return float(str(value))
+    except ValueError:
+        return default
+
+
+def _payload_strings(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item) for item in value if item)
 
 
 def _multimodal_hit_payload(hit: MultimodalSearchHit) -> dict[str, object]:
@@ -970,12 +1004,12 @@ class WorkbenchApi:
                 ),
                 "results": page}
 
-    def readiness(self) -> dict[str, object]:
+    def readiness(self) -> JsonObject:
         """Check that owned engines are open and SQL backends accept a probe."""
         engines = self.pipeline.engines
         if getattr(engines, "_closed", False):
             return {"ready": False, "service": "kogwistar-llm-wiki", "reason": "engines_closed"}
-        checks: dict[str, str] = {}
+        checks: dict[str, JsonValue] = {}
         try:
             for name in ("conversation", "workflow", "kg", "wisdom", "derived_knowledge"):
                 engine = getattr(engines, name, None)
@@ -997,20 +1031,20 @@ class WorkbenchApi:
             return {"ready": False, "service": "kogwistar-llm-wiki", "checks": checks, "reason": str(exc)}
         return {"ready": True, "service": "kogwistar-llm-wiki", "checks": checks}
 
-    def get_settings(self, *, workspace_id: str = "default") -> dict[str, object]:
+    def get_settings(self, *, workspace_id: str = "default") -> JsonObject:
         return self.settings.snapshot(workspace_id=workspace_id)
 
-    def settings_health(self, *, workspace_id: str = "default") -> dict[str, object]:
+    def settings_health(self, *, workspace_id: str = "default") -> JsonObject:
         return self.settings.health(workspace_id=workspace_id, readiness=self.readiness())
 
     def update_desired_settings(
-        self, *, workspace_id: str, changes: Mapping[str, object]
-    ) -> dict[str, object]:
+        self, *, workspace_id: str, changes: Mapping[str, JsonValue]
+    ) -> JsonObject:
         return self.settings.update_desired(changes, workspace_id=workspace_id)
 
     def apply_settings(
         self, *, workspace_id: str, confirmed: bool
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         return self.settings.apply(workspace_id=workspace_id, confirmed=confirmed)
 
     def recall_memory(
@@ -1021,7 +1055,7 @@ class WorkbenchApi:
         include_inferred: bool = True,
         limit: int | None = None,
         authorized_stream_ids: Sequence[str] | None = None,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         return self.codex_memory.recall(
             workspace_id=workspace_id,
             query_text=query_text,
@@ -1031,8 +1065,8 @@ class WorkbenchApi:
         )
 
     def capture_memory(
-        self, payload: Mapping[str, object] | list[Mapping[str, object]]
-    ) -> dict[str, object]:
+        self, payload: Mapping[str, JsonValue] | list[Mapping[str, JsonValue]]
+    ) -> JsonObject:
         return self.codex_memory.capture(payload)
 
     def review_memory(
@@ -1044,7 +1078,7 @@ class WorkbenchApi:
         lifecycle_status: str | None = None,
         limit: int = 50,
         authorized_stream_ids: Sequence[str] | None = None,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         return self.codex_memory.review(
             workspace_id=workspace_id,
             kind=kind,
@@ -1054,7 +1088,7 @@ class WorkbenchApi:
             authorized_stream_ids=authorized_stream_ids,
         )
 
-    def compose_preview(self, payload: Mapping[str, object]) -> dict[str, object]:
+    def compose_preview(self, payload: Mapping[str, object]) -> JsonObject:
         """Return a generated Compose bundle without writing files or secrets."""
         options = ComposeOptions(
             backend=str(payload.get("backend") or "postgres"),
@@ -1065,18 +1099,23 @@ class WorkbenchApi:
             with_oauth=bool(payload.get("with_oauth", False)),
             auth_mode=str(payload.get("auth_mode") or "disabled"),
             model_revision=str(payload.get("model_revision") or ""),
-            embedding_dimension=int(payload.get("embedding_dimension") or 1024),
-            embedding_max_model_len=int(payload.get("embedding_max_model_len") or 8192),
-            embedding_crop_token_budget=int(payload.get("embedding_crop_token_budget") or 7680),
-            embedding_gpu_memory_utilization=float(payload.get("embedding_gpu_memory_utilization") or 0.86),
+            embedding_dimension=_payload_int(payload.get("embedding_dimension"), 1024),
+            embedding_max_model_len=_payload_int(payload.get("embedding_max_model_len"), 8192),
+            embedding_crop_token_budget=_payload_int(payload.get("embedding_crop_token_budget"), 7680),
+            embedding_gpu_memory_utilization=_payload_float(
+                payload.get("embedding_gpu_memory_utilization"), 0.86
+            ),
             embedding_vllm_enforce_eager=bool(payload.get("embedding_vllm_enforce_eager", True)),
-            embedding_vllm_max_num_seqs=int(payload.get("embedding_vllm_max_num_seqs") or 1),
+            embedding_vllm_max_num_seqs=_payload_int(payload.get("embedding_vllm_max_num_seqs"), 1),
         )
         errors = validate_options(options)
-        return {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None}
+        return cast(
+            JsonObject,
+            {"valid": not errors, "errors": errors, "yaml": render_compose(options) if not errors else None},
+        )
 
     @staticmethod
-    def compose_check(payload: Mapping[str, object]) -> dict[str, object]:
+    def compose_check(payload: Mapping[str, object]) -> JsonObject:
         text = payload.get("yaml")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("yaml must be a non-empty string")
@@ -1151,7 +1190,7 @@ class WorkbenchApi:
                     workspace_id=request.workspace_id,
                     interaction_id=interaction_id,
                     session_id=session_id,
-                    submitted_at_ms=int(payload.get("submitted_at_ms") or int(time.time() * 1000)),
+                    submitted_at_ms=_payload_int(payload.get("submitted_at_ms"), int(time.time() * 1000)),
                     response=response,
                 )
                 if not created and stored_interaction.response is not None:
@@ -1266,7 +1305,7 @@ class WorkbenchApi:
         stored_payload = {**dict(payload), "workspace_id": validated.workspace_id, "mode": "codex"}
         interaction = self.interactions.enqueue(
             stored_payload,
-            max_retries=int(payload.get("max_retries") or 3),
+            max_retries=_payload_int(payload.get("max_retries"), 3),
         )
         self.dispatcher.notify(interaction.workspace_id)
         return interaction.to_dict()
@@ -1462,12 +1501,15 @@ class WorkbenchApi:
 
 def _lens_request(payload: Mapping[str, object]) -> SemanticLensRequest:
     def integer(name: str, default: int) -> int:
-        value = payload.get(name)
-        return default if value is None else int(value)
+        return _payload_int(payload.get(name), default)
+
+    source_watermark = payload.get("source_watermark")
+    if not isinstance(source_watermark, (str, int)):
+        source_watermark = None
 
     return SemanticLensRequest(
         workspace_id=str(payload["workspace_id"]),
-        graph_spaces=tuple(payload.get("graph_spaces") or (GraphSpace.CURATED_KG.value,)),
+        graph_spaces=_payload_strings(payload.get("graph_spaces")) or (GraphSpace.CURATED_KG.value,),
         query_text=str(payload.get("query_text") or ""),
         semantic_retrieval=bool(payload.get("semantic_retrieval", False)),
         retrieval_mode=_retrieval_mode(payload.get("retrieval_mode")),
@@ -1475,16 +1517,16 @@ def _lens_request(payload: Mapping[str, object]) -> SemanticLensRequest:
         similarity_threshold=(
             None
             if payload.get("similarity_threshold") is None
-            else float(payload["similarity_threshold"])
+            else _payload_float(payload["similarity_threshold"], 0.0)
         ),
         source_evidence_required=bool(payload.get("source_evidence_required", False)),
-        explicit_anchor_ids=tuple(str(value) for value in (payload.get("explicit_anchor_ids") or ())),
+        explicit_anchor_ids=_payload_strings(payload.get("explicit_anchor_ids")),
         hop_limit=integer("hop_limit", 1),
         max_nodes=integer("max_nodes", 40),
         max_edges=integer("max_edges", 80),
         max_hyperedges=integer("max_hyperedges", 12),
-        pinned_node_ids=tuple(str(value) for value in (payload.get("pinned_node_ids") or ())),
-        source_watermark=payload.get("source_watermark"),
+        pinned_node_ids=_payload_strings(payload.get("pinned_node_ids")),
+        source_watermark=source_watermark,
         include_tombstones=bool(payload.get("include_tombstones", False)),
     )
 
