@@ -3,16 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
+from kogwistar.json_types import JsonValue
 from kogwistar.runtime.sinks import EventSinkLike, JsonlEventSink
 
 from .diagnostics.debug_helpers import LiveTracePrinter
 from .otel import LlmWikiTelemetry
 
+JsonObject = dict[str, JsonValue]
+
 
 class EventEnricher(Protocol):
     """Callback that adds structured fields to one trace event."""
 
-    def __call__(self, event: dict[str, object], /) -> dict[str, object]: ...
+    def __call__(self, event: JsonObject, /) -> JsonObject: ...
 
 
 class LongRunJsonlTraceSink(JsonlEventSink):
@@ -30,7 +33,7 @@ class LongRunJsonlTraceSink(JsonlEventSink):
         self.live_trace_printer = LiveTracePrinter(prefix="longrun.runtime") if live_trace else None
         self.telemetry = telemetry or LlmWikiTelemetry.from_environment()
 
-    def emit(self, event: dict[str, object]) -> None:
+    def emit(self, event: JsonObject) -> None:
         enriched_event = self.enrich_event(dict(event)) if self.enrich_event is not None else dict(event)
         super().emit(enriched_event)
         self.telemetry.instrument_event(enriched_event)
