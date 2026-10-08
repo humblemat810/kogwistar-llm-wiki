@@ -15,7 +15,7 @@ from ..agent.protocol import (
 )
 from ..maintenance.maintenance_control import configured_default_request_max_rounds
 from ..models import IngestPipelineRequest
-from .host import AgentGatewayHost, JsonObject, ToolArguments
+from .host import AgentGatewayHost, JsonObject, SourceDocumentRecord, ToolArguments
 
 
 class AgentMaintenanceToolsMixin(AgentGatewayHost):
@@ -43,7 +43,7 @@ class AgentMaintenanceToolsMixin(AgentGatewayHost):
         if not isinstance(raw_source_ids, (list, tuple, set, frozenset)):
             raise TypeError("source_document_ids must be a list of IDs")
         source_ids = [str(value) for value in raw_source_ids if str(value).strip()]
-        source_candidates: Sequence[Mapping[str, object]] | None = None
+        source_candidates: Sequence[SourceDocumentRecord] | None = None
         if not source_ids:
             source_candidates = self._source_documents(workspace_id)
             source_ids = self._source_ids_for_topic(

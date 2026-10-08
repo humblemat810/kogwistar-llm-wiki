@@ -195,7 +195,7 @@ class AgentGateway(
         source_document_id: str,
         metadata: Mapping[str, JsonValue],
         request: IngestPipelineRequest,
-        maintenance_jobs: list[JsonObject] | None = None,
+        maintenance_jobs: Sequence[JsonObject] | None = None,
     ) -> JsonObject:
         """Expose durable session/view state without exposing raw source bytes."""
 

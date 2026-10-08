@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol, TypeAlias
+from typing import Protocol, TypeAlias, TypedDict
 
 from kogwistar.json_types import JsonValue
 
@@ -13,6 +13,15 @@ from ..workbench.workbench_api import WorkbenchApi
 
 ToolArguments: TypeAlias = Mapping[str, JsonValue]
 JsonObject = dict[str, JsonValue]
+
+
+class SourceDocumentRecord(TypedDict):
+    """Typed source-map record shared by gateway and source tools."""
+
+    id: str
+    metadata: JsonObject
+    content: str
+    revision_document_id: str
 
 
 class AgentGatewayHost(Protocol):
@@ -28,14 +37,14 @@ class AgentGatewayHost(Protocol):
 
     def _answer(self, payload: Mapping[str, JsonValue]) -> JsonObject: ...
 
-    def _source_documents(self, workspace_id: str) -> Sequence[JsonObject]: ...
+    def _source_documents(self, workspace_id: str) -> Sequence[SourceDocumentRecord]: ...
 
     def _source_ids_for_topic(
         self,
         workspace_id: str,
         topic: str,
         *,
-        candidates: Sequence[JsonObject] | None = None,
+        candidates: Sequence[SourceDocumentRecord] | None = None,
     ) -> list[str]: ...
 
     def _load_source_request(
@@ -44,7 +53,7 @@ class AgentGatewayHost(Protocol):
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
-        candidates: Sequence[JsonObject] | None = None,
+        candidates: Sequence[SourceDocumentRecord] | None = None,
     ) -> IngestPipelineRequest | None: ...
 
     def _load_source_request_by_id(

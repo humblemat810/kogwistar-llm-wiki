@@ -5,20 +5,19 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 from ..models import IngestPipelineRequest
 from ..parsing.parse_views import ParseViewResolver
 from ..utils import _temporary_namespace
-from kogwistar.json_types import JsonValue
 from .gateway_source import (
     decode_metadata_mapping,
     fetch_source_text,
     validate_agent_source_uri,
     validate_supplied_provenance,
 )
-from .host import AgentGatewayHost, JsonObject, ToolArguments
+from .host import AgentGatewayHost, JsonObject, SourceDocumentRecord, ToolArguments
 
 if TYPE_CHECKING:
     from ..workbench.workbench_api import WorkbenchApi
@@ -26,20 +25,11 @@ if TYPE_CHECKING:
 _MAX_SOURCE_DISCOVERY_NODES = 128
 
 
-def _candidate_uri(candidate: Mapping[str, JsonValue]) -> str:
+def _candidate_uri(candidate: Mapping[str, object]) -> str:
     metadata = candidate.get("metadata")
     if not isinstance(metadata, Mapping):
         return ""
     return str(metadata.get("source_uri") or "")
-
-
-class SourceDocumentRecord(TypedDict):
-    """Typed source-map record shared by gateway and source tools."""
-
-    id: str
-    metadata: JsonObject
-    content: str
-    revision_document_id: str
 
 
 ProvenancePolicy = Literal["required", "optional", "disabled"]
@@ -151,7 +141,7 @@ class AgentSourceMixin(AgentGatewayHost):
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
-        candidates: Sequence[JsonObject] | None = None,
+        candidates: Sequence[SourceDocumentRecord] | None = None,
     ) -> IngestPipelineRequest | None:
         if candidates is None:
             candidates = self._source_documents(workspace_id)
@@ -319,7 +309,7 @@ class AgentSourceMixin(AgentGatewayHost):
         workspace_id: str,
         topic: str,
         *,
-        candidates: Sequence[JsonObject] | None = None,
+        candidates: Sequence[SourceDocumentRecord] | None = None,
     ) -> list[str]:
         terms = {term.lower() for term in topic.split() if len(term) > 2}
         matches = []
