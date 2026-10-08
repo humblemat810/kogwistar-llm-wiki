@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from threading import Event
 from typing import TYPE_CHECKING, ClassVar, Protocol
@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Protocol
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.engine_core.models import Node
+from kogwistar.maintenance.contracts import BeforeWrite
 from kogwistar.runtime import RunResult
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.runtime import WorkflowRuntime
@@ -171,7 +172,7 @@ class MaintenanceWorkerLike(Protocol):
         workspace_id: str,
         engines: NamespaceEngines,
         *,
-        before_write: Callable[[object], None] | None = None,
+        before_write: BeforeWrite[object] | None = None,
     ) -> list[str]: ...
 
     def _handle_review_maintenance_subject(self, ctx: MaintenanceJobExecutionContext) -> None: ...

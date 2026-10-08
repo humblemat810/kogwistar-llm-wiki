@@ -8,6 +8,7 @@ from typing import cast
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.maintenance.contracts import BeforeWrite
 from kogwistar.maintenance.models import MaintenanceTemplateResult
 from kogwistar.maintenance.template import run_grouped_maintenance_template
 from kogwistar.runtime.models import RunSuccess, StepRunResult
@@ -130,7 +131,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                     ]
                 ),
             ),
-            before_write=cast(Callable[[str], None], before_write) if callable(before_write) else None,
+            before_write=cast(BeforeWrite[str], before_write) if callable(before_write) else None,
         )
         for result in template_result.grouped_results:
             logger.info(
@@ -230,7 +231,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         workspace_id: str,
         engines: NamespaceEngines,
         *,
-        before_write: Callable[[object], None] | None = None,
+        before_write: BeforeWrite[object] | None = None,
     ) -> list[str]:
         """Analyze completed execution history and emit execution-derived wisdom."""
         if not workspace_id or not engines:
@@ -329,7 +330,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         emitted = self._emit_execution_wisdom_from_history(
             workspace_id,
             engines,
-            before_write=cast(Callable[[object], None], before_write) if callable(before_write) else None,
+            before_write=cast(BeforeWrite[object], before_write) if callable(before_write) else None,
         )
         return RunSuccess(
             state_update=[("u", {"history_wisdom_complete": True, "execution_wisdom_emitted": emitted})]
