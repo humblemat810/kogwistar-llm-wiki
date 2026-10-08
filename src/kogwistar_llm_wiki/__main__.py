@@ -355,7 +355,7 @@ def _cmd_compose_check(args: argparse.Namespace) -> None:
     return _compose_check_command(args)
 
 
-def _command_handlers() -> dict[str, Callable[[argparse.Namespace], object]]:
+def _command_handlers() -> dict[str, Callable[[argparse.Namespace], None]]:
     return {
         "demo": _cmd_demo,
         "ingest": _cmd_ingest,
