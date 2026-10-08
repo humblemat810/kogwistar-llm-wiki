@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol, TypedDict, cast
@@ -21,9 +21,11 @@ from kogwistar.runtime.budget import (
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 
 from ..diagnostics.debug_helpers import summarize_stage_timings
+from ..ingest.contracts import TraceLog
 from ..providers.role_config import provider_config_summary
 from ..usage.provider import (
     ProviderUsageCallback,
+    ProviderUsageEventSink,
     provider_call_count,
     resolve_token_pricing,
 )
@@ -139,7 +141,7 @@ def _build_provider_layer_callbacks(
     budget_ledger: StateBackedBudgetLedger | None = None,
     run_id: str = "",
     source_document_id: str = "",
-    usage_event_sink: Callable[[BudgetEvent], None] | None = None,
+    usage_event_sink: ProviderUsageEventSink | None = None,
     build_callbacks: LayerCallbackBuilder | None = None,
 ) -> LayerwiseLLMCallbacks:
     model_callbacks: list[ProviderUsageCallback] = []
@@ -174,8 +176,8 @@ def run_workflow_layered_parse(
     provider_settings: WorkflowProviderSettings,
     engine_dir: Path,
     budget_ledger: StateBackedBudgetLedger | None = None,
-    trace: Callable[[str], None] | None = None,
-    heartbeat: Callable[[str], None] | None = None,
+    trace: TraceLog | None = None,
+    heartbeat: TraceLog | None = None,
     run_id: str | None = None,
     resume_from_checkpoint: bool = False,
     usage_event_path: Path | None = None,
@@ -217,7 +219,7 @@ def run_workflow_layered_parse(
             "budget_kind": "token",
         }
     )
-    usage_event_sink: Callable[[BudgetEvent], None] | None = None
+    usage_event_sink: ProviderUsageEventSink | None = None
     if usage_event_path is not None:
         usage_event_path.parent.mkdir(parents=True, exist_ok=True)
 
