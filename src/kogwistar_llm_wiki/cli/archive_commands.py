@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable
 from pathlib import Path
 
-from ..models import NamespaceEngines
-from .entrypoint_support import EngineBuilder
+from .entrypoint_support import EngineBuilder, EngineCloser
 
 
 def archive_create(
     args: argparse.Namespace,
     *,
     build_engines: EngineBuilder,
-    close_engines: Callable[[NamespaceEngines], None],
+    close_engines: EngineCloser,
 ) -> None:
     from ..archiving.operations import create_archive
 
@@ -57,7 +55,7 @@ def archive_restore(
     args: argparse.Namespace,
     *,
     build_engines: EngineBuilder,
-    close_engines: Callable[[NamespaceEngines], None],
+    close_engines: EngineCloser,
 ) -> None:
     from ..archiving.operations import restore_archive, restore_backend_snapshot
     from ..archiving.validation import inspect_archive

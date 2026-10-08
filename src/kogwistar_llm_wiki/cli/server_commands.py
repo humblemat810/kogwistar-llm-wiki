@@ -13,18 +13,14 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Literal, Protocol
 
-from ..models import NamespaceEngines
-from .entrypoint_support import EngineBuilder, PersistenceKwargsFactory
+from .entrypoint_support import EngineBuilder, EngineCloser, PersistenceKwargsFactory
 
 logger = logging.getLogger("kogwistar_llm_wiki")
 
 BuildEngines = EngineBuilder
 
 
-class CloseEngines(Protocol):
-    """Release the engines created for one CLI command."""
-
-    def __call__(self, engines: NamespaceEngines, /) -> None: ...
+CloseEngines = EngineCloser
 
 
 class AuthorizeNotificationSource(Protocol):

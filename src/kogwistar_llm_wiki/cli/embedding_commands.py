@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from kogwistar.json_types import JsonObject
 
 from ..models import NamespaceEngines
-from .entrypoint_support import EngineBuilder
+from .entrypoint_support import EngineBuilder, EngineCloser
 
 
 @runtime_checkable
@@ -45,7 +44,7 @@ def embeddings_inspect(
     args: argparse.Namespace,
     *,
     build_engines: EngineBuilder,
-    close_engines: Callable[[NamespaceEngines], None],
+    close_engines: EngineCloser,
 ) -> None:
     engines = build_engines(
         args.workspace,
@@ -76,7 +75,7 @@ def embeddings_adopt_legacy(
     args: argparse.Namespace,
     *,
     build_engines: EngineBuilder,
-    close_engines: Callable[[NamespaceEngines], None],
+    close_engines: EngineCloser,
 ) -> None:
     if not args.acknowledge_legacy_vectors:
         raise ValueError(

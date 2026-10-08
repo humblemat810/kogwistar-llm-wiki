@@ -9,8 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..models import NamespaceEngines
-from .entrypoint_support import DemoEngineBuilder, EngineBuilder, PersistenceKwargs
+from .entrypoint_support import DemoEngineBuilder, EngineBuilder, EngineCloser, PersistenceKwargs
 
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest
@@ -89,7 +88,7 @@ def run_demo(
     args: argparse.Namespace,
     *,
     build_demo_engines: DemoEngineBuilder,
-    close_engines: Callable[[NamespaceEngines], None],
+    close_engines: EngineCloser,
     persistence_kwargs: Callable[[argparse.Namespace], PersistenceKwargs],
 ) -> None:
     """Run the ephemeral, single-process demonstration flow."""
@@ -163,7 +162,7 @@ def run_ingest(
     args: argparse.Namespace,
     *,
     build_engines: EngineBuilder,
-    close_engines: Callable[[NamespaceEngines], None],
+    close_engines: EngineCloser,
     persistence_kwargs: Callable[[argparse.Namespace], PersistenceKwargs],
 ) -> None:
     """Run one persistent ingest command."""
@@ -204,7 +203,7 @@ def run_report(
     args: argparse.Namespace,
     *,
     build_engines: EngineBuilder,
-    close_engines: Callable[[NamespaceEngines], None],
+    close_engines: EngineCloser,
     persistence_kwargs: Callable[[argparse.Namespace], PersistenceKwargs],
 ) -> None:
     """Build and print a persisted workspace quality report."""
