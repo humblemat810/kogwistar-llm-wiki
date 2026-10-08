@@ -6,7 +6,9 @@ import hashlib
 import tarfile
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
+
+from kogwistar.json_types import JsonValue
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -101,8 +103,8 @@ def assert_quiescent(engines: NamespaceEngines) -> None:
         )
 
 
-def embedding_profiles(engines: NamespaceEngines) -> dict[str, dict[str, Any]]:
-    profiles: dict[str, dict[str, Any]] = {}
+def embedding_profiles(engines: NamespaceEngines) -> dict[str, dict[str, JsonValue]]:
+    profiles: dict[str, dict[str, JsonValue]] = {}
     seen: set[int] = set()
     for label, engine in (
         ("conversation", engines.conversation),
@@ -125,7 +127,7 @@ def embedding_profiles(engines: NamespaceEngines) -> dict[str, dict[str, Any]]:
     return profiles
 
 
-def embedding_fingerprint(profiles: Mapping[str, Any]) -> str:
+def embedding_fingerprint(profiles: Mapping[str, JsonValue]) -> str:
     import json
 
     return hashlib.sha256(
@@ -165,8 +167,8 @@ def sha256_file(path: Path) -> str:
 def restore_artifacts(
     archive: tarfile.TarFile,
     target_data_dir: Path,
-    expected_entries: Mapping[str, Any] | None = None,
-    predecessor_entries: Mapping[str, Any] | None = None,
+    expected_entries: Mapping[str, str] | None = None,
+    predecessor_entries: Mapping[str, str] | None = None,
 ) -> int:
     restored = 0
     seen: set[str] = set()
