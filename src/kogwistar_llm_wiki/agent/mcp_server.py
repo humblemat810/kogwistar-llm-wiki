@@ -131,12 +131,12 @@ def _object_schema(
     *,
     required: tuple[str, ...] = (),
 ) -> JsonObject:
-    return {
+    return cast(JsonObject, {
         "additionalProperties": False,
         "properties": properties,
         "required": list(required),
         "type": "object",
-    }
+    })
 
 
 def _memory_record_schema() -> JsonObject:
@@ -580,7 +580,11 @@ class AgentMcpServer:
     ) -> types.CallToolResult:
         try:
             identity = self._authenticate_request()
-            result = self._dispatch(name, arguments, identity=identity)
+            result = self._dispatch(
+                name,
+                cast(Mapping[str, JsonValue], arguments),
+                identity=identity,
+            )
         except Exception as exc:  # noqa: BLE001 - expose failures as tool results
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
@@ -628,10 +632,10 @@ class AgentMcpServer:
     def _dispatch(
         self,
         name: str,
-        arguments: dict[str, object],
+        arguments: Mapping[str, JsonValue],
         *,
         identity: LlmWikiIdentity | None = None,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         """Authorize and dispatch one validated MCP call to the gateway."""
 
         workspace = str(arguments.get("workspace_id") or "").strip() or None
@@ -657,7 +661,7 @@ class AgentMcpServer:
         scope = "read" if name in READ_TOOL_NAMES else "write"
         authorize(identity, workspace_id=workspace, scope=scope)
         with claims_context(identity):
-            return self.gateway.call_mcp_tool(name, arguments)
+            return cast(JsonObject, self.gateway.call_mcp_tool(name, arguments))
 
     async def call_tool(
         self, name: str, arguments: dict[str, object] | None = None
@@ -665,7 +669,10 @@ class AgentMcpServer:
         """Invoke a tool directly for provider-free contract tests."""
 
         try:
-            result = self._dispatch(name, arguments or {})
+            result = self._dispatch(
+                name,
+                cast(Mapping[str, JsonValue], arguments or {}),
+            )
         except Exception as exc:  # noqa: BLE001 - MCP tools expose errors as protocol results
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
