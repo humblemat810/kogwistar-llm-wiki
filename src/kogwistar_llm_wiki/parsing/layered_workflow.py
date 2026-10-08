@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict, cast
+from typing import Literal, Protocol, TypedDict, cast
 
 from kg_doc_parser.workflow_ingest.layerwise_llm import (
     LayerwiseLLMCallbacks,
@@ -390,7 +390,7 @@ def run_workflow_layered_parse(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
     )
-    timing_summary = summarize_stage_timings(cast(list[Mapping[str, Any]], layer_log))
+    timing_summary = summarize_stage_timings(cast(list[Mapping[str, object]], layer_log))
     usage_summary["timing_summary"] = timing_summary
     if proposal_summary:
         usage_summary["proposal_summary"] = proposal_summary
