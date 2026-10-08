@@ -13,6 +13,7 @@ from kg_doc_parser.workflow_ingest.layerwise_llm import (
     build_layerwise_llm_callbacks,
 )
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
+from kogwistar.json_types import JsonValue
 from kogwistar.runtime.budget import (
     BudgetEvent,
     StateBackedBudgetLedger,
@@ -89,6 +90,10 @@ class LayeredParseResult:
 
         value = self.diagnostics.get("workflow_status")
         return value if isinstance(value, str) else None
+
+
+def _json_len(value: object) -> int:
+    return len(value) if isinstance(value, (list, tuple, dict, str)) else 0
 
 
 def _summarize_budget_events(
@@ -351,8 +356,8 @@ def run_workflow_layered_parse(
         _layer_event(
             "workflow_layered_export_bundle_synthesized",
             workflow_status=getattr(run_result, "status", None),
-            graph_node_count=len(graph_payload.get("nodes", []) or []),
-            graph_edge_count=len(graph_payload.get("edges", []) or []),
+            graph_node_count=_json_len(graph_payload.get("nodes")),
+            graph_edge_count=_json_len(graph_payload.get("edges")),
         )
     if not bundle:
         _layer_event(
@@ -365,8 +370,8 @@ def run_workflow_layered_parse(
         "workflow_layered_export_bundle_ready",
         workflow_status=getattr(run_result, "status", None),
         bundle_source=bundle_source,
-        graph_node_count=len(bundle.graph_payload.get("nodes", []) or []),
-        graph_edge_count=len(bundle.graph_payload.get("edges", []) or []),
+        graph_node_count=_json_len(bundle.graph_payload.get("nodes")),
+        graph_edge_count=_json_len(bundle.graph_payload.get("edges")),
     )
 
     graph_payload = cast(dict[str, object], _dump_model(bundle.graph_payload))
@@ -392,7 +397,9 @@ def run_workflow_layered_parse(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
     )
-    timing_summary = summarize_stage_timings(cast(list[Mapping[str, object]], layer_log))
+    timing_summary = summarize_stage_timings(
+        cast(list[Mapping[str, JsonValue]], layer_log)
+    )
     usage_summary["timing_summary"] = timing_summary
     if proposal_summary:
         usage_summary["proposal_summary"] = proposal_summary
@@ -434,6 +441,9 @@ def run_workflow_layered_parse(
         evaluation=evaluation,
         diagnostics=diagnostics,
         usage_summary=usage_summary,
-        usage_events=[budget_event_to_dict(event) for event in budget_ledger.events],
+        usage_events=cast(
+            list[dict[str, object]],
+            [budget_event_to_dict(event) for event in budget_ledger.events],
+        ),
         layer_log=layer_log,
     )
