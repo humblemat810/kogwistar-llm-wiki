@@ -356,6 +356,19 @@ class AssetResolver(Protocol):
     def resolve(self, unit: MultimodalSourceUnit) -> object: ...
 
 
+class _NativeModelLike(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+    def eval(self) -> "_NativeModelLike": ...
+
+
+class _NativeProcessorLike(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+
+NativeVisionProcessor = Callable[..., object]
+
+
 @runtime_checkable
 class MultimodalProjectionStore(Protocol):
     @property
@@ -1463,8 +1476,8 @@ class ColQwenNativeEncoder:
 
     def __init__(
         self,
-        model: Any,
-        processor: Any,
+        model: _NativeModelLike,
+        processor: _NativeProcessorLike,
         *,
         profile: MultimodalEmbeddingProfile,
         device: str,
@@ -1534,7 +1547,7 @@ class ColQwenNativeEncoder:
             if model_id == DEFAULT_COLQWEN_MODEL
             else revision
         )
-        model_kwargs: dict[str, Any] = {"revision": effective_revision} if effective_revision else {}
+        model_kwargs: dict[str, object] = {"revision": effective_revision} if effective_revision else {}
         if selected_device == "cuda" and load_in_4bit:
             try:
                 from transformers import BitsAndBytesConfig
@@ -1581,7 +1594,7 @@ class ColQwenNativeEncoder:
         )
         return cls(model, processor, profile=profile, device=selected_device, batch_size=batch_size)
 
-    def _run(self, inputs: Any) -> Sequence[EmbeddingSet]:
+    def _run(self, inputs: object) -> Sequence[EmbeddingSet]:
         import torch
 
         if hasattr(inputs, "to"):
@@ -1722,13 +1735,13 @@ class Qwen3VLDenseEncoder:
 
     def __init__(
         self,
-        model: Any,
-        processor: Any,
+        model: _NativeModelLike,
+        processor: _NativeProcessorLike,
         *,
         profile: MultimodalEmbeddingProfile,
         device: str,
         batch_size: int = 1,
-        vision_processor: Any | None = None,
+        vision_processor: NativeVisionProcessor | None = None,
         instruction: str = "Represent the user's input.",
     ) -> None:
         if profile.embedding != "dense":
@@ -1803,7 +1816,7 @@ class Qwen3VLDenseEncoder:
                     f'install "{sys.executable}" -m pip install -e ".[multimodal-cuda]"'
                 ) from exc
 
-        model_kwargs: dict[str, Any] = {"trust_remote_code": True}
+        model_kwargs: dict[str, object] = {"trust_remote_code": True}
         if revision:
             model_kwargs["revision"] = revision
         if selected_device == "cuda":
@@ -1811,7 +1824,7 @@ class Qwen3VLDenseEncoder:
         else:
             model_kwargs["torch_dtype"] = torch.float32
         model = AutoModelForMultimodalLM.from_pretrained(model_id, **model_kwargs).eval()
-        processor_kwargs: dict[str, Any] = {"trust_remote_code": True}
+        processor_kwargs: dict[str, object] = {"trust_remote_code": True}
         if revision:
             processor_kwargs["revision"] = revision
         try:
@@ -1930,7 +1943,7 @@ class Qwen3VLDenseEncoder:
         kwargs.update(video_kwargs)
         return self._processor(**kwargs)
 
-    def _run(self, inputs: Any) -> Sequence[EmbeddingSet]:
+    def _run(self, inputs: object) -> Sequence[EmbeddingSet]:
         import torch
 
         if hasattr(inputs, "to"):
