@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Protocol, TypeAlias
 
+from kogwistar.json_types import JsonValue
+
 from ..models import IngestPipelineRequest
 from ..otel import LlmWikiTelemetry
 from ..workbench.workbench_api import WorkbenchApi
 
-ToolArguments: TypeAlias = Mapping[str, object]
+ToolArguments: TypeAlias = Mapping[str, JsonValue]
 
 
 class AgentGatewayHost(Protocol):
