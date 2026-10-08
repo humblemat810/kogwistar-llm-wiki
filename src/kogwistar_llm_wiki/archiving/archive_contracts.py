@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from kogwistar.engine_core import GraphKnowledgeEngine
+from kogwistar.json_types import JsonObject
 
 ARCHIVE_FORMAT_VERSION = 2
 READABLE_ARCHIVE_FORMATS = {1, ARCHIVE_FORMAT_VERSION}
@@ -31,7 +32,7 @@ class RestoreReport:
     replayed_namespaces: int
     rebuilt_vectors: bool
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(self) -> JsonObject:
         return {
             "archive_id": self.archive_id,
             "workspace_id": self.workspace_id,
