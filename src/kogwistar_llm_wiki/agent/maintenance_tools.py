@@ -15,11 +15,11 @@ from ..agent.protocol import (
 )
 from ..maintenance.maintenance_control import configured_default_request_max_rounds
 from ..models import IngestPipelineRequest
-from .host import AgentGatewayHost, ToolArguments
+from .host import AgentGatewayHost, JsonObject, ToolArguments
 
 
 class AgentMaintenanceToolsMixin(AgentGatewayHost):
-    def maintain(self, arguments: ToolArguments) -> dict[str, object]:
+    def maintain(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         topic = str(arguments.get("topic") or "").strip()
         objective = str(arguments.get("objective") or arguments.get("policy") or "").strip()

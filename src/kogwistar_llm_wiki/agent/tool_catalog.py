@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .host import AgentGatewayHost, ToolArguments
+from .host import AgentGatewayHost, JsonObject, ToolArguments
 
 
 class AgentToolCatalogMixin(AgentGatewayHost):
@@ -50,7 +50,7 @@ class AgentToolCatalogMixin(AgentGatewayHost):
             "confirm": "Explicitly approve and apply a previously validated knowledge change.",
         }
 
-    def call_mcp_tool(self, name: str, arguments: ToolArguments) -> dict[str, object]:
+    def call_mcp_tool(self, name: str, arguments: ToolArguments) -> JsonObject:
         with self.telemetry.span("llm_wiki.mcp_tool", {"tool": name}):
             handlers = {
                 "query": self.query,

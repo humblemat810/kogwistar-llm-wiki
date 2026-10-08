@@ -17,7 +17,7 @@ from .gateway_source import (
     validate_agent_source_uri,
     validate_supplied_provenance,
 )
-from .host import AgentGatewayHost, ToolArguments
+from .host import AgentGatewayHost, JsonObject, ToolArguments
 
 if TYPE_CHECKING:
     from ..workbench.workbench_api import WorkbenchApi
@@ -70,10 +70,10 @@ class AgentSourceMixin(AgentGatewayHost):
 
     api: WorkbenchApi
 
-    def multimodal_capture(self, arguments: ToolArguments) -> dict[str, object]:
+    def multimodal_capture(self, arguments: ToolArguments) -> JsonObject:
         return self.api.multimodal_capture(arguments)
 
-    def multimodal_index(self, arguments: ToolArguments) -> dict[str, object]:
+    def multimodal_index(self, arguments: ToolArguments) -> JsonObject:
         return self.api.multimodal_index(arguments)
 
     def _source_request(

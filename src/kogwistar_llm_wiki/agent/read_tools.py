@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .host import AgentGatewayHost, ToolArguments
+from .host import AgentGatewayHost, JsonObject, ToolArguments
 from .protocol import bounded_lens_arguments as _bounded_lens_arguments
 
 
@@ -25,13 +25,13 @@ class AgentReadToolsMixin(AgentGatewayHost):
             raise PermissionError("memory stream is not authorized for workspace")
         return stream_ids
 
-    def query(self, arguments: ToolArguments) -> dict[str, object]:
+    def query(self, arguments: ToolArguments) -> JsonObject:
         return self._answer(arguments)
 
-    def search(self, arguments: ToolArguments) -> dict[str, object]:
+    def search(self, arguments: ToolArguments) -> JsonObject:
         return self.api.get_lens(_bounded_lens_arguments(arguments))
 
-    def history(self, arguments: ToolArguments) -> dict[str, object]:
+    def history(self, arguments: ToolArguments) -> JsonObject:
         raw_limit = arguments.get("limit")
         limit = 100 if raw_limit is None else int(raw_limit)
         return {
@@ -42,7 +42,7 @@ class AgentReadToolsMixin(AgentGatewayHost):
             )
         }
 
-    def memory_recall(self, arguments: ToolArguments) -> dict[str, object]:
+    def memory_recall(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         stream_ids = self._authorized_memory_stream_ids(arguments, workspace_id)
         return self.api.recall_memory(
@@ -53,7 +53,7 @@ class AgentReadToolsMixin(AgentGatewayHost):
             authorized_stream_ids=stream_ids,
         )
 
-    def memory_capture(self, arguments: ToolArguments) -> dict[str, object]:
+    def memory_capture(self, arguments: ToolArguments) -> JsonObject:
         payload = arguments.get("record")
         if payload is None:
             payload = arguments.get("records")
@@ -65,7 +65,7 @@ class AgentReadToolsMixin(AgentGatewayHost):
             return self.api.capture_memory(payload)
         raise ValueError("memory_capture record(s) must be an object or list of objects")
 
-    def memory_review(self, arguments: ToolArguments) -> dict[str, object]:
+    def memory_review(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         return self.api.review_memory(
             workspace_id=workspace_id,
@@ -76,14 +76,14 @@ class AgentReadToolsMixin(AgentGatewayHost):
             authorized_stream_ids=self._authorized_memory_stream_ids(arguments, workspace_id),
         )
 
-    def multimodal_search(self, arguments: ToolArguments) -> dict[str, object]:
+    def multimodal_search(self, arguments: ToolArguments) -> JsonObject:
         return self.api.multimodal_search(arguments)
 
-    def multimodal_status(self, arguments: ToolArguments) -> dict[str, object]:
+    def multimodal_status(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         return self.api.multimodal_status(workspace_id=workspace_id)
 
-    def hypergraph_search(self, arguments: ToolArguments) -> dict[str, object]:
+    def hypergraph_search(self, arguments: ToolArguments) -> JsonObject:
         payload = _bounded_lens_arguments(arguments)
         payload.setdefault("max_hyperedges", 12)
         payload.setdefault("max_nodes", 40)
