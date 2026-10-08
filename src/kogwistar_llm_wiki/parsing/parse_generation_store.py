@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from kogwistar.engine_core import NamedProjectionStore
+from kogwistar.json_types import JsonObject, JsonValue
 
 from .parse_views import (
     ParseGeneration,
@@ -15,6 +16,29 @@ from .parse_views import (
 
 class ParseGenerationStoreConflict(RuntimeError):
     """Another writer changed a generation before this commit."""
+
+
+def _object(value: JsonValue | None) -> JsonObject:
+    return value if isinstance(value, dict) else {}
+
+
+def _object_map(value: JsonValue | None) -> dict[str, JsonObject]:
+    return {
+        str(key): item
+        for key, item in _object(value).items()
+        if isinstance(item, dict)
+    }
+
+
+def _sequence(value: JsonValue | None, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    return default
 
 
 class ParseGenerationStore:
@@ -41,13 +65,11 @@ class ParseGenerationStore:
         payload = row.get("payload")
         if not isinstance(payload, dict):
             raise TypeError("parse generation projection payload must be an object")
-        generation = ParseGeneration.model_validate(payload.get("generation", {}))
+        generation = ParseGeneration.model_validate(_object(payload.get("generation")))
         if generation.workspace_id != self.workspace_id or generation.generation_id != generation_id:
             raise ValueError("parse generation workspace or identity does not match store")
-        commits_payload = payload.get("commits") or {}
-        members_payload = payload.get("members") or {}
-        if not isinstance(commits_payload, dict) or not isinstance(members_payload, dict):
-            raise TypeError("parse generation commits and members must be objects")
+        commits_payload = _object_map(payload.get("commits"))
+        members_payload = _object_map(payload.get("members"))
         commits = tuple(ParseGenerationCommit.model_validate(item) for item in commits_payload.values())
         members = tuple(ParseGenerationMember.model_validate(item) for item in members_payload.values())
         validate_generation_member_ancestry(members)
@@ -71,7 +93,7 @@ class ParseGenerationStore:
         member_ids = {member.member_id for member in members}
         if any(not set(commit.member_ids).issubset(member_ids) for commit in commits):
             raise ValueError("stored parse generation commit references an unknown member")
-        return generation, commits, members, int(row.get("last_authoritative_seq", 0))
+        return generation, commits, members, _sequence(row.get("last_authoritative_seq"))
 
     def list_for_source(
         self, source_document_id: str
@@ -85,12 +107,12 @@ class ParseGenerationStore:
             payload = row.get("payload")
             if not isinstance(payload, dict):
                 continue
-            generation = ParseGeneration.model_validate(payload.get("generation", {}))
+            generation = ParseGeneration.model_validate(_object(payload.get("generation")))
             if (
                 generation.workspace_id == self.workspace_id
                 and generation.source_document_id == source_document_id
             ):
-                result.append((generation, int(row.get("last_authoritative_seq", 0))))
+                result.append((generation, _sequence(row.get("last_authoritative_seq"))))
         result.sort(key=lambda item: (item[0].created_at, item[0].generation_id), reverse=True)
         return result
 
@@ -122,12 +144,12 @@ class ParseGenerationStore:
             existing = row.get("payload")
             if not isinstance(existing, dict):
                 raise TypeError("parse generation projection payload must be an object")
-            commits = dict(existing.get("commits") or {})
+            commits = _object_map(existing.get("commits"))
             stored_generation = existing.get("generation")
             if stored_generation != generation.model_dump(mode="json"):
                 if not isinstance(stored_generation, dict):
                     raise ParseGenerationStoreConflict("generation ID was reused with different evidence")
-                stored_header = ParseGeneration.model_validate(stored_generation)
+                stored_header = ParseGeneration.model_validate(_object(stored_generation))
                 self._validate_status_transition(stored_header, generation)
                 if stored_header.model_copy(update={"status": generation.status}).model_dump(
                     mode="json"
@@ -139,13 +161,13 @@ class ParseGenerationStore:
             if existing_commit is not None:
                 if existing_commit != commit.model_dump(mode="json"):
                     raise ParseGenerationStoreConflict("commit ID was reused with different evidence")
-                existing_members = dict(existing.get("members") or {})
+                existing_members = _object_map(existing.get("members"))
                 for member in members:
                     previous = existing_members.get(member.member_id)
                     if previous != member.model_dump(mode="json"):
                         raise ParseGenerationStoreConflict("member ID was reused with different evidence")
-                return int(row.get("last_authoritative_seq", 0))
-            existing_members = dict(existing.get("members") or {})
+                return _sequence(row.get("last_authoritative_seq"))
+            existing_members = _object_map(existing.get("members"))
             for member in members:
                 previous = existing_members.get(member.member_id)
                 if previous is not None and previous != member.model_dump(mode="json"):
@@ -157,8 +179,8 @@ class ParseGenerationStore:
                 "commits": commits,
                 "members": existing_members,
             }
-            expected_authoritative = int(row.get("last_authoritative_seq", -1))
-            expected_materialized = int(row.get("last_materialized_seq", -1))
+            expected_authoritative = _sequence(row.get("last_authoritative_seq"), -1)
+            expected_materialized = _sequence(row.get("last_materialized_seq"), -1)
             next_version = expected_authoritative + 1
         validate_generation_member_ancestry(
             [ParseGenerationMember.model_validate(item) for item in payload["members"].values()]
