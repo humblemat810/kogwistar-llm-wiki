@@ -68,7 +68,10 @@ def validate_reingest_revision(
     if not requested:
         return
     known: set[str] = set()
-    for revision in existing.get("revisions") or []:
+    revisions = existing.get("revisions")
+    if not isinstance(revisions, list):
+        revisions = []
+    for revision in revisions:
         if not isinstance(revision, Mapping):
             continue
         known.add(str(revision.get("id") or ""))
