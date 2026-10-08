@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 from kogwistar.json_types import JsonValue
 
@@ -58,10 +58,7 @@ class ParseSourceResult(Protocol):
     def semantic_tree(self) -> SemanticTreeLike: ...
 
 
-class ParserCallable(Protocol):
-    """Keyword-driven parser boundary used by direct ingestion."""
-
-    def __call__(self, **kwargs: object) -> ParseSourceResult: ...
+ParserCallable = Callable[..., ParseSourceResult]
 
 
 class TraceLog(Protocol):

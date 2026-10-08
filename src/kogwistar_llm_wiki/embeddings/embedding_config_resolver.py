@@ -23,7 +23,7 @@ EmbeddingProvider = Literal["fake", "openai", "vertex", "ollama"]
 class EmbeddingFunctionFactory(Protocol):
     """Build an embedding function for one resolved provider configuration."""
 
-    def __call__(self, config: EmbeddingProviderConfig) -> EmbeddingFunctionLike: ...
+    def __call__(self, spec: EmbeddingProviderConfig) -> EmbeddingFunctionLike: ...
 
 
 class TinyEmbeddingFunction:
