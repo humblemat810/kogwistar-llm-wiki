@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `7db3bb3` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `1e8d3e2` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `dd2900f` |
+| `kogwistar` | `feat/stack-type-contracts` | `d69f319` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
 
 ## Verified Scopes
 
@@ -48,24 +48,27 @@ change.
 | Kogwistar | `runtime/perf_profile.py` benchmark protocol and JSON-report boundaries | 0 errors, 0 warnings | passed | 15 tests collected, all environment-gated/skipped locally |
 | Kogwistar | `server/chat_service_run_execution.py`, `chat_service_shared.py`, `run_registry.py` execution and telemetry protocols | 0 errors, 0 warnings | passed | 14 passed, 7 skipped; 9 Chroma-dependent setup errors locally |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
+| Kogwistar | `conversation/policy.py` policy hooks and backend JSON narrowing | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 4 passed, 17 skipped |
 | Kogwistar | `kogwistar` full source scan | 704 errors, 22 warnings across 275 files | not yet run for full scope | current full-scope measurement after `7db3bb3`; MCP/proposer slice is 0 errors |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
-| KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 75 legacy Ruff findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
+| KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 182 legacy Ruff findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 174 files | targeted groups passed; full runtime suite pending | Pyright clean |
+| LLM-Wiki | diagnostics, remote embedding, trace sink, and memory boundaries | 0 errors, 0 warnings across full `src` scan | passed (`E4,E7,E9,F`) | 28 passed |
 
 ## Remaining Work
 
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
-  the parser-wide Ruff scan still has `75` legacy findings;
-  Kogwistar full source now measures `704` errors and `22` warnings across
+  the parser-wide Ruff scan currently has `182` legacy findings;
+  Kogwistar full source baseline measures `704` errors and `22` warnings across
   275 files after the SQLite, graph-read, write, PostgreSQL backend, and
-  MCP/proposer slices.
+  MCP/proposer slices; this baseline predates the latest policy slice and is
+  not a current full-source rerun.
   The latest write slice is clean; the PostgreSQL backend is reduced to 41
   errors and remains an active follow-up slice.
   The conversation
@@ -90,6 +93,17 @@ change.
 - [ ] Observe GitHub Actions for each pushed exact SHA before treating a slice
       as remotely verified.
 - [ ] Reconcile this ledger after every commit or rebase.
+
+## Remote Verification Status
+
+- `kogwistar-llm-wiki` PR #42 was merged at `b5149d5`; its last visible CI
+  run tested `b8a7e55` and was green, but the merged PR retained one separate
+  failed status check. Commit `f6b4dc1` was pushed afterward to the already
+  merged head branch, so it has no new pull-request synchronization run.
+- Kogwistar run `37898674106` tested `3aabb90` and failed in its CPython/PyPy
+  test matrix and optional PyPy-beta job; lint, Rust, native-wheel, and
+  SQLite-invariant jobs passed. Commit `d69f319` is newer and requires a new
+  exact-SHA run before remote verification.
 
 ## Measurement Commands
 
