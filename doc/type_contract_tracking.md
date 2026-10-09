@@ -27,6 +27,9 @@ change.
 
 ## Remaining Work
 
+- Current measured backlog: KG Doc Parser `workflow_ingest` has `101`
+  Pyright errors; Kogwistar `agent/` has `22`. These are scoped counts, not
+  whole-repository totals.
 - [ ] Run and record the current full Pyright count for each repository.
 - [ ] Remove remaining parser `workflow_ingest` errors, grouped by module and
       protocol boundary rather than by individual diagnostic.
