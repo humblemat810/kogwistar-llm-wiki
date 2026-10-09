@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `d18f510` |
+| `kogwistar` | `feat/stack-type-contracts` | `95f7170` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `dd1e669` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
@@ -105,7 +105,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 262 files | 1,344 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 262 files | 1,338 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 160 | remaining legacy parser annotations |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -114,8 +114,8 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `1,504` findings: Kogwistar
-`1,344`, KG Doc Parser `160`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `1,498` findings: Kogwistar
+`1,338`, KG Doc Parser `160`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
@@ -293,6 +293,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   GitHub query reports `runs=0`.
 - Kogwistar typing commit `d18f510` annotates flattened graph reference
   validators for duplicate IDs and orphan references. Local Pyright remains
+  clean, the flattened conversion suite passed 37 tests, and the exact-SHA
+  GitHub query reports `runs=0`.
+- Kogwistar typing commit `95f7170` annotates extraction context validators and
+  conversion entry-point `insertion_method` contracts. Local Pyright remains
   clean, the flattened conversion suite passed 37 tests, and the exact-SHA
   GitHub query reports `runs=0`.
 - The `feat/stack-type-contracts` branch currently has an open Core PR and
