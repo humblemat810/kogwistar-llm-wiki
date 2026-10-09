@@ -7,6 +7,7 @@ from contextlib import AbstractContextManager
 from typing import Literal, cast
 
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonValue
 from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
@@ -410,7 +411,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
             next_payload["parse_target"] = derived_parse_target.model_dump(mode="json")
         raw_context = ctx.payload.get("maintenance_context")
         next_payload["maintenance_context"] = append_maintenance_round(
-            cast(Mapping[str, object], raw_context)
+            cast(Mapping[str, JsonValue], raw_context)
             if isinstance(raw_context, Mapping)
             else None,
             round_number=current_round + 1,
