@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `908fdcd` |
+| `kogwistar` | `feat/stack-type-contracts` | `3020dbc` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
 
@@ -60,6 +60,7 @@ change.
 | Kogwistar | `engine_core/subsystems/read.py` graph result and adapter boundaries | 0 errors, 0 warnings | passed | 38 passed, 2 skipped, 6 deselected |
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 0 errors, 0 warnings | passed | 4 focused tests passed, 1 optional `pgvector` test unavailable locally, 1 PostgreSQL fixture skipped |
+| Kogwistar | `utils/file_loader.py` path-pattern, loader, callback, and iterator contracts | 0 errors, 0 warnings | passed | direct loader smoke passed; no dedicated focused test module found |
 | Kogwistar | `runtime/resolvers.py` resolver wrapper, sandbox input, and async resolver contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 85 passed, 3 skipped |
 | Kogwistar | package introspection, ACL metadata validators, and compression workflow return contract | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 191 passed, 2 skipped; 3 optional/fixture failures |
 | Kogwistar | historical search facade signatures and `similarity_threshold` protocol forwarding | 0 errors, 0 warnings across engine, read, ACL, and shared protocol files | touched-file check passed; legacy engine E402 remains outside this slice | first search normalization test passed; second fake-backend test hung locally before completion |
@@ -99,7 +100,7 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`629`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`610`
   findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
@@ -113,7 +114,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 629 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 610 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -122,12 +123,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `629` findings: Kogwistar
-`629`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `610` findings: Kogwistar
+`610`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `1040 / 1,669` findings resolved, or approximately `62.3%`; `37.7%`
+That is `1059 / 1,669` findings resolved, or approximately `63.5%`; `36.5%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
@@ -223,6 +224,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   contracts for traversal flags, backend filters, and semantic expansion
   results. Local Pyright and strict `ANN` checks are clean, and the focused
   graph-query suite passed 6 tests. The latest Core CI run remains in progress.
+
+- Kogwistar typing commit `3020dbc` completes the file-loader path-pattern,
+  callback, and iterator contracts. Local Pyright and strict `ANN` checks are
+  clean, and a direct loader smoke passed. Exact-SHA workflow `37988563721`
+  is pending; no remote success is claimed yet.
 
 - Kogwistar run `37939704217` completed successfully for exact SHA
   `1ffdfd42f19614c750be31161edb4876302e3294`. Required CPython 3.12-3.14,
