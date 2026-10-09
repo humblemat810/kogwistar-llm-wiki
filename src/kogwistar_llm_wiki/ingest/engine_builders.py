@@ -10,12 +10,11 @@ import tempfile
 from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
 from kogwistar.engine_core import (
     GraphKnowledgeEngine,
-    PgVectorBackend,
     StorageBackendFactory,
 )
 from kogwistar.engine_core.embedding_profile import EmbeddingProfile
@@ -84,7 +83,7 @@ class CoreGraphEngineFactory(Protocol):
         persist_directory: str | None = None,
         embedding_function: EmbeddingFunctionLike | None = None,
         kg_graph_type: str = "knowledge",
-        backend: str | StorageBackend | PgVectorBackend | None = None,
+        backend: str | StorageBackend | None = None,
         embedding_profile: EmbeddingProfile | None = None,
         embedding_profile_mode: str = "enforce",
         namespace: str = "default",
@@ -451,7 +450,9 @@ def _build_postgres_engine(
         persist_directory=str(persist_directory),
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
-        backend=backend,
+        # The PostgreSQL backend is validated by the core constructor at runtime;
+        # keep this adapter aligned with the constructor's public annotation.
+        backend=cast(StorageBackend, backend),
         embedding_profile=embedding_profile,
         embedding_profile_mode=embedding_profile_mode,
         namespace=kg_graph_type,

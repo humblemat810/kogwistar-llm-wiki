@@ -23,6 +23,7 @@ from kogwistar.runtime.budget import (
 from kogwistar.runtime.models import RunSuccess
 from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
+from kogwistar.llm_tasks.providers import StructuredOutputRunnable
 
 from ..configuration.identity import runtime_authority_context
 from ..configuration.workspace import WorkspaceNamespaces
@@ -1732,7 +1733,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
 
         model = build_chat_model_for_role("parser", self.provider_settings)
-        structured = model.with_structured_output(CrosslinkProposalResponse)
+        structured = cast(
+            StructuredOutputRunnable[CrosslinkProposalResponse],
+            model.with_structured_output(CrosslinkProposalResponse),
+        )
         prompt = {
             "task": "Propose only evidence-supported semantic links between distinct nodes.",
             "constraints": [
@@ -1785,7 +1789,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
 
         model = build_chat_model_for_role("parser", self.provider_settings)
-        structured = model.with_structured_output(CrosslinkCriticResponse)
+        structured = cast(
+            StructuredOutputRunnable[CrosslinkCriticResponse],
+            model.with_structured_output(CrosslinkCriticResponse),
+        )
         critic_evidence = [CrosslinkEvidence.model_validate(item) for item in evidence]
         neighbor_context = self._crosslink_prompt_context(critic_evidence, ctx)
         projection, projected_evidence, projected_context = project_crosslink_payload(

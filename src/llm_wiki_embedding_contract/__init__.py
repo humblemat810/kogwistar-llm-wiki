@@ -7,7 +7,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Literal, TypeAliasType
+from typing import Literal, TypeAlias
 
 EmbeddingKind = Literal["single_vector", "dense", "late_interaction"]
 SimilarityMetric = Literal["dot", "cosine"]
@@ -23,11 +23,8 @@ SourceModality = Literal[
     "video_frame",
 ]
 EmbeddingSet = tuple[tuple[float, ...], ...]
-JsonScalar = TypeAliasType("JsonScalar", None | bool | int | float | str)
-JsonValue = TypeAliasType(
-    "JsonValue",
-    JsonScalar | list["JsonValue"] | dict[str, "JsonValue"],
-)
+JsonScalar: TypeAlias = None | bool | int | float | str
+JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject = dict[str, JsonValue]
 
 

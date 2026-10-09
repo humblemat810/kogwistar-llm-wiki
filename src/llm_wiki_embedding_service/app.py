@@ -8,6 +8,7 @@ import hmac
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -29,7 +30,10 @@ class _EmbeddingServiceState:
 
 
 def _profile(config: EmbeddingServiceConfig) -> dict[str, object]:
-    return config.profile.canonical_payload() | {"fingerprint": config.profile.fingerprint}
+    return cast(
+        dict[str, object],
+        config.profile.canonical_payload() | {"fingerprint": config.profile.fingerprint},
+    )
 
 
 def _error(message: str, status: int) -> JSONResponse:
