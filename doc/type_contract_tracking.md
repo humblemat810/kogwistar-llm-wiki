@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `20c1599` |
+| `kogwistar` | `feat/stack-type-contracts` | `0270a1b` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
 
@@ -54,7 +54,7 @@ change.
 | Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
 | Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
 | Kogwistar | `conversation/policy.py`, `server/resources.py`, `server/chat_service_run_inspection.py`, `shortids.py`, `utils/log.py` | 0 errors, 0 warnings | passed for focused files; legacy E402 remains in `utils/log.py` | focused compatibility checks passed; backend-dependent tests remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | 175 errors, 3 warnings across the current source | not yet run for full scope | regenerated full-scope measurement after `20c1599`; 102-error reduction from the 277-error baseline; adjudication trace, search-index, event-envelope, aliasing, ingest, and native transaction-token slices are clean in isolation; remote verification for `20c1599` is unavailable |
+| Kogwistar | `kogwistar` full source scan | 175 errors, 3 warnings across the current source | not yet run for full scope | last regenerated full-scope measurement after `20c1599`; extraction normalization is clean in isolation; the full count has not yet been regenerated; remote verification for `0270a1b` is unavailable |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -114,7 +114,7 @@ after its full-scope scan is regenerated.
   run tested `b8a7e55` and was green, but the merged PR retained one separate
   failed status check. Commit `f6b4dc1` was pushed afterward to the already
   merged head branch, so it has no new pull-request synchronization run.
-- No GitHub Actions run currently exists for exact Kogwistar SHA `20c1599`.
+- No GitHub Actions run currently exists for exact Kogwistar SHA `0270a1b`.
   The earlier run `37904203244` for `b9001dd` was cancelled/superseded; no
   remote green result is claimed for the current branch.
 
