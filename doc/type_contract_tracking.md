@@ -45,7 +45,7 @@ change.
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 41 errors, 0 warnings | passed | 10 passed, 2 skipped; PostgreSQL fixtures unavailable locally |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | 1,894 errors, 24 warnings across the scanned package | not yet run for full scope | post-engine-contract measurement |
+| Kogwistar | `kogwistar` full source scan | 1,213 errors, 22 warnings across 275 files | not yet run for full scope | current full-scope measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
