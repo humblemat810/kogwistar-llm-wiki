@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `f33a038` |
+| `kogwistar` | `feat/stack-type-contracts` | `3df4d15` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
 
@@ -54,7 +54,7 @@ change.
 | Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
 | Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
 | Kogwistar | `conversation/policy.py`, `server/resources.py`, `server/chat_service_run_inspection.py`, `shortids.py`, `utils/log.py` | 0 errors, 0 warnings | passed for focused files; legacy E402 remains in `utils/log.py` | focused compatibility checks passed; backend-dependent tests remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | 71 errors, 3 warnings across 275 files | not yet run for full scope | regenerated after `f33a038`; remote verification for `f33a038` is not available |
+| Kogwistar | `kogwistar` full source scan | 68 errors, 3 warnings across 275 files | not yet run for full scope | regenerated after `3df4d15`; exact-SHA GitHub run is still in progress |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -70,8 +70,8 @@ change.
 ## Quantified Progress
 
 For the Kogwistar full-source Pyright backlog, the fixed baseline is 277
-errors. The current scan reports 71 errors, so the measured diagnostic
-reduction is 206/277 = 74.4%. This is a backlog metric only; it does not claim
+errors. The current scan reports 68 errors, so the measured diagnostic
+reduction is 209/277 = 75.5%. This is a backlog metric only; it does not claim
 that 75.5% of runtime behavior is broken, and it does not count warnings,
 Ruff findings, or unverified CI as completed work. A slice is counted only
 after its full-scope scan is regenerated.
@@ -79,7 +79,7 @@ after its full-scope scan is regenerated.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan currently has `182` legacy findings;
-  Kogwistar full source currently measures `71` errors and `3` warnings across
+  Kogwistar full source currently measures `68` errors and `3` warnings across
   275 files after the latest protocol slices; this is a measurement, not a
   passing gate. The largest remaining groups are `postgres_backend.py`, demo
   modules, and selected server/runtime boundaries.
@@ -114,9 +114,9 @@ after its full-scope scan is regenerated.
   run tested `b8a7e55` and was green, but the merged PR retained one separate
   failed status check. Commit `f6b4dc1` was pushed afterward to the already
   merged head branch, so it has no new pull-request synchronization run.
-- No GitHub Actions run currently exists for exact Kogwistar SHA `f33a038`.
-  The earlier run `37904203244` for `b9001dd` was cancelled/superseded; no
-  remote green result is claimed for the current branch.
+- GitHub Actions run `37910494854` covers exact Kogwistar SHA `3df4d153` and is
+  still in progress; no remote green result is claimed until it reaches a
+  terminal successful conclusion.
 
 ## Measurement Commands
 
