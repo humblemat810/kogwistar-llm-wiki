@@ -280,7 +280,7 @@ class MemoryService:
         ranked.sort(key=lambda item: (-item[0], -item[1].created_at_ms, item[1].memory_id()))
         maximum = self.max_recall_records if limit is None else _bounded_int(limit, default=self.max_recall_records, upper=self.max_recall_records)
         selected = ranked[:maximum]
-        return {
+        return cast(JsonObject, {
             "status": "ok",
             "workspace_id": workspace_id,
             "enabled": self.enabled,
@@ -288,7 +288,7 @@ class MemoryService:
             "verified": [self._record_payload(record, score=score) for score, record in selected if record.confidence == "verified"],
             "inferred": [self._record_payload(record, score=score) for score, record in selected if record.confidence == "inferred"],
             "count": len(selected),
-        }
+        })
 
     def review(
         self,
@@ -321,13 +321,13 @@ class MemoryService:
         ]
         records.sort(key=lambda item: (-item.created_at_ms, item.memory_id()))
         selected = records[: _bounded_int(limit, default=50, upper=100)]
-        return {
+        return cast(JsonObject, {
             "status": "ok",
             "workspace_id": workspace_id,
             "enabled": self.enabled,
             "records": [self._record_payload(record) for record in selected],
             "count": len(selected),
-        }
+        })
 
     def _persist(self, record: MemoryRecord) -> JsonObject:
         memory_id = record.memory_id()
