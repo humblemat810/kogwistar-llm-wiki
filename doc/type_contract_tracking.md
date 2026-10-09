@@ -11,7 +11,7 @@ change.
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `8848b26` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `2a07057` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6868e5a` |
 
 ## Verified Scopes
 
@@ -75,6 +75,7 @@ change.
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 181 files | targeted groups passed; full runtime suite pending | Pyright clean |
 | LLM-Wiki | diagnostics, remote embedding, trace sink, and memory boundaries | 0 errors, 0 warnings across full `src` scan | passed (`E4,E7,E9,F`) | 28 passed |
 | LLM-Wiki | vLLM multimodal message/content wire contracts | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 44 passed, 3 skipped |
+| LLM-Wiki | standalone embedding-service health, readiness, capability, and representation responses | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 21 passed |
 | LLM-Wiki | normal local CI-marked suite with vendored paths configured | not applicable | passed | 1,044 passed, 8 skipped, 178 deselected in 25:41 |
 
 ## Remaining Work
@@ -139,6 +140,9 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 44 focused multimodal tests passed with 3 skipped.
+- LLM-Wiki typing commit `6868e5a` is pushed to its feature branch. The exact-SHA
+  API query currently reports no workflow run (`runs=0`); local verification is
+  Pyright-clean, Ruff-clean, and 21 embedding-service tests passed.
 
 ## Measurement Commands
 
