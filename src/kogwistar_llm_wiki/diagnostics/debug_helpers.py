@@ -87,14 +87,17 @@ def summarize_stage_timings(layer_log: list[Mapping[str, JsonValue]]) -> JsonObj
         item for item in ranked
         if not item[0].endswith("_parse") and item[0] not in {"parse", "workflow_layered_parse"}
     ]
-    return {
-        "stage_count": len(stages),
-        "stages": stages,
-        "dominant_stage": ranked[0][0] if ranked and _json_int(ranked[0][1]["total_ms"]) > 0 else None,
-        "dominant_stage_total_ms": _json_int(ranked[0][1]["total_ms"]) if ranked else 0,
-        "dominant_operation_stage": operation_ranked[0][0] if operation_ranked else None,
-        "dominant_operation_stage_total_ms": _json_int(operation_ranked[0][1]["total_ms"]) if operation_ranked else 0,
-    }
+    return cast(
+        JsonObject,
+        {
+            "stage_count": len(stages),
+            "stages": stages,
+            "dominant_stage": ranked[0][0] if ranked and _json_int(ranked[0][1]["total_ms"]) > 0 else None,
+            "dominant_stage_total_ms": _json_int(ranked[0][1]["total_ms"]) if ranked else 0,
+            "dominant_operation_stage": operation_ranked[0][0] if operation_ranked else None,
+            "dominant_operation_stage_total_ms": _json_int(operation_ranked[0][1]["total_ms"]) if operation_ranked else 0,
+        },
+    )
 
 
 def aggregate_stage_timings(summaries: list[Mapping[str, JsonValue]]) -> JsonObject:

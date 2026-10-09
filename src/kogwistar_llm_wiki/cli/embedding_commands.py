@@ -19,6 +19,7 @@ class EmbeddingProfileReportingEngine(Protocol):
     @property
     def embedding_profile_report(self) -> JsonObject:
         """Return the backend's serializable embedding profile report."""
+        ...
 
 
 def _profile_report(engine: object) -> JsonObject:

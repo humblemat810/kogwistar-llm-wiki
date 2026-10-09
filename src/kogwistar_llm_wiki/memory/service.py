@@ -247,7 +247,10 @@ class MemoryService:
             raise MemoryValidationError("a memory capture batch must contain one workspace only")
         for record in validated:
             records.append(self._persist(record))
-        return {"status": "captured", "workspace_id": records[0]["workspace_id"], "records": records}
+        return cast(
+            JsonObject,
+            {"status": "captured", "workspace_id": records[0]["workspace_id"], "records": records},
+        )
 
     def recall(
         self,
