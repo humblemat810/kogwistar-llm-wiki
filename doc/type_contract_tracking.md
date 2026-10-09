@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `e9a2531` |
+| `kogwistar` | `feat/stack-type-contracts` | `1d6ceb6` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `affe290` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `5a03744` |
 
@@ -204,6 +204,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   type-checking-only engine import. Local strict Ruff/Pyright are clean and the
   relevant viewer/CDC tests passed 7 tests; optional Chroma tests still require
   the `chromadb` extra.
+- Kogwistar typing commit `1d6ceb6` strengthens the existing mandatory ACL
+  policy protocol with concrete decision/result types while preserving its
+  runtime-checkable method set. The ACL protocol tests passed 3 tests; an
+  attempted wider ACL run exposed only missing optional Chroma setup and an
+  unrelated fixture mismatch.
 - KG Doc Parser typing commit `622b687` adds page-aware source collection,
   page, and unit protocols without widening the layered parser contract. Its
   exact-SHA GitHub result remains to be observed because the branch has no
