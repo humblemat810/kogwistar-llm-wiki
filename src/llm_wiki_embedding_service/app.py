@@ -8,7 +8,7 @@ import hmac
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import cast
+from typing import Literal, TypedDict, cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -27,6 +27,39 @@ from .encoder import DenseEncoder, build_dense_encoder
 class _EmbeddingServiceState:
     encoder: DenseEncoder | None = None
     load_error: str | None = None
+
+
+class HealthResponse(TypedDict):
+    ok: Literal[True]
+    service: str
+
+
+class ReadyResponse(TypedDict):
+    ready: Literal[True]
+    profile: dict[str, object]
+
+
+class CapabilitiesResponse(TypedDict):
+    contract_version: Literal["v1"]
+    service: str
+    embedding: Literal["dense"]
+    modalities: list[str]
+    profile: dict[str, object]
+    batch_size: int
+    max_items: int
+    max_request_bytes: int
+
+
+class EmbeddingResult(TypedDict):
+    item_id: object
+    vectors: list[list[float]]
+
+
+class RepresentResponse(TypedDict):
+    contract_version: Literal["v1"]
+    request_id: str
+    profile: dict[str, object]
+    results: list[EmbeddingResult]
 
 
 def _profile(config: EmbeddingServiceConfig) -> dict[str, object]:
@@ -69,17 +102,17 @@ def create_app(
     app = FastAPI(title="LLM-Wiki Embedding Service", version="1", lifespan=lifespan)
 
     @app.get("/healthz")
-    def healthz() -> dict[str, object]:
+    def healthz() -> HealthResponse:
         return {"ok": True, "service": "llm-wiki-embedding"}
 
     @app.get("/readyz", response_model=None)
-    def readyz() -> Response | dict[str, object]:
+    def readyz() -> Response | ReadyResponse:
         if state.encoder is None:
             return _error(state.load_error or "model is not loaded", 503)
         return {"ready": True, "profile": _profile(selected)}
 
     @app.get("/v1/capabilities", response_model=None)
-    def capabilities(request: Request) -> Response | dict[str, object]:
+    def capabilities(request: Request) -> Response | CapabilitiesResponse:
         if not _authorized(request, selected.token):
             return _error("unauthorized", 401)
         if selected.encoder == "clip-vit-b32":
@@ -88,10 +121,19 @@ def create_app(
             modalities = ["text"]
         else:
             modalities = ["text", "image", "pdf_page", "table", "chart", "video_frame", "webpage"]
-        return {"contract_version": "v1", "service": "llm-wiki-embedding", "embedding": "dense", "modalities": modalities, "profile": _profile(selected), "batch_size": selected.batch_size, "max_items": selected.max_items, "max_request_bytes": selected.max_request_bytes}
+        return {
+            "contract_version": "v1",
+            "service": "llm-wiki-embedding",
+            "embedding": "dense",
+            "modalities": modalities,
+            "profile": _profile(selected),
+            "batch_size": selected.batch_size,
+            "max_items": selected.max_items,
+            "max_request_bytes": selected.max_request_bytes,
+        }
 
     @app.post("/v1/represent", response_model=None)
-    async def represent(request: Request) -> Response | dict[str, object]:
+    async def represent(request: Request) -> Response | RepresentResponse:
         if not _authorized(request, selected.token):
             return _error("unauthorized", 401)
         if state.encoder is None:
@@ -121,7 +163,7 @@ def _authorized(request: Request, token: str | None) -> bool:
 
 def _represent_payload(
     payload: object, encoder: DenseEncoder, config: EmbeddingServiceConfig
-) -> dict[str, object]:
+) -> RepresentResponse:
     if not isinstance(payload, Mapping) or payload.get("contract_version") != "v1":
         raise ContractValidationError("unsupported embedding contract version")
     if payload.get("operation") not in {"query", "document"}:
@@ -167,7 +209,7 @@ def _represent_payload(
     vectors = encoder.encode(items)
     if len(vectors) != len(items):
         raise ContractValidationError("encoder returned a different number of vectors")
-    results = []
+    results: list[EmbeddingResult] = []
     for item, embedding_set in zip(items, vectors):
         checked = validate_dense_vectors(embedding_set, dimension=config.dimension)
         results.append({"item_id": item["item_id"], "vectors": [list(vector) for vector in checked]})
