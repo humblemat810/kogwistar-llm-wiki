@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `78bb9c9` |
+| `kogwistar` | `feat/stack-type-contracts` | `78b7972` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `affe290` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `7371267` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `5a03744` |
 
 ## Verified Scopes
 
@@ -196,10 +196,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   `similarity_threshold` parameter. Exact-SHA workflow run `37954185993` is
   currently loading on GitHub; it is not yet a green or failed result. Local
   full-source Pyright remains clean across 262 files.
-- Kogwistar typing commit `78bb9c9` adds explicit SQLAlchemy engine and
-  session-factory types to the auth database boundary. A newer exact-SHA CI run
-  is expected after the push; local file Pyright/Ruff are clean and all 31 auth
-  tests passed.
+- Kogwistar typing commit `78b7972` completes the auth service return contracts
+  on top of the database boundary. Local source Pyright/Ruff are clean for the
+  auth package and all 31 auth tests passed; the pushed Core PR must still be
+  monitored to completion.
 - KG Doc Parser typing commit `622b687` adds page-aware source collection,
   page, and unit protocols without widening the layered parser contract. Its
   exact-SHA GitHub result remains to be observed because the branch has no
