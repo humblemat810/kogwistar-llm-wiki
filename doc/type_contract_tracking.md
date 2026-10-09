@@ -11,7 +11,7 @@ change.
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `b16f9ec` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `622b687` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6e20e39` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `72783fe` |
 
 ## Verified Scopes
 
@@ -211,10 +211,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   contract fix. Its exact-SHA API query currently reports no workflow run
   (`runs=0`); local verification is full-source Pyright-clean and 30
   maintenance orchestration tests passed.
-- LLM-Wiki typing commit `6e20e39` records the Core search protocol slice and
-  is the current root documentation head. The two subsequent local annotation
-  fixes are currently uncommitted and must be verified before their commit is
-  added here; no remote CI result is claimed for them.
+- LLM-Wiki typing commit `72783fe` records the Core search protocol slice and
+  closes two remaining concrete annotation findings in maintenance observation
+  and graph-space query boundaries. No remote CI result is claimed because the
+  branch has no open pull request; the targeted local tests reached 12 executed
+  cases before the known shutdown hang.
 - The `feat/stack-type-contracts` branch currently has an open Core PR and
   exact Core CI coverage. The parser and LLM-Wiki branches currently have no
   open PRs, so their latest commits cannot have pull-request CI results; this
