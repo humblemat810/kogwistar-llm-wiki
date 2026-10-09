@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
@@ -514,7 +514,8 @@ class CodexCliCockpitResponder:
             else:
                 raw = self.runner.run(**run_kwargs)
             try:
-                return restore_cockpit_action(_parse_cockpit_action(raw), projection)
+                restored = restore_cockpit_action(_parse_cockpit_action(raw), projection)
+                return cast(CockpitAction, restored)
             except (ValidationError, ValueError) as exc:
                 validation_error = exc
                 if self.trace_line is not None:

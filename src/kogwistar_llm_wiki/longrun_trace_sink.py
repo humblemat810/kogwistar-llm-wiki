@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from collections.abc import Mapping
+from typing import Protocol, cast
 
 from kogwistar.json_types import JsonValue
 from kogwistar.runtime.sinks import EventSinkLike, JsonlEventSink
@@ -33,10 +34,13 @@ class LongRunJsonlTraceSink(JsonlEventSink):
         self.live_trace_printer = LiveTracePrinter(prefix="longrun.runtime") if live_trace else None
         self.telemetry = telemetry or LlmWikiTelemetry.from_environment()
 
-    def emit(self, event: JsonObject) -> None:
-        enriched_event = self.enrich_event(dict(event)) if self.enrich_event is not None else dict(event)
-        super().emit(enriched_event)
-        self.telemetry.instrument_event(enriched_event)
+    def emit(self, event: dict[str, object]) -> None:
+        event_json = cast(JsonObject, dict(event))
+        enriched_event = (
+            self.enrich_event(event_json) if self.enrich_event is not None else event_json
+        )
+        super().emit(cast(dict[str, object], enriched_event))
+        self.telemetry.instrument_event(cast(Mapping[str, object], enriched_event))
         if self.live_trace_printer is not None:
             self.live_trace_printer.emit(enriched_event)
 

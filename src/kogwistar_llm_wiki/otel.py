@@ -152,13 +152,13 @@ def _ensure_tracer_provider(service_name: str) -> None:
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # pyright: ignore[reportMissingImports]
                 OTLPSpanExporter,
             )
-            from opentelemetry.sdk.resources import (
+            from opentelemetry.sdk.resources import (  # pyright: ignore[reportMissingImports]
                 Resource,  # pyright: ignore[reportMissingImports]
             )
-            from opentelemetry.sdk.trace import (
+            from opentelemetry.sdk.trace import (  # pyright: ignore[reportMissingImports]
                 TracerProvider,  # pyright: ignore[reportMissingImports]
             )
-            from opentelemetry.sdk.trace.export import (
+            from opentelemetry.sdk.trace.export import (  # pyright: ignore[reportMissingImports]
                 BatchSpanProcessor,  # pyright: ignore[reportMissingImports]
             )
 

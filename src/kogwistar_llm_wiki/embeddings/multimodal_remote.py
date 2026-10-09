@@ -58,7 +58,7 @@ class HttpResponseLike(Protocol):
 class UrlOpener(Protocol):
     """Injectable HTTP opener used by production and deterministic tests."""
 
-    def __call__(self, request: Request, *, timeout: float) -> HttpResponseLike: ...
+    def __call__(self, url: Request, *, timeout: float) -> HttpResponseLike: ...
 
 
 @dataclass(frozen=True, slots=True)
