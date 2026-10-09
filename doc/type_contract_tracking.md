@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `feb989b` |
+| `kogwistar` | `feat/stack-type-contracts` | `4dbc83a` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `4e9ef93` |
 
@@ -50,6 +50,7 @@ change.
 | Kogwistar | `engine_core/rust_postgres_session.py` native PostgreSQL JSON/session boundary | 0 errors, 0 warnings | passed | 33 PostgreSQL integration tests skipped because the local fixture is unavailable |
 | Kogwistar | DiskCache ignored positional dependency boundary | 0 errors, 0 warnings | passed | local-lambda regression and fake candidate tests passed; PyPy 3.11 GitHub job passed on `1a01a73` |
 | Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 0 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
+| Kogwistar | `workers/async_index_job_worker.py` generic await and queue-value boundaries | 0 errors, 0 warnings | passed | 8 passed, 2 existing warnings |
 | Kogwistar | `runtime/perf_profile.py` benchmark protocol and JSON-report boundaries | 0 errors, 0 warnings | passed | 15 tests collected, all environment-gated/skipped locally |
 | Kogwistar | `server/chat_service_run_execution.py`, `chat_service_shared.py`, `run_registry.py` execution and telemetry protocols | 0 errors, 0 warnings | passed | 14 passed, 7 skipped; 9 Chroma-dependent setup errors locally |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
@@ -119,11 +120,10 @@ after its full-scope scan is regenerated.
 
 ## Remote Verification Status
 
-- Kogwistar run `37930756117` completed successfully for exact SHA `1a01a73`,
-  including the required PyPy 3.11 job. The latest visible branch run is
-  `37933832191` for exact SHA `389c243` and is still in progress. Later
-  `feb989b` is pushed, but does not yet have a completed exact-SHA workflow
-  result; it must not be inferred from earlier green runs.
+- Kogwistar run `37935432457` completed successfully for exact SHA
+  `4dbc83a0ed6b3feb401f49539110b2fb0902400b`. Required CPython 3.12-3.14,
+  PyPy 3.11, lint, Rust, SQLite invariants, and native-wheel smoke jobs passed.
+  The PyPy 3.12 beta job failed as an explicitly non-blocking best-effort job.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 
