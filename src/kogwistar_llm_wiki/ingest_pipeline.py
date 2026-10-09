@@ -323,6 +323,8 @@ class IngestPipeline(
     SourceLifecycleMixin,
     WorkbenchAccessMixin,
 ):
+    conversation_persistence_mode: Literal["single_stage", "two_stage"]
+
     def __init__(
         self,
         engines: NamespaceEngines,
