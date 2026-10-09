@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `1d6ceb6` |
+| `kogwistar` | `feat/stack-type-contracts` | `5b327f5` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `affe290` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `5a03744` |
 
@@ -209,6 +209,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   runtime-checkable method set. The ACL protocol tests passed 3 tests; an
   attempted wider ACL run exposed only missing optional Chroma setup and an
   unrelated fixture mismatch.
+- Kogwistar typing commit `5b327f5` annotates PostgreSQL UoW, collection,
+  backend-constructor, and connection-context lifecycles. Local Pyright is
+  clean and the async UoW, PostgreSQL metadata, and native session facade suite
+  passed 13 tests; remaining Ruff findings are existing SQL/embedding boundary
+  debt.
 - KG Doc Parser typing commit `622b687` adds page-aware source collection,
   page, and unit protocols without widening the layered parser contract. Its
   exact-SHA GitHub result remains to be observed because the branch has no
