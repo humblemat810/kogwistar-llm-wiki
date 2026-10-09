@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `9aaf126` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `a3032d4` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `fdd79e7` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
 ## Verified Scopes
@@ -113,7 +113,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
 | Kogwistar | 0 errors, 0 warnings across 262 files | 1,054 | remaining Core annotation/protocol migration |
-| KG Doc Parser | 0 errors, 0 warnings across 40 files | 45 | remaining legacy parser annotations |
+| KG Doc Parser | 0 errors, 0 warnings across 40 files | 32 | remaining legacy parser annotations |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
 These counts are not a percentage. They are the denominator needed for a
@@ -121,12 +121,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `1,099` findings: Kogwistar
-`1,054`, KG Doc Parser `45`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `1,086` findings: Kogwistar
+`1,054`, KG Doc Parser `32`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `570 / 1,669` findings resolved, or approximately `34.2%`; `65.8%`
+That is `583 / 1,669` findings resolved, or approximately `34.9%`; `65.1%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
@@ -274,6 +274,12 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   level parser seam. Local Pyright is clean, the semantic parser suite passed
   7 tests with 7 environment-gated skips, and the parser-wide strict ANN count
   is now 45. The exact-SHA API currently reports no workflow run (`runs=0`).
+- KG Doc Parser typing commit `fdd79e7` annotates frontend child preparation,
+  iterative review-loop inputs/outputs, and deterministic pointer correction
+  boundaries. Local Pyright is clean, strict ANN findings in the parser are
+  down to 32, and the semantic parser suite passed 7 tests with 7
+  environment-gated skips. The exact-SHA API currently reports no workflow
+  run (`runs=0`).
 - Kogwistar typing commit `78b7972` completes the auth service return contracts
   on top of the database boundary. Local source Pyright/Ruff are clean for the
   auth package and all 31 auth tests passed.
