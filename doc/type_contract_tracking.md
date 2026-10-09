@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `9055966` |
+| `kogwistar` | `feat/stack-type-contracts` | `a293f70` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `1e8d3e2` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f635e36` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `8498bcb` |
 
 ## Verified Scopes
 
@@ -38,6 +38,7 @@ change.
 | Kogwistar | `messaging/service.py`, lane-message store protocol and projection records | 0 errors, 0 warnings across 3 messaging files | passed | 27 lane-message, visibility, projection-rebuild, and metastore-contract tests passed |
 | Kogwistar | `runtime/checkpointed_projection.py` | 0 errors, 0 warnings | passed | 6 checkpoint, CAS, failure-preservation, and bounded-tail tests passed |
 | Kogwistar | `runtime/telemetry.py`, `runtime/models.py`, `runtime/__init__.py` | 0 errors, 0 warnings | passed | 12 budget/projection regression tests passed |
+| Kogwistar | `engine_core/embedding_profile.py` JSON/profile boundary | 0 errors, 0 warnings | pending focused check | 16 passed, 36 skipped |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
 | Kogwistar | `kogwistar` full source scan | 1,894 errors, 24 warnings across the scanned package | not yet run for full scope | post-engine-contract measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
@@ -54,7 +55,10 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan still has `75` legacy findings;
-  Kogwistar full source has `1,894` errors and `24` warnings. The conversation
+  Kogwistar full source had `1,519` errors and `22` warnings across 275 files
+  in the latest pre-embedding-profile scan; the latest profile slice removes
+  44 diagnostics and requires a fresh full scan for the authoritative total.
+  The conversation
   resolver, cache-wrapper, orchestration, retrieval, agentic-answering, and
   service slices are each measured at `0` Pyright errors and `0` warnings;
   the full conversation package is now `0` Pyright errors across 19 files,
