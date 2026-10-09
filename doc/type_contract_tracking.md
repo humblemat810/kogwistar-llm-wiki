@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `8ee9bbd` |
+| `kogwistar` | `feat/stack-type-contracts` | `d380368` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `617bad4` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `3fdeb0e` |
 
@@ -20,6 +20,7 @@ change.
 | Kogwistar | `agent/read_tools.py` | 0 errors | passed | 44 passed |
 | Kogwistar | `agent/bindings.py` | 0 errors | passed | ACL/goal-agent suite passed |
 | Kogwistar | `agent/control.py`, `delegation.py`, `limits.py` | 0 errors | passed | 30 agent tests passed |
+| Kogwistar | `runtime/budget.py` | 0 errors | passed | 16 passed |
 | Kogwistar | `kogwistar` full source scan | 2,250 errors, 24 warnings across 275 files | not yet run for full scope | baseline measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
