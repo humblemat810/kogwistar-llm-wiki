@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `4e597f5` |
+| `kogwistar` | `feat/stack-type-contracts` | `821b0f2` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `1e8d3e2` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `8498bcb` |
 
@@ -40,6 +40,7 @@ change.
 | Kogwistar | `runtime/telemetry.py`, `runtime/models.py`, `runtime/__init__.py` | 0 errors, 0 warnings | passed | 12 budget/projection regression tests passed |
 | Kogwistar | `engine_core/embedding_profile.py` JSON/profile boundary | 0 errors, 0 warnings | selected check has legacy resolver findings outside this slice | 16 passed, 36 skipped |
 | Kogwistar | `engine_core/in_memory_backend.py` sync/async projection adapters | 0 errors, 0 warnings | passed | 92 passed, 24 skipped; 6 Chroma cases unavailable without `chromadb` |
+| Kogwistar | `engine_core/engine_sqlite.py` SQLite and projection JSON boundaries | 0 errors, 0 warnings | passed | 17 passed, 2 skipped; PostgreSQL fixture unavailable |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
 | Kogwistar | `kogwistar` full source scan | 1,894 errors, 24 warnings across the scanned package | not yet run for full scope | post-engine-contract measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
