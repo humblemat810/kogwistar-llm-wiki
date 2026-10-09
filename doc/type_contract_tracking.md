@@ -53,7 +53,7 @@ change.
 | Kogwistar | `server/bootstrap.py` | 0 errors, 0 warnings | passed | 4 bootstrap tests passed |
 | Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
 | Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
-| Kogwistar | `kogwistar` full source scan | 270 errors, 3 warnings across 275 files | not yet run for full scope | fresh full-scope measurement after `8b95003`; largest remaining groups are legacy PostgreSQL/demo/server boundaries |
+| Kogwistar | `kogwistar` full source scan | 230 errors, 3 warnings across the current source | not yet run for full scope | fresh full-scope measurement after `b9001dd`; 40-error reduction from the 270-error baseline; largest remaining groups are demo/OCR/provider/runtime/strategy/wisdom boundaries |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -69,8 +69,8 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan currently has `182` legacy findings;
-  Kogwistar full source currently measures `270` errors and `3` warnings across
-  275 files after the latest protocol slices; this is a measurement, not a
+  Kogwistar full source currently measures `230` errors and `3` warnings across
+  the current source after the latest protocol slices; this is a measurement, not a
   passing gate. The largest remaining groups are `postgres_backend.py`, demo
   modules, and selected server/runtime boundaries.
   The latest write slice is clean; the PostgreSQL backend is reduced to 41
