@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `cfd73b8` |
+| `kogwistar` | `feat/stack-type-contracts` | `e9a267c` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `af2b62a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `3fdeb0e` |
 
@@ -32,7 +32,7 @@ change.
 | Kogwistar | `engine_core/engine.py` and optional projection capability protocol | 0 errors, 0 warnings | legacy E402 in existing monolithic engine import layout | 70 passed, 8 skipped; Chroma unavailable locally; 1 unrelated ACL fixture-helper failure |
 | Kogwistar | `conversation/models.py`, `conversation_context.py`, `memory_retriever.py` | 0 errors, 0 warnings | passed | 9 passed, 2 warnings |
 | Kogwistar | `conversation/resolvers.py` state boundary and retrieval fallback | 44 errors, 0 warnings | passed | 18 passed, 8 warnings |
-| Kogwistar | `conversation` full scoped package | 192 errors, 0 warnings across 19 files | not yet run for full scope | post-resolver state-boundary measurement |
+| Kogwistar | `conversation` full scoped package | 155 errors, 0 warnings across 19 files | not yet run for full scope | post-resolver capability-protocol measurement |
 | Kogwistar | `kogwistar` full source scan | 1,894 errors, 24 warnings across the scanned package | not yet run for full scope | post-engine-contract measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
@@ -48,8 +48,9 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` has `0`
   Pyright errors; the parser-wide backlog is `11` errors and `1` warning;
   Kogwistar full source has `1,894` errors and `24` warnings. The conversation
-  resolver slice is now measured at `44` errors and `0` warnings, down from
-  `145` errors before its typed state boundary.
+  resolver and cache-wrapper slice is now measured at `0` errors and `0`
+  warnings; the full conversation package is `155` errors, down from `300`
+  before the conversation typing work began.
   These are measured scopes, not a claim that the whole stack is complete.
 - [x] Run and record the current full Pyright count for the parser
       `workflow_ingest` scope.
