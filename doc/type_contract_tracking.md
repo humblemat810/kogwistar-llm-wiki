@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `9b064a0` |
+| `kogwistar` | `feat/stack-type-contracts` | `8864307` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
 
@@ -43,7 +43,7 @@ change.
 | Kogwistar | `engine_core/engine_sqlite.py` SQLite and projection JSON boundaries | 0 errors, 0 warnings | passed | 17 passed, 2 skipped; PostgreSQL fixture unavailable |
 | Kogwistar | `engine_core/subsystems/read.py` graph result and adapter boundaries | 0 errors, 0 warnings | passed | 38 passed, 2 skipped, 6 deselected |
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
-| Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 41 errors, 0 warnings | passed | 10 passed, 2 skipped; PostgreSQL fixtures unavailable locally |
+| Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 0 errors, 0 warnings | passed | 4 focused tests passed, 1 optional `pgvector` test unavailable locally, 1 PostgreSQL fixture skipped |
 | Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 0 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
 | Kogwistar | `runtime/perf_profile.py` benchmark protocol and JSON-report boundaries | 0 errors, 0 warnings | passed | 15 tests collected, all environment-gated/skipped locally |
 | Kogwistar | `server/chat_service_run_execution.py`, `chat_service_shared.py`, `run_registry.py` execution and telemetry protocols | 0 errors, 0 warnings | passed | 14 passed, 7 skipped; 9 Chroma-dependent setup errors locally |
@@ -54,7 +54,7 @@ change.
 | Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
 | Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
 | Kogwistar | `conversation/policy.py`, `server/resources.py`, `server/chat_service_run_inspection.py`, `shortids.py`, `utils/log.py` | 0 errors, 0 warnings | passed for focused files; legacy E402 remains in `utils/log.py` | focused compatibility checks passed; backend-dependent tests remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | 41 errors, 0 warnings across 275 files | not yet run for full scope | regenerated after `8a1b5ab`; the newer optional-boundary batch is targeted-clean, and remaining diagnostics are in the pre-existing dirty PostgreSQL backend |
+| Kogwistar | `kogwistar` full source scan | 0 errors, 0 warnings across 275 files | targeted PostgreSQL Ruff checks passed | full scan regenerated after `8864307`; PostgreSQL fixtures and optional `pgvector` coverage remain environment-gated locally |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -70,8 +70,8 @@ change.
 ## Quantified Progress
 
 For the Kogwistar full-source Pyright backlog, the fixed baseline is 277
-errors. The current scan reports 41 errors, so the measured diagnostic
-reduction is 236/277 = 85.2%. This is a backlog metric only; it does not claim
+errors. The current scan reports 0 errors, so the measured diagnostic
+reduction is 277/277 = 100%. This is a backlog metric only; it does not claim
 that 75.5% of runtime behavior is broken, and it does not count warnings,
 Ruff findings, or unverified CI as completed work. A slice is counted only
 after its full-scope scan is regenerated.
@@ -79,12 +79,13 @@ after its full-scope scan is regenerated.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan currently has `182` legacy findings;
-  Kogwistar full source currently measures `41` errors and `0` warnings across
-  275 files after the latest protocol slices; this is a measurement, not a
-  passing gate. The largest remaining groups are `postgres_backend.py`, demo
-  modules, and selected server/runtime boundaries.
-  The latest runtime/ontology slices are clean; the PostgreSQL backend remains
-  an active follow-up slice, and the full-source backlog is still open.
+  Kogwistar full source currently measures `0` errors and `0` warnings across
+  275 files after the PostgreSQL boundary fix. This is a typing measurement,
+  not a passing runtime gate; optional backend fixtures and full CI remain
+  separately unverified.
+  The latest runtime, ontology, and PostgreSQL slices are clean; the remaining
+  work is full runtime/CI verification and legacy Ruff cleanup, not Pyright
+  diagnostics.
   The conversation
   resolver, cache-wrapper, orchestration, retrieval, agentic-answering, and
   service slices are each measured at `0` Pyright errors and `0` warnings;
@@ -96,8 +97,8 @@ after its full-scope scan is regenerated.
       `workflow_ingest` scope.
 - [x] Remove parser `workflow_ingest` errors, grouped by module and protocol
       boundary rather than by individual diagnostic.
-- [ ] Reduce the Kogwistar full-source backlog by package, starting with core
-      runtime/engine protocol boundaries and then the remaining subsystems.
+- [x] Reduce the Kogwistar full-source Pyright backlog by package, including
+      the final PostgreSQL engine boundary.
 - [x] Audit all LLM-Wiki packages beyond the current targeted scope.
 - [x] Remove the measured LLM-Wiki backlog of 30 errors, grouped by policy,
       transport/protocol, JSON boundaries, and model contracts.
@@ -114,9 +115,9 @@ after its full-scope scan is regenerated.
   run tested `b8a7e55` and was green, but the merged PR retained one separate
   failed status check. Commit `f6b4dc1` was pushed afterward to the already
   merged head branch, so it has no new pull-request synchronization run.
-- No GitHub Actions run is currently visible for exact Kogwistar SHA
-  `9b064a0`; no remote result is claimed until Actions records and completes
-  that run.
+- GitHub Actions run `37915006232` is visible for exact Kogwistar SHA
+  `8864307` and is currently queued; no remote result is claimed until Actions
+  records and completes that run.
 
 ## Measurement Commands
 
