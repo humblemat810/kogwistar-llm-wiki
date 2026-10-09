@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `b543920` |
+| `kogwistar` | `feat/stack-type-contracts` | `8b95003` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
 
@@ -44,12 +44,13 @@ change.
 | Kogwistar | `engine_core/subsystems/read.py` graph result and adapter boundaries | 0 errors, 0 warnings | passed | 38 passed, 2 skipped, 6 deselected |
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 41 errors, 0 warnings | passed | 10 passed, 2 skipped; PostgreSQL fixtures unavailable locally |
-| Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 47 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
+| Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 0 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
 | Kogwistar | `runtime/perf_profile.py` benchmark protocol and JSON-report boundaries | 0 errors, 0 warnings | passed | 15 tests collected, all environment-gated/skipped locally |
 | Kogwistar | `server/chat_service_run_execution.py`, `chat_service_shared.py`, `run_registry.py` execution and telemetry protocols | 0 errors, 0 warnings | passed | 14 passed, 7 skipped; 9 Chroma-dependent setup errors locally |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
 | Kogwistar | `conversation/policy.py` policy hooks and backend JSON narrowing | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 4 passed, 17 skipped |
-| Kogwistar | `kogwistar` full source scan | 277 errors, 3 warnings across 275 files | not yet run for full scope | fresh full-scope measurement after `b543920`; largest remaining groups are legacy PostgreSQL/demo/server boundaries |
+| Kogwistar | `engine_core/subsystems/extract.py` and `llm_tasks/default_provider.py` | 0 errors, 0 warnings | passed | provider/structured-output tests passed; Chroma-dependent extraction tests unavailable locally |
+| Kogwistar | `kogwistar` full source scan | 270 errors, 3 warnings across 275 files | not yet run for full scope | fresh full-scope measurement after `8b95003`; largest remaining groups are legacy PostgreSQL/demo/server boundaries |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -65,7 +66,7 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan currently has `182` legacy findings;
-  Kogwistar full source currently measures `277` errors and `3` warnings across
+  Kogwistar full source currently measures `270` errors and `3` warnings across
   275 files after the latest protocol slices; this is a measurement, not a
   passing gate. The largest remaining groups are `postgres_backend.py`, demo
   modules, and selected server/runtime boundaries.
@@ -102,8 +103,8 @@ change.
   merged head branch, so it has no new pull-request synchronization run.
 - Kogwistar run `37898674106` tested `3aabb90` and failed in its CPython/PyPy
   test matrix and optional PyPy-beta job; lint, Rust, native-wheel, and
-  SQLite-invariant jobs passed. Commit `b543920` has a new exact-SHA run
-  `37901420812`, which remains in progress while this ledger is updated.
+  SQLite-invariant jobs passed. Commit `5bc563a` has run `37902367430`, and
+  commit `8b95003` is queued as run `37902767866`; neither is terminal yet.
 
 ## Measurement Commands
 
