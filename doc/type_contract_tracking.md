@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `a6ee520` |
+| `kogwistar` | `feat/stack-type-contracts` | `51474aa` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `327b361` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `4e9ef93` |
 
@@ -45,6 +45,7 @@ change.
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 0 errors, 0 warnings | passed | 4 focused tests passed, 1 optional `pgvector` test unavailable locally, 1 PostgreSQL fixture skipped |
 | Kogwistar | `_rust_bridge.py` native JSON-string extension protocol and JSON result narrowing | 0 errors, 0 warnings | passed | 20 Rust/API parity tests passed |
+| Kogwistar | `engine_core/rust_postgres_session.py` native PostgreSQL JSON/session boundary | 0 errors, 0 warnings | passed | 33 PostgreSQL integration tests skipped because the local fixture is unavailable |
 | Kogwistar | DiskCache ignored positional dependency boundary | 0 errors, 0 warnings | passed | local-lambda regression and fake candidate tests passed; PyPy 3.11 GitHub job passed on `1a01a73` |
 | Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 0 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
 | Kogwistar | `runtime/perf_profile.py` benchmark protocol and JSON-report boundaries | 0 errors, 0 warnings | passed | 15 tests collected, all environment-gated/skipped locally |
@@ -116,10 +117,11 @@ after its full-scope scan is regenerated.
 ## Remote Verification Status
 
 - Kogwistar run `37930756117` completed successfully for exact SHA `1a01a73`,
-  including the required PyPy 3.11 job. The subsequent native-protocol commit
-  `a6ee520` was pushed to the same feature branch and requires a new exact-SHA
-  result; unauthenticated GitHub API polling is currently rate-limited, so its
-  status remains pending rather than being inferred from the prior run.
+  including the required PyPy 3.11 job. Subsequent native-protocol commits
+  `2ce478a`, `a6ee520`, and `51474aa` were pushed to the same feature branch and
+  each requires a new exact-SHA result; unauthenticated GitHub API polling is
+  currently rate-limited, so their status remains pending rather than being
+  inferred from the prior run.
 - KG Doc Parser typing commit `327b361` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 
