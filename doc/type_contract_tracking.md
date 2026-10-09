@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `2d89fe4` |
+| `kogwistar` | `feat/stack-type-contracts` | `afdd868` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `ac07188` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `741e29a` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
 ## Verified Scopes
 
@@ -105,7 +105,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 262 files | 1,475 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 262 files | 1,440 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 194 | remaining legacy parser annotations |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -113,6 +113,11 @@ These counts are not a percentage. They are the denominator needed for a
 reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
+
+The current strict production-source backlog is `1,634` findings: Kogwistar
+`1,440`, KG Doc Parser `194`, and LLM-Wiki `0` in `src/`. The previous
+recorded total was `1,669`; the reduction came from the Core `shortids.py`
+contract slice, not from excluding files.
 
 For the Kogwistar full-source Pyright backlog, the first reproducible
 source-only baseline was 194 errors. The last reproducible scan before
@@ -166,6 +171,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
 - Kogwistar typing commit `8848b26` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and five focused maintenance tests passed.
+- Kogwistar typing commit `afdd868` is pushed to its feature branch. The
+  exact-SHA API query currently reports no workflow run (`runs=0`); local
+  verification is Pyright-clean, Ruff-clean, and five short-id smoke tests
+  passed.
 - Kogwistar typing commit `4c25179` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and the resume-contract test passed.
