@@ -103,8 +103,8 @@ change.
   findings) and KG Doc Parser (`21` findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
-  `2bfa194` is pushed after local verification and its exact-SHA workflow has
-  not yet appeared in the API response.
+  `9aaf126` and parser SHA `a72abd3` are pushed after local verification;
+  neither exact-SHA workflow has appeared in the API response yet.
 
 ## Quantified Progress
 
@@ -285,6 +285,12 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   semantic parser suite passed 25 tests with 7 environment-gated skips, and
   the parser-wide strict ANN count is now 21. The exact-SHA API currently
   reports no workflow run (`runs=0`).
+- KG Doc Parser typing commit `a72abd3` closes the remaining semantic helper
+  annotations and narrows the parser client JSON counter boundary after the
+  Core JSON types became stricter. Full parser Pyright remains clean across
+  40 files; the focused semantic/resolver suite passed 25 tests with 7
+  environment-gated skips. The exact-SHA API currently reports no workflow
+  run (`runs=0`).
 - Kogwistar typing commit `78b7972` completes the auth service return contracts
   on top of the database boundary. Local source Pyright/Ruff are clean for the
   auth package and all 31 auth tests passed.
