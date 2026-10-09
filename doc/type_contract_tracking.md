@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `2bfa194` |
+| `kogwistar` | `feat/stack-type-contracts` | `5f836ff` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `9211bfe` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
@@ -112,7 +112,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 262 files | 1,127 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 262 files | 1,095 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 66 | remaining legacy parser annotations |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -121,12 +121,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `1,193` findings: Kogwistar
-`1,127`, KG Doc Parser `66`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `1,161` findings: Kogwistar
+`1,095`, KG Doc Parser `66`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `476 / 1,669` findings resolved, or approximately `28.5%`; `71.5%`
+That is `508 / 1,669` findings resolved, or approximately `30.4%`; `69.6%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
@@ -237,6 +237,16 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   conversation service, workflow materialization, and native-store JSON
   boundaries. Local focused checks pass; the latest exact-SHA query reports
   no workflow run, so no remote success is claimed yet.
+- Kogwistar typing commit `3e71e00` preserves decorated SQLite method
+  signatures with `ParamSpec` and typed sync/async wrappers. Local Pyright and
+  strict Ruff are clean, and all 21 SQLite context invariant tests passed.
+- Kogwistar typing commit `0eefd47` narrows optional LangChain callback hooks
+  and fallback stubs. Local Pyright and strict Ruff are clean, and 8 optional
+  dependency-boundary tests passed.
+- Kogwistar typing commit `5f836ff` annotates the SQLite connection context
+  override and legacy entity-event iterator. Local Pyright and strict Ruff are
+  clean, and 7 Rust/Python SQLite differential tests passed. Exact-SHA remote
+  CI has not been observed for these latest commits.
 - KG Doc Parser typing commit `9458981` annotates the version-chain database
   and file metadata helpers. Local Pyright and the semantic parser suite pass;
   exact-SHA CI currently reports no workflow run.
