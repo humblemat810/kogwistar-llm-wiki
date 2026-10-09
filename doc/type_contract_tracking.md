@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `74560a2` |
+| `kogwistar` | `feat/stack-type-contracts` | `5c65b50` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `5381284` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `d78d60f` |
 
@@ -28,7 +28,7 @@ change.
 ## Remaining Work
 
 - Current measured backlog: KG Doc Parser `workflow_ingest` has `101`
-  Pyright errors; Kogwistar `agent/` has `22`. These are scoped counts, not
+  Pyright errors; Kogwistar `agent/` has `13`. These are scoped counts, not
   whole-repository totals.
 - [ ] Run and record the current full Pyright count for each repository.
 - [ ] Remove remaining parser `workflow_ingest` errors, grouped by module and
