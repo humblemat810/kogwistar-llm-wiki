@@ -38,6 +38,17 @@ MCP_READ_TOOLS = frozenset({
 })
 
 
+def _request_int(value: object, *, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
 def build_workbench_handler(
     api: WorkbenchApi,
     gateway: AgentGateway | None = None,
@@ -364,7 +375,9 @@ def build_workbench_handler(
                         workspace_id=str(workspace_id or ""),
                         candidate_key=str(payload.get("candidate_key") or ""),
                         evidence_snapshot_id=str(payload.get("evidence_snapshot_id") or ""),
-                        expected_evidence_version=int(payload.get("expected_evidence_version") or 0),
+                        expected_evidence_version=_request_int(
+                            payload.get("expected_evidence_version")
+                        ),
                         decision=str(payload.get("decision") or ""),
                         confirmed=bool(payload.get("confirmed", False)),
                         actor_id=getattr(identity, "principal_id", None),
@@ -498,7 +511,14 @@ def build_workbench_handler(
             self.end_headers()
 
             def emit(body: object) -> None:
-                value = _jsonrpc_result(jsonrpc_id, body) if standard else body
+                value = (
+                    _jsonrpc_result(
+                        cast(JsonValue, jsonrpc_id),
+                        cast(JsonValue, body),
+                    )
+                    if standard
+                    else body
+                )
                 self.wfile.write(_sse_bytes("message" if standard else "task", value))
                 self.wfile.flush()
 
@@ -520,12 +540,12 @@ def build_workbench_handler(
             while time.monotonic() < deadline:
                 time.sleep(interval)
                 if standard:
-                    response = gateway.a2a_jsonrpc({
+                    response = gateway.a2a_jsonrpc(cast(Mapping[str, JsonValue], {
                         "jsonrpc": "2.0",
                         "id": jsonrpc_id,
                         "method": "tasks/get",
                         "params": {"id": task_id, "metadata": {"workspace_id": workspace_id}},
-                    })
+                    }))
                     current = response.get("result") if isinstance(response.get("result"), dict) else None
                 else:
                     current = gateway.a2a_task(workspace_id=workspace_id, task_id=task_id)
