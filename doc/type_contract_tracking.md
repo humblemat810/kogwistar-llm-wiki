@@ -167,9 +167,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 3 workflow-design regression tests passed.
 - Kogwistar typing commit `b081654` is pushed to its feature branch. Exact-SHA
-  workflow run `37946481813` is currently queued; it is not yet remotely
-  verified. Local verification is full-source Pyright-clean, changed-file
-  `E7,E9,F`-clean, and 78 runtime/server tests passed with 2 skips.
+  workflow run `37946481813` completed successfully. Required CPython 3.12-3.14,
+  PyPy 3.11, lint, Rust, SQLite invariants, and native-wheel smoke jobs passed;
+  only the explicitly nonblocking PyPy 3.12 beta job failed. Local verification
+  is full-source Pyright-clean, changed-file `E7,E9,F`-clean, and 78
+  runtime/server tests passed with 2 skips.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
