@@ -8,6 +8,7 @@ from typing import cast
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonObject
 from kogwistar.maintenance.contracts import BeforeWrite
 from kogwistar.maintenance.models import MaintenanceTemplateResult
 from kogwistar.maintenance.template import run_grouped_maintenance_template
@@ -228,7 +229,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
             doc_id=None,
             level_from_root=None,
             mentions=merged_mentions,
-            metadata=cast(LlmWikiDerivedKnowledgePolicy, policies.derived_knowledge).build_metadata(
+            metadata=cast(JsonObject, cast(LlmWikiDerivedKnowledgePolicy, policies.derived_knowledge).build_metadata(
                 workspace_id=workspace_id,
                 label=label,
                 source_node_ids=source_node_ids,
@@ -236,7 +237,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                     [*cast(Sequence[Node | str], existing)]
                 ),
                 created_at_ms=created_at_ms,
-            ),
+            )),
         )
 
     def _emit_execution_wisdom_from_history(
@@ -307,7 +308,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                         ]
                     )
                 ],
-                metadata=wisdom_policy.build_metadata(
+                metadata=cast(JsonObject, wisdom_policy.build_metadata(
                     workspace_id=workspace_id,
                     step_op=pattern.step_op,
                     failure_count=len(pattern.failure_nodes),
@@ -317,7 +318,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                     ),
                     created_at_ms=created_at_ms,
                 )
-                | {"label": f"execution_failure_pattern:{pattern.step_op}"},
+                | {"label": f"execution_failure_pattern:{pattern.step_op}"}),
             ),
             before_write=before_write,
         )

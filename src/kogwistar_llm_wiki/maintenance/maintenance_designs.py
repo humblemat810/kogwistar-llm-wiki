@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonObject
 from kogwistar.runtime.models import WorkflowDesignArtifact, WorkflowEdge, WorkflowNode
 
 from .maintenance_policy import (
@@ -111,7 +112,7 @@ def _workflow_node(
         doc_id=None,
         level_from_root=None,
         mentions=mentions,
-        metadata=metadata,
+        metadata=cast(JsonObject, metadata),
     )
 
 

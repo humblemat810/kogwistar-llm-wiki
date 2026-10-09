@@ -16,6 +16,7 @@ from kogwistar.engine_core.models import (
     Node,
     Span,
 )
+from kogwistar.json_types import JsonObject
 
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -206,15 +207,15 @@ def export_graph_seed_bundle(
     ).canonicalized()
 
 
-def _metadata(workspace_id: str, bundle: GraphSeedBundle, **extra: str) -> dict[str, str]:
-    return {
+def _metadata(workspace_id: str, bundle: GraphSeedBundle, **extra: str) -> JsonObject:
+    return cast(JsonObject, {
         "workspace_id": workspace_id,
         "graph_space": GraphSpace.CURATED_KG.value,
         "seed_bundle_id": bundle.bundle_id,
         "seed_schema_version": str(bundle.schema_version),
         "lifecycle_status": "active",
         **extra,
-    }
+    })
 
 
 def _source_node(workspace_id: str, bundle: GraphSeedBundle, source: SeedSource) -> Node:

@@ -257,7 +257,7 @@ class ProjectionWorker:
                 summary=f"Projection request {req_node_id} transitioned to {status}",
                 mentions=[Grounding(spans=[span])],
                 properties={},
-                metadata=metadata,
+                metadata=cast(JsonObject, metadata),
                 doc_id=f"conv:{ns.conv_bg}",
                 domain_id=None,
                 canonical_entity_id=None,

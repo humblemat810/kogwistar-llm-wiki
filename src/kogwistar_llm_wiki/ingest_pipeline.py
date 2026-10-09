@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
@@ -91,7 +91,7 @@ from .otel import LlmWikiTelemetry
 from .policies.rules import LlmWikiPolicies, build_default_policies
 from .projection import ProjectionManager
 from .usage.projection_engine import UsageProjection
-from .usage.usage_models import UsageProjectionSnapshot
+from .usage.usage_models import UsageMetaStore, UsageProjectionSnapshot
 from .utils import _temporary_namespace  # noqa: F401 - compatibility helper seam
 from .workbench.investigation_history import InvestigationHistoryService
 from .workbench.query import GraphSpaceQueryService
@@ -386,7 +386,7 @@ class IngestPipeline(
     def usage_projection(self, workspace_id: str) -> UsageProjection:
         namespaces = self.namespaces_for(workspace_id)
         return UsageProjection(
-            self.engines.conversation.meta_sqlite,
+            cast(UsageMetaStore, self.engines.conversation.meta_sqlite),
             workspace_id=workspace_id,
             source_namespace=namespaces.usage_events,
             projection_namespace=namespaces.usage_projection,

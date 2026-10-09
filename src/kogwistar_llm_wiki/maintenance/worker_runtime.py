@@ -19,6 +19,7 @@ from kogwistar.runtime.budget_adapters import summarize_budget_events
 from ..configuration.workspace import WorkspaceNamespaces
 from ..usage.events import persist_usage_events
 from ..usage.projection_engine import UsageProjection
+from ..usage.usage_models import UsageMetaStore
 from ..utils import _background_namespace
 from .maintenance_strategies import (
     MaintenanceJobExecutionContext,
@@ -168,7 +169,7 @@ class MaintenanceRuntimeWorkerMixin(MaintenanceWorkerLike):
             model=self.provider_settings.parser.model,
         )
         UsageProjection(
-            self.engines.conversation.meta_sqlite,
+            cast(UsageMetaStore, self.engines.conversation.meta_sqlite),
             workspace_id=ctx.workspace_id,
             source_namespace=ns.usage_events,
             projection_namespace=ns.usage_projection,

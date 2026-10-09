@@ -266,7 +266,10 @@ class DisambiguationService:
                         continue
                     try:
                         reconciled = DisambiguationCandidate.model_validate_json(candidate_json)
-                        version = int(node.metadata["last_reconciled_evidence_version"])
+                        raw_version = node.metadata["last_reconciled_evidence_version"]
+                        if not isinstance(raw_version, (int, float, str)):
+                            raise ValueError("stored evidence version is not numeric")
+                        version = int(raw_version)
                     except (KeyError, TypeError, ValueError) as exc:
                         raise ValueError("stored contact decision artifact is malformed") from exc
                     if (

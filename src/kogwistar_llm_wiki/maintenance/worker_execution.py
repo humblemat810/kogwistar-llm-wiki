@@ -625,7 +625,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 source_cluster_id=None,
                 verification=None,
             )])],
-            metadata={
+            metadata=cast(JsonObject, {
                 "workspace_id": ctx.workspace_id,
                 "source_document_id": decision.source_document_id,
                 "artifact_kind": "maintenance_guard_decision",
@@ -639,7 +639,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 "selection_strategy": ctx.payload.get("selection_strategy"),
                 "maintenance_candidates": list(_mapping_items(ctx.payload.get("maintenance_candidates")))[:24],
                 "created_at_ms": int(time.time() * 1000),
-            },
+            }),
         )
         with _background_namespace(self.engines.conversation, ns.conv_bg):
             if not self.engines.conversation.read.node_exists(ids=[artifact_id]):

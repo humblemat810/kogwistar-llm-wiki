@@ -10,7 +10,7 @@ from kogwistar.id_provider import stable_id
 from kogwistar.runtime import BudgetAttribution, BudgetEvent
 from kogwistar.runtime.budget import budget_event_to_dict
 
-from .usage_models import UsageMetaStore
+from .usage_models import UsageEventStore
 
 USAGE_EVENT_KIND = "usage_event"
 
@@ -45,7 +45,7 @@ def _event_id(event: BudgetEvent) -> str:
     )
 
 
-def append_usage_event(meta: UsageMetaStore, *, namespace: str, event: BudgetEvent) -> int:
+def append_usage_event(meta: UsageEventStore, *, namespace: str, event: BudgetEvent) -> int:
     """Append one idempotently identifiable raw usage event to the core event log."""
 
     event_id = _event_id(event)
@@ -63,7 +63,7 @@ def append_usage_event(meta: UsageMetaStore, *, namespace: str, event: BudgetEve
 
 
 def persist_usage_events(
-    meta: UsageMetaStore,
+    meta: UsageEventStore,
     *,
     namespace: str,
     events: Iterable[BudgetEvent],

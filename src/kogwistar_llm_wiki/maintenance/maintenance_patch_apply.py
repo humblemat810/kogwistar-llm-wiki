@@ -17,6 +17,7 @@ from kogwistar.engine_core.models import (
     Span,
 )
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonObject
 from kogwistar.typing_interfaces import ReadLike, WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
@@ -720,7 +721,7 @@ def _node_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOpe
         level_from_root=None,
         properties=operation.properties or None,
         mentions=[Grounding(spans=[_span_from_operation(operation)])],
-        metadata=metadata,
+        metadata=cast(JsonObject, metadata),
     )
 
 
@@ -742,7 +743,7 @@ def _edge_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOpe
         target_edge_ids=[],
         properties=operation.properties or None,
         mentions=[Grounding(spans=[_span_from_operation(operation)])],
-        metadata=metadata,
+        metadata=cast(JsonObject, metadata),
     )
 
 

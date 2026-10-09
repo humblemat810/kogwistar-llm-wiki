@@ -30,7 +30,7 @@ from hashlib import sha256
 from io import BytesIO
 from math import sqrt
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from kogwistar.engine_core import (
     EmbeddingProfile as CoreEmbeddingProfile,
@@ -913,7 +913,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
             )
         storage_key = _projection_storage_key(unit.workspace_id, unit.view_id)
         ids = [f"{storage_key}:{ordinal}" for ordinal in range(len(normalised))]
-        metadatas = [
+        metadatas: list[dict[str, str | int | float | bool | None]] = [
             {
                 "view_id": unit.view_id,
                 "storage_key": storage_key,
@@ -929,7 +929,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         self._collection.upsert(
             ids=ids,
             embeddings=[list(vector) for vector in normalised],
-            metadatas=metadatas,
+            metadatas=cast(Any, metadatas),
         )
         SQLiteMultimodalProjectionStore.upsert_embedding(
             self, unit, normalised, profile=profile
@@ -977,9 +977,10 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
                 raise ProjectionIntegrityError(
                     f"Chroma contains an unknown source view {storage_key!r}"
                 )
-            grouped.setdefault(storage_key, []).append(
-                (int(metadata.get("vector_ordinal", 0)), vector)
-            )
+            raw_ordinal = metadata.get("vector_ordinal", 0)
+            if not isinstance(raw_ordinal, (int, float, str)):
+                raise ProjectionIntegrityError("Chroma vector ordinal is not numeric")
+            grouped.setdefault(storage_key, []).append((int(raw_ordinal), vector))
         scored: list[tuple[float, MultimodalSourceUnit]] = []
         for storage_key, values in grouped.items():
             values.sort(key=lambda item: item[0])

@@ -440,7 +440,7 @@ def _memory_node(record: MemoryRecord, memory_id: str) -> Node:
         level_from_root=0,
         doc_id=f"_conv:{memory_id}",
         mentions=[Grounding(spans=[span])],
-        metadata={
+        metadata=cast(JsonObject, {
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
             "artifact_kind": MemoryService.artifact_kind,
@@ -449,7 +449,7 @@ def _memory_node(record: MemoryRecord, memory_id: str) -> Node:
             "memory_kind": record.kind,
             "memory_confidence": record.confidence,
             "memory_lifecycle_status": record.lifecycle_status,
-        },
+        }),
     )
 
 
@@ -486,13 +486,13 @@ def _evidence_node(record: MemoryRecord, evidence: MemoryEvidence, evidence_id: 
         level_from_root=0,
         doc_id=f"_conv:{evidence_id}",
         mentions=[Grounding(spans=[span])],
-        metadata={
+        metadata=cast(JsonObject, {
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
             "artifact_kind": MemoryService.evidence_artifact_kind,
             "evidence_payload_json": json.dumps(evidence.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
             "evidence_id": evidence_id,
-        },
+        }),
     )
 
 
@@ -515,14 +515,14 @@ def _support_edge(record: MemoryRecord, memory_id: str, evidence: Sequence[Memor
         source_edge_ids=[],
         target_edge_ids=[],
         mentions=[Grounding(spans=[Span.from_dummy_for_conversation(f"support:{edge_id}")])],
-        metadata={
+        metadata=cast(JsonObject, {
             "workspace_id": record.workspace_id,
             "conversation_lane": "foreground",
             "artifact_kind": MemoryService.artifact_kind,
             "edge_kind": "hyperedge",
             "memory_id": memory_id,
             "evidence_ids": evidence_ids,
-        },
+        }),
     )
 
 
