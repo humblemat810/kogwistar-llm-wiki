@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `9055966` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `af2b62a` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `1e8d3e2` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f635e36` |
 
 ## Verified Scopes
@@ -45,14 +45,15 @@ change.
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
-| KG Doc Parser | `kg_doc_parser` full source scan | 11 errors, 1 warning across 40 files | legacy module Ruff backlog remains | checked-out-core semantic test path passed; full parameterized run not completed |
+| KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 75 legacy Ruff findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 174 files | targeted groups passed; full runtime suite pending | Pyright clean |
 
 ## Remaining Work
 
-- Current measured backlog: KG Doc Parser `workflow_ingest` has `0`
-  Pyright errors; the parser-wide backlog is `11` errors and `1` warning;
+- Current measured backlog: KG Doc Parser `workflow_ingest` and the full
+  `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
+  the parser-wide Ruff scan still has `75` legacy findings;
   Kogwistar full source has `1,894` errors and `24` warnings. The conversation
   resolver, cache-wrapper, orchestration, retrieval, agentic-answering, and
   service slices are each measured at `0` Pyright errors and `0` warnings;
