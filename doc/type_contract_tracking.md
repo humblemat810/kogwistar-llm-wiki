@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `74873ed` |
+| `kogwistar` | `feat/stack-type-contracts` | `12dbe64` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
 
@@ -68,6 +68,7 @@ change.
 | Kogwistar | `engine_core/utils/aliasing.py` graph alias and de-alias contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 8 passed; 2 optional Chroma cases unavailable locally |
 | Kogwistar | `runtime/async_runtime.py` async workflow invocation, edge, persistence, and callback contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F` except pre-existing E402 in the monolithic module) | 86 passed, 2 skipped; optional Chroma/PostgreSQL fixtures unavailable locally |
 | Kogwistar | `runtime/design.py` workflow graph reader, resolver, and validation contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 1 available workflow-design test passed; 1 PostgreSQL case skipped and 2 Chroma cases unavailable locally |
+| Kogwistar | `engine_core/in_memory_backend.py` engine, model, transaction, and lock contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 54 passed, 6 skipped; 4 Chroma cases unavailable locally |
 | Kogwistar | `runtime/resolvers.py` resolver wrapper, sandbox input, and async resolver contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 85 passed, 3 skipped |
 | Kogwistar | package introspection, ACL metadata validators, and compression workflow return contract | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 191 passed, 2 skipped; 3 optional/fixture failures |
 | Kogwistar | historical search facade signatures and `similarity_threshold` protocol forwarding | 0 errors, 0 warnings across engine, read, ACL, and shared protocol files | touched-file check passed; legacy engine E402 remains outside this slice | first search normalization test passed; second fake-backend test hung locally before completion |
@@ -107,11 +108,11 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`489`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`474`
   findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
-  `74873ed` is pushed and exact-SHA workflow `37992458923` is queued.
+  `12dbe64` is pushed and exact-SHA workflow `37993011702` is in progress.
   Parser SHA `a72abd3` has local verification, but no exact-SHA
   workflow has appeared in the API response.
 
@@ -121,7 +122,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 489 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 474 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -130,12 +131,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `489` findings: Kogwistar
-`489`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `474` findings: Kogwistar
+`474`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `1180 / 1,669` findings resolved, or approximately `70.7%`; `29.3%`
+That is `1195 / 1,669` findings resolved, or approximately `71.6%`; `28.4%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
@@ -270,6 +271,12 @@ The latest runtime, maintenance, ontology, PostgreSQL, and chat API slices are c
   clean; the available workflow-design case passed, with Chroma unavailable
   locally. Exact-SHA workflow `37992458923` is queued; no remote success is
   claimed.
+
+- Kogwistar typing commit `12dbe64` completes the in-memory backend engine,
+  graph-model, transaction, and lock contracts. Local Pyright and strict `ANN`
+  checks are clean; 54 backend/two-stage/meta tests passed, with optional Chroma
+  cases unavailable locally. Exact-SHA workflow `37993011702` is in progress;
+  no remote success is claimed.
 
 - Kogwistar run `37939704217` completed successfully for exact SHA
   `1ffdfd42f19614c750be31161edb4876302e3294`. Required CPython 3.12-3.14,
