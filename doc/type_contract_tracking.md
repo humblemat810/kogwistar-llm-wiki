@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `8ee9bbd` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `abffc81` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `ac53e80` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `d78d60f` |
 
 ## Verified Scopes
@@ -24,19 +24,24 @@ change.
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
+| KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
+| LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 30 errors, 0 warnings across 181 files | not yet run for full scope | measurement only |
 
 ## Remaining Work
 
-- Current measured backlog: KG Doc Parser `workflow_ingest` has `85`
+- Current measured backlog: KG Doc Parser `workflow_ingest` has `0`
   Pyright errors; Kogwistar `agent/` has `0`. These are scoped counts, not
   whole-repository totals.
-- [ ] Run and record the current full Pyright count for each repository.
-- [ ] Remove remaining parser `workflow_ingest` errors, grouped by module and
-      protocol boundary rather than by individual diagnostic.
+- [x] Run and record the current full Pyright count for the parser
+      `workflow_ingest` scope.
+- [x] Remove parser `workflow_ingest` errors, grouped by module and protocol
+      boundary rather than by individual diagnostic.
 - [ ] Audit core runtime/engine modules for missing protocols and broad
       `Any`/`object` boundaries.
 - [ ] Audit all LLM-Wiki packages beyond the current targeted scope.
+- [ ] Remove the measured LLM-Wiki backlog of 30 errors, grouped by policy,
+      transport/protocol, JSON boundaries, and model contracts.
 - [ ] Run full local CI for each repository with the documented dependency
       paths and `-p no:cacheprovider` where appropriate.
 - [ ] Verify PyPy 3.11 and CPython 3.12-3.14 compatibility after type changes.
