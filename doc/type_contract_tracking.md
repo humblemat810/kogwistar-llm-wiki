@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `c4a4f35` |
+| `kogwistar` | `feat/stack-type-contracts` | `194aac6` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
 
@@ -64,6 +64,7 @@ change.
 | Kogwistar | `wisdom/resolvers.py` typed dream workflow context, payload, dependency, and callback boundaries | 0 errors, 0 warnings | passed | 4 dream workflow tests passed |
 | Kogwistar | `runtime/runtime.py` trace payload, backend lookup, context-manager, cache-path, and join-helper contracts | 0 errors, 0 warnings | legacy E402 only | 86 passed, 2 skipped (optional Chroma/PostgreSQL fixtures) |
 | Kogwistar | `server/chat_api.py` FastAPI response and SSE iterator contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 9 passed, 2 warnings |
+| Kogwistar | `strategies/adjudicators.py` task, payload, cache, and batch contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | fake-backend batch test passed; optional Chroma cases unavailable locally |
 | Kogwistar | `runtime/resolvers.py` resolver wrapper, sandbox input, and async resolver contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 85 passed, 3 skipped |
 | Kogwistar | package introspection, ACL metadata validators, and compression workflow return contract | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 191 passed, 2 skipped; 3 optional/fixture failures |
 | Kogwistar | historical search facade signatures and `similarity_threshold` protocol forwarding | 0 errors, 0 warnings across engine, read, ACL, and shared protocol files | touched-file check passed; legacy engine E402 remains outside this slice | first search normalization test passed; second fake-backend test hung locally before completion |
@@ -103,7 +104,7 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`548`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`530`
   findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
@@ -117,7 +118,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 548 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 530 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -126,12 +127,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `548` findings: Kogwistar
+The current strict production-source backlog is `530` findings: Kogwistar
 `567`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `1121 / 1,669` findings resolved, or approximately `67.1%`; `32.9%`
+That is `1139 / 1,669` findings resolved, or approximately `68.2%`; `31.8%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
@@ -244,6 +245,11 @@ The latest runtime, maintenance, ontology, PostgreSQL, and chat API slices are c
   checks are clean, and the focused chat API smoke suite passed 9 tests with 2
   warnings. Exact-SHA workflow `37990138209` is pending; no remote success is
   claimed yet.
+
+- Kogwistar typing commit `194aac6` completes the adjudicator task, payload,
+  cache, and batch contracts. Local Pyright and strict `ANN` checks are clean;
+  the fake-backend regression passed and optional Chroma cases were unavailable.
+  Exact-SHA workflow `37990768861` is in progress; no remote success is claimed.
 
 - Kogwistar run `37939704217` completed successfully for exact SHA
   `1ffdfd42f19614c750be31161edb4876302e3294`. Required CPython 3.12-3.14,
