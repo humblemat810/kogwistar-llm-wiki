@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `e7af064` |
+| `kogwistar` | `feat/stack-type-contracts` | `cc8b043` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
 
@@ -70,6 +70,7 @@ change.
 | Kogwistar | `runtime/design.py` workflow graph reader, resolver, and validation contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 1 available workflow-design test passed; 1 PostgreSQL case skipped and 2 Chroma cases unavailable locally |
 | Kogwistar | `engine_core/in_memory_backend.py` engine, model, transaction, and lock contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 54 passed, 6 skipped; 4 Chroma cases unavailable locally |
 | Kogwistar | `server/mcp_tools.py` ASGI middleware, graph-tool, adjudication, and public MCP tool contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 22 MCP/auth tests passed, 1 optional test skipped; golden schema parity passed |
+| Kogwistar | `runtime/rust_runtime_authority.py` sync/async Rust scheduler, HTTP, and result contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 8 authority tests passed, 2 optional Rust-server tests skipped; 5 legacy fixture-construction cases remain separately failing |
 | Kogwistar | `runtime/resolvers.py` resolver wrapper, sandbox input, and async resolver contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 85 passed, 3 skipped |
 | Kogwistar | package introspection, ACL metadata validators, and compression workflow return contract | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 191 passed, 2 skipped; 3 optional/fixture failures |
 | Kogwistar | historical search facade signatures and `similarity_threshold` protocol forwarding | 0 errors, 0 warnings across engine, read, ACL, and shared protocol files | touched-file check passed; legacy engine E402 remains outside this slice | first search normalization test passed; second fake-backend test hung locally before completion |
@@ -109,11 +110,11 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`460`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`450`
   findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
-  `e7af064` is pushed and exact-SHA workflow `37993616509` is pending.
+  `cc8b043` is pushed and exact-SHA workflow `37993949288` is pending.
   Parser SHA `a72abd3` has local verification, but no exact-SHA
   workflow has appeared in the API response.
 
@@ -123,7 +124,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 460 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 450 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -132,12 +133,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `460` findings: Kogwistar
-`460`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `450` findings: Kogwistar
+`450`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `1209 / 1,669` findings resolved, or approximately `72.3%`; `27.7%`
+That is `1219 / 1,669` findings resolved, or approximately `73.0%`; `27.0%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
@@ -284,6 +285,12 @@ The latest runtime, maintenance, ontology, PostgreSQL, and chat API slices are c
   strict `ANN` checks are clean; 22 MCP/auth tests passed with 1 optional skip,
   and the golden MCP schema parity test passed. Exact-SHA workflow
   `37993616509` is pending; no remote success is claimed.
+
+- Kogwistar typing commit `cc8b043` completes the sync/async Rust runtime
+  authority HTTP, scheduler, and result contracts. Local Pyright and strict
+  `ANN` checks are clean; 8 authority tests passed and 2 optional Rust-server
+  tests were skipped. Exact-SHA workflow `37993949288` is pending; no remote
+  success is claimed.
 
 - Kogwistar run `37939704217` completed successfully for exact SHA
   `1ffdfd42f19614c750be31161edb4876302e3294`. Required CPython 3.12-3.14,
