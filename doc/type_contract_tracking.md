@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `631403c` |
+| `kogwistar` | `feat/stack-type-contracts` | `1efb288` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `dd1e669` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
@@ -105,7 +105,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 262 files | 1,357 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 262 files | 1,355 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 160 | remaining legacy parser annotations |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -114,8 +114,8 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `1,517` findings: Kogwistar
-`1,357`, KG Doc Parser `160`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `1,515` findings: Kogwistar
+`1,355`, KG Doc Parser `160`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
@@ -283,6 +283,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   metadata, tombstone normalization, and node/edge helper contracts. Local
   Pyright remains clean, the model/flattening suite passed 38 tests, and the
   exact-SHA GitHub query reports `runs=0`.
+- Kogwistar typing commit `1efb288` narrows the `LevelAwareMixin` metadata
+  validator from `Any` to a guarded raw payload. Local Pyright remains clean,
+  the model/flattening suite passed 38 tests, and the exact-SHA GitHub query
+  reports `runs=0`.
 - The `feat/stack-type-contracts` branch currently has an open Core PR and
   exact Core CI coverage. The parser and LLM-Wiki branches currently have no
   open PRs, so their latest commits cannot have pull-request CI results; this
