@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `a1f2592` |
+| `kogwistar` | `feat/stack-type-contracts` | `f6d5e0d` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `1e8d3e2` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `8498bcb` |
 
@@ -44,6 +44,7 @@ change.
 | Kogwistar | `engine_core/subsystems/read.py` graph result and adapter boundaries | 0 errors, 0 warnings | passed | 38 passed, 2 skipped, 6 deselected |
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 41 errors, 0 warnings | passed | 10 passed, 2 skipped; PostgreSQL fixtures unavailable locally |
+| Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 47 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
 | Kogwistar | `kogwistar` full source scan | 1,213 errors, 22 warnings across 275 files | not yet run for full scope | current full-scope measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
