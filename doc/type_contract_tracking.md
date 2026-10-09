@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `8ee9bbd` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `ac53e80` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `617bad4` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `3fdeb0e` |
 
 ## Verified Scopes
@@ -20,25 +20,27 @@ change.
 | Kogwistar | `agent/read_tools.py` | 0 errors | passed | 44 passed |
 | Kogwistar | `agent/bindings.py` | 0 errors | passed | ACL/goal-agent suite passed |
 | Kogwistar | `agent/control.py`, `delegation.py`, `limits.py` | 0 errors | passed | 30 agent tests passed |
+| Kogwistar | `kogwistar` full source scan | 2,250 errors, 24 warnings across 275 files | not yet run for full scope | baseline measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
+| KG Doc Parser | `kg_doc_parser` full source scan | 12 errors, 1 warning across 40 files | legacy module Ruff backlog remains | semantic subset 4 passed, 10 deselected |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 174 files | targeted groups passed; full runtime suite pending | Pyright clean |
 
 ## Remaining Work
 
 - Current measured backlog: KG Doc Parser `workflow_ingest` has `0`
-  Pyright errors; Kogwistar `agent/` has `0`. These are scoped counts, not
-  whole-repository totals.
+  Pyright errors; Kogwistar full source has `2,250` errors and `24` warnings.
+  These are measured scopes, not a claim that the whole stack is complete.
 - [x] Run and record the current full Pyright count for the parser
       `workflow_ingest` scope.
 - [x] Remove parser `workflow_ingest` errors, grouped by module and protocol
       boundary rather than by individual diagnostic.
-- [ ] Audit core runtime/engine modules for missing protocols and broad
-      `Any`/`object` boundaries.
+- [ ] Reduce the Kogwistar full-source backlog by package, starting with core
+      runtime/engine protocol boundaries and then the remaining subsystems.
 - [x] Audit all LLM-Wiki packages beyond the current targeted scope.
 - [x] Remove the measured LLM-Wiki backlog of 30 errors, grouped by policy,
       transport/protocol, JSON boundaries, and model contracts.
