@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `414f8be` |
+| `kogwistar` | `feat/stack-type-contracts` | `b16f9ec` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `622b687` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `0ab6345` |
 
@@ -59,6 +59,7 @@ change.
 | Kogwistar | `engine_core/subsystems/read.py` graph result and adapter boundaries | 0 errors, 0 warnings | passed | 38 passed, 2 skipped, 6 deselected |
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 0 errors, 0 warnings | passed | 4 focused tests passed, 1 optional `pgvector` test unavailable locally, 1 PostgreSQL fixture skipped |
+| Kogwistar | historical search facade signatures and `similarity_threshold` protocol forwarding | 0 errors, 0 warnings across engine, read, ACL, and shared protocol files | touched-file check passed; legacy engine E402 remains outside this slice | first search normalization test passed; second fake-backend test hung locally before completion |
 | Kogwistar | `_rust_bridge.py` native JSON-string extension protocol and JSON result narrowing | 0 errors, 0 warnings | passed | 20 Rust/API parity tests passed |
 | Kogwistar | `engine_core/rust_postgres_session.py` native PostgreSQL JSON/session boundary | 0 errors, 0 warnings | passed | 33 PostgreSQL integration tests skipped because the local fixture is unavailable |
 | Kogwistar | DiskCache ignored positional dependency boundary | 0 errors, 0 warnings | passed | local-lambda regression and fake candidate tests passed; PyPy 3.11 GitHub job passed on `1a01a73` |
@@ -188,6 +189,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   synchronization run `#498` is queued; local full-source Pyright is clean
   across 262 files, changed-file Ruff is clean, and the Rust registry
   differential test passed with 1 PostgreSQL fixture skipped.
+- Kogwistar typing commit `b16f9ec` aligns the historical search facade, ACL
+  forwarding, and shared read protocol around the explicit
+  `similarity_threshold` parameter. Exact-SHA workflow run `37954185993` is
+  currently loading on GitHub; it is not yet a green or failed result. Local
+  full-source Pyright remains clean across 262 files.
 - KG Doc Parser typing commit `622b687` adds page-aware source collection,
   page, and unit protocols without widening the layered parser contract. Its
   exact-SHA GitHub result remains to be observed because the branch has no
