@@ -56,9 +56,9 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan still has `75` legacy findings;
-  Kogwistar full source had `1,519` errors and `22` warnings across 275 files
-  in the latest pre-embedding-profile scan; the latest profile slice removes
-  44 diagnostics and requires a fresh full scan for the authoritative total.
+  Kogwistar full source now has `1,445` errors and `22` warnings across 275
+  files in the latest full scan, down from `1,519` after the embedding-profile
+  and in-memory-adapter slices.
   The conversation
   resolver, cache-wrapper, orchestration, retrieval, agentic-answering, and
   service slices are each measured at `0` Pyright errors and `0` warnings;
