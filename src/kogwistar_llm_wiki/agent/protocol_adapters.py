@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Mapping
+from typing import cast
 
 from kogwistar.json_types import JsonValue
 
@@ -83,7 +84,7 @@ class AgentProtocolMixin(AgentGatewayHost):
         request.update({str(k): v for k, v in metadata.items()})
         if bool(payload.get("background", True)) and self.api.dispatcher is not None:
             interaction = self.api.submit_interaction(request)
-            return _a2a_task(interaction)
+            return _a2a_task(cast(Mapping[str, JsonValue], interaction))
         result = self._answer(request)
         task_id = _request_id(payload, "task")
         return {
@@ -97,7 +98,7 @@ class AgentProtocolMixin(AgentGatewayHost):
         interaction = self.api.get_interaction(workspace_id=workspace_id, interaction_id=task_id)
         if interaction is None:
             return None
-        return _a2a_task(interaction)
+        return _a2a_task(cast(Mapping[str, JsonValue], interaction))
 
     def a2a_jsonrpc(self, payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         """Handle the A2A JSON-RPC binding without duplicating task logic."""
