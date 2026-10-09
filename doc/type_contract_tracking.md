@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `ba0fedc` |
+| `kogwistar` | `feat/stack-type-contracts` | `3b2be8e` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6868e5a` |
 
@@ -31,6 +31,7 @@ change.
 | Kogwistar | `server/chat_service_run_inspection.py` persisted workflow JSON boundaries | 0 errors, 0 warnings | passed | resume-contract test passed; broader server setup remains uncounted |
 | Kogwistar | `server/chat_service_run_execution.py` run/state JSON contracts | 0 errors, 0 warnings | passed | 12 chat-service and workflow-lineage tests passed |
 | Kogwistar | `server/chat_mcp.py` service-provider and role/namespace decorator protocols | 0 errors, 0 warnings | passed | 2 targeted MCP tests passed; recursive JSON annotations intentionally retained as legacy schema boundary |
+| Kogwistar | `server/chat_service_workflow_design.py` history/projection response boundary | 0 errors, 0 warnings | passed | 6 workflow-design and lineage/ACL tests passed |
 | Kogwistar | `engine_core/in_memory_meta.py` metadata and projection JSON boundaries | 0 errors, 0 warnings | passed | 22 passed, 2 warnings |
 | Kogwistar | `typing_interfaces.py` plus engine subsystem protocol surface | 0 errors in protocol file; engine reduced to 44 | passed | fake backend smoke passed; optional Chroma unavailable locally |
 | Kogwistar | ACL read/write protocol forwarding and backend capability attributes | engine reduced to 34 errors | passed | 42 ACL tests passed; 1 unrelated fixture-helper failure |
@@ -147,6 +148,9 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
 - Kogwistar typing commit `ba0fedc` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 2 targeted MCP tests passed.
+- Kogwistar typing commit `3b2be8e` is pushed to its feature branch. The exact-SHA
+  API query currently reports no workflow run (`runs=0`); local verification is
+  Pyright-clean, Ruff-clean, and 6 focused workflow/lineage tests passed.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
