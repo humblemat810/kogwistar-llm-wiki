@@ -60,10 +60,10 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan still has `75` legacy findings;
-  Kogwistar full source last measured `1,283` errors and `22` warnings across
-  275 files after the SQLite, graph-read, and latest write slices; the latest
-  write slice itself is clean, but the full source scan must be regenerated
-  after this commit for the next authoritative total.
+  Kogwistar full source now measures `1,213` errors and `22` warnings across
+  275 files after the SQLite, graph-read, write, and PostgreSQL backend slices.
+  The latest write slice is clean; the PostgreSQL backend is reduced to 41
+  errors and remains an active follow-up slice.
   The conversation
   resolver, cache-wrapper, orchestration, retrieval, agentic-answering, and
   service slices are each measured at `0` Pyright errors and `0` warnings;
