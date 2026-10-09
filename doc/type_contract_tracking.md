@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `9c173a0` |
+| `kogwistar` | `feat/stack-type-contracts` | `da93060` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `0ab6345` |
 
@@ -35,6 +35,7 @@ change.
 | Kogwistar | `server/chat_service_workflow_history.py` visible-delta and event payload contracts | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `server/chat_service_workflow_history.py` event-row protocol boundary | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `maintenance/template.py`, `grouped_artifacts.py` read-only filter protocol | 0 errors, 0 warnings | passed | maintenance-template regression passed; full source scan passed |
+| Kogwistar | `server/run_registry.py` metadata-store protocol | 0 errors, 0 warnings | passed | 10 run-registry/server tests passed, 1 PostgreSQL fixture skipped |
 | Kogwistar | `server/chat_service_workflow_design.py` mutation/undo/redo JSON responses | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `server/chat_mcp.py` generic role/namespace decorator protocol and `mcp_tools.py` naming cleanup | 0 errors, 0 warnings | passed | 2 MCP regression tests passed; server Ruff E4/E7/E9/F clean |
 | Kogwistar | `engine_core/in_memory_meta.py` metadata and projection JSON boundaries | 0 errors, 0 warnings | passed | 22 passed, 2 warnings |
@@ -180,6 +181,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   smoke jobs passed; only the explicitly nonblocking PyPy 3.12 beta job failed.
   Local full-source Pyright is clean across 262 files, and the maintenance-
   template regression passed.
+- Kogwistar typing commit `da93060` adds the durable metadata-store protocol
+  for `RunRegistry`. Its exact-SHA workflow result is pending; local full-source
+  Pyright is clean across 262 files, and 10 run-registry/server tests passed
+  with 1 PostgreSQL fixture skipped.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
