@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `33d58c1` |
+| `kogwistar` | `feat/stack-type-contracts` | `f60150b` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `f0a2b73` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
@@ -99,7 +99,7 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`1,203`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`1,195`
   findings) and KG Doc Parser (`149` findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; the latest
@@ -113,7 +113,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 262 files | 1,203 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 262 files | 1,195 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 149 | remaining legacy parser annotations |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -122,12 +122,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `1,352` findings: Kogwistar
-`1,203`, KG Doc Parser `149`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `1,344` findings: Kogwistar
+`1,195`, KG Doc Parser `149`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `317 / 1,669` findings resolved, or approximately `19.0%`; `81.0%`
+That is `325 / 1,669` findings resolved, or approximately `19.5%`; `80.5%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
