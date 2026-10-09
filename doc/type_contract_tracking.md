@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `45098be` |
+| `kogwistar` | `feat/stack-type-contracts` | `8afa3c8` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `dd1e669` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
@@ -98,6 +98,13 @@ change.
 | LLM-Wiki | normal local CI-marked suite with vendored paths configured | not applicable | passed | 1,044 passed, 8 skipped, 178 deselected in 25:41 |
 
 ## Remaining Work
+
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`1,288`
+  findings) and KG Doc Parser (`160` findings), prioritizing public protocol
+  boundaries and callback surfaces over mechanical private helpers.
+- Run the full relevant test and CI gates for each pushed slice; the latest
+  Core feature-branch SHA `8afa3c8` currently has no GitHub workflow run
+  attached (`runs=0`).
 
 ## Quantified Progress
 
