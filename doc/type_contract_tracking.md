@@ -64,6 +64,7 @@ change.
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 181 files | targeted groups passed; full runtime suite pending | Pyright clean |
 | LLM-Wiki | diagnostics, remote embedding, trace sink, and memory boundaries | 0 errors, 0 warnings across full `src` scan | passed (`E4,E7,E9,F`) | 28 passed |
+| LLM-Wiki | normal local CI-marked suite with vendored paths configured | not applicable | passed | 1,044 passed, 8 skipped, 178 deselected in 25:41 |
 
 ## Remaining Work
 
