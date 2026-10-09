@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `33ac29a` |
+| `kogwistar` | `feat/stack-type-contracts` | `c6bc55d` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
 
@@ -207,6 +207,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   strict `ANN` checks are clean; the DiskCache positional-ignore regression
   passed. The cross-backend cache test cannot run locally because `chromadb`
   is not installed. Exact-SHA workflow `37981879828` is pending.
+
+- Kogwistar commit `c6bc55d` removes four unused imports reported by the full
+  repository Ruff gate. Local `python -m ruff check .` passes. Exact-SHA
+  workflow `37987976204` is queued; no remote test result is claimed yet.
 
 - Kogwistar run `37939704217` completed successfully for exact SHA
   `1ffdfd42f19614c750be31161edb4876302e3294`. Required CPython 3.12-3.14,
