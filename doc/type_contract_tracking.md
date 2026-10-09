@@ -9,8 +9,8 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `d493f6e` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `dd1e669` |
+| `kogwistar` | `feat/stack-type-contracts` | `fa06e21` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `a867514` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
 ## Verified Scopes
