@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `f193e00` |
+| `kogwistar` | `feat/stack-type-contracts` | `2d89fe4` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `ac07188` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `741e29a` |
 
@@ -61,6 +61,7 @@ change.
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 0 errors, 0 warnings | passed | 4 focused tests passed, 1 optional `pgvector` test unavailable locally, 1 PostgreSQL fixture skipped |
 | Kogwistar | `runtime/resolvers.py` resolver wrapper, sandbox input, and async resolver contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 85 passed, 3 skipped |
+| Kogwistar | package introspection, ACL metadata validators, and compression workflow return contract | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 191 passed, 2 skipped; 3 optional/fixture failures |
 | Kogwistar | historical search facade signatures and `similarity_threshold` protocol forwarding | 0 errors, 0 warnings across engine, read, ACL, and shared protocol files | touched-file check passed; legacy engine E402 remains outside this slice | first search normalization test passed; second fake-backend test hung locally before completion |
 | Kogwistar | `_rust_bridge.py` native JSON-string extension protocol and JSON result narrowing | 0 errors, 0 warnings | passed | 20 Rust/API parity tests passed |
 | Kogwistar | `engine_core/rust_postgres_session.py` native PostgreSQL JSON/session boundary | 0 errors, 0 warnings | passed | 33 PostgreSQL integration tests skipped because the local fixture is unavailable |
@@ -86,6 +87,7 @@ change.
 | KG Doc Parser | `workflow_ingest/providers.py` structured-provider schema boundary | 0 errors, 0 warnings | passed | provider settings/token-budget tests passed with vendored Core on `PYTHONPATH` |
 | KG Doc Parser | `workflow_ingest/clients.py` resume argument protocol | 0 errors, 0 warnings | passed | unsupported server-resume contract passed; optional Chroma case skipped |
 | KG Doc Parser | `utils/langchain.py` callback and generation-variant contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | dependency-path import check passed |
+| KG Doc Parser | `ocr.py` and `pdf2png.py` callback, loader, and conversion contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | PDF suite 7 passed; OCR workflow cases passed; 2 legacy fixture/import failures |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 181 files | targeted groups passed; full runtime suite pending | Pyright clean |
 | LLM-Wiki | maintenance observation audit and graph-space logical-reference protocols | 0 errors, 0 warnings across 2 touched files | passed (`ANN,E4,E7,E9,F`) | targeted process executed 12 tests before shutdown hang; not counted as a completed pass |
