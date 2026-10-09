@@ -111,11 +111,11 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`403`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`367`
   findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
-  `e5ede6f` is pushed and exact-SHA workflow `37995675356` is queued.
+  `615ca81` is pushed and exact-SHA workflow `37996187442` is pending.
   Parser SHA `a72abd3` has local verification, but no exact-SHA
   workflow has appeared in the API response.
 
@@ -125,7 +125,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 403 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 367 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -134,12 +134,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `403` findings: Kogwistar
-`403`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `367` findings: Kogwistar
+`367`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `1266 / 1,669` findings resolved, or approximately `75.9%`; `24.1%`
+That is `1302 / 1,669` findings resolved, or approximately `78.0%`; `22.0%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
