@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `d69f319` |
+| `kogwistar` | `feat/stack-type-contracts` | `b543920` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
 
@@ -49,7 +49,7 @@ change.
 | Kogwistar | `server/chat_service_run_execution.py`, `chat_service_shared.py`, `run_registry.py` execution and telemetry protocols | 0 errors, 0 warnings | passed | 14 passed, 7 skipped; 9 Chroma-dependent setup errors locally |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
 | Kogwistar | `conversation/policy.py` policy hooks and backend JSON narrowing | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 4 passed, 17 skipped |
-| Kogwistar | `kogwistar` full source scan | 704 errors, 22 warnings across 275 files | not yet run for full scope | current full-scope measurement after `7db3bb3`; MCP/proposer slice is 0 errors |
+| Kogwistar | `kogwistar` full source scan | 277 errors, 3 warnings across 275 files | not yet run for full scope | fresh full-scope measurement after `b543920`; largest remaining groups are legacy PostgreSQL/demo/server boundaries |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -65,10 +65,10 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan currently has `182` legacy findings;
-  Kogwistar full source baseline measures `704` errors and `22` warnings across
-  275 files after the SQLite, graph-read, write, PostgreSQL backend, and
-  MCP/proposer slices; this baseline predates the latest policy slice and is
-  not a current full-source rerun.
+  Kogwistar full source currently measures `277` errors and `3` warnings across
+  275 files after the latest protocol slices; this is a measurement, not a
+  passing gate. The largest remaining groups are `postgres_backend.py`, demo
+  modules, and selected server/runtime boundaries.
   The latest write slice is clean; the PostgreSQL backend is reduced to 41
   errors and remains an active follow-up slice.
   The conversation
@@ -102,8 +102,8 @@ change.
   merged head branch, so it has no new pull-request synchronization run.
 - Kogwistar run `37898674106` tested `3aabb90` and failed in its CPython/PyPy
   test matrix and optional PyPy-beta job; lint, Rust, native-wheel, and
-  SQLite-invariant jobs passed. Commit `d69f319` is newer and requires a new
-  exact-SHA run before remote verification.
+  SQLite-invariant jobs passed. Commit `b543920` has a new exact-SHA run
+  `37901420812`, which remains in progress while this ledger is updated.
 
 ## Measurement Commands
 
