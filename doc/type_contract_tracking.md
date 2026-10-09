@@ -9,8 +9,8 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `5c65b50` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `5381284` |
+| `kogwistar` | `feat/stack-type-contracts` | `8ee9bbd` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `abffc81` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `d78d60f` |
 
 ## Verified Scopes
@@ -19,6 +19,7 @@ change.
 | --- | --- | --- | --- | --- |
 | Kogwistar | `agent/read_tools.py` | 0 errors | passed | 44 passed |
 | Kogwistar | `agent/bindings.py` | 0 errors | passed | ACL/goal-agent suite passed |
+| Kogwistar | `agent/control.py`, `delegation.py`, `limits.py` | 0 errors | passed | 30 agent tests passed |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -27,8 +28,8 @@ change.
 
 ## Remaining Work
 
-- Current measured backlog: KG Doc Parser `workflow_ingest` has `101`
-  Pyright errors; Kogwistar `agent/` has `13`. These are scoped counts, not
+- Current measured backlog: KG Doc Parser `workflow_ingest` has `85`
+  Pyright errors; Kogwistar `agent/` has `0`. These are scoped counts, not
   whole-repository totals.
 - [ ] Run and record the current full Pyright count for each repository.
 - [ ] Remove remaining parser `workflow_ingest` errors, grouped by module and
