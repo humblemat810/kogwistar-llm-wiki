@@ -192,6 +192,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   contract fix. Its exact-SHA API query currently reports no workflow run
   (`runs=0`); local verification is full-source Pyright-clean and 30
   maintenance orchestration tests passed.
+- The `feat/stack-type-contracts` branch currently has an open Core PR and
+  exact Core CI coverage. The parser and LLM-Wiki branches currently have no
+  open PRs, so their latest commits cannot have pull-request CI results; this
+  is a delivery-state gap, not evidence of a passing or failing downstream
+  implementation.
 
 ## Measurement Commands
 
