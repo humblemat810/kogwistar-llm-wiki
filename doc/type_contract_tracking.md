@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `e0451eb` |
+| `kogwistar` | `feat/stack-type-contracts` | `908fdcd` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
 
@@ -99,7 +99,7 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`641`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`629`
   findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
@@ -113,7 +113,7 @@ Current production-source annotation snapshot (`ruff check ... --select ANN`):
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 641 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 629 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -122,12 +122,12 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `641` findings: Kogwistar
-`641`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `629` findings: Kogwistar
+`629`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `1028 / 1,669` findings resolved, or approximately `61.6%`; `38.4%`
+That is `1040 / 1,669` findings resolved, or approximately `62.3%`; `37.7%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
@@ -218,6 +218,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   passed 9 tests. The prior exact-SHA run `37987976204` is still in progress
   with PyPy 3.11 failed and SQLite invariants passed; no green remote result is
   claimed for this newer commit yet.
+
+- Kogwistar typing commit `908fdcd` completes the public graph-query facade
+  contracts for traversal flags, backend filters, and semantic expansion
+  results. Local Pyright and strict `ANN` checks are clean, and the focused
+  graph-query suite passed 6 tests. The latest Core CI run remains in progress.
 
 - Kogwistar run `37939704217` completed successfully for exact SHA
   `1ffdfd42f19614c750be31161edb4876302e3294`. Required CPython 3.12-3.14,
