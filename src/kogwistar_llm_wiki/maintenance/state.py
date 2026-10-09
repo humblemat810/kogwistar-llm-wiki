@@ -32,7 +32,7 @@ def _as_int(value: object, default: int = 0) -> int:
     return default
 
 
-def and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
+def and_where(*clauses: Mapping[str, object]) -> dict[str, object]:
     """Compose a Chroma-compatible conjunction filter."""
 
     return {"$and": [dict(clause) for clause in clauses]}

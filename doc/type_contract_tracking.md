@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `b081654` |
+| `kogwistar` | `feat/stack-type-contracts` | `9c173a0` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6868e5a` |
 
@@ -34,6 +34,7 @@ change.
 | Kogwistar | `server/chat_service_workflow_design.py` history/projection response boundary | 0 errors, 0 warnings | passed | 6 workflow-design and lineage/ACL tests passed |
 | Kogwistar | `server/chat_service_workflow_history.py` visible-delta and event payload contracts | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `server/chat_service_workflow_history.py` event-row protocol boundary | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
+| Kogwistar | `maintenance/template.py`, `grouped_artifacts.py` read-only filter protocol | 0 errors, 0 warnings | passed | maintenance-template regression passed; full source scan passed |
 | Kogwistar | `server/chat_service_workflow_design.py` mutation/undo/redo JSON responses | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `server/chat_mcp.py` generic role/namespace decorator protocol and `mcp_tools.py` naming cleanup | 0 errors, 0 warnings | passed | 2 MCP regression tests passed; server Ruff E4/E7/E9/F clean |
 | Kogwistar | `engine_core/in_memory_meta.py` metadata and projection JSON boundaries | 0 errors, 0 warnings | passed | 22 passed, 2 warnings |
@@ -84,6 +85,7 @@ change.
 | LLM-Wiki | diagnostics, remote embedding, trace sink, and memory boundaries | 0 errors, 0 warnings across full `src` scan | passed (`E4,E7,E9,F`) | 28 passed |
 | LLM-Wiki | vLLM multimodal message/content wire contracts | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 44 passed, 3 skipped |
 | LLM-Wiki | standalone embedding-service health, readiness, capability, and representation responses | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 21 passed |
+| LLM-Wiki | maintenance filter composition and grouped-template boundary | 0 errors, 0 warnings across 3 changed files | passed | 30 maintenance orchestration tests passed |
 | LLM-Wiki | normal local CI-marked suite with vendored paths configured | not applicable | passed | 1,044 passed, 8 skipped, 178 deselected in 25:41 |
 
 ## Remaining Work
@@ -172,6 +174,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   only the explicitly nonblocking PyPy 3.12 beta job failed. Local verification
   is full-source Pyright-clean, changed-file `E7,E9,F`-clean, and 78
   runtime/server tests passed with 2 skips.
+- Kogwistar typing commit `9c173a0` is pushed after the successful `b081654`
+  run. Its exact-SHA workflow result remains to be observed; local full-source
+  Pyright is clean across 262 files, and the maintenance-template regression
+  passed.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
