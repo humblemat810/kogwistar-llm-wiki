@@ -11,7 +11,7 @@ change.
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `1ffdfd4` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `4e9ef93` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `dbba744` |
 
 ## Verified Scopes
 
