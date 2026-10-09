@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `f2c4eb3` |
+| `kogwistar` | `feat/stack-type-contracts` | `feb989b` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `4e9ef93` |
 
@@ -120,10 +120,10 @@ after its full-scope scan is regenerated.
 ## Remote Verification Status
 
 - Kogwistar run `37930756117` completed successfully for exact SHA `1a01a73`,
-  including the required PyPy 3.11 job. The exact-SHA run for `e4fd355` is
-  still in progress. The newer `a474b14` and `f2c4eb3` pushes are present on
-  the remote branch but do not yet have a completed exact-SHA workflow result;
-  they must not be inferred from earlier green runs.
+  including the required PyPy 3.11 job. The latest visible branch run is
+  `37933832191` for exact SHA `389c243` and is still in progress. Later
+  `feb989b` is pushed, but does not yet have a completed exact-SHA workflow
+  result; it must not be inferred from earlier green runs.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 
