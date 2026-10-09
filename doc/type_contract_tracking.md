@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `78bb9c9` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `a724406` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `affe290` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `7371267` |
 
 ## Verified Scopes
@@ -212,6 +212,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   remains unobserved because the branch has no open PR; local full-source
   Pyright is clean across 40 files and the focused page-index/resolver suite
   passed 74 tests with 8 optional skips.
+- KG Doc Parser typing commit `affe290` publicly re-exports the new engine and
+  persistence protocols from `workflow_ingest`; the export/import check,
+  touched-file Pyright, and Ruff checks pass. No remote CI is claimed because
+  the branch still has no open PR.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 44 focused multimodal tests passed with 3 skipped.
