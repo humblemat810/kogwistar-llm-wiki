@@ -11,7 +11,7 @@ change.
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `9c173a0` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6868e5a` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `0ab6345` |
 
 ## Verified Scopes
 
@@ -186,6 +186,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
 - LLM-Wiki typing commit `6868e5a` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 21 embedding-service tests passed.
+- LLM-Wiki typing commit `0ab6345` is pushed after the maintenance filter
+  contract fix. Its exact-SHA API query currently reports no workflow run
+  (`runs=0`); local verification is full-source Pyright-clean and 30
+  maintenance orchestration tests passed.
 
 ## Measurement Commands
 
