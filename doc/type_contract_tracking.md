@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `c93b9c8` |
+| `kogwistar` | `feat/stack-type-contracts` | `64ab58e` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `af2b62a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f635e36` |
 
@@ -33,7 +33,9 @@ change.
 | Kogwistar | `conversation/models.py`, `conversation_context.py`, `memory_retriever.py` | 0 errors, 0 warnings | passed | 9 passed, 2 warnings |
 | Kogwistar | `conversation/resolvers.py` state boundary and retrieval fallback | 44 errors, 0 warnings | passed | 18 passed, 8 warnings |
 | Kogwistar | `conversation/conversation_orchestrator.py`, `conversation/tool_runner.py`, `engine_core/types.py` | 0 errors, 0 warnings | passed | 18 passed, 8 warnings |
-| Kogwistar | `conversation` full scoped package | 155 errors, 0 warnings across 19 files before latest orchestrator slice | not yet rerun for full scope | focused orchestration/tool-runner suite passed |
+| Kogwistar | `conversation/agentic_answering.py` | 0 errors, 0 warnings | passed | 19 passed; Chroma/real-LLM cases unavailable locally |
+| Kogwistar | `conversation/service.py` | 0 errors, 0 warnings | passed | fake cancellation/causality paths passed; Chroma unavailable locally |
+| Kogwistar | `conversation` full scoped package | 69 errors, 0 warnings across 19 files after agentic/service slices | not yet rerun for full scope | Chroma/real-LLM tests remain environment-gated |
 | Kogwistar | `kogwistar` full source scan | 1,894 errors, 24 warnings across the scanned package | not yet run for full scope | post-engine-contract measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
@@ -49,10 +51,10 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` has `0`
   Pyright errors; the parser-wide backlog is `11` errors and `1` warning;
   Kogwistar full source has `1,894` errors and `24` warnings. The conversation
-  resolver, cache-wrapper, and latest orchestration/tool-runner slices are each
-  measured at `0` errors and `0` warnings; the full conversation package was
-  `155` errors before the latest slice, down from `300` before the conversation
-  typing work began.
+  resolver, cache-wrapper, orchestration, agentic-answering, and service slices
+  are each measured at `0` errors and `0` warnings; the full conversation
+  package is now `69` errors, down from `300` before the conversation typing
+  work began.
   These are measured scopes, not a claim that the whole stack is complete.
 - [x] Run and record the current full Pyright count for the parser
       `workflow_ingest` scope.
