@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `937bd80` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `f74f13a` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `5a03744` |
+| `kogwistar` | `feat/stack-type-contracts` | `f193e00` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `ac07188` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `741e29a` |
 
 ## Verified Scopes
 
@@ -82,7 +82,7 @@ change.
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
-| KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 212 legacy Ruff findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
+| KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 201 legacy ANN findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
 | KG Doc Parser | `workflow_ingest/providers.py` structured-provider schema boundary | 0 errors, 0 warnings | passed | provider settings/token-budget tests passed with vendored Core on `PYTHONPATH` |
 | KG Doc Parser | `workflow_ingest/clients.py` resume argument protocol | 0 errors, 0 warnings | passed | unsupported server-resume contract passed; optional Chroma case skipped |
 | KG Doc Parser | `utils/langchain.py` callback and generation-variant contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | dependency-path import check passed |
@@ -99,6 +99,19 @@ change.
 
 ## Quantified Progress
 
+Current production-source annotation snapshot (`ruff check ... --select ANN`):
+
+| Repository | Pyright | Strict ANN findings | Interpretation |
+| --- | ---: | ---: | --- |
+| Kogwistar | 0 errors, 0 warnings across 262 files | 1,495 | remaining Core annotation/protocol migration |
+| KG Doc Parser | 0 errors, 0 warnings across 40 files | 201 | remaining legacy parser annotations |
+| LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
+
+These counts are not a percentage. They are the denominator needed for a
+reproducible percentage after the migration policy defines which generated,
+benchmark, and test files are in scope. Full CI status is tracked separately;
+local Pyright and Ruff success cannot substitute for remote CI.
+
 For the Kogwistar full-source Pyright backlog, the first reproducible
 source-only baseline was 194 errors. The last reproducible scan before
 `1ffdfd4` reported 180 errors, concentrated in the runtime JSON boundaries.
@@ -110,7 +123,7 @@ regenerated.
 
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
-  the parser-wide Ruff scan currently has `212` legacy findings;
+  the parser-wide Ruff scan currently has `201` legacy findings;
   Kogwistar full source-only scan after `b081654` measures `0` errors and `0`
   warnings. This is a typing measurement,
   not a passing runtime gate; optional backend fixtures and full CI remain
