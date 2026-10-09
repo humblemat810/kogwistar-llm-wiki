@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `67fcba3` |
+| `kogwistar` | `feat/stack-type-contracts` | `702ea49` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `af2b62a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `3fdeb0e` |
 
@@ -23,6 +23,7 @@ change.
 | Kogwistar | `runtime/budget.py` | 0 errors | passed | 16 passed |
 | Kogwistar | `runtime/rust_worker.py` protocol and JSON boundary | 0 errors, 0 warnings | passed | 21 passed |
 | Kogwistar | `runtime/contract.py` workflow edge protocol | 0 errors, 0 warnings | pre-existing E402 only | 2 passed |
+| Kogwistar | `runtime/routing.py` plus workflow predicate protocol | 0 errors, 0 warnings | broader legacy import check pending | route/join parity tests passed |
 | Kogwistar | `kogwistar` full source scan | 2,250 errors, 24 warnings across 275 files | not yet run for full scope | baseline measurement |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
