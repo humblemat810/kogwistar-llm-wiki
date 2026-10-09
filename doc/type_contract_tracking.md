@@ -26,7 +26,7 @@ change.
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
-| LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 30 errors, 0 warnings across 181 files | not yet run for full scope | measurement only |
+| LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 174 files | targeted groups passed; full runtime suite pending | Pyright clean |
 
 ## Remaining Work
 
@@ -39,8 +39,8 @@ change.
       boundary rather than by individual diagnostic.
 - [ ] Audit core runtime/engine modules for missing protocols and broad
       `Any`/`object` boundaries.
-- [ ] Audit all LLM-Wiki packages beyond the current targeted scope.
-- [ ] Remove the measured LLM-Wiki backlog of 30 errors, grouped by policy,
+- [x] Audit all LLM-Wiki packages beyond the current targeted scope.
+- [x] Remove the measured LLM-Wiki backlog of 30 errors, grouped by policy,
       transport/protocol, JSON boundaries, and model contracts.
 - [ ] Run full local CI for each repository with the documented dependency
       paths and `-p no:cacheprovider` where appropriate.
