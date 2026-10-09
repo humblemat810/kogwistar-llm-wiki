@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `937bd80` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `affe290` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `f74f13a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `5a03744` |
 
 ## Verified Scopes
@@ -85,6 +85,7 @@ change.
 | KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 182 legacy Ruff findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
 | KG Doc Parser | `workflow_ingest/providers.py` structured-provider schema boundary | 0 errors, 0 warnings | passed | provider settings/token-budget tests passed with vendored Core on `PYTHONPATH` |
 | KG Doc Parser | `workflow_ingest/clients.py` resume argument protocol | 0 errors, 0 warnings | passed | unsupported server-resume contract passed; optional Chroma case skipped |
+| KG Doc Parser | `utils/langchain.py` callback and generation-variant contracts | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | dependency-path import check passed |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 181 files | targeted groups passed; full runtime suite pending | Pyright clean |
 | LLM-Wiki | maintenance observation audit and graph-space logical-reference protocols | 0 errors, 0 warnings across 2 touched files | passed (`ANN,E4,E7,E9,F`) | targeted process executed 12 tests before shutdown hang; not counted as a completed pass |
