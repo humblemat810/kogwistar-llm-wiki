@@ -11,7 +11,6 @@ import argparse
 import json
 from pathlib import Path
 
-
 TOPICS = [
     ("ordinary prose", "A quiet coastal town prepared for the winter storm.", "Residents secured boats, stocked supplies, and monitored the approaching storm."),
     ("code", "How does a Python dictionary lookup work?", "A dictionary uses a hash table to map keys to values and usually provides constant average-time lookup."),

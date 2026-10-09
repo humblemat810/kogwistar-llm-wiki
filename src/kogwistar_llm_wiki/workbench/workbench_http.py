@@ -251,7 +251,7 @@ def build_workbench_handler(
                 size = int(self.headers.get("content-length", "0"))
                 payload = cast(JsonObject, json.loads(self.rfile.read(size)))
                 if not isinstance(payload, dict):
-                    raise ValueError("request body must be a JSON object")  # noqa: TRY004
+                    raise ValueError("request body must be a JSON object")
                 extension_query = _query_mapping(parsed.query)
                 workspace_id = (
                     extension_route.workspace_id(extension_query, payload)

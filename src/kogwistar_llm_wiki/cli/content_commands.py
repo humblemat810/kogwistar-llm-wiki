@@ -9,7 +9,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .entrypoint_support import DemoEngineBuilder, EngineBuilder, EngineCloser, PersistenceKwargs
+from .entrypoint_support import (
+    DemoEngineBuilder,
+    EngineBuilder,
+    EngineCloser,
+    PersistenceKwargs,
+)
 
 if TYPE_CHECKING:
     from kogwistar_llm_wiki.models import IngestPipelineRequest

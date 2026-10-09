@@ -26,7 +26,6 @@ from ..models import (
     IngestPipelineRequest,
 )
 from ..parsing.parse_session_store import parse_session_scope_id
-from .contracts import IngestPipelineHost
 from ..parsing.parse_views import (
     ParseTarget,
     ParseViewStore,
@@ -34,7 +33,7 @@ from ..parsing.parse_views import (
     reparse_session_id,
 )
 from ..utils import _background_namespace, _temporary_namespace
-from .contracts import ParseSourceResult
+from .contracts import IngestPipelineHost, ParseSourceResult
 
 
 def _metadata_digest_value(digest: dict[str, JsonValue] | None) -> str | None:

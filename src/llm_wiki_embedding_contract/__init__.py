@@ -7,9 +7,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Literal
-
-from typing_extensions import TypeAliasType
+from typing import Literal, TypeAliasType
 
 EmbeddingKind = Literal["single_vector", "dense", "late_interaction"]
 SimilarityMetric = Literal["dot", "cosine"]

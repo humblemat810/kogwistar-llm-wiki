@@ -98,7 +98,7 @@ def event_groups(event: BudgetEvent) -> dict[str, list[str]]:
 def decode_projection(row: Mapping[str, JsonValue]) -> JsonObject:
     payload = row.get("payload")
     if not isinstance(payload, dict):
-        raise ValueError("usage projection payload must be an object")  # noqa: TRY004
+        raise ValueError("usage projection payload must be an object")
     schema_version = row.get("projection_schema_version")
     payload_schema_version = payload.get("projection_schema_version")
     if not isinstance(schema_version, (int, float, str)) or int(schema_version or 0) != USAGE_PROJECTION_SCHEMA_VERSION:

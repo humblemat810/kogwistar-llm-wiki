@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from contextlib import AbstractContextManager
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, cast
@@ -234,7 +234,7 @@ class NotificationDeliveryScheduler:
                     NotificationDeliveryOutcome(job_id=job.job_id, status="failed", error_code="invalid_job")
                 )
                 continue
-            except Exception as exc:  # noqa: BLE001 - ACL adapters may be temporarily unavailable
+            except Exception as exc:
                 queue.retry_or_fail(job, exc)
                 outcomes.append(
                     NotificationDeliveryOutcome(
@@ -251,7 +251,7 @@ class NotificationDeliveryScheduler:
                     digest=digest,
                     idempotency_key=job.job_id,
                 )
-            except Exception as exc:  # noqa: BLE001 - shared queue owns retry/DLQ policy
+            except Exception as exc:
                 queue.retry_or_fail(job, exc)
                 outcomes.append(
                     NotificationDeliveryOutcome(

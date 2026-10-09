@@ -310,7 +310,7 @@ class CodexAppServerRunner:
                 except json.JSONDecodeError as exc:
                     raise RuntimeError(f"Codex App Server emitted invalid JSON: {line!r}") from exc
                 if not isinstance(message, dict):
-                    raise RuntimeError(  # noqa: TRY004 - protocol failure, not caller type validation
+                    raise RuntimeError(
                         "Codex App Server emitted a non-object JSON message"
                     )
                 return message

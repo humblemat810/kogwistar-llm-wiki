@@ -228,10 +228,10 @@ def build_demo_engines(
 
 
 __all__ = [
+    "EngineCloser",
     "InMemoryBuilderKwargs",
     "PersistenceKwargs",
     "PersistenceKwargsFactory",
-    "EngineCloser",
     "PersistentBuilderKwargs",
     "PostgresBuilderKwargs",
     "build_demo_engines",

@@ -15,7 +15,6 @@ from pathlib import Path
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-
 NON_TEXT_PREFIXES = ("thinker.audio_tower.", "thinker.visual.")
 
 

@@ -320,7 +320,7 @@ class SettingsService:
             try:
                 probe = multimodal.readiness() if hasattr(multimodal, "readiness") else {"ready": True}
                 embedding = {"state": "up" if probe.get("ready") else "degraded", **probe}
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 embedding = {"state": "unavailable", "reason": str(exc)}
         return {"version": 1, "workspace_id": workspace_id, "state": "up" if readiness.get("ready") else "degraded", "readiness": readiness, "embedding_service": _redact(embedding), "checked_at_ms": int(time.time() * 1000)}
 

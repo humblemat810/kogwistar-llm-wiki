@@ -295,7 +295,7 @@ class ProjectionSnapshotMixin:
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except Exception:  # noqa: BLE001 - corrupt optional manifest is treated as absent
+            except Exception:
                 return None
         if not isinstance(payload, dict):
             return None

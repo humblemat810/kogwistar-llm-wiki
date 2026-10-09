@@ -13,9 +13,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from itertools import pairwise
 from typing import cast
+
 from kogwistar.engine_core import NamedProjectionStore
-from kogwistar.runtime import ProjectionPayload
 from kogwistar.id_provider import stable_id
+from kogwistar.runtime import ProjectionPayload
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 

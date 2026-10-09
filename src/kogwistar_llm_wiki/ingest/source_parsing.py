@@ -146,7 +146,7 @@ class SourceParsingMixin:
                 last_materialized_seq=usage_snapshot.last_materialized_seq,
                 materialization_status=usage_snapshot.materialization_status,
             )
-        except Exception as exc:  # noqa: BLE001 - projection refresh must not fail ingestion
+        except Exception as exc:
             self._trace_event(
                 "usage_projection_refresh_failed",
                 workspace_id=request.workspace_id,

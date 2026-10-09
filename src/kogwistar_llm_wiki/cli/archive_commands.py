@@ -114,7 +114,7 @@ def archive_catalog(args: argparse.Namespace) -> None:
     for path in sorted(Path(args.directory).expanduser().resolve().glob("*.tar.gz")):
         try:
             manifest = inspect_archive(path)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             rows.append({"path": str(path), "status": "invalid", "error": str(exc)})
             continue
         captured_at_ms = manifest.get("captured_at_ms", 0)

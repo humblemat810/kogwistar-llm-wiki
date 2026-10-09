@@ -131,7 +131,7 @@ class TestTemporaryNamespace:
                     # The proxy seen by this thread's subsystems should carry its namespace.
                     seen = engine.write._e.namespace
                     observed[ns] = seen
-            except Exception as e:  # noqa: BLE001 - test captures worker failures
+            except Exception as e:
                 errors.append(e)
 
         t1 = threading.Thread(target=worker, args=("ns_alpha",))

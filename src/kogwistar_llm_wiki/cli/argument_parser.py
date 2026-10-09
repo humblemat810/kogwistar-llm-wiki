@@ -5,6 +5,7 @@ import os
 from collections.abc import Mapping
 from typing import Protocol
 
+
 class CommandHandler(Protocol):
     """Handle one parsed CLI command."""
 

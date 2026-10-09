@@ -355,7 +355,7 @@ class AgentSourceMixin(AgentGatewayHost):
                     status=status,
                     limit=10_000,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if errors is not None:
                     errors.append(f"{type(exc).__name__}: {exc}")
                 rows = []

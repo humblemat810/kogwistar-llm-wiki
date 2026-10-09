@@ -23,9 +23,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from kogwistar.json_types import JsonValue
 from mcp import types
 from mcp.server.lowlevel import Server
-from kogwistar.json_types import JsonValue
 
 from ..configuration.identity import (
     LlmWikiIdentity,
@@ -561,7 +561,7 @@ class AgentMcpServer:
                 params.arguments or {},
                 identity=identity,
             )
-        except Exception as exc:  # noqa: BLE001 - expose failures as tool results
+        except Exception as exc:
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
                 is_error=True,
@@ -585,7 +585,7 @@ class AgentMcpServer:
                 cast(Mapping[str, JsonValue], arguments),
                 identity=identity,
             )
-        except Exception as exc:  # noqa: BLE001 - expose failures as tool results
+        except Exception as exc:
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
                 is_error=True,
@@ -673,7 +673,7 @@ class AgentMcpServer:
                 name,
                 cast(Mapping[str, JsonValue], arguments or {}),
             )
-        except Exception as exc:  # noqa: BLE001 - MCP tools expose errors as protocol results
+        except Exception as exc:
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
                 is_error=True,

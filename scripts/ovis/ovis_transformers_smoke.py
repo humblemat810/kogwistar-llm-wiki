@@ -8,7 +8,9 @@ from pathlib import Path
 
 import torch
 from transformers import AutoProcessor
-from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import Qwen2_5OmniForConditionalGeneration
+from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
+    Qwen2_5OmniForConditionalGeneration,
+)
 
 
 def main() -> None:

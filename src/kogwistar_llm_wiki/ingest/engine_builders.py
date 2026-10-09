@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
-from kogwistar.engine_core import GraphKnowledgeEngine, PgVectorBackend, StorageBackendFactory
+from kogwistar.engine_core import (
+    GraphKnowledgeEngine,
+    PgVectorBackend,
+    StorageBackendFactory,
+)
 from kogwistar.engine_core.embedding_profile import EmbeddingProfile
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.engine_core.storage_backend import StorageBackend

@@ -29,6 +29,19 @@ from .maintenance.maintenance_designs import (
 from .maintenance.maintenance_patch_apply import (
     apply_maintenance_patch_for_scope,  # noqa: F401
 )
+from .maintenance.maintenance_strategies import (
+    ContactObservationProvider as MaintenanceContactObservationProvider,
+)
+from .maintenance.maintenance_strategies import (
+    CrosslinkCritic,
+    CrosslinkProposer,
+    LayeredMaintenanceParser,
+    MaintenanceContextLimitSink,
+    MaintenanceDocumentParser,
+    MaintenanceObservationCritic,
+    MaintenanceTraceSink,
+    MaintenanceUsageSink,
+)
 from .maintenance.observation_critic import (
     build_observation_critic,
     is_context_window_error,
@@ -46,17 +59,6 @@ from .maintenance.worker_observation import MaintenanceObservationWorkerMixin
 from .maintenance.worker_parse import DurableParseMaintenanceWorkerMixin
 from .maintenance.worker_runtime import MaintenanceRuntimeWorkerMixin
 from .maintenance.worker_selection import MaintenanceSelectionWorkerMixin
-from .maintenance.maintenance_strategies import (
-    ContactObservationProvider as MaintenanceContactObservationProvider,
-    CrosslinkCritic,
-    CrosslinkProposer,
-    LayeredMaintenanceParser,
-    MaintenanceContextLimitSink,
-    MaintenanceDocumentParser,
-    MaintenanceObservationCritic,
-    MaintenanceTraceSink,
-    MaintenanceUsageSink,
-)
 from .models import NamespaceEngines
 from .otel import LlmWikiTelemetry
 from .policies.rules import LlmWikiPolicies, build_default_policies
@@ -292,7 +294,7 @@ class MaintenanceWorker(
                         if callable(pause_background):
                             try:
                                 pause_background()
-                            except Exception as pause_error:  # noqa: BLE001
+                            except Exception as pause_error:
                                 self._emit_trace(
                                     "maintenance_context_pause_failed",
                                     workspace_id=workspace_id,

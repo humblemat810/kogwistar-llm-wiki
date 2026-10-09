@@ -269,7 +269,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 for item in raw_findings
             )
             return cast(Literal["succeeded", "failed"], status), findings
-        except Exception as exc:  # noqa: BLE001 - critic failure is fail-closed
+        except Exception as exc:
             if is_context_window_error(exc):
                 self._emit_trace(
                     "maintenance_observation_context_limit_blocked",
@@ -281,7 +281,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 if callable(pause_background):
                     try:
                         pause_background()
-                    except Exception as pause_error:  # noqa: BLE001 - keep assessment fail-closed
+                    except Exception as pause_error:
                         self._emit_trace(
                             "maintenance_observation_context_pause_failed",
                             workspace_id=ctx.workspace_id,
@@ -623,7 +623,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 fallback_revision_document_id=subject.revision_document_id,
             )
             return resolution.view_id, resolution.view_version, active
-        except Exception as exc:  # noqa: BLE001 - unresolved activity must fail closed
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_observation_active_view_check_failed",
                 workspace_id=subject.workspace_id,

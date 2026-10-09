@@ -39,7 +39,7 @@ def _mapping_sequence(
             raise ValueError(f"evidence payload requires {key}")
         return ()
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
-        raise ValueError(f"evidence payload field {key!r} must be a sequence")  # noqa: TRY004
+        raise ValueError(f"evidence payload field {key!r} must be a sequence")
     if not all(isinstance(item, Mapping) for item in raw):
         raise ValueError(f"evidence payload field {key!r} entries must be mappings")
     return tuple(item for item in raw if isinstance(item, Mapping))
@@ -130,7 +130,7 @@ class PinnedEntityRef:
     def from_payload(cls, payload: Mapping[str, object]) -> PinnedEntityRef:
         raw_ref = payload.get("logical_ref")
         if not isinstance(raw_ref, Mapping):
-            raise ValueError("pinned evidence entity requires logical_ref")  # noqa: TRY004
+            raise ValueError("pinned evidence entity requires logical_ref")
         return cls(
             logical_ref=LogicalRef(
                 target_namespace=str(raw_ref["target_namespace"]),
@@ -174,10 +174,10 @@ class EvidencePackReference:
     def from_payload(cls, payload: Mapping[str, object]) -> EvidencePackReference:
         raw_ref = payload.get("pack_ref")
         if not isinstance(raw_ref, Mapping):
-            raise ValueError("evidence pack reference requires pack_ref")  # noqa: TRY004
+            raise ValueError("evidence pack reference requires pack_ref")
         raw_watermark = payload.get("source_watermark") or {}
         if not isinstance(raw_watermark, Mapping):
-            raise ValueError("evidence pack source_watermark must be a mapping")  # noqa: TRY004
+            raise ValueError("evidence pack source_watermark must be a mapping")
         return cls(
             pack_ref=LogicalRef(
                 target_namespace=str(raw_ref["target_namespace"]),
@@ -262,7 +262,7 @@ class EvidencePack:
         raw_sources = _mapping_sequence(payload, "source_refs")
         raw_watermarks = payload.get("source_watermarks") or {}
         if not isinstance(raw_watermarks, Mapping):
-            raise ValueError("evidence pack source_watermarks must be a mapping")  # noqa: TRY004
+            raise ValueError("evidence pack source_watermarks must be a mapping")
         return cls(
             pack_id=str(payload["pack_id"]),
             namespace=str(payload["namespace"]),

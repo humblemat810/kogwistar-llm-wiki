@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
             # The base app image is Torch-free. Local adapters remain available
             # only when constructed directly by developer/test code.
             validate_configured_multimodal_runtime(require_device=True)
-    except Exception as exc:  # noqa: BLE001 - convert all startup failures to a clear exit message
+    except Exception as exc:
         print(
             "llm-wiki container configuration invalid: "
             f"{exc}\n"

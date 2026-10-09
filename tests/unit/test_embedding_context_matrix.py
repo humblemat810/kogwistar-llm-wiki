@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from scripts.benchmark_embedding_context_matrix import Service, _ovis_input, _qwen_payload
+from scripts.benchmark_embedding_context_matrix import (
+    Service,
+    _ovis_input,
+    _qwen_payload,
+)
 
 
 def test_qwen_context_payload_keeps_text_and_hashed_image() -> None:

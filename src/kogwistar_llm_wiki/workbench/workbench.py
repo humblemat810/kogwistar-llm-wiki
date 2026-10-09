@@ -6,11 +6,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from .contracts import Clock
 from .investigation_history import (
     InvestigationHistoryRecord,
     InvestigationHistoryService,
 )
-from .contracts import Clock
 from .semantic_lens import (
     InvestigationOutcome,
     ProposalValidation,

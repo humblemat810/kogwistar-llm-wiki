@@ -398,8 +398,8 @@ def restore_crosslink_response(
 
 
 __all__ = [
-    "PromptAliasError",
     "CockpitActionLike",
+    "PromptAliasError",
     "PromptAliasProjection",
     "project_crosslink_payload",
     "restore_cockpit_action",

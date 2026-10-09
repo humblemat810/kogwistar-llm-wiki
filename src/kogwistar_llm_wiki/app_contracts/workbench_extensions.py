@@ -192,15 +192,15 @@ def load_workbench_extensions(
 __all__ = [
     "WORKBENCH_EXTENSION_ENTRY_POINT_GROUP",
     "ExtensionContentType",
+    "ExtensionHandler",
     "ExtensionMethod",
     "ExtensionScope",
-    "ExtensionHandler",
-    "WorkspaceIdResolver",
     "WorkbenchExtension",
     "WorkbenchExtensionFactory",
     "WorkbenchExtensionRequest",
     "WorkbenchExtensionResponse",
     "WorkbenchExtensionRoute",
+    "WorkspaceIdResolver",
     "index_workbench_extensions",
     "load_workbench_extensions",
 ]

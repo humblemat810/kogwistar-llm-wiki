@@ -337,7 +337,7 @@ class AgentGateway(
         try:
             snapshot = self.api.pipeline.usage_projection(workspace_id).snapshot()
             usage_snapshot = cast(JsonObject, snapshot.as_dict()) if snapshot is not None else None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             usage_error = f"{type(exc).__name__}: {exc}"
         source_states: dict[str, int] = {}
         for item in self._source_documents(workspace_id):

@@ -6,8 +6,8 @@ import os
 from typing import cast
 
 from kg_doc_parser.workflow_ingest.providers import (
-    EmbeddingProviderConfig,
     ChatProviderName,
+    EmbeddingProviderConfig,
     ProposalMode,
     ProviderEndpointConfig,
     WorkflowProviderSettings,

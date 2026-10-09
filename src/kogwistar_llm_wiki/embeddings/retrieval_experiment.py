@@ -626,7 +626,7 @@ class EvidenceSubscription:
         except asyncio.CancelledError:
             if self._state is not FeedState.CANCELLED:
                 raise
-        except Exception as exc:  # noqa: BLE001 - provider exceptions are external boundary failures
+        except Exception as exc:
             # A failed sidecar must not fail the main worker.  Its terminal
             # state is observable and the caller can report the provider error.
             self._error = exc

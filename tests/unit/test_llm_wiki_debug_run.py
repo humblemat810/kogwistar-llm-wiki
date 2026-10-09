@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import kg_doc_parser.semantic_document_splitting_layerwise_edits as layerwise_edits
 import pytest
-from kogwistar.utils.cache_backend import Memory
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
+from kogwistar.utils.cache_backend import Memory
 
 from kogwistar_llm_wiki import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.diagnostics.debug_helpers import (

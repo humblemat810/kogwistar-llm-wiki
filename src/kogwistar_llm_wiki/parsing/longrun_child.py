@@ -320,7 +320,7 @@ def run_longrun_parser_child(
         _trace(f"child_exception {type(exc).__name__}: {exc}")
         try:
             _write_json_file(failure_payload_path, dict(payload))
-        except Exception as payload_exc:  # noqa: BLE001
+        except Exception as payload_exc:
             _trace(f"failure_payload_write_error {type(payload_exc).__name__}: {payload_exc}")
         _write_json_file(
             failure_path,

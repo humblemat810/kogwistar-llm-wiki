@@ -207,7 +207,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         for mention in raw_mentions:
             try:
                 mention_key = mention.model_dump_json()
-            except Exception:  # noqa: BLE001 - legacy grounding objects may expose arbitrary serializers
+            except Exception:
                 mention_key = str(mention)
             if mention_key not in seen_mentions:
                 merged_mentions.append(mention)

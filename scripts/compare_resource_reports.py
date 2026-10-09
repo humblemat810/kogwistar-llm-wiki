@@ -34,7 +34,7 @@ def _load_report(spec: str) -> tuple[str, dict[str, Any]]:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"could not read resource report {path}: {exc}") from exc
     if not isinstance(report.get("summary"), dict):
-        raise ValueError(  # noqa: TRY004 - preserve the CLI's validation contract
+        raise ValueError(
             f"resource report {path} has no summary object"
         )
     return label, report

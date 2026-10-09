@@ -79,6 +79,7 @@ from .workbench_cockpit import (
     validate_cockpit_proposal,
 )
 
+
 class AgentResponder(Protocol):
     """Produce a synchronous answer for one semantic-lens request."""
 
@@ -1027,7 +1028,7 @@ class WorkbenchApi:
             if multimodal is not None and hasattr(multimodal, "readiness"):
                 snapshot = multimodal.readiness()
                 checks["multimodal_embedding"] = "ok" if snapshot.get("ready") else "degraded"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return {"ready": False, "service": "kogwistar-llm-wiki", "checks": checks, "reason": str(exc)}
         return {"ready": True, "service": "kogwistar-llm-wiki", "checks": checks}
 

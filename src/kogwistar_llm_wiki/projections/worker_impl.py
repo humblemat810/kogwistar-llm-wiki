@@ -141,7 +141,7 @@ class ProjectionWorker:
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except Exception:  # noqa: BLE001 - corrupt optional payload is treated as empty
+            except Exception:
                 payload = {}
         if not isinstance(payload, dict):
             payload = {}

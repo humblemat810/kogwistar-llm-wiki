@@ -160,7 +160,7 @@ class UsageProjection:
     def _decode_event(self, payload_json: str) -> BudgetEvent:
         payload = json.loads(payload_json)
         if not isinstance(payload, dict):
-            raise ValueError("usage event payload must be an object")  # noqa: TRY004
+            raise ValueError("usage event payload must be an object")
         return budget_event_from_dict(payload)
 
     def _apply_event(self, state: _UsageProjectionState, event: BudgetEvent, _seq: int) -> None:

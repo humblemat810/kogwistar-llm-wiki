@@ -14,8 +14,10 @@ from ..configuration.workspace import WorkspaceNamespaces
 from ..parsing.parse_views import ParseViewResolver
 from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_selection import select_request_candidates
-from .maintenance_strategies import MaintenanceJobExecutionContext
-from .maintenance_strategies import MaintenanceWorkerLike
+from .maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+    MaintenanceWorkerLike,
+)
 from .state import belongs_to_workspace as _belongs_to_workspace
 from .state import edge_ids as _edge_ids
 from .state import metadata_mapping
@@ -88,7 +90,7 @@ class MaintenanceSelectionWorkerMixin(MaintenanceWorkerLike):
                 if _selection_entity_is_accessible(edge, ctx.workspace_id)
                 and _edge_ids(edge) <= node_ids
             ]
-        except Exception as exc:  # noqa: BLE001 - selection is advisory; guarded work remains authoritative
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_selection_degraded",
                 workspace_id=ctx.workspace_id,
@@ -153,7 +155,7 @@ class MaintenanceSelectionWorkerMixin(MaintenanceWorkerLike):
                 metadata,
                 fallback_revision_document_id=str(metadata.get("revision_document_id") or "") or None,
             )
-        except Exception as exc:  # noqa: BLE001 - inactive is safer than ranking stale evidence
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_selection_active_view_check_failed",
                 workspace_id=workspace_id,
@@ -197,7 +199,7 @@ class MaintenanceSelectionWorkerMixin(MaintenanceWorkerLike):
                     },
                     idempotency_key=audit_key,
                 )
-        except Exception as exc:  # noqa: BLE001 - audit failure must not bypass maintenance fences
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_selection_audit_failed",
                 workspace_id=ctx.workspace_id,

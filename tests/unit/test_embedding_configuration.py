@@ -306,7 +306,9 @@ def test_postgres_profile_isolated_layout_uses_distinct_physical_schemas(
 def test_postgres_profile_isolated_schema_is_stable_for_same_profile() -> None:
     config = EmbeddingProviderConfig(provider="fake", model="stable", dimension=7)
     profile = ingest_pipeline._embedding_profile(config)
-    from kogwistar_llm_wiki.ingest.engine_builders import profile_isolated_postgres_schema
+    from kogwistar_llm_wiki.ingest.engine_builders import (
+        profile_isolated_postgres_schema,
+    )
 
     assert profile_isolated_postgres_schema("llm_wiki", profile) == profile_isolated_postgres_schema(
         "llm_wiki", profile

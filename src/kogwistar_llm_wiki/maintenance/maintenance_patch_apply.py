@@ -255,7 +255,7 @@ def apply_maintenance_patch(
             operation_results=operation_results,
             artifact_id=artifact_id,
         )
-    except Exception as exc:  # noqa: BLE001 - malformed maintenance operations become review items
+    except Exception as exc:
         status = MaintenancePatchStatus.NEEDS_REVIEW
         operation_results.append(
             MaintenancePatchOperationApplyResult(
@@ -406,7 +406,7 @@ def _derived_crosslink_retraction_issues(
         return []
     try:
         edges = _read_entities_by_ids(engine, "edge", target_ids)
-    except Exception:  # noqa: BLE001 - unreadable targets fail closed as invalid
+    except Exception:
         edges = []
     by_id = {str(edge.id): edge for edge in edges}
     issues: list[MaintenancePatchValidationIssue] = []

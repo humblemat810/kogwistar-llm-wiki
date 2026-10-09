@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import cast
 from itertools import islice
+from typing import cast
 
-from .maintenance_strategies import MaintenanceWorkerLike
 from ..disambiguation.contact_matching import (
     DEFAULT_MAX_FUZZY_NAME_COMPARISONS,
     ContactIdentityObservation,
     discover_contact_match_candidates,
 )
 from ..disambiguation.service import DisambiguationService
-from .maintenance_strategies import MaintenanceJobExecutionContext
+from .maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+    MaintenanceWorkerLike,
+)
 
 _MAX_CONTACT_SCAN_STREAMS = 64
 _MAX_CONTACT_SCAN_OBSERVATIONS = 250

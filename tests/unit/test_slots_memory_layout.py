@@ -8,7 +8,6 @@ import pytest
 
 from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
-from kogwistar_llm_wiki.memory import MemoryService
 from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings
 from kogwistar_llm_wiki.compose.options import ComposeOptions
 from kogwistar_llm_wiki.configuration.identity import LlmWikiIdentity
@@ -21,6 +20,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
     MaintenanceStrategyRegistry,
 )
+from kogwistar_llm_wiki.memory import MemoryService
 from kogwistar_llm_wiki.parsing.parse_session_store import ParseSessionStore
 from kogwistar_llm_wiki.parsing.parse_statistics import ParseStatisticsStore
 from kogwistar_llm_wiki.parsing.parse_views import ParseViewResolver, ParseViewStore

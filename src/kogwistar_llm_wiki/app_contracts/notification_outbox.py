@@ -347,7 +347,7 @@ class NotificationOutboxReader:
             from importlib import import_module
 
             jobs_module = import_module("kogwistar.engine_core.jobs")
-            cursor_type = cast(_JobQueueCursorFactory, getattr(jobs_module, "JobQueueCursor"))
+            cursor_type = cast(_JobQueueCursorFactory, jobs_module.JobQueueCursor)
         except ImportError as exc:
             raise NotificationOutboxUnavailableError(
                 "notification outbox cursor requires a newer Kogwistar core"

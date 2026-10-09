@@ -272,7 +272,7 @@ class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
             if self._advance_maintenance_plan(ctx):
                 return
             self._acknowledge_job(ctx)
-        except Exception as exc:  # noqa: BLE001 - failed maintenance is reported and fenced
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_parse_failed",
                 workspace_id=ctx.workspace_id,

@@ -13,9 +13,9 @@ from kogwistar.runtime import RunResult
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.runtime import WorkflowRuntime
 
+from ..disambiguation.contact_matching import ContactIdentityObservation
 from ..models import NamespaceEngines
 from ..policies.rules import LlmWikiPolicies
-from ..disambiguation.contact_matching import ContactIdentityObservation
 from .maintenance_guards import MaintenanceGuardDecision
 from .maintenance_policy import (
     GRAPH_PATCH_APPLY_KINDS,
@@ -33,9 +33,9 @@ class LayeredMaintenanceParser(Protocol):
 
     def __call__(
         self,
-        ctx: "MaintenanceJobExecutionContext",
-        session: "ParseSessionState",
-        frontier: list["ParseFrontierItem"],
+        ctx: MaintenanceJobExecutionContext,
+        session: ParseSessionState,
+        frontier: list[ParseFrontierItem],
         /,
     ) -> Mapping[str, object]: ...
 
@@ -137,7 +137,7 @@ class MaintenanceWorkerLike(Protocol):
     maintenance_llm_calls_per_slice: int
     maintenance_seconds_per_slice: int
     document_parser: MaintenanceDocumentParser
-    layered_parser: "LayeredMaintenanceParser"
+    layered_parser: LayeredMaintenanceParser
 
     def _load_request_node(self, workspace_id: str, req_node_id: str) -> Node | None: ...
     def _emit_trace(self, event: str, **fields: object) -> None: ...

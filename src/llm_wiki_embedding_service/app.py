@@ -53,7 +53,7 @@ def create_app(
                     state.encoder = await asyncio.to_thread(
                         build_dense_encoder, selected
                     )
-                except Exception as exc:  # noqa: BLE001 - readiness reports model failures
+                except Exception as exc:
                     state.load_error = str(exc)
 
             load_task = asyncio.create_task(load_model())

@@ -20,7 +20,6 @@ from llmcompressor.entrypoints.model_free.converter import ModelFreePtqConverter
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-
 TEXT_IGNORE = [
     r"re:^(thinker\.(audio_tower|visual)|talker|token2wav)\..*",
 ]

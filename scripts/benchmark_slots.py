@@ -29,7 +29,6 @@ from kogwistar.messaging.models import (
 
 from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
 from kogwistar_llm_wiki.codex.codex_compose_tui import LaunchStep, TuiConfiguration
-from kogwistar_llm_wiki.memory import MemoryService
 from kogwistar_llm_wiki.codex.codex_workbench_agent import (
     CodexCliSettings,
     CodexProcessRunner,
@@ -42,6 +41,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
     MaintenanceStrategyRegistry,
 )
+from kogwistar_llm_wiki.memory import MemoryService
 from kogwistar_llm_wiki.workbench.review_query import ReviewQueryService
 from kogwistar_llm_wiki.workbench.semantic_lens import SemanticLensService
 from kogwistar_llm_wiki.workbench.workbench_background import WorkbenchInteractionStore

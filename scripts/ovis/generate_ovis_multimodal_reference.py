@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as functional
+from torch.nn import functional
 from transformers import AutoProcessor
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
     Qwen2_5OmniForConditionalGeneration,

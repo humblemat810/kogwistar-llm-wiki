@@ -395,7 +395,7 @@ class MaintenanceBudgetMixin:
                     list[_BackgroundNode],
                     self.engines.kg.read.get_nodes(limit=500),
                 )
-        except Exception as exc:  # noqa: BLE001 - backend failures degrade exploration only
+        except Exception as exc:
             logger.warning("Background maintenance selection degraded: %s", exc)
             nodes = []
         nodes = [

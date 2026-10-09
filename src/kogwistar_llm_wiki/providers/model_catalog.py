@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 
 
 class _UrlOpenResponse(Protocol):
-    def __enter__(self) -> "_UrlOpenResponse": ...
+    def __enter__(self) -> _UrlOpenResponse: ...
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None: ...
 
@@ -78,7 +78,7 @@ def available_models(
             entries = payload.get("models", []) if provider == "ollama" else payload.get("data", [])
             models.extend(str(entry.get("name") or entry.get("id")) for entry in entries if isinstance(entry, dict))
             source = "provider"
-        except Exception:  # noqa: BLE001 - provider discovery is best-effort
+        except Exception:
             source = "unavailable"
     deduplicated = sorted({model for model in models if model and model != "None"})
     return {"role": role, "provider": provider, "base_url": base_url, "models": deduplicated, "source": source}

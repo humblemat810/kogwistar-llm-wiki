@@ -23,8 +23,8 @@ from kogwistar.engine_core.models import Edge, Node
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
 from ..utils import _temporary_namespace
-from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 from .contracts import Clock
+from .query import GraphSpaceQueryResult, GraphSpaceQueryService
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]*", re.IGNORECASE)
 logger = logging.getLogger(__name__)
@@ -861,7 +861,7 @@ def _jsonable(value: object) -> object:
     if isinstance(value, (list, tuple, set)):
         return [_jsonable(item) for item in value]
     if hasattr(value, "value") and not isinstance(value, (str, bytes)):
-        return _jsonable(cast(object, getattr(value, "value")))
+        return _jsonable(cast(object, value.value))
     return value
 
 

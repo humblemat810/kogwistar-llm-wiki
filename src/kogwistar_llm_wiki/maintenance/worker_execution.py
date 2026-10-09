@@ -1088,7 +1088,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 patch_id=patch.patch_id,
                 lifecycle=next_payload["crosslink_lifecycle"],
             )
-        except Exception as exc:  # noqa: BLE001 - durable job boundary must record provider/backend failures
+        except Exception as exc:
             if self._claim_lost.is_set():
                 self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_crosslink")
                 return
@@ -1290,7 +1290,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     raise ValueError("group_id values must be unique within a proposal")
                 group_ids.add(group.group_id)
                 groups.append(group)
-            except Exception as exc:  # noqa: BLE001 - isolate one provider group
+            except Exception as exc:
                 malformed_groups.append((raw_group, str(exc)))
         self._trace_crosslink_workflow_stage(
             ctx, "propose", "groups_proposed" if raw_groups else "no_candidate",
@@ -1401,7 +1401,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             )
             try:
                 self._validate_crosslink_authority(ctx, patch)
-            except Exception as exc:  # noqa: BLE001 - isolate one invalid group
+            except Exception as exc:
                 artifact_id = self._persist_crosslink_group_rejection(
                     ctx, stable_group_id, group.model_dump(mode="json"), str(exc)
                 )
@@ -1435,7 +1435,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     explanation="Human review required because the provider-call budget is exhausted.",
                     evidence_ids=tuple(group_evidence),
                 )
-            except Exception as exc:  # noqa: BLE001 - isolate one invalid group
+            except Exception as exc:
                 artifact_id = self._persist_crosslink_group_rejection(
                     ctx, stable_group_id, group.model_dump(mode="json"), str(exc)
                 )
@@ -1593,7 +1593,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     payload=stage_payload,
                     idempotency_key=stage_key,
                 )
-        except Exception as exc:  # noqa: BLE001 - trace persistence must be visible
+        except Exception as exc:
             ctx.payload["maintenance_trace_persistence_failed"] = True
             self._emit_trace(
                 "maintenance_workflow_trace_persistence_failed",

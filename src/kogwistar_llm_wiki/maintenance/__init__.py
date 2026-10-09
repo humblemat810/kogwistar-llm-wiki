@@ -52,9 +52,9 @@ from .maintenance_strategies import (
     CrosslinkCritic,
     CrosslinkProposer,
     LayeredMaintenanceParser,
-    MaintenanceJobExecutionContext,
     MaintenanceContextLimitSink,
     MaintenanceDocumentParser,
+    MaintenanceJobExecutionContext,
     MaintenanceObservationCritic,
     MaintenanceStrategy,
     MaintenanceStrategyRegistry,
@@ -64,14 +64,14 @@ from .maintenance_strategies import (
 )
 
 __all__ = [
-    "MaintenanceCandidate",
     "ContactObservationProvider",
     "CrosslinkCritic",
     "CrosslinkProposer",
     "LayeredMaintenanceParser",
-    "MaintenanceJobExecutionContext",
+    "MaintenanceCandidate",
     "MaintenanceContextLimitSink",
     "MaintenanceDocumentParser",
+    "MaintenanceJobExecutionContext",
     "MaintenanceObservationCritic",
     "MaintenanceObservationFrame",
     "MaintenanceProfileDecision",
