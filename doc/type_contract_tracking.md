@@ -175,9 +175,11 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   is full-source Pyright-clean, changed-file `E7,E9,F`-clean, and 78
   runtime/server tests passed with 2 skips.
 - Kogwistar typing commit `9c173a0` is pushed after the successful `b081654`
-  run. Its exact-SHA workflow result remains to be observed; local full-source
-  Pyright is clean across 262 files, and the maintenance-template regression
-  passed.
+  run. Exact-SHA workflow `37949128012` completed successfully. Required
+  CPython 3.12-3.14, PyPy 3.11, lint, Rust, SQLite invariants, and native-wheel
+  smoke jobs passed; only the explicitly nonblocking PyPy 3.12 beta job failed.
+  Local full-source Pyright is clean across 262 files, and the maintenance-
+  template regression passed.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
