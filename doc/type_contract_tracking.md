@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `8b95003` |
+| `kogwistar` | `feat/stack-type-contracts` | `b9001dd` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
 
@@ -50,6 +50,9 @@ change.
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
 | Kogwistar | `conversation/policy.py` policy hooks and backend JSON narrowing | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 4 passed, 17 skipped |
 | Kogwistar | `engine_core/subsystems/extract.py` and `llm_tasks/default_provider.py` | 0 errors, 0 warnings | passed | provider/structured-output tests passed; Chroma-dependent extraction tests unavailable locally |
+| Kogwistar | `server/bootstrap.py` | 0 errors, 0 warnings | passed | 4 bootstrap tests passed |
+| Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
+| Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
 | Kogwistar | `kogwistar` full source scan | 270 errors, 3 warnings across 275 files | not yet run for full scope | fresh full-scope measurement after `8b95003`; largest remaining groups are legacy PostgreSQL/demo/server boundaries |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
@@ -101,10 +104,9 @@ change.
   run tested `b8a7e55` and was green, but the merged PR retained one separate
   failed status check. Commit `f6b4dc1` was pushed afterward to the already
   merged head branch, so it has no new pull-request synchronization run.
-- Kogwistar run `37898674106` tested `3aabb90` and failed in its CPython/PyPy
-  test matrix and optional PyPy-beta job; lint, Rust, native-wheel, and
-  SQLite-invariant jobs passed. Commit `5bc563a` has run `37902367430`, and
-  commit `8b95003` is queued as run `37902767866`; neither is terminal yet.
+- Kogwistar run `37904203244` tests exact SHA `b9001dd` and is currently
+  pending. Earlier runs for the preceding typing slices were superseded, so
+  no remote green result is claimed for the current branch yet.
 
 ## Measurement Commands
 
