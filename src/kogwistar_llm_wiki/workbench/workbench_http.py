@@ -38,6 +38,20 @@ MCP_READ_TOOLS = frozenset({
 })
 
 
+def _jsonable(value: object) -> JsonValue:
+    """Normalize handler results before crossing the JSON response boundary."""
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in value]
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None and not isinstance(value, (str, bytes)):
+        return _jsonable(enum_value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
 def _request_int(value: object, *, default: int = 0) -> int:
     if isinstance(value, bool):
         return default
@@ -238,7 +252,7 @@ def build_workbench_handler(
             except (KeyError, TypeError, ValueError) as exc:
                 self._write_json({"error": "invalid_request", "detail": str(exc)}, status=400)
                 return
-            self._write_json(body)
+            self._write_json(_jsonable(body))
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
@@ -388,9 +402,14 @@ def build_workbench_handler(
                     decisions = payload.get("decisions")
                     if not isinstance(decisions, list) or any(not isinstance(item, dict) for item in decisions):
                         raise ValueError("decisions must be a list of objects")
+                    review_decisions = [
+                        cast(Mapping[str, object], item)
+                        for item in decisions
+                        if isinstance(item, dict)
+                    ]
                     body = api.decide_crosslink_group_reviews(
                         workspace_id=str(workspace_id or ""),
-                        decisions=decisions,
+                        decisions=review_decisions,
                         actor_id=str(getattr(identity, "principal_id", None) or "local-operator"),
                         authority_claims=durable_claims_snapshot(),
                     )
@@ -409,7 +428,7 @@ def build_workbench_handler(
             except RuntimeError as exc:
                 self._write_json({"error": "service_unavailable", "detail": str(exc)}, status=503)
                 return
-            self._write_json(body, status=status)
+            self._write_json(_jsonable(body), status=status)
 
         def _require_agent_api(self) -> None:
             if not agent_api_enabled:

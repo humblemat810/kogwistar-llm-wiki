@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from kogwistar.json_types import JsonValue
 
@@ -89,7 +89,7 @@ class IngestPipelineHost(Protocol):
     debug_trace_path: Path | None
     live_trace_printer: LiveTracePrinter | None
     telemetry: LlmWikiTelemetry
-    conversation_persistence_mode: str
+    conversation_persistence_mode: Literal["single_stage", "two_stage"]
     parser_provider_settings: WorkflowProviderSettings | None
     multimodal_projection_store: MultimodalProjectionStore | None
     multimodal_encoder: MultimodalEncoder | None

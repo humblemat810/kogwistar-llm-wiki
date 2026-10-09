@@ -13,6 +13,7 @@ from kg_doc_parser.workflow_ingest.layerwise_llm import (
     build_layerwise_llm_callbacks,
 )
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
+from kg_doc_parser.workflow_ingest.semantics import SemanticNode
 from kogwistar.json_types import JsonValue
 from kogwistar.runtime.budget import (
     BudgetEvent,
@@ -83,6 +84,7 @@ class LayeredParseResult:
     usage_summary: dict[str, object]
     usage_events: list[dict[str, object]]
     layer_log: list[dict[str, object]]
+    semantic_tree: SemanticNode | None = None
 
     @property
     def workflow_status(self) -> str | None:
@@ -332,10 +334,7 @@ def run_workflow_layered_parse(
         from kg_doc_parser.workflow_ingest.models import (
             WorkflowExportBundle as _WorkflowExportBundle,
         )
-        from kg_doc_parser.workflow_ingest.semantics import (
-            SemanticNode,
-            semantic_tree_to_kge_payload,
-        )
+        from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 
         semantic_tree = SemanticNode.model_validate(final_state["semantic_tree"])
         graph_payload = semantic_tree_to_kge_payload(semantic_tree, doc_id=source_document_id)
@@ -436,6 +435,12 @@ def run_workflow_layered_parse(
         total_cost=usage_summary["total_cost"],
         parse_session_mode=parse_session.get("mode"),
     )
+    semantic_tree_value = final_state.get("semantic_tree")
+    semantic_tree = (
+        SemanticNode.model_validate(semantic_tree_value)
+        if isinstance(semantic_tree_value, Mapping)
+        else None
+    )
     return LayeredParseResult(
         graph_payload=graph_payload,
         evaluation=evaluation,
@@ -446,4 +451,5 @@ def run_workflow_layered_parse(
             [budget_event_to_dict(event) for event in budget_ledger.events],
         ),
         layer_log=layer_log,
+        semantic_tree=semantic_tree,
     )

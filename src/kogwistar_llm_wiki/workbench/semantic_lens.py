@@ -19,6 +19,7 @@ from math import isnan
 from typing import Literal, Protocol, cast
 
 from kogwistar.engine_core.models import Edge, Node
+from kogwistar.json_types import JsonValue
 
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -738,7 +739,7 @@ def _lens_node(result: GraphSpaceQueryResult) -> LensNode:
         entity_revision=_revision(metadata),
         metadata=metadata,
         grounding=_grounding(node),
-        payload=payload,
+        payload=cast(dict[str, object], payload),
     )
 
 
@@ -754,7 +755,7 @@ def _lens_edge(edge: Edge, graph_space: str, namespace: str) -> LensEdge:
         entity_revision=_revision(dict(getattr(edge, "metadata", None) or {})),
         metadata=dict(getattr(edge, "metadata", None) or {}),
         grounding=_grounding(edge),
-        payload=payload,
+        payload=cast(dict[str, object], payload),
     )
 
 
@@ -762,7 +763,7 @@ def _grounding(node: GraphEntity) -> tuple[dict[str, object], ...]:
     refs: list[dict[str, object]] = []
     for mention in getattr(node, "mentions", None) or ():
         for span in getattr(mention, "spans", None) or ():
-            refs.append(_model_dump(span))
+            refs.append(cast(dict[str, object], _model_dump(span)))
     return tuple(refs)
 
 
@@ -842,27 +843,30 @@ def _flat_hit(
     }
 
 
-def _model_dump(value: object) -> dict[str, object]:
+def _model_dump(value: object) -> dict[str, JsonValue]:
     dump = getattr(value, "model_dump", None)
     if callable(dump):
         try:
             # Kogwistar models expose ``dump_format`` while plain Pydantic
             # models expose ``mode``.  Keep this compatibility at the app
             # boundary rather than changing either model implementation.
-            return cast(dict[str, object], _jsonable(dump(dump_format="json")))
+            return cast(dict[str, JsonValue], _jsonable(dump(dump_format="json")))
         except TypeError:
-            return cast(dict[str, object], _jsonable(dump(mode="json")))
-    return cast(dict[str, object], _jsonable(dict(getattr(value, "__dict__", {}) or {})))
+            return cast(dict[str, JsonValue], _jsonable(dump(mode="json")))
+    return cast(dict[str, JsonValue], _jsonable(dict(getattr(value, "__dict__", {}) or {})))
 
 
-def _jsonable(value: object) -> object:
+def _jsonable(value: object) -> JsonValue:
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [_jsonable(item) for item in value]
-    if hasattr(value, "value") and not isinstance(value, (str, bytes)):
-        return _jsonable(cast(object, value.value))
-    return value
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None and not isinstance(value, (str, bytes)):
+        return _jsonable(enum_value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
 
 
 def _as_int(value: object) -> int:

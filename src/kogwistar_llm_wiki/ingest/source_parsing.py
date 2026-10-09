@@ -8,7 +8,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.runtime.budget import budget_event_from_dict
@@ -19,7 +19,7 @@ from ..providers.role_config import (
     resolve_parser_provider_settings,
 )
 from ..usage.events import persist_usage_events
-from .contracts import IngestPipelineHost, ParseSourceResult, TraceLog
+from .contracts import IngestPipelineHost, ParseSourceResult, SemanticTreeLike, TraceLog
 
 
 class SourceParsingMixin:
@@ -117,7 +117,10 @@ class SourceParsingMixin:
                 provider_settings=provider_settings,
                 engine_dir=engine_dir,
                 trace=self._trace_text if self.debug_trace_path is not None else None,
-                conversation_persistence_mode=self.conversation_persistence_mode,
+                conversation_persistence_mode=cast(
+                    Literal["single_stage", "two_stage"],
+                    self.conversation_persistence_mode,
+                ),
             )
         finally:
             shutil.rmtree(engine_dir, ignore_errors=True)
@@ -165,8 +168,12 @@ class SourceParsingMixin:
             if getattr(result, "parse_session", None)
             else None,
         )
+        semantic_tree = result.semantic_tree or cast(
+            SemanticTreeLike,
+            SimpleNamespace(title=request.title),
+        )
         return cast(ParseSourceResult, SimpleNamespace(
-            semantic_tree=result.semantic_tree,
+            semantic_tree=semantic_tree,
             graph_payload=result.graph_payload,
             evaluation=result.evaluation,
             diagnostics=result.diagnostics,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from kogwistar.engine_core.models import (
     GraphExtractionWithIDs,
@@ -201,7 +202,7 @@ class MaintenanceRequestMixin:
                 visibility="internal",
                 label="Maintenance Job Request",
                 summary=f"Maintenance requested for {request.title}",
-                extra_metadata={
+                extra_metadata=cast(dict[str, JsonValue], {
                     "job_type": "maintenance",
                     "trigger_type": "ingest",
                     "status": "pending",
@@ -223,7 +224,7 @@ class MaintenanceRequestMixin:
                     "request_fingerprint": request_fingerprint,
                     "budgets": _metadata_digest_value(dict(budgets or {})),
                     "parse_target": target.model_dump(mode="json") if target is not None else None,
-                },
+                }),
             )
             with _background_namespace(self.engines.conversation, namespace):
                 self.engines.conversation.write.add_node(node)
@@ -430,7 +431,7 @@ class MaintenanceRequestMixin:
             visibility="internal",
             label=f"Parse retry history: {request.title}",
             summary=summary,
-            extra_metadata={
+            extra_metadata=cast(dict[str, JsonValue], {
                 "retry_history_json": json.dumps(history_payload, sort_keys=True, separators=(",", ":")),
                 "parser_lane": parser_lane,
                 "assignment_mode": assignment_mode,
@@ -450,7 +451,7 @@ class MaintenanceRequestMixin:
                 "validation_errors": validation_errors,
                 "workflow_run_id": history_payload["workflow_run_id"],
                 "workflow_status": history_payload["workflow_status"],
-            },
+            }),
         )
         with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
@@ -567,7 +568,7 @@ class MaintenanceRequestMixin:
             visibility="review",
             label=f"Promotion candidate: {request.title}",
             summary=f"Promotion candidate linked from {candidate_link_id}",
-            extra_metadata={
+            extra_metadata=cast(dict[str, JsonValue], {
                 "candidate_link_id": candidate_link_id,
                 "promotion_evidence_pack_id": promotion_evidence_pack_id,
                 "promotion_evidence_pack_digest": _metadata_digest_value(promotion_evidence_pack_digest),
@@ -581,7 +582,7 @@ class MaintenanceRequestMixin:
                 ),
                 "lineage_edge_ids": _metadata_list_value(list(lineage_edge_ids or [])),
                 "review_namespace": self.namespaces_for(request.workspace_id).review,
-            },
+            }),
         )
         with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
