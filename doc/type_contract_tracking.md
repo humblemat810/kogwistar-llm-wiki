@@ -36,7 +36,7 @@ change.
 | Kogwistar | `server/chat_service_workflow_history.py` event-row protocol boundary | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `maintenance/template.py`, `grouped_artifacts.py` read-only filter protocol | 0 errors, 0 warnings | passed | maintenance-template regression passed; full source scan passed |
 | Kogwistar | `server/run_registry.py` metadata-store protocol | 0 errors, 0 warnings | passed | 10 run-registry/server tests passed, 1 PostgreSQL fixture skipped |
-| Kogwistar | `server/run_registry.py` JSON result/snapshot and event-delegate protocols | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 10 run-registry/server tests passed, 1 PostgreSQL fixture skipped |
+| Kogwistar | `server/run_registry.py` JSON result/snapshot and event-delegate protocols plus Rust adapter | 0 errors, 0 warnings across full 262-file scan | passed (`E4,E7,E9,F`) | 1 Rust registry differential test passed, 1 PostgreSQL fixture skipped |
 | Kogwistar | `server/chat_service_workflow_design.py` mutation/undo/redo JSON responses | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `server/chat_mcp.py` generic role/namespace decorator protocol and `mcp_tools.py` naming cleanup | 0 errors, 0 warnings | passed | 2 MCP regression tests passed; server Ruff E4/E7/E9/F clean |
 | Kogwistar | `engine_core/in_memory_meta.py` metadata and projection JSON boundaries | 0 errors, 0 warnings | passed | 22 passed, 2 warnings |
@@ -182,11 +182,12 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   smoke jobs passed; only the explicitly nonblocking PyPy 3.12 beta job failed.
   Local full-source Pyright is clean across 262 files, and the maintenance-
   template regression passed.
-- Kogwistar typing commit `616911e` strengthens the durable metadata-store
-  protocol with recursive JSON result/snapshot types and an event-delegate
-  protocol. Its exact-SHA workflow result is pending; local full-source
-  Pyright is clean across 262 files, changed-file Ruff is clean, and 10
-  run-registry/server tests passed with 1 PostgreSQL fixture skipped.
+- Kogwistar typing commit `414f8be` strengthens the durable metadata-store
+  protocol with recursive JSON result/snapshot types, an event-delegate
+  protocol, and matching Rust SQLite adapter signatures. Exact PR
+  synchronization run `#498` is queued; local full-source Pyright is clean
+  across 262 files, changed-file Ruff is clean, and the Rust registry
+  differential test passed with 1 PostgreSQL fixture skipped.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
