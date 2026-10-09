@@ -9,8 +9,8 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `51474aa` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `327b361` |
+| `kogwistar` | `feat/stack-type-contracts` | `f2c4eb3` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `4e9ef93` |
 
 ## Verified Scopes
@@ -35,6 +35,8 @@ change.
 | Kogwistar | `conversation/conversation_orchestrator.py`, `conversation/tool_runner.py`, `engine_core/types.py` | 0 errors, 0 warnings | passed | 18 passed, 8 warnings |
 | Kogwistar | `conversation/agentic_answering.py` | 0 errors, 0 warnings | passed | 19 passed; Chroma/real-LLM cases unavailable locally |
 | Kogwistar | `conversation/service.py` | 0 errors, 0 warnings | passed | fake cancellation/causality paths passed; Chroma unavailable locally |
+| Kogwistar | conversation facade and orchestrator entry points | 0 errors, 0 warnings | passed | focused conversation cases collected; optional backend cases skipped locally |
+| Kogwistar | GraphKnowledgeEngine ACL facade | 0 errors, 0 warnings | passed | 38 ACL tests passed; Chroma unavailable and PostgreSQL fixtures skipped locally |
 | Kogwistar | `messaging/service.py`, lane-message store protocol and projection records | 0 errors, 0 warnings across 3 messaging files | passed | 27 lane-message, visibility, projection-rebuild, and metastore-contract tests passed |
 | Kogwistar | `runtime/checkpointed_projection.py` | 0 errors, 0 warnings | passed | 6 checkpoint, CAS, failure-preservation, and bounded-tail tests passed |
 | Kogwistar | `runtime/telemetry.py`, `runtime/models.py`, `runtime/__init__.py` | 0 errors, 0 warnings | passed | 12 budget/projection regression tests passed |
@@ -65,6 +67,7 @@ change.
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
 | KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 182 legacy Ruff findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
 | KG Doc Parser | `workflow_ingest/providers.py` structured-provider schema boundary | 0 errors, 0 warnings | passed | provider settings/token-budget tests passed with vendored Core on `PYTHONPATH` |
+| KG Doc Parser | `workflow_ingest/clients.py` resume argument protocol | 0 errors, 0 warnings | passed | unsupported server-resume contract passed; optional Chroma case skipped |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 181 files | targeted groups passed; full runtime suite pending | Pyright clean |
 | LLM-Wiki | diagnostics, remote embedding, trace sink, and memory boundaries | 0 errors, 0 warnings across full `src` scan | passed (`E4,E7,E9,F`) | 28 passed |
@@ -117,12 +120,11 @@ after its full-scope scan is regenerated.
 ## Remote Verification Status
 
 - Kogwistar run `37930756117` completed successfully for exact SHA `1a01a73`,
-  including the required PyPy 3.11 job. Subsequent native-protocol commits
-  `2ce478a`, `a6ee520`, and `51474aa` were pushed to the same feature branch and
-  each requires a new exact-SHA result; unauthenticated GitHub API polling is
-  currently rate-limited, so their status remains pending rather than being
-  inferred from the prior run.
-- KG Doc Parser typing commit `327b361` is pushed to its feature branch; its
+  including the required PyPy 3.11 job. The exact-SHA run for `e4fd355` is
+  still in progress. The newer `a474b14` and `f2c4eb3` pushes are present on
+  the remote branch but do not yet have a completed exact-SHA workflow result;
+  they must not be inferred from earlier green runs.
+- KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 
 ## Measurement Commands
