@@ -11,7 +11,7 @@ change.
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `b16f9ec` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `622b687` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `0ab6345` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6e20e39` |
 
 ## Verified Scopes
 
@@ -85,6 +85,7 @@ change.
 | KG Doc Parser | `workflow_ingest/clients.py` resume argument protocol | 0 errors, 0 warnings | passed | unsupported server-resume contract passed; optional Chroma case skipped |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 181 files | targeted groups passed; full runtime suite pending | Pyright clean |
+| LLM-Wiki | maintenance observation audit and graph-space logical-reference protocols | 0 errors, 0 warnings across 2 touched files | passed (`ANN,E4,E7,E9,F`) | targeted process executed 12 tests before shutdown hang; not counted as a completed pass |
 | LLM-Wiki | diagnostics, remote embedding, trace sink, and memory boundaries | 0 errors, 0 warnings across full `src` scan | passed (`E4,E7,E9,F`) | 28 passed |
 | LLM-Wiki | vLLM multimodal message/content wire contracts | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 44 passed, 3 skipped |
 | LLM-Wiki | standalone embedding-service health, readiness, capability, and representation responses | 0 errors, 0 warnings | passed (`E4,E7,E9,F`) | 21 passed |
@@ -210,6 +211,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   contract fix. Its exact-SHA API query currently reports no workflow run
   (`runs=0`); local verification is full-source Pyright-clean and 30
   maintenance orchestration tests passed.
+- LLM-Wiki typing commit `6e20e39` records the Core search protocol slice and
+  is the current root documentation head. The two subsequent local annotation
+  fixes are currently uncommitted and must be verified before their commit is
+  added here; no remote CI result is claimed for them.
 - The `feat/stack-type-contracts` branch currently has an open Core PR and
   exact Core CI coverage. The parser and LLM-Wiki branches currently have no
   open PRs, so their latest commits cannot have pull-request CI results; this

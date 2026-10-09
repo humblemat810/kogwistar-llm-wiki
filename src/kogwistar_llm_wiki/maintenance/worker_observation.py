@@ -15,9 +15,11 @@ from ..parsing.parse_views import ParseTarget, ParseViewResolver, ParseViewStore
 from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_context import append_maintenance_round
 from .maintenance_observation import (
+    MaintenanceObservationFrame,
     ObservationFinding,
     ObservationRuntimeLimits,
     ObservationSubject,
+    ParseAndGraphQualityAssessment,
     SubjectKind,
     assess_observation_frame,
     build_observation_frame,
@@ -562,7 +564,12 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 ]
         return source_context, relation_context, neighborhood_context, parent_context
 
-    def _persist_observation_audit(self, ctx, frame, assessment) -> None:
+    def _persist_observation_audit(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        frame: MaintenanceObservationFrame,
+        assessment: ParseAndGraphQualityAssessment,
+    ) -> None:
         """Persist assessment metadata without storing raw source text."""
 
         ns = WorkspaceNamespaces(ctx.workspace_id)
