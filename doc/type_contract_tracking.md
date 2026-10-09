@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `b16f9ec` |
+| `kogwistar` | `feat/stack-type-contracts` | `78bb9c9` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a724406` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `7371267` |
 
@@ -36,6 +36,7 @@ change.
 | Kogwistar | `server/chat_service_workflow_history.py` event-row protocol boundary | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `maintenance/template.py`, `grouped_artifacts.py` read-only filter protocol | 0 errors, 0 warnings | passed | maintenance-template regression passed; full source scan passed |
 | Kogwistar | `server/run_registry.py` metadata-store protocol | 0 errors, 0 warnings | passed | 10 run-registry/server tests passed, 1 PostgreSQL fixture skipped |
+| Kogwistar | `server/auth/db.py` auth database factory and sessionmaker boundary | 0 errors, 0 warnings | passed (`ANN,E4,E7,E9,F`) | 31 auth tests passed |
 | Kogwistar | `server/run_registry.py` JSON result/snapshot and event-delegate protocols plus Rust adapter | 0 errors, 0 warnings across full 262-file scan | passed (`E4,E7,E9,F`) | 1 Rust registry differential test passed, 1 PostgreSQL fixture skipped |
 | Kogwistar | `server/chat_service_workflow_design.py` mutation/undo/redo JSON responses | 0 errors, 0 warnings | passed | 3 workflow-design regression tests passed |
 | Kogwistar | `server/chat_mcp.py` generic role/namespace decorator protocol and `mcp_tools.py` naming cleanup | 0 errors, 0 warnings | passed | 2 MCP regression tests passed; server Ruff E4/E7/E9/F clean |
@@ -195,6 +196,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   `similarity_threshold` parameter. Exact-SHA workflow run `37954185993` is
   currently loading on GitHub; it is not yet a green or failed result. Local
   full-source Pyright remains clean across 262 files.
+- Kogwistar typing commit `78bb9c9` adds explicit SQLAlchemy engine and
+  session-factory types to the auth database boundary. A newer exact-SHA CI run
+  is expected after the push; local file Pyright/Ruff are clean and all 31 auth
+  tests passed.
 - KG Doc Parser typing commit `622b687` adds page-aware source collection,
   page, and unit protocols without widening the layered parser contract. Its
   exact-SHA GitHub result remains to be observed because the branch has no
