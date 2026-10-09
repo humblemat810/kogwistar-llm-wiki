@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `4d217a8` |
+| `kogwistar` | `feat/stack-type-contracts` | `b081654` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6868e5a` |
 
@@ -70,7 +70,7 @@ change.
 | Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
 | Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
 | Kogwistar | `conversation/policy.py`, `server/resources.py`, `server/chat_service_run_inspection.py`, `shortids.py`, `utils/log.py` | 0 errors, 0 warnings | passed for focused files; legacy E402 remains in `utils/log.py` | focused compatibility checks passed; backend-dependent tests remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | post-`1ffdfd4` full scan pending; last reproducible scan had 180 errors concentrated in runtime JSON boundaries | targeted checks passed | post-commit targeted runtime scan is clean; full remote CI passed |
+| Kogwistar | `kogwistar` full source scan | 0 errors, 0 warnings after `b081654` | focused changed-file Ruff `E7,E9,F` passed; legacy `E402` remains in monolithic runtime imports | 78 runtime/server tests passed, 2 skipped; full CI remains unverified for this SHA |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -93,18 +93,17 @@ change.
 For the Kogwistar full-source Pyright backlog, the first reproducible
 source-only baseline was 194 errors. The last reproducible scan before
 `1ffdfd4` reported 180 errors, concentrated in the runtime JSON boundaries.
-The current commit makes those boundaries clean in targeted scans, but a new
-full-source scan is still required before claiming a zero full-source count.
-This is a backlog metric only; it does not claim that a percentage of runtime
-behavior is broken, and it does not count warnings, Ruff findings, or
-unverified CI as completed work. A slice is counted only after its full-scope
-scan is regenerated.
+The full source-only scan after `b081654` reports 0 errors and 0 warnings.
+This is a backlog metric only; it does not claim that runtime behavior is
+fully verified, and it does not count Ruff findings or unverified CI as
+completed work. A slice is counted only after its full-scope scan is
+regenerated.
 
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan currently has `182` legacy findings;
-  Kogwistar last reproducible pre-`1ffdfd4` source scan measured `180` errors;
-  the post-commit runtime boundary files measure `0` targeted errors. This is a typing measurement,
+  Kogwistar full source-only scan after `b081654` measures `0` errors and `0`
+  warnings. This is a typing measurement,
   not a passing runtime gate; optional backend fixtures and full CI remain
   separately unverified.
 The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the remaining
@@ -126,7 +125,7 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
 - [x] Audit all LLM-Wiki packages beyond the current targeted scope.
 - [x] Remove the measured LLM-Wiki backlog of 30 errors, grouped by policy,
       transport/protocol, JSON boundaries, and model contracts.
-- [ ] Regenerate the full Kogwistar source-only scan after `1ffdfd4`.
+- [x] Regenerate the full Kogwistar source-only scan after `1ffdfd4`.
 - [ ] Run full local CI for each repository with the documented dependency
       paths and `-p no:cacheprovider` where appropriate.
 - [ ] Verify PyPy 3.11 and CPython 3.12-3.14 compatibility after type changes.
@@ -167,6 +166,10 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
 - Kogwistar typing commit `4d217a8` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 3 workflow-design regression tests passed.
+- Kogwistar typing commit `b081654` is pushed to its feature branch. Exact-SHA
+  workflow run `37946481813` is currently queued; it is not yet remotely
+  verified. Local verification is full-source Pyright-clean, changed-file
+  `E7,E9,F`-clean, and 78 runtime/server tests passed with 2 skips.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
   exact-SHA GitHub result remains to be observed.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
