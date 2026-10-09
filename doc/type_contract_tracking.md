@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `616911e` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `622b687` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `0ab6345` |
 
 ## Verified Scopes
@@ -188,8 +188,12 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   synchronization run `#498` is queued; local full-source Pyright is clean
   across 262 files, changed-file Ruff is clean, and the Rust registry
   differential test passed with 1 PostgreSQL fixture skipped.
-- KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
-  exact-SHA GitHub result remains to be observed.
+- KG Doc Parser typing commit `622b687` adds page-aware source collection,
+  page, and unit protocols without widening the layered parser contract. Its
+  exact-SHA GitHub result remains to be observed because the branch has no
+  open PR; local full-source Pyright is clean, Ruff is clean for the touched
+  modules, and the page-index/resolver suite passed 74 tests with 8 optional
+  skips.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 44 focused multimodal tests passed with 3 skipped.
