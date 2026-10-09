@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `78b7972` |
+| `kogwistar` | `feat/stack-type-contracts` | `e9a2531` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `affe290` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `5a03744` |
 
@@ -198,8 +198,12 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   full-source Pyright remains clean across 262 files.
 - Kogwistar typing commit `78b7972` completes the auth service return contracts
   on top of the database boundary. Local source Pyright/Ruff are clean for the
-  auth package and all 31 auth tests passed; the pushed Core PR must still be
-  monitored to completion.
+  auth package and all 31 auth tests passed.
+- Kogwistar typing commit `e9a2531` hardens CDC and visualization typing,
+  removes mutable visualization defaults, and fixes runtime use of a
+  type-checking-only engine import. Local strict Ruff/Pyright are clean and the
+  relevant viewer/CDC tests passed 7 tests; optional Chroma tests still require
+  the `chromadb` extra.
 - KG Doc Parser typing commit `622b687` adds page-aware source collection,
   page, and unit protocols without widening the layered parser contract. Its
   exact-SHA GitHub result remains to be observed because the branch has no
