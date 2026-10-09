@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 from kg_doc_parser.workflow_ingest.page_index import (
     PageIndexMode,
@@ -17,6 +17,7 @@ from kg_doc_parser.workflow_ingest.page_index import (
     parse_page_index_document,
 )
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
+from kogwistar.json_types import JsonValue
 from kogwistar.runtime.budget import (
     BudgetEvent,
     StateBackedBudgetLedger,
@@ -24,6 +25,7 @@ from kogwistar.runtime.budget import (
 )
 
 from ..diagnostics.debug_helpers import LiveTracePrinter, env_flag_enabled
+from ..ingest.contracts import TraceLog
 from ..parsing.layered_workflow import LayeredParseResult
 from ..parsing.longrun_support import append_trace_line as _append_trace_line
 from ..parsing.longrun_support import dump_model as _dump_model
@@ -45,7 +47,22 @@ from ..usage.provider import (
 class WorkflowParser(Protocol):
     """Typed parser boundary used by the isolated long-run child."""
 
-    def __call__(self, **kwargs: object) -> LayeredParseResult: ...
+    def __call__(
+        self,
+        *,
+        source_document_id: str,
+        title: str,
+        raw_text: str,
+        provider_settings: WorkflowProviderSettings,
+        engine_dir: Path,
+        budget_ledger: StateBackedBudgetLedger | None = None,
+        trace: TraceLog | None = None,
+        heartbeat: TraceLog | None = None,
+        run_id: str | None = None,
+        resume_from_checkpoint: bool = False,
+        usage_event_path: Path | None = None,
+        conversation_persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    ) -> LayeredParseResult: ...
 
 
 class BudgetSummaryBuilder(Protocol):
@@ -111,7 +128,7 @@ def run_longrun_parser_child(
             _append_trace_line(dump_trace_path, f"child::{contextual_message}")
         if live_trace_printer is not None:
             live_trace_printer.emit(
-                {
+                cast(dict[str, JsonValue], {
                     "stage": "parser_trace",
                     "message": f"child::{contextual_message}",
                     "doc_id": payload.get("doc_id"),
@@ -122,7 +139,7 @@ def run_longrun_parser_child(
                     "pid": os.getpid(),
                     "process_name": multiprocessing.current_process().name,
                     "thread_name": threading.current_thread().name,
-                }
+                })
             )
 
     try:
@@ -189,7 +206,7 @@ def run_longrun_parser_child(
             _trace("child_page_index_graph_payload_done")
             title = str(getattr(page_index_result.semantic_tree, "title", payload["title"]))
             evaluation = _basic_sense_eval_from_graph_payload(
-                graph_payload=graph_payload,
+                graph_payload=cast(dict[str, object], graph_payload),
                 diagnostics={
                     "parser_lane": "page_index",
                     "page_index": _dump_model(page_index_result.diagnostics),
@@ -220,6 +237,15 @@ def run_longrun_parser_child(
             _trace(f"child_building_workflow_engines dir={engine_dir}")
             _trace("child_before_workflow_layered_parse")
             _heartbeat("workflow_layered_parse_start")
+            raw_conversation_mode = str(
+                payload.get("conversation_persistence_mode") or "single_stage"
+            )
+            conversation_mode = cast(
+                Literal["single_stage", "two_stage"],
+                raw_conversation_mode
+                if raw_conversation_mode in {"single_stage", "two_stage"}
+                else "single_stage",
+            )
             layered_result = workflow_parser(
                 source_document_id=source_document_id,
                 title=str(payload["title"]),
@@ -236,9 +262,7 @@ def run_longrun_parser_child(
                     if payload.get("usage_event_path")
                     else None
                 ),
-                conversation_persistence_mode=str(
-                    payload.get("conversation_persistence_mode") or "single_stage"
-                ),
+                conversation_persistence_mode=conversation_mode,
             )
             _trace("child_workflow_layered_parse_call_returned")
             _heartbeat("workflow_layered_parse_complete")
