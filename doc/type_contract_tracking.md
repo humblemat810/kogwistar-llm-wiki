@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `b2ce16f` |
+| `kogwistar` | `feat/stack-type-contracts` | `33d58c1` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `f0a2b73` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `df9e510` |
 
@@ -103,8 +103,9 @@ change.
   findings) and KG Doc Parser (`149` findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; the latest
-  Core feature-branch SHA `b2ce16f` currently has no GitHub workflow run
-  attached (`runs=0`).
+  Core feature-branch SHA `33d58c1` was pushed after local verification;
+  the exact-SHA GitHub query is temporarily unavailable because the GitHub
+  API rate limit was exceeded.
 
 ## Quantified Progress
 
