@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `4dbc83a` |
+| `kogwistar` | `feat/stack-type-contracts` | `1ffdfd4` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `0fc621a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `4e9ef93` |
 
@@ -26,6 +26,7 @@ change.
 | Kogwistar | `runtime/routing.py` plus workflow predicate protocol | 0 errors, 0 warnings | broader legacy import check pending | route/join parity tests passed |
 | Kogwistar | `runtime/runtime.py` workflow runtime boundary | 0 errors, 0 warnings | legacy E402 only | 5 focused sync contract tests passed |
 | Kogwistar | `runtime/base_runtime.py`, `async_runtime.py` resolver contracts | 0 errors, 0 warnings | legacy E402 only in async/runtime peers | 69 passed, 2 skipped |
+| Kogwistar | `runtime/native_contracts.py` plus sync/async native join-result adapters | 0 errors, 0 warnings | passed | 41 runtime/short-id contract tests passed |
 | Kogwistar | `engine_core/in_memory_meta.py` metadata and projection JSON boundaries | 0 errors, 0 warnings | passed | 22 passed, 2 warnings |
 | Kogwistar | `typing_interfaces.py` plus engine subsystem protocol surface | 0 errors in protocol file; engine reduced to 44 | passed | fake backend smoke passed; optional Chroma unavailable locally |
 | Kogwistar | ACL read/write protocol forwarding and backend capability attributes | engine reduced to 34 errors | passed | 42 ACL tests passed; 1 unrelated fixture-helper failure |
@@ -60,7 +61,7 @@ change.
 | Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
 | Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
 | Kogwistar | `conversation/policy.py`, `server/resources.py`, `server/chat_service_run_inspection.py`, `shortids.py`, `utils/log.py` | 0 errors, 0 warnings | passed for focused files; legacy E402 remains in `utils/log.py` | focused compatibility checks passed; backend-dependent tests remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | 0 errors, 0 warnings across 275 files | targeted PostgreSQL Ruff checks passed | full scan regenerated after `8864307`; PostgreSQL fixtures and optional `pgvector` coverage remain environment-gated locally |
+| Kogwistar | `kogwistar` full source scan | post-`1ffdfd4` full scan pending; last reproducible scan had 180 errors concentrated in runtime JSON boundaries | targeted checks passed | post-commit targeted runtime scan is clean; full remote CI passed |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -78,18 +79,21 @@ change.
 
 ## Quantified Progress
 
-For the Kogwistar full-source Pyright backlog, the fixed baseline is 277
-errors. The current scan reports 0 errors, so the measured diagnostic
-reduction is 277/277 = 100%. This is a backlog metric only; it does not claim
-that 75.5% of runtime behavior is broken, and it does not count warnings,
-Ruff findings, or unverified CI as completed work. A slice is counted only
-after its full-scope scan is regenerated.
+For the Kogwistar full-source Pyright backlog, the first reproducible
+source-only baseline was 194 errors. The last reproducible scan before
+`1ffdfd4` reported 180 errors, concentrated in the runtime JSON boundaries.
+The current commit makes those boundaries clean in targeted scans, but a new
+full-source scan is still required before claiming a zero full-source count.
+This is a backlog metric only; it does not claim that a percentage of runtime
+behavior is broken, and it does not count warnings, Ruff findings, or
+unverified CI as completed work. A slice is counted only after its full-scope
+scan is regenerated.
 
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan currently has `182` legacy findings;
-  Kogwistar full source currently measures `0` errors and `0` warnings across
-  275 files after the PostgreSQL boundary fix. This is a typing measurement,
+  Kogwistar last reproducible pre-`1ffdfd4` source scan measured `180` errors;
+  the post-commit runtime boundary files measure `0` targeted errors. This is a typing measurement,
   not a passing runtime gate; optional backend fixtures and full CI remain
   separately unverified.
   The latest runtime, ontology, and PostgreSQL slices are clean; the remaining
@@ -111,6 +115,7 @@ after its full-scope scan is regenerated.
 - [x] Audit all LLM-Wiki packages beyond the current targeted scope.
 - [x] Remove the measured LLM-Wiki backlog of 30 errors, grouped by policy,
       transport/protocol, JSON boundaries, and model contracts.
+- [ ] Regenerate the full Kogwistar source-only scan after `1ffdfd4`.
 - [ ] Run full local CI for each repository with the documented dependency
       paths and `-p no:cacheprovider` where appropriate.
 - [ ] Verify PyPy 3.11 and CPython 3.12-3.14 compatibility after type changes.
@@ -120,8 +125,8 @@ after its full-scope scan is regenerated.
 
 ## Remote Verification Status
 
-- Kogwistar run `37935432457` completed successfully for exact SHA
-  `4dbc83a0ed6b3feb401f49539110b2fb0902400b`. Required CPython 3.12-3.14,
+- Kogwistar run `37939704217` completed successfully for exact SHA
+  `1ffdfd42f19614c750be31161edb4876302e3294`. Required CPython 3.12-3.14,
   PyPy 3.11, lint, Rust, SQLite invariants, and native-wheel smoke jobs passed.
   The PyPy 3.12 beta job failed as an explicitly non-blocking best-effort job.
 - KG Doc Parser typing commit `0fc621a` is pushed to its feature branch; its
@@ -135,6 +140,14 @@ From each repository root:
 pyright <scope> 2>&1
 python -m ruff check <scope> --select E4,E7,E9,F
 python -m pytest <focused-tests> -q -p no:cacheprovider
+```
+
+For Kogwistar production-source typing, use the checked-in source-only
+configuration so tests, demos, and generated cache code do not distort the
+measurement:
+
+```powershell
+pyright --project pyright.source.json
 ```
 
 For a numeric Pyright count in PowerShell:
