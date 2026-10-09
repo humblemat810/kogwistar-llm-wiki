@@ -96,15 +96,17 @@ class SettingsMemoryLike(Protocol):
     max_recall_records: int
 
 
-def _redact(value: object) -> object:
+def _redact(value: object) -> JsonValue:
     if isinstance(value, Mapping):
-        return {
+        return cast(JsonObject, {
             str(key): ("[redacted]" if any(word in str(key).lower() for word in _SECRET_WORDS) else _redact(item))
             for key, item in value.items()
-        }
+        })
     if isinstance(value, list):
         return [_redact(item) for item in value]
-    return value
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
 
 
 def _object_mapping(value: object) -> Mapping[str, JsonValue]:
@@ -113,7 +115,7 @@ def _object_mapping(value: object) -> Mapping[str, JsonValue]:
 
 def _setting_int(value: object, *, name: str) -> int:
     if not isinstance(value, (int, float, str)):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
@@ -130,6 +132,8 @@ class SettingsService:
         "path",
         "pipeline",
     )
+    _runtime_multimodal_enabled: bool | None
+    _runtime_otel_enabled: bool | None
 
     def __init__(
         self,
@@ -364,7 +368,7 @@ class SettingsService:
                 levels = normalize_profile_ladder(next_desired["maintenance_profile_ladder"])
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"invalid maintenance_profile_ladder: {exc}") from exc
-            next_desired["maintenance_profile_ladder"] = [
+            next_desired["maintenance_profile_ladder"] = cast(JsonValue, [
                 {
                     "name": level.name,
                     "provider": level.provider,
@@ -373,7 +377,7 @@ class SettingsService:
                     "budget": level.budget,
                 }
                 for level in levels
-            ]
+            ])
         if "maintenance_token_budget_rate" in next_desired:
             value = _setting_int(
                 next_desired["maintenance_token_budget_rate"],
@@ -387,7 +391,9 @@ class SettingsService:
                 raise ValueError("maintenance_budget must be an object")
             from ..maintenance.maintenance_profiles import normalize_budget
 
-            next_desired["maintenance_budget"] = normalize_budget(next_desired["maintenance_budget"])
+            next_desired["maintenance_budget"] = cast(
+                JsonValue, normalize_budget(next_desired["maintenance_budget"])
+            )
         if (
             "embedding_max_model_len" in next_desired
             and "embedding_crop_token_budget" in next_desired
@@ -417,21 +423,22 @@ class SettingsService:
                 return {"status": "rejected", "reason": "opentelemetry_runtime_not_available", **snapshot}
             if telemetry is not None and hasattr(telemetry, "set_enabled"):
                 telemetry.set_enabled(desired["otel_enabled"])
-            self._runtime_otel_enabled = desired["otel_enabled"]
+            self._runtime_otel_enabled = cast(bool, desired["otel_enabled"])
         if isinstance(desired, Mapping) and isinstance(desired.get("multimodal_enabled"), bool):
             if desired["multimodal_enabled"] and self.pipeline.multimodal_encoder is None:
                 return {"status": "rejected", "reason": "multimodal_embedding_service_not_configured", **snapshot}
-            self._runtime_multimodal_enabled = desired["multimodal_enabled"]
+            self._runtime_multimodal_enabled = cast(bool, desired["multimodal_enabled"])
             snapshot = self.snapshot(workspace_id=workspace_id)
-        if self.codex_memory is not None and isinstance(desired, Mapping):
+        memory = self.codex_memory
+        if memory is not None and isinstance(desired, Mapping):
             if isinstance(desired.get("codex_memory_enabled"), bool):
-                self.codex_memory.enabled = desired["codex_memory_enabled"]
+                memory.enabled = cast(bool, desired["codex_memory_enabled"])
             for key, attribute in (
                 ("codex_memory_max_records_per_capture", "max_records_per_capture"),
                 ("codex_memory_max_recall_records", "max_recall_records"),
             ):
                 if key in desired:
-                    setattr(self.codex_memory, attribute, _setting_int(desired[key], name=key))
+                    setattr(memory, attribute, _setting_int(desired[key], name=key))
             snapshot = self.snapshot(workspace_id=workspace_id)
         pending_changes = snapshot.get("pending_changes", [])
         if {"maintenance_enabled", "maintenance_profile", "maintenance_budget"}.intersection(
@@ -517,4 +524,9 @@ class SettingsService:
             warnings.append("Embedding profile changes require an isolated projection and re-embedding.")
         if {"maintenance_enabled", "maintenance_profile", "maintenance_profile_ladder", "maintenance_budget"}.intersection(pending_changes):
             warnings.append("Maintenance profile changes are applied through the local docker-exec control command.")
-        return {"pending_changes": pending_changes, "restart_required": restart_required, "reembedding_required": reembedding_required, "warnings": warnings}
+        return cast(JsonObject, {
+            "pending_changes": pending_changes,
+            "restart_required": restart_required,
+            "reembedding_required": reembedding_required,
+            "warnings": warnings,
+        })
