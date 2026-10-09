@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `f6d5e0d` |
+| `kogwistar` | `feat/stack-type-contracts` | `f41a5eb` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `1e8d3e2` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `8498bcb` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `dd2900f` |
 
 ## Verified Scopes
 
@@ -45,8 +45,9 @@ change.
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 41 errors, 0 warnings | passed | 10 passed, 2 skipped; PostgreSQL fixtures unavailable locally |
 | Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 47 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
+| Kogwistar | `runtime/perf_profile.py` benchmark protocol and JSON-report boundaries | 0 errors, 0 warnings | passed | 15 tests collected, all environment-gated/skipped locally |
 | Kogwistar | `conversation` full scoped package | 0 errors, 0 warnings across 19 files | four pre-existing Ruff findings remain in `agentic_answering_design.py` and `conversation_context.py` | 14 focused workflow/agentic tests passed; Chroma/real-LLM cases remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | 1,213 errors, 22 warnings across 275 files | not yet run for full scope | current full-scope measurement |
+| Kogwistar | `kogwistar` full source scan | 1,079 errors, 22 warnings across 275 files | not yet run for full scope | current full-scope measurement after `f41a5eb` |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -61,7 +62,7 @@ change.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings;
   the parser-wide Ruff scan still has `75` legacy findings;
-  Kogwistar full source now measures `1,213` errors and `22` warnings across
+  Kogwistar full source now measures `1,079` errors and `22` warnings across
   275 files after the SQLite, graph-read, write, and PostgreSQL backend slices.
   The latest write slice is clean; the PostgreSQL backend is reduced to 41
   errors and remains an active follow-up slice.
