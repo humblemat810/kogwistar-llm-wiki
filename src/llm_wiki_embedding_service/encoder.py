@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from io import BytesIO
 from typing import Protocol, cast
 
@@ -37,8 +37,8 @@ class DenseEncoder(Protocol):
 
 class _ModelLike(Protocol):
     def __call__(self, *args: object, **kwargs: object) -> object: ...
-    def eval(self) -> "_ModelLike": ...
-    def to(self, device: str) -> "_ModelLike": ...
+    def eval(self) -> _ModelLike: ...
+    def to(self, device: str) -> _ModelLike: ...
 
 
 class _ProcessorLike(Protocol):
@@ -61,6 +61,22 @@ class _TorchLike(Protocol):
     __version__: str
     version: _TorchVersionLike
     cuda: _TorchCudaLike
+
+
+class _TensorLike(Protocol):
+    ndim: int
+    shape: Sequence[int]
+    device: object
+
+    def to(self, device: str) -> _TensorLike: ...
+    def long(self) -> _TensorLike: ...
+    def sum(self, dim: int) -> _TensorLike: ...
+    def clamp_min(self, value: int) -> _TensorLike: ...
+    def __sub__(self, other: int) -> _TensorLike: ...
+    def __getitem__(self, key: object) -> _TensorLike: ...
+    def detach(self) -> _TensorLike: ...
+    def cpu(self) -> _TensorLike: ...
+    def tolist(self) -> Sequence[Sequence[float]]: ...
 
 
 class Qwen3VLDenseEncoder:
@@ -97,7 +113,7 @@ class Qwen3VLDenseEncoder:
             from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
             raise RuntimeError("embedding service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
-        _validate_torch(torch, config)
+        _validate_torch(cast(_TorchLike, torch), config)
         model_source = config.model_path or config.model
         kwargs: dict[str, object] = {"trust_remote_code": True, "revision": config.revision}
         if config.device == "cuda":
@@ -140,22 +156,35 @@ class Qwen3VLDenseEncoder:
     def _run(self, inputs: object) -> list[tuple[tuple[float, ...], ...]]:
         import torch
         if isinstance(inputs, Mapping):
-            inputs = {key: value.to(self.device) if hasattr(value, "to") else value for key, value in inputs.items()}
+            inputs = {
+                key: cast(_TensorLike, value).to(self.device)
+                if hasattr(value, "to")
+                else value
+                for key, value in inputs.items()
+            }
         elif hasattr(inputs, "to"):
-            inputs = inputs.to(self.device)
+            inputs = cast(_TensorLike, inputs).to(self.device)
         with torch.inference_mode():
             output = getattr(self._model, "model", self._model)(**inputs) if isinstance(inputs, Mapping) else getattr(self._model, "model", self._model)(inputs)
-        values = getattr(output, "embeddings", getattr(output, "last_hidden_state", output))
+        values = cast(
+            _TensorLike,
+            getattr(output, "embeddings", getattr(output, "last_hidden_state", output)),
+        )
         if getattr(values, "ndim", None) == 3:
             mask = inputs.get("attention_mask") if isinstance(inputs, Mapping) else None
             if mask is None:
                 values = values[:, -1, :]
             else:
-                positions = mask.long().sum(dim=1).clamp_min(1) - 1
-                values = values[torch.arange(values.shape[0], device=values.device), positions]
+                typed_mask = cast(_TensorLike, mask)
+                positions = typed_mask.long().sum(dim=1).clamp_min(1) - 1
+                arange = cast(Callable[..., _TensorLike], torch.arange)
+                values = values[arange(values.shape[0], device=str(values.device)), positions]
         if getattr(values, "ndim", None) != 2:
             raise EmbeddingInferenceError("model did not return one dense vector per item")
-        values = torch.nn.functional.normalize(values[..., : self.profile.dimension], p=2, dim=-1).detach().cpu().tolist()
+        normalize = cast(Callable[..., _TensorLike], torch.nn.functional.normalize)
+        values = normalize(
+            values[..., : self.profile.dimension], p=2, dim=-1
+        ).detach().cpu().tolist()
         return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in values]
 
     def encode(self, items: Sequence[Mapping[str, object]]) -> list[tuple[tuple[float, ...], ...]]:
@@ -208,7 +237,7 @@ class BgeSmallTextEncoder:
             from transformers import AutoModel, AutoTokenizer
         except ImportError as exc:
             raise RuntimeError("BGE embedding service requires Torch and Transformers") from exc
-        _validate_torch(torch, config)
+        _validate_torch(cast(_TorchLike, torch), config)
         model_source = config.model_path or config.model
         tokenizer = AutoTokenizer.from_pretrained(
             model_source,
@@ -256,12 +285,14 @@ class BgeSmallTextEncoder:
         }
         with torch.inference_mode():
             output = self._model(**encoded)
-        hidden = getattr(output, "last_hidden_state", None)
+        hidden_value = getattr(output, "last_hidden_state", None)
+        hidden = cast(_TensorLike, hidden_value)
         if getattr(hidden, "ndim", None) != 3:
             raise EmbeddingInferenceError("BGE model did not return token hidden states")
         if hidden.shape[-1] != self.profile.dimension:
             raise EmbeddingInferenceError("BGE model output dimension does not match its profile")
-        vectors = torch.nn.functional.normalize(hidden[:, 0, :], p=2, dim=-1).detach().cpu().tolist()
+        normalize = cast(Callable[..., _TensorLike], torch.nn.functional.normalize)
+        vectors = normalize(hidden[:, 0, :], p=2, dim=-1).detach().cpu().tolist()
         if len(vectors) != len(items):
             raise EmbeddingInferenceError("model returned a different number of vectors")
         return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in vectors]
