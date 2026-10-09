@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `d380368` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `617bad4` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `af2b62a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `3fdeb0e` |
 
 ## Verified Scopes
@@ -27,14 +27,15 @@ change.
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
-| KG Doc Parser | `kg_doc_parser` full source scan | 12 errors, 1 warning across 40 files | legacy module Ruff backlog remains | semantic subset 4 passed, 10 deselected |
+| KG Doc Parser | `kg_doc_parser` full source scan | 11 errors, 1 warning across 40 files | legacy module Ruff backlog remains | checked-out-core semantic test path passed; full parameterized run not completed |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 174 files | targeted groups passed; full runtime suite pending | Pyright clean |
 
 ## Remaining Work
 
 - Current measured backlog: KG Doc Parser `workflow_ingest` has `0`
-  Pyright errors; Kogwistar full source has `2,250` errors and `24` warnings.
+  Pyright errors; the parser-wide backlog is `11` errors and `1` warning;
+  Kogwistar full source has `2,250` errors and `24` warnings.
   These are measured scopes, not a claim that the whole stack is complete.
 - [x] Run and record the current full Pyright count for the parser
       `workflow_ingest` scope.
