@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `8864307` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `be46033` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `f6b4dc1` |
+| `kogwistar` | `feat/stack-type-contracts` | `a6ee520` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `327b361` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `4e9ef93` |
 
 ## Verified Scopes
 
@@ -44,6 +44,8 @@ change.
 | Kogwistar | `engine_core/subsystems/read.py` graph result and adapter boundaries | 0 errors, 0 warnings | passed | 38 passed, 2 skipped, 6 deselected |
 | Kogwistar | `engine_core/subsystems/write.py`, `typing_interfaces.py` write and backend protocol boundaries | 0 errors, 0 warnings | passed | 35 passed, 7 skipped, 9 deselected; Chroma unavailable locally |
 | Kogwistar | `engine_core/postgres_backend.py` PostgreSQL event, async-result, and vector-buffer boundaries | 0 errors, 0 warnings | passed | 4 focused tests passed, 1 optional `pgvector` test unavailable locally, 1 PostgreSQL fixture skipped |
+| Kogwistar | `_rust_bridge.py` native JSON-string extension protocol and JSON result narrowing | 0 errors, 0 warnings | passed | 20 Rust/API parity tests passed |
+| Kogwistar | DiskCache ignored positional dependency boundary | 0 errors, 0 warnings | passed | local-lambda regression and fake candidate tests passed; PyPy 3.11 GitHub job passed on `1a01a73` |
 | Kogwistar | `engine_core/engine_postgres_meta.py` async/sync engine mode boundaries | 0 errors, 0 warnings | passed | 19 passed, 1 skipped; PostgreSQL fixture unavailable locally |
 | Kogwistar | `runtime/perf_profile.py` benchmark protocol and JSON-report boundaries | 0 errors, 0 warnings | passed | 15 tests collected, all environment-gated/skipped locally |
 | Kogwistar | `server/chat_service_run_execution.py`, `chat_service_shared.py`, `run_registry.py` execution and telemetry protocols | 0 errors, 0 warnings | passed | 14 passed, 7 skipped; 9 Chroma-dependent setup errors locally |
@@ -61,6 +63,7 @@ change.
 | KG Doc Parser | `workflow_ingest/service.py` | 0 errors | passed | 18 resolver tests passed |
 | KG Doc Parser | `workflow_ingest` (full scoped package) | 0 errors | passed for touched modules | focused run reached all selected cases but was stopped during shutdown; not counted as a pass |
 | KG Doc Parser | `kg_doc_parser` full source scan | 0 errors, 0 warnings across 40 files | 182 legacy Ruff findings remain | full Pyright scan completed; runtime/integration coverage remains separate |
+| KG Doc Parser | `workflow_ingest/providers.py` structured-provider schema boundary | 0 errors, 0 warnings | passed | provider settings/token-budget tests passed with vendored Core on `PYTHONPATH` |
 | LLM-Wiki | ingestion/parsing/workbench targeted scope | 0 errors | passed | 14 passed, 1 deselected |
 | LLM-Wiki | `src/kogwistar_llm_wiki` full scope | 0 errors, 0 warnings across 181 files | targeted groups passed; full runtime suite pending | Pyright clean |
 | LLM-Wiki | diagnostics, remote embedding, trace sink, and memory boundaries | 0 errors, 0 warnings across full `src` scan | passed (`E4,E7,E9,F`) | 28 passed |
@@ -112,13 +115,13 @@ after its full-scope scan is regenerated.
 
 ## Remote Verification Status
 
-- `kogwistar-llm-wiki` PR #42 was merged at `b5149d5`; its last visible CI
-  run tested `b8a7e55` and was green, but the merged PR retained one separate
-  failed status check. Commit `f6b4dc1` was pushed afterward to the already
-  merged head branch, so it has no new pull-request synchronization run.
-- GitHub Actions run `37915006232` is visible for exact Kogwistar SHA
-  `8864307` and is currently queued; no remote result is claimed until Actions
-  records and completes that run.
+- Kogwistar run `37930756117` completed successfully for exact SHA `1a01a73`,
+  including the required PyPy 3.11 job. The subsequent native-protocol commit
+  `a6ee520` was pushed to the same feature branch and requires a new exact-SHA
+  result; unauthenticated GitHub API polling is currently rate-limited, so its
+  status remains pending rather than being inferred from the prior run.
+- KG Doc Parser typing commit `327b361` is pushed to its feature branch; its
+  exact-SHA GitHub result remains to be observed.
 
 ## Measurement Commands
 
