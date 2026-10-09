@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `1e68f50` |
+| `kogwistar` | `feat/stack-type-contracts` | `fa15d70` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
 
@@ -89,7 +89,7 @@ change.
 | Kogwistar | `server/auth` | 0 errors, 0 warnings | passed | 39 auth/integration tests passed |
 | Kogwistar | `server/chat_service.py`, `chat_service_shared.py`, `chat_service_conversation_queries.py`, `chat_service_run_execution.py` | 0 errors, 0 warnings | passed | async event suite skipped because Chroma/Postgres fixtures are unavailable locally |
 | Kogwistar | `conversation/policy.py`, `server/resources.py`, `server/chat_service_run_inspection.py`, `shortids.py`, `utils/log.py` | 0 errors, 0 warnings | passed for focused files; legacy E402 remains in `utils/log.py` | focused compatibility checks passed; backend-dependent tests remain environment-gated |
-| Kogwistar | `kogwistar` full source scan | 0 errors, 0 warnings across 276 files after `9cf1c74` | configured Ruff passes | full CI is pending for exact SHA `9cf1c74`; optional backend and incomplete-fixture tests remain separately scoped |
+| Kogwistar | `kogwistar` full source scan | 0 errors, 0 warnings across 276 files after `fa15d70` | configured Ruff passes | full CI is pending for exact SHA `fa15d70`; optional backend and incomplete-fixture tests remain separately scoped |
 | KG Doc Parser | `workflow_ingest/clients.py`, `demo_harness.py` | 0 errors | passed | 6 passed, 2 skipped |
 | KG Doc Parser | `workflow_ingest/handlers.py` | 0 errors | passed | resolver/demo suites passed |
 | KG Doc Parser | `workflow_ingest/serialization.py` | 0 errors | passed | serialization callers covered |
@@ -111,11 +111,11 @@ change.
 
 ## Remaining Work
 
-- Complete strict `ANN` annotation coverage in Kogwistar Core (`273`
+- Complete strict `ANN` annotation coverage in Kogwistar Core (`240`
   findings), prioritizing public protocol
   boundaries and callback surfaces over mechanical private helpers.
 - Run the full relevant test and CI gates for each pushed slice; Core SHA
-  `9cf1c74` is pushed; exact-SHA workflow `38003860155` is pending.
+  `fa15d70` is pushed; exact-SHA workflow `38004573961` is pending.
   Parser SHA `a72abd3` has local verification, but no exact-SHA
   workflow has appeared in the API response.
 
@@ -125,7 +125,7 @@ Current production-source annotation snapshot (`ruff check kogwistar --select AN
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 273 | remaining Core annotation/protocol migration |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 240 | remaining Core annotation/protocol migration |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -134,19 +134,19 @@ reproducible percentage after the migration policy defines which generated,
 benchmark, and test files are in scope. Full CI status is tracked separately;
 local Pyright and Ruff success cannot substitute for remote CI.
 
-The current strict production-source backlog is `273` findings: Kogwistar
-`273`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
+The current strict production-source backlog is `240` findings: Kogwistar
+`240`, KG Doc Parser `0`, and LLM-Wiki `0` in `src/`. The previous
 recorded total was `1,669`; the reductions came from completed Core and parser
 contract slices, not from excluding files.
 
-That is `1396 / 1,669` findings resolved, or approximately `83.6%`; `16.4%`
+That is `1429 / 1,669` findings resolved, or approximately `85.6%`; `14.4%`
 remains under this strict-annotation metric. This is a migration-health
 measure, not a feature-completion percentage.
 
 For the Kogwistar full-source Pyright backlog, the first reproducible
 source-only baseline was 194 errors. The last reproducible scan before
 `1ffdfd4` reported 180 errors, concentrated in the runtime JSON boundaries.
-The full source-only scan after `9cf1c74` reports 0 errors and 0 warnings.
+The full source-only scan after `fa15d70` reports 0 errors and 0 warnings.
 This is a backlog metric only; it does not claim that runtime behavior is
 fully verified, and it does not count Ruff findings or unverified CI as
 completed work. A slice is counted only after its full-scope scan is
@@ -155,7 +155,7 @@ regenerated.
 - Current measured backlog: KG Doc Parser `workflow_ingest` and the full
   `kg_doc_parser` source scan have `0` Pyright errors and `0` warnings and the
   parser-wide strict ANN scan has `0` findings; Kogwistar full source-only scan
-  after `9cf1c74` measures `0` errors and `0` warnings, with `273` strict ANN
+  after `fa15d70` measures `0` errors and `0` warnings, with `240` strict ANN
   findings remaining. This is a typing
   measurement,
   not a passing runtime gate; optional backend fixtures and full CI remain
@@ -189,8 +189,8 @@ The latest runtime, maintenance, ontology, PostgreSQL, and chat API slices are c
 
 ## Current Exact-SHA Gate
 
-- Kogwistar `9cf1c74` is pushed to `feat/stack-type-contracts`; exact-SHA
-  GitHub Actions run `38003860155` is pending.
+- Kogwistar `fa15d70` is pushed to `feat/stack-type-contracts`; exact-SHA
+  GitHub Actions run `38004573961` is pending.
 - No remote success is
   claimed until its Python matrix reaches a terminal result.
 - Fresh local Pyright is clean across Core (`276` files), KG Doc Parser
