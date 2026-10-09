@@ -10,8 +10,8 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `b16f9ec` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `622b687` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `72783fe` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `a724406` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `7371267` |
 
 ## Verified Scopes
 
@@ -201,6 +201,12 @@ The latest runtime, maintenance, ontology, and PostgreSQL slices are clean; the 
   open PR; local full-source Pyright is clean, Ruff is clean for the touched
   modules, and the page-index/resolver suite passed 74 tests with 8 optional
   skips.
+- KG Doc Parser typing commit `a724406` adds the reusable workflow engine
+  capability protocol, reusing Core `ReadLike`/`WriteLike` contracts and
+  preserving the concrete runtime factory boundary. Exact-SHA GitHub status
+  remains unobserved because the branch has no open PR; local full-source
+  Pyright is clean across 40 files and the focused page-index/resolver suite
+  passed 74 tests with 8 optional skips.
 - LLM-Wiki typing commit `2a07057` is pushed to its feature branch. The exact-SHA
   API query currently reports no workflow run (`runs=0`); local verification is
   Pyright-clean, Ruff-clean, and 44 focused multimodal tests passed with 3 skipped.
