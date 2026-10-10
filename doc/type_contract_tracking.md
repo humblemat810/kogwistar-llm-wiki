@@ -9,9 +9,25 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `33a9cc4` |
+| `kogwistar` | `feat/stack-type-contracts` | `f10a148` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
+
+## Current Verification Snapshot
+
+This snapshot is the current evidence baseline, not a claim that remote CI is
+green:
+
+| Repository | Current local result | Remote result |
+| --- | --- | --- |
+| `kogwistar` at `f10a148` | strict ANN clean; full Ruff clean; focused Rust/SQLite tests 29 passed; previous full source Pyright scan 0 errors/0 warnings | required PyPy 3.11 job in run `38013837072` failed; traceback is not visible without authenticated logs |
+| `kg-doc-parser` at `a72abd3` | Pyright 0 errors/0 warnings; strict ANN clean | no terminal exact-SHA result recorded |
+| `kogwistar-llm-wiki` at `1011d53` | Pyright `src` 0 errors/0 warnings; Ruff E4/E7/E9/F clean | no terminal exact-SHA result recorded |
+
+The old ``>1,000`` Pyright count is therefore no longer the active measure.
+The remaining gap is runtime/remote verification, especially the unexplained
+required PyPy 3.11 failure in Core, not an identified backlog of Pyright
+diagnostics.
 
 ## Verified Scopes
 
