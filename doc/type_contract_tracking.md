@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `f10a148` |
+| `kogwistar` | `feat/stack-type-contracts` | `8d24394` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `6f8ca21` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `b07c43b` |
 
 ## Current Verification Snapshot
 
@@ -20,14 +20,14 @@ green:
 
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
-| `kogwistar` at `f10a148` | strict ANN clean; full Ruff clean; focused Rust/SQLite tests 29 passed; previous full source Pyright scan 0 errors/0 warnings | required PyPy 3.11 job in run `38013837072` failed; traceback is not visible without authenticated logs |
-| `kg-doc-parser` at `a72abd3` | Pyright 0 errors/0 warnings; strict ANN clean | no terminal exact-SHA result recorded |
-| `kogwistar-llm-wiki` at `1011d53` | Pyright `src` 0 errors/0 warnings; Ruff E4/E7/E9/F clean | no terminal exact-SHA result recorded |
+| `kogwistar` at `8d24394` | full source Pyright 0 errors/0 warnings; changed-file Ruff and schema checks pass; focused Rust/SQLite tests 75 passed, 2 skipped | required matrix is still running; optional PyPy 3.12 beta failed and remains best-effort |
+| `kg-doc-parser` at `a72abd3` | full source Pyright 0 errors/0 warnings | no terminal exact-SHA result recorded |
+| `kogwistar-llm-wiki` at `b07c43b` | full configured Pyright 0 errors/0 warnings; changed-file Ruff passes; maintenance regression 16 passed | no checks created because the former PR is closed; a new PR or manual dispatch is required |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
-The remaining gap is runtime/remote verification, especially the unexplained
-required PyPy 3.11 failure in Core, not an identified backlog of Pyright
-diagnostics.
+The remaining gap is runtime/remote verification and downstream integration,
+not an identified backlog of Pyright diagnostics.  The current root fix aligns
+the maintenance protocol with Core's `JsonValue` lifecycle contract.
 
 ## Verified Scopes
 
