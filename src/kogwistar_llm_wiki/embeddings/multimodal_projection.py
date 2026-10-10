@@ -93,6 +93,14 @@ class ChromaCollectionLike(Protocol):
     def get(self, *, include: Sequence[str]) -> Mapping[str, object]: ...
 
 
+def _collection_values(value: object) -> Sequence[object]:
+    if value is None:
+        return ()
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return value
+    raise ProjectionIntegrityError("Chroma collection returned a non-sequence field")
+
+
 def _as_int(value: object, *, field_name: str) -> int:
     """Narrow a legacy payload scalar before constructing a typed locator."""
 
@@ -985,8 +993,8 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         grouped: dict[str, list[tuple[int, object]]] = {}
         raw_embeddings = rows.get("embeddings")
         raw_metadatas = rows.get("metadatas")
-        embeddings = [] if raw_embeddings is None else raw_embeddings
-        metadatas = [] if raw_metadatas is None else raw_metadatas
+        embeddings = _collection_values(raw_embeddings)
+        metadatas = _collection_values(raw_metadatas)
         for vector, metadata in zip(embeddings, metadatas):
             if not isinstance(metadata, Mapping):
                 raise ProjectionIntegrityError("Chroma multimodal metadata is not a mapping")

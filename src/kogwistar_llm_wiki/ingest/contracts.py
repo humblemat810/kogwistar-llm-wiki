@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -60,10 +60,9 @@ class ParseSourceResult(Protocol):
     def semantic_tree(self) -> SemanticTreeLike: ...
 
 
-class ParserCallable(Protocol):
-    """Keyword-driven parser entry point used by ingestion orchestration."""
-
-    def __call__(self, **kwargs: object) -> ParseSourceResult: ...
+# This boundary is intentionally broad: ``source_parsing`` introspects legacy
+# parser signatures and conditionally supplies optional keyword arguments.
+ParserCallable = Callable[..., ParseSourceResult]
 
 
 class TraceLog(Protocol):
