@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `0ffb466` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `4c7c0b6` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `be75812` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `e34dc30` |
 
 ## Current Verification Snapshot
@@ -21,7 +21,7 @@ green:
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
 | `kogwistar` at `0ffb466` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; graph/two-stage slice 10 passed, 20 skipped; added transient Stage-1 adapter protocols | required Actions run `38023702906` is green; optional PyPy 3.12 beta remains best-effort |
-| `kg-doc-parser` at `4c7c0b6` | source Pyright 0 errors/0 warnings; strict ANN 0; resolver/CLI slice 23 passed with 2 Chroma-dependent tests deselected; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
+| `kg-doc-parser` at `be75812` | source Pyright 0 errors/0 warnings; strict ANN 0; SplitPage JSON contract narrowed; resolver/CLI slice 23 passed with 2 Chroma-dependent tests deselected; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
 | `kogwistar-llm-wiki` at `e34dc30` | configured source Pyright 0 errors/0 warnings; typed vision-processor protocol; multimodal/Qwen suite 33 passed, 4 skipped; changed-file Ruff passes | no checks created for this exact SHA; a new PR or manual dispatch is required |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
