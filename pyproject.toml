@@ -25,7 +25,7 @@ classifiers = [
 # bootstrap installs them editable before the root package.
 dependencies = [
     "kogwistar",
-    "graph-knowledge-doc-parser>=0.2.6,<0.3",
+    "graph-knowledge-doc-parser>=0.2.7,<0.3",
     "kogwistar-obsidian-sink",
 ]
 

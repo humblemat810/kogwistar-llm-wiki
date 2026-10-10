@@ -13,7 +13,7 @@ def test_root_package_uses_parser_published_distribution_name() -> None:
         requirement.startswith("graph-knowledge-doc-parser")
         for requirement in dependencies
     )
-    assert "graph-knowledge-doc-parser>=0.2.6,<0.3" in dependencies
+    assert "graph-knowledge-doc-parser>=0.2.7,<0.3" in dependencies
     assert "kg-doc-parser" not in project["project"]["dependencies"]
     assert project["tool"]["uv"]["sources"]["graph-knowledge-doc-parser"] == {
         "path": "kg-doc-parser",
