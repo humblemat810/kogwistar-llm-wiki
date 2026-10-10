@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `8d24394` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `a72abd3` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `62a676a` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `b07c43b` |
 
 ## Current Verification Snapshot
@@ -21,7 +21,7 @@ green:
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
 | `kogwistar` at `8d24394` | full source Pyright 0 errors/0 warnings; changed-file Ruff and schema checks pass; focused Rust/SQLite tests 75 passed, 2 skipped | required matrix run `38018175109` green across CPython 3.12-3.14, PyPy 3.11, lint, Rust, native wheels, and SQLite; optional PyPy 3.12 beta failed and remains best-effort |
-| `kg-doc-parser` at `a72abd3` | full source Pyright 0 errors/0 warnings | no terminal exact-SHA result recorded |
+| `kg-doc-parser` at `62a676a` | full source Pyright 0 errors/0 warnings; changed workflow-ingest modules pass strict Ruff; deterministic workflow suite passed 127 tests with 25 skips | no Actions run exists for this exact SHA; five excluded manual OCR cases require local Ollama models or a Gemini API key |
 | `kogwistar-llm-wiki` at `b07c43b` | full configured Pyright 0 errors/0 warnings; changed-file Ruff passes; maintenance regression 16 passed | no checks created because the former PR is closed; a new PR or manual dispatch is required |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
