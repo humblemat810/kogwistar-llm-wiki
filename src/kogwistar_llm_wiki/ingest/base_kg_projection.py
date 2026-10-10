@@ -99,10 +99,10 @@ class BaseKgProjectionMixin:
                     "verification_status": "unverified",
                 },
             )
-            base_node = Node(
+            base_node = Node.model_validate({
                 **payload,
-                doc_id=source_document_id,
-                mentions=[
+                "doc_id": source_document_id,
+                "mentions": [
                     Grounding(
                         spans=[
                             self._base_kg_reference_span(
@@ -113,10 +113,10 @@ class BaseKgProjectionMixin:
                         ]
                     )
                 ],
-                domain_id=None,
-                canonical_entity_id=None,
-                embedding=None,
-            )
+                "domain_id": None,
+                "canonical_entity_id": None,
+                "embedding": None,
+            })
             with _temporary_namespace(self.engines.kg, base_namespace):
                 self.engines.kg.write.add_node(base_node)
 
@@ -180,10 +180,10 @@ class BaseKgProjectionMixin:
                     "verification_status": "unverified",
                 },
             )
-            base_edge = type(edge)(
+            base_edge = type(edge).model_validate({
                 **payload,
-                doc_id=source_document_id,
-                mentions=[
+                "doc_id": source_document_id,
+                "mentions": [
                     Grounding(
                         spans=[
                             self._base_kg_reference_span(
@@ -194,11 +194,11 @@ class BaseKgProjectionMixin:
                         ]
                     )
                 ],
-                domain_id=None,
-                canonical_entity_id=None,
-                embedding=None,
-                source_edge_ids=[],
-                target_edge_ids=[],
-            )
+                "domain_id": None,
+                "canonical_entity_id": None,
+                "embedding": None,
+                "source_edge_ids": [],
+                "target_edge_ids": [],
+            })
             with _temporary_namespace(self.engines.kg, base_namespace):
                 self.engines.kg.write.add_edge(base_edge)

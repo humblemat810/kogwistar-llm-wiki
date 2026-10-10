@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
-from typing import Literal, cast
+from collections.abc import Mapping
+from typing import Literal, Protocol, cast
 
 from kg_doc_parser.workflow_ingest.providers import (
     EmbeddingProviderConfig,
@@ -18,6 +18,12 @@ from kogwistar.typing_interfaces import EmbeddingFunctionLike
 
 EMBEDDING_SPACES = ("conversation", "workflow", "knowledge", "wisdom")
 EmbeddingProvider = Literal["fake", "openai", "vertex", "ollama"]
+
+
+class EmbeddingFunctionFactory(Protocol):
+    """Build an embedding function for one resolved provider configuration."""
+
+    def __call__(self, spec: EmbeddingProviderConfig) -> EmbeddingFunctionLike: ...
 
 
 class TinyEmbeddingFunction:
@@ -76,7 +82,7 @@ def resolve_embedding_function(
     embedding_max_sequence_length: int | None = None,
     embedding_crop_token_budget: int | None = None,
     embedding_tokenizer_fingerprint: str | None = None,
-    embedding_factory: Callable[[EmbeddingProviderConfig], EmbeddingFunctionLike] | None = None,
+    embedding_factory: EmbeddingFunctionFactory | None = None,
 ) -> tuple[EmbeddingFunctionLike, EmbeddingProviderConfig]:
     """Resolve one embedding provider without creating a second factory."""
 
@@ -194,7 +200,7 @@ def resolve_embedding_functions(
     embedding_dimension: int | None = None,
     embedding_base_url: str | None = None,
     embedding_api_key_env: str | None = None,
-    embedding_factory: Callable[[EmbeddingProviderConfig], EmbeddingFunctionLike] | None = None,
+    embedding_factory: EmbeddingFunctionFactory | None = None,
 ) -> tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]:
     """Resolve one embedding function/config per graph space."""
 

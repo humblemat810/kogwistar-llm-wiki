@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 from ..models import IngestPipelineRequest
@@ -17,7 +17,7 @@ from .gateway_source import (
     validate_agent_source_uri,
     validate_supplied_provenance,
 )
-from .host import AgentGatewayHost, ToolArguments
+from .host import AgentGatewayHost, JsonObject, SourceDocumentRecord, ToolArguments
 
 if TYPE_CHECKING:
     from ..workbench.workbench_api import WorkbenchApi
@@ -30,15 +30,6 @@ def _candidate_uri(candidate: Mapping[str, object]) -> str:
     if not isinstance(metadata, Mapping):
         return ""
     return str(metadata.get("source_uri") or "")
-
-
-class SourceDocumentRecord(TypedDict):
-    """Typed source-map record shared by gateway and source tools."""
-
-    id: str
-    metadata: dict[str, object]
-    content: str
-    revision_document_id: str
 
 
 ProvenancePolicy = Literal["required", "optional", "disabled"]
@@ -65,16 +56,29 @@ def _parse_limits(value: object) -> dict[str, ParseLimitValue]:
     return limits
 
 
+def _float_argument(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
 class AgentSourceMixin(AgentGatewayHost):
     """Keep source discovery and queue inspection out of the protocol façade."""
 
     api: WorkbenchApi
 
-    def multimodal_capture(self, arguments: ToolArguments) -> dict[str, object]:
-        return self.api.multimodal_capture(arguments)
+    def multimodal_capture(self, arguments: ToolArguments) -> JsonObject:
+        return cast(JsonObject, self.api.multimodal_capture(arguments))
 
-    def multimodal_index(self, arguments: ToolArguments) -> dict[str, object]:
-        return self.api.multimodal_index(arguments)
+    def multimodal_index(self, arguments: ToolArguments) -> JsonObject:
+        return cast(JsonObject, self.api.multimodal_index(arguments))
 
     def _source_request(
         self,
@@ -122,7 +126,7 @@ class AgentSourceMixin(AgentGatewayHost):
             parser_mode=str(arguments.get("parser_mode") or "heuristic"),
             parser_lane=str(arguments.get("parser_lane") or "page_index"),
             promotion_mode=str(arguments.get("promotion_mode") or "pending"),
-            auto_accept_threshold=float(arguments.get("auto_accept_threshold", 0.95)),
+            auto_accept_threshold=_float_argument(arguments.get("auto_accept_threshold"), 0.95),
             llm_provider=str(arguments.get("llm_provider"))
             if arguments.get("llm_provider") is not None
             else None,
@@ -150,7 +154,7 @@ class AgentSourceMixin(AgentGatewayHost):
         workspace_id: str,
         source_uri: str = "",
         source_document_id: str = "",
-        candidates: Sequence[Mapping[str, object]] | None = None,
+        candidates: Sequence[SourceDocumentRecord] | None = None,
     ) -> IngestPipelineRequest | None:
         if candidates is None:
             candidates = self._source_documents(workspace_id)
@@ -218,7 +222,7 @@ class AgentSourceMixin(AgentGatewayHost):
         *,
         workspace_id: str,
         source_id: str,
-        metadata: dict[str, object],
+        metadata: JsonObject,
         content: str,
     ) -> IngestPipelineRequest:
         return IngestPipelineRequest(
@@ -232,7 +236,10 @@ class AgentSourceMixin(AgentGatewayHost):
             parser_lane=str(metadata.get("parser_lane") or "page_index"),
             promotion_mode=str(metadata.get("promotion_mode") or "pending"),
             provenance_policy=_provenance_policy(metadata.get("provenance_policy")),
-            provenance=decode_metadata_mapping(metadata.get("provenance")),
+            provenance=cast(
+                dict[str, object] | None,
+                decode_metadata_mapping(metadata.get("provenance")),
+            ),
             parse_limits=_parse_limits(metadata.get("parse_limits")),
         )
 
@@ -318,7 +325,7 @@ class AgentSourceMixin(AgentGatewayHost):
         workspace_id: str,
         topic: str,
         *,
-        candidates: Sequence[Mapping[str, object]] | None = None,
+        candidates: Sequence[SourceDocumentRecord] | None = None,
     ) -> list[str]:
         terms = {term.lower() for term in topic.split() if len(term) > 2}
         matches = []
@@ -348,7 +355,7 @@ class AgentSourceMixin(AgentGatewayHost):
                     status=status,
                     limit=10_000,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if errors is not None:
                     errors.append(f"{type(exc).__name__}: {exc}")
                 rows = []

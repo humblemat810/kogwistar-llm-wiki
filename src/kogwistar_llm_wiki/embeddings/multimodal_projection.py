@@ -30,7 +30,7 @@ from hashlib import sha256
 from io import BytesIO
 from math import sqrt
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from kogwistar.engine_core import (
     EmbeddingProfile as CoreEmbeddingProfile,
@@ -43,6 +43,11 @@ from kogwistar.engine_core import (
     TemporalIntervalLocator,
     TextRangeLocator,
     VideoRegionTrackLocator,
+)
+from kogwistar.json_types import JsonObject
+from kogwistar.typing_interfaces import (
+    SqlAlchemyConnectionLike,
+    SqlAlchemyEngineLike,
 )
 
 from llm_wiki_embedding_contract import (
@@ -68,6 +73,32 @@ DEFAULT_COLQWEN_REVISION = "ddc07d2317c80f75fc742b7362ee9ad1912908f9"
 DEFAULT_QWEN3_VL_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
 QWEN3_VL_MIN_DIMENSION = 64
 QWEN3_VL_MAX_DIMENSION = 2048
+
+ChromaMetadataValue = str | int | float | bool | None
+
+
+class ChromaCollectionLike(Protocol):
+    """Small optional-SDK surface used by the profile-scoped projection."""
+
+    def count(self) -> int: ...
+
+    def upsert(
+        self,
+        *,
+        ids: Sequence[str],
+        embeddings: Sequence[Sequence[float]],
+        metadatas: Sequence[Mapping[str, ChromaMetadataValue]],
+    ) -> object: ...
+
+    def get(self, *, include: Sequence[str]) -> Mapping[str, object]: ...
+
+
+def _collection_values(value: object) -> Sequence[object]:
+    if value is None:
+        return ()
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return value
+    raise ProjectionIntegrityError("Chroma collection returned a non-sequence field")
 
 
 def _as_int(value: object, *, field_name: str) -> int:
@@ -136,6 +167,11 @@ class EmbeddingProfileMismatch(ValueError):
 
 class ProjectionIntegrityError(ValueError):
     """Raised when a stage transition or vector payload is invalid."""
+
+
+def _move_to_device(value: object, device: str) -> object:
+    mover = getattr(value, "to", None)
+    return mover(device) if callable(mover) else value
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,7 +281,7 @@ class MultimodalSourceUnit:
                 page_number=_optional_int(locator, "page_number"),
             )
         else:
-            typed_locator = LegacyLocator(payload=locator)
+            typed_locator = LegacyLocator(payload=cast(JsonObject, locator))
 
         import hashlib
 
@@ -354,6 +390,33 @@ class MultimodalImageQueryEncoder(Protocol):
 @runtime_checkable
 class AssetResolver(Protocol):
     def resolve(self, unit: MultimodalSourceUnit) -> object: ...
+
+
+class _NativeModelLike(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+    def eval(self) -> _NativeModelLike: ...
+
+
+class _NativeProcessorLike(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+
+class _TensorMetadataLike(Protocol):
+    ndim: int
+
+
+class NativeVisionProcessor(Protocol):
+    """Provider boundary for Qwen's optional vision preprocessing helper."""
+
+    def __call__(
+        self,
+        conversations: Sequence[list[dict[str, object]]],
+        *,
+        image_patch_size: int,
+        return_video_metadata: bool,
+        return_video_kwargs: bool,
+    ) -> object: ...
 
 
 @runtime_checkable
@@ -852,7 +915,10 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         self._client = chromadb.PersistentClient(path=str(self.persist_directory))
         collection_basis = collection_name or self.scope
         name = f"mm_{sha256(f'{collection_basis}:profile:{self.profile.fingerprint}'.encode()).hexdigest()[:24]}"
-        self._collection = self._client.get_or_create_collection(name=name)
+        self._collection: ChromaCollectionLike = cast(
+            ChromaCollectionLike,
+            self._client.get_or_create_collection(name=name),
+        )
         self._validate_physical_rows()
 
     def _expected_vector_count(self) -> int:
@@ -886,7 +952,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
             )
         storage_key = _projection_storage_key(unit.workspace_id, unit.view_id)
         ids = [f"{storage_key}:{ordinal}" for ordinal in range(len(normalised))]
-        metadatas = [
+        metadatas: list[dict[str, str | int | float | bool | None]] = [
             {
                 "view_id": unit.view_id,
                 "storage_key": storage_key,
@@ -927,8 +993,8 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         grouped: dict[str, list[tuple[int, object]]] = {}
         raw_embeddings = rows.get("embeddings")
         raw_metadatas = rows.get("metadatas")
-        embeddings = [] if raw_embeddings is None else raw_embeddings
-        metadatas = [] if raw_metadatas is None else raw_metadatas
+        embeddings = _collection_values(raw_embeddings)
+        metadatas = _collection_values(raw_metadatas)
         for vector, metadata in zip(embeddings, metadatas):
             if not isinstance(metadata, Mapping):
                 raise ProjectionIntegrityError("Chroma multimodal metadata is not a mapping")
@@ -950,9 +1016,10 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
                 raise ProjectionIntegrityError(
                     f"Chroma contains an unknown source view {storage_key!r}"
                 )
-            grouped.setdefault(storage_key, []).append(
-                (int(metadata.get("vector_ordinal", 0)), vector)
-            )
+            raw_ordinal = metadata.get("vector_ordinal", 0)
+            if not isinstance(raw_ordinal, (int, float, str)):
+                raise ProjectionIntegrityError("Chroma vector ordinal is not numeric")
+            grouped.setdefault(storage_key, []).append((int(raw_ordinal), vector))
         scored: list[tuple[float, MultimodalSourceUnit]] = []
         for storage_key, values in grouped.items():
             values.sort(key=lambda item: item[0])
@@ -1008,7 +1075,7 @@ class PgVectorMultimodalProjectionStore:
         self,
         dsn: str | None = None,
         *,
-        engine: Any | None = None,
+        engine: SqlAlchemyEngineLike | None = None,
         scope: str,
         profile: MultimodalEmbeddingProfile,
         schema: str = "public",
@@ -1016,7 +1083,9 @@ class PgVectorMultimodalProjectionStore:
     ) -> None:
         try:
             import sqlalchemy as sa
-            from pgvector.sqlalchemy import Vector  # pyright: ignore[reportMissingImports]
+            from pgvector.sqlalchemy import (  # pyright: ignore[reportMissingImports]
+                Vector,
+            )
         except ImportError as exc:
             raise RuntimeError(
                 "PostgreSQL multimodal projection requires sqlalchemy and pgvector"
@@ -1033,7 +1102,9 @@ class PgVectorMultimodalProjectionStore:
         self.schema = str(schema)
         self.max_search_vectors = int(max_search_vectors)
         self._owns_engine = engine is None
-        self._engine = engine if engine is not None else sa.create_engine(str(dsn))
+        self._engine: SqlAlchemyEngineLike = (
+            engine if engine is not None else sa.create_engine(str(dsn))
+        )
         self._metadata = sa.MetaData(schema=self.schema)
         profile_key = sha256(profile.fingerprint.encode("utf-8")).hexdigest()[:32]
         self._profile_key = profile_key
@@ -1062,25 +1133,29 @@ class PgVectorMultimodalProjectionStore:
         )
         self._ensure_schema()
         self._ensure_vector_extension()
-        self._metadata.create_all(self._engine)
+        create_all = cast(Callable[[object], None], self._metadata.create_all)
+        create_all(self._engine)
         self._bind_profile()
 
     def _ensure_schema(self) -> None:
         if self.schema == "public":
             return
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             connection.exec_driver_sql(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
 
     def _ensure_vector_extension(self) -> None:
         """Make the pgvector type available before creating profile tables."""
 
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
 
     def _bind_profile(self) -> None:
         import sqlalchemy as sqlalchemy_module
 
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             row = connection.execute(
                 sqlalchemy_module.select(self._profile_table).where(
                     self._profile_table.c.scope == self.scope
@@ -1119,7 +1194,8 @@ class PgVectorMultimodalProjectionStore:
 
         pending = tuple(units)
         seen: set[str] = set()
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             rows: list[tuple[str, str]] = []
             for unit in pending:
                 _validate_captured_unit(unit, profile=self.profile)
@@ -1187,7 +1263,8 @@ class PgVectorMultimodalProjectionStore:
         _validate_captured_unit(unit, profile=self.profile)
         storage_key = _projection_storage_key(unit.workspace_id, unit.view_id)
         payload = json.dumps(unit.to_payload(), sort_keys=True)
-        with self._engine.begin() as connection:
+        with self._engine.begin() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             existing = connection.execute(
                 sa.select(self._unit_table.c.unit_json).where(
                     self._unit_table.c.view_id == storage_key
@@ -1233,17 +1310,26 @@ class PgVectorMultimodalProjectionStore:
     def stage_counts(self, *, workspace_id: str | None = None) -> dict[str, int]:
         import sqlalchemy as sa
 
-        with self._engine.connect() as connection:
-            rows = connection.execute(sa.select(self._unit_table.c.unit_json))
-            units = tuple(MultimodalSourceUnit.from_payload(json.loads(str(row[0]))) for row in rows)
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
+            unit_payloads = connection.execute(
+                sa.select(self._unit_table.c.unit_json)
+            ).scalars().all()
+            units = tuple(
+                MultimodalSourceUnit.from_payload(json.loads(str(payload)))
+                for payload in unit_payloads
+            )
             if workspace_id is not None:
                 units = tuple(unit for unit in units if unit.workspace_id == workspace_id)
             stage1 = len(units)
             stage2 = int(
-                connection.execute(
+                cast(
+                    int,
+                    connection.execute(
                     sa.select(sa.func.count(sa.distinct(self._vector_table.c.view_id)))
                     .select_from(self._vector_table)
-                ).scalar_one()
+                    ).scalar_one(),
+                )
             )
             if workspace_id is not None:
                 stage2 = sum(
@@ -1258,7 +1344,7 @@ class PgVectorMultimodalProjectionStore:
         return {"stage1": stage1, "stage2": stage2, "pending_stage2": stage1 - stage2}
 
     def _load_unit_by_storage_key(
-        self, connection: Any, storage_key: str
+        self, connection: SqlAlchemyConnectionLike, storage_key: str
     ) -> MultimodalSourceUnit | None:
         sa = __import__("sqlalchemy")
         row = connection.execute(
@@ -1278,10 +1364,12 @@ class PgVectorMultimodalProjectionStore:
         import sqlalchemy as sa
 
         self._check_profile(profile)
-        with self._engine.connect() as connection:
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             if workspace_id is not None:
                 unit = self._load_unit_by_storage_key(
-                    connection, _projection_storage_key(workspace_id, view_id)
+                    cast(SqlAlchemyConnectionLike, connection),
+                    _projection_storage_key(workspace_id, view_id),
                 )
             else:
                 rows = connection.execute(sa.select(self._unit_table.c.unit_json)).scalars().all()
@@ -1300,8 +1388,9 @@ class PgVectorMultimodalProjectionStore:
     ) -> Sequence[MultimodalSourceUnit]:
         import sqlalchemy as sa
 
-        with self._engine.connect() as connection:
-            rows = connection.execute(
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
+            unit_payloads = connection.execute(
                 sa.select(self._unit_table.c.unit_json)
                 .select_from(
                     self._unit_table.outerjoin(
@@ -1311,8 +1400,11 @@ class PgVectorMultimodalProjectionStore:
                 )
                 .where(self._vector_table.c.view_id.is_(None))
                 .distinct()
+            ).scalars().all()
+            units = tuple(
+                MultimodalSourceUnit.from_payload(json.loads(str(payload)))
+                for payload in unit_payloads
             )
-            units = tuple(MultimodalSourceUnit.from_payload(json.loads(str(row[0]))) for row in rows)
             return tuple(
                 unit for unit in units
                 if workspace_id is None or unit.workspace_id == workspace_id
@@ -1330,9 +1422,15 @@ class PgVectorMultimodalProjectionStore:
 
         self._check_profile(profile)
         query = _normalise_embedding_set(query_vectors, dimension=profile.dimension)
-        with self._engine.connect() as connection:
+        with self._engine.connect() as raw_connection:
+            connection = cast(SqlAlchemyConnectionLike, raw_connection)
             count = int(
-                connection.execute(sa.select(sa.func.count()).select_from(self._vector_table)).scalar_one()
+                cast(
+                    int,
+                    connection.execute(
+                        sa.select(sa.func.count()).select_from(self._vector_table)
+                    ).scalar_one(),
+                )
             )
             if count > self.max_search_vectors:
                 raise ProjectionIntegrityError(
@@ -1348,12 +1446,13 @@ class PgVectorMultimodalProjectionStore:
             )
             grouped: dict[str, list[object]] = {}
             for row in rows:
-                grouped.setdefault(str(row._mapping["view_id"]), []).append(
-                    row._mapping["embedding"]
-                )
+                mapping = cast(Mapping[str, object], getattr(row, "_mapping", {}))
+                grouped.setdefault(str(mapping["view_id"]), []).append(mapping["embedding"])
             scored: list[tuple[float, MultimodalSourceUnit]] = []
             for view_id, values in grouped.items():
-                unit = self._load_unit_by_storage_key(connection, view_id)
+                unit = self._load_unit_by_storage_key(
+                    cast(SqlAlchemyConnectionLike, connection), view_id
+                )
                 if unit is None:
                     raise ProjectionIntegrityError(f"vector row references unknown source view {view_id!r}")
                 if workspace_id is not None and unit.workspace_id != workspace_id:
@@ -1463,8 +1562,8 @@ class ColQwenNativeEncoder:
 
     def __init__(
         self,
-        model: Any,
-        processor: Any,
+        model: _NativeModelLike,
+        processor: _NativeProcessorLike,
         *,
         profile: MultimodalEmbeddingProfile,
         device: str,
@@ -1534,7 +1633,7 @@ class ColQwenNativeEncoder:
             if model_id == DEFAULT_COLQWEN_MODEL
             else revision
         )
-        model_kwargs: dict[str, Any] = {"revision": effective_revision} if effective_revision else {}
+        model_kwargs: dict[str, object] = {"revision": effective_revision} if effective_revision else {}
         if selected_device == "cuda" and load_in_4bit:
             try:
                 from transformers import BitsAndBytesConfig
@@ -1559,11 +1658,13 @@ class ColQwenNativeEncoder:
         else:
             model_kwargs["torch_dtype"] = torch.float32
 
-        model = ColQwen2ForRetrieval.from_pretrained(model_id, **model_kwargs).eval()
+        load_model = cast(Callable[..., _NativeModelLike], ColQwen2ForRetrieval.from_pretrained)
+        model = load_model(model_id, **model_kwargs).eval()
+        load_processor = cast(Callable[..., _NativeProcessorLike], AutoProcessor.from_pretrained)
         processor = (
-            AutoProcessor.from_pretrained(model_id, revision=effective_revision)
+            load_processor(model_id, revision=effective_revision)
             if effective_revision
-            else AutoProcessor.from_pretrained(model_id)
+            else load_processor(model_id)
         )
         resolved_dimension = int(
             dimension or getattr(getattr(model, "config", None), "embedding_dim", 128)
@@ -1581,24 +1682,31 @@ class ColQwenNativeEncoder:
         )
         return cls(model, processor, profile=profile, device=selected_device, batch_size=batch_size)
 
-    def _run(self, inputs: Any) -> Sequence[EmbeddingSet]:
+    def _run(self, inputs: object) -> Sequence[EmbeddingSet]:
         import torch
 
-        if hasattr(inputs, "to"):
-            inputs = inputs.to(self.device)
-        attention_mask = inputs.get("attention_mask") if hasattr(inputs, "get") else None
+        if not isinstance(inputs, Mapping):
+            raise ProjectionIntegrityError("ColQwen processor must return a mapping")
+        model_inputs = {
+            str(key): _move_to_device(value, self.device)
+            for key, value in inputs.items()
+        }
+        attention_mask = model_inputs.get("attention_mask")
         with torch.inference_mode():
-            output = self._model(**inputs)
+            output = self._model(**model_inputs)
         embeddings = getattr(output, "embeddings", output)
         if hasattr(embeddings, "detach"):
-            embeddings = embeddings.detach().cpu()
+            embeddings = cast(torch.Tensor, embeddings).detach().cpu()
         if attention_mask is not None and hasattr(attention_mask, "detach"):
-            masks = attention_mask.detach().cpu()
+            masks = cast(torch.Tensor, attention_mask).detach().cpu()
             embeddings = [
                 row[mask.to(dtype=torch.bool)]
-                for row, mask in zip(embeddings, masks)
+                for row, mask in zip(
+                    cast(Sequence[torch.Tensor], embeddings),
+                    cast(Sequence[torch.Tensor], masks),
+                )
             ]
-        return _normalise_sets(embeddings, profile=self.profile)
+        return _normalise_sets(cast(Sequence[object], embeddings), profile=self.profile)
 
     def encode_queries(self, queries: Sequence[str], *, batch_size: int | None = None) -> Sequence[EmbeddingSet]:
         return self._encode_text_values(queries, batch_size=batch_size)
@@ -1722,13 +1830,13 @@ class Qwen3VLDenseEncoder:
 
     def __init__(
         self,
-        model: Any,
-        processor: Any,
+        model: _NativeModelLike,
+        processor: _NativeProcessorLike,
         *,
         profile: MultimodalEmbeddingProfile,
         device: str,
         batch_size: int = 1,
-        vision_processor: Any | None = None,
+        vision_processor: NativeVisionProcessor | None = None,
         instruction: str = "Represent the user's input.",
     ) -> None:
         if profile.embedding != "dense":
@@ -1775,7 +1883,9 @@ class Qwen3VLDenseEncoder:
             )
         try:
             import torch
-            from qwen_vl_utils import process_vision_info  # pyright: ignore[reportMissingImports]
+            from qwen_vl_utils import (  # pyright: ignore[reportMissingImports]
+                process_vision_info,
+            )
             from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
             raise RuntimeError(
@@ -1803,23 +1913,25 @@ class Qwen3VLDenseEncoder:
                     f'install "{sys.executable}" -m pip install -e ".[multimodal-cuda]"'
                 ) from exc
 
-        model_kwargs: dict[str, Any] = {"trust_remote_code": True}
+        model_kwargs: dict[str, object] = {"trust_remote_code": True}
         if revision:
             model_kwargs["revision"] = revision
         if selected_device == "cuda":
             model_kwargs.update({"torch_dtype": torch.float16, "device_map": "auto"})
         else:
             model_kwargs["torch_dtype"] = torch.float32
-        model = AutoModelForMultimodalLM.from_pretrained(model_id, **model_kwargs).eval()
-        processor_kwargs: dict[str, Any] = {"trust_remote_code": True}
+        load_model = cast(Callable[..., _NativeModelLike], AutoModelForMultimodalLM.from_pretrained)
+        model = load_model(model_id, **model_kwargs).eval()
+        processor_kwargs: dict[str, object] = {"trust_remote_code": True}
         if revision:
             processor_kwargs["revision"] = revision
+        load_processor = cast(Callable[..., _NativeProcessorLike], AutoProcessor.from_pretrained)
         try:
-            processor = AutoProcessor.from_pretrained(
+            processor = load_processor(
                 model_id, padding_side="right", **processor_kwargs
             )
         except TypeError:
-            processor = AutoProcessor.from_pretrained(model_id, **processor_kwargs)
+            processor = load_processor(model_id, **processor_kwargs)
         profile = MultimodalEmbeddingProfile(
             provider="transformers",
             model=model_id,
@@ -1930,14 +2042,12 @@ class Qwen3VLDenseEncoder:
         kwargs.update(video_kwargs)
         return self._processor(**kwargs)
 
-    def _run(self, inputs: Any) -> Sequence[EmbeddingSet]:
+    def _run(self, inputs: object) -> Sequence[EmbeddingSet]:
         import torch
 
-        if hasattr(inputs, "to"):
-            inputs = inputs.to(self.device)
-        elif isinstance(inputs, Mapping):
+        if isinstance(inputs, Mapping):
             inputs = {
-                key: value.to(self.device) if hasattr(value, "to") else value
+                key: _move_to_device(value, self.device)
                 for key, value in inputs.items()
             }
         with torch.inference_mode():
@@ -1954,19 +2064,31 @@ class Qwen3VLDenseEncoder:
         embeddings = getattr(output, "embeddings", None)
         if embeddings is None:
             embeddings = getattr(output, "last_hidden_state", output)
-        if hasattr(embeddings, "ndim") and embeddings.ndim == 3:
+        tensor_metadata = cast(_TensorMetadataLike, embeddings)
+        if hasattr(embeddings, "ndim") and int(tensor_metadata.ndim) == 3:
+            tensor_embeddings = cast(torch.Tensor, embeddings)
             mask = inputs.get("attention_mask") if isinstance(inputs, Mapping) else None
             if mask is None:
-                embeddings = embeddings[:, -1, :]
+                embeddings = tensor_embeddings[:, -1, :]
             else:
-                positions = mask.long().sum(dim=1).clamp_min(1) - 1
-                embeddings = embeddings[torch.arange(embeddings.shape[0], device=embeddings.device), positions]
-        if hasattr(embeddings, "ndim") and embeddings.ndim != 2:
-            raise ProjectionIntegrityError("Qwen3-VL must return one dense vector per source view")
+                mask_tensor = cast(torch.Tensor, mask)
+                positions = mask_tensor.long().sum(dim=1).clamp_min(1) - 1
+                embeddings = tensor_embeddings[
+                    torch.arange(tensor_embeddings.shape[0], device=tensor_embeddings.device),
+                    positions,
+                ]
         if hasattr(embeddings, "ndim"):
+            tensor_embeddings = cast(torch.Tensor, embeddings)
+        else:
+            tensor_embeddings = None
+        if tensor_embeddings is not None and tensor_embeddings.ndim != 2:
+            raise ProjectionIntegrityError("Qwen3-VL must return one dense vector per source view")
+        if tensor_embeddings is not None:
             from torch.nn import functional
 
-            embeddings = functional.normalize(embeddings[..., : self.profile.dimension], p=2, dim=-1)
+            embeddings = functional.normalize(
+                tensor_embeddings[..., : self.profile.dimension], p=2, dim=-1
+            )
             # Dense profiles expose one vector per view, while the common
             # normalizer receives a set of vectors per view.
             return _normalise_sets([[row] for row in embeddings], profile=self.profile)
@@ -1974,7 +2096,11 @@ class Qwen3VLDenseEncoder:
             # This branch also makes the adapter contract testable with a tiny
             # fake model in environments that intentionally omit Torch.
             normalised: list[list[list[float]]] = []
+            if not isinstance(embeddings, Sequence) or isinstance(embeddings, (str, bytes)):
+                raise ProjectionIntegrityError("Qwen3-VL returned an unsupported embedding payload")
             for row in embeddings:
+                if not isinstance(row, Sequence) or isinstance(row, (str, bytes)):
+                    raise ProjectionIntegrityError("Qwen3-VL returned a non-vector row")
                 values = [float(value) for value in row[: self.profile.dimension]]
                 norm = sqrt(sum(value * value for value in values))
                 if norm == 0.0:
@@ -2128,9 +2254,9 @@ def build_configured_multimodal_encoder(
             RemoteMultimodalEncoder,
         )
         from .multimodal_runtime import (
-            configured_embedding_service_allowed_hosts,
             configured_embedding_crop_token_budget,
             configured_embedding_max_model_len,
+            configured_embedding_service_allowed_hosts,
             configured_embedding_service_max_request_bytes,
             configured_embedding_service_timeout,
             configured_embedding_service_token,

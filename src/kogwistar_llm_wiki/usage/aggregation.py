@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from kogwistar.json_types import JsonObject, JsonValue
 from kogwistar.runtime import BudgetEvent
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 
 USAGE_PROJECTION_SCHEMA_VERSION = 1
 
 
-def _mapping(value: object) -> Mapping[str, object]:
+def _mapping(value: object) -> Mapping[str, JsonValue]:
     return value if isinstance(value, Mapping) else {}
 
 
@@ -94,12 +95,14 @@ def event_groups(event: BudgetEvent) -> dict[str, list[str]]:
     return {dimension: keys for dimension, keys in groups.items() if keys}
 
 
-def decode_projection(row: Mapping[str, object]) -> dict[str, object]:
+def decode_projection(row: Mapping[str, JsonValue]) -> JsonObject:
     payload = row.get("payload")
     if not isinstance(payload, dict):
-        raise ValueError("usage projection payload must be an object")  # noqa: TRY004
-    if int(row.get("projection_schema_version") or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
+        raise ValueError("usage projection payload must be an object")
+    schema_version = row.get("projection_schema_version")
+    payload_schema_version = payload.get("projection_schema_version")
+    if not isinstance(schema_version, (int, float, str)) or int(schema_version or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
         raise ValueError("usage projection schema version is incompatible")
-    if int(payload.get("projection_schema_version") or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
+    if not isinstance(payload_schema_version, (int, float, str)) or int(payload_schema_version or 0) != USAGE_PROJECTION_SCHEMA_VERSION:
         raise ValueError("usage projection payload schema version is incompatible")
-    return dict(payload)
+    return payload

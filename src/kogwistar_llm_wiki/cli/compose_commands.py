@@ -7,6 +7,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from kogwistar.json_types import JsonObject
+
 from ..compose.options import ComposeOptions
 from ..compose.validation import check_compose_text, write_compose
 
@@ -34,7 +36,7 @@ def compose_generate(args: argparse.Namespace) -> None:
 def compose_check(args: argparse.Namespace) -> None:
     path = Path(args.file)
     result = check_compose_text(path.read_text(encoding="utf-8"))
-    docker_check: dict[str, object] = {"status": "not_run", "detail": "docker command unavailable"}
+    docker_check: JsonObject = {"status": "not_run", "detail": "docker command unavailable"}
     try:
         completed = subprocess.run(
             ["docker", "compose", "-f", str(path), "config", "--quiet"],

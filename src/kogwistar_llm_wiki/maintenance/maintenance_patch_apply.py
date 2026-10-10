@@ -17,6 +17,7 @@ from kogwistar.engine_core.models import (
     Span,
 )
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonObject, JsonValue
 from kogwistar.typing_interfaces import ReadLike, WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
@@ -88,8 +89,8 @@ class _MaintenanceEngineLike(Protocol):
 
     def uow(self) -> EngineUnitOfWork: ...
 
-    def tombstone_node(self, node_id: str, **kw: object) -> bool: ...
-    def tombstone_edge(self, edge_id: str, **kw: object) -> bool: ...
+    def tombstone_node(self, node_id: str, **kw: JsonValue) -> bool: ...
+    def tombstone_edge(self, edge_id: str, **kw: JsonValue) -> bool: ...
 
 
 class MaintenancePatchOperationApplyResult(BaseModel):
@@ -255,7 +256,7 @@ def apply_maintenance_patch(
             operation_results=operation_results,
             artifact_id=artifact_id,
         )
-    except Exception as exc:  # noqa: BLE001 - malformed maintenance operations become review items
+    except Exception as exc:
         status = MaintenancePatchStatus.NEEDS_REVIEW
         operation_results.append(
             MaintenancePatchOperationApplyResult(
@@ -406,7 +407,7 @@ def _derived_crosslink_retraction_issues(
         return []
     try:
         edges = _read_entities_by_ids(engine, "edge", target_ids)
-    except Exception:  # noqa: BLE001 - unreadable targets fail closed as invalid
+    except Exception:
         edges = []
     by_id = {str(edge.id): edge for edge in edges}
     issues: list[MaintenancePatchValidationIssue] = []
@@ -720,7 +721,7 @@ def _node_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOpe
         level_from_root=None,
         properties=operation.properties or None,
         mentions=[Grounding(spans=[_span_from_operation(operation)])],
-        metadata=metadata,
+        metadata=cast(JsonObject, metadata),
     )
 
 
@@ -742,7 +743,7 @@ def _edge_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOpe
         target_edge_ids=[],
         properties=operation.properties or None,
         mentions=[Grounding(spans=[_span_from_operation(operation)])],
-        metadata=metadata,
+        metadata=cast(JsonObject, metadata),
     )
 
 

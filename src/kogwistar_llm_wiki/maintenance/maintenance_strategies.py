@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from threading import Event
 from typing import TYPE_CHECKING, ClassVar, Protocol
@@ -8,13 +8,14 @@ from typing import TYPE_CHECKING, ClassVar, Protocol
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.engine_core.models import Node
+from kogwistar.maintenance.contracts import BeforeWrite
 from kogwistar.runtime import RunResult
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.runtime import WorkflowRuntime
 
+from ..disambiguation.contact_matching import ContactIdentityObservation
 from ..models import NamespaceEngines
 from ..policies.rules import LlmWikiPolicies
-from ..disambiguation.contact_matching import ContactIdentityObservation
 from .maintenance_guards import MaintenanceGuardDecision
 from .maintenance_policy import (
     GRAPH_PATCH_APPLY_KINDS,
@@ -32,9 +33,9 @@ class LayeredMaintenanceParser(Protocol):
 
     def __call__(
         self,
-        ctx: "MaintenanceJobExecutionContext",
-        session: "ParseSessionState",
-        frontier: list["ParseFrontierItem"],
+        ctx: MaintenanceJobExecutionContext,
+        session: ParseSessionState,
+        frontier: list[ParseFrontierItem],
         /,
     ) -> Mapping[str, object]: ...
 
@@ -136,7 +137,7 @@ class MaintenanceWorkerLike(Protocol):
     maintenance_llm_calls_per_slice: int
     maintenance_seconds_per_slice: int
     document_parser: MaintenanceDocumentParser
-    layered_parser: "LayeredMaintenanceParser"
+    layered_parser: LayeredMaintenanceParser
 
     def _load_request_node(self, workspace_id: str, req_node_id: str) -> Node | None: ...
     def _emit_trace(self, event: str, **fields: object) -> None: ...
@@ -171,7 +172,7 @@ class MaintenanceWorkerLike(Protocol):
         workspace_id: str,
         engines: NamespaceEngines,
         *,
-        before_write: Callable[[object], None] | None = None,
+        before_write: BeforeWrite[object] | None = None,
     ) -> list[str]: ...
 
     def _handle_review_maintenance_subject(self, ctx: MaintenanceJobExecutionContext) -> None: ...

@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict, cast
+from typing import Literal, Protocol, TypedDict, cast
 
 from kg_doc_parser.workflow_ingest.layerwise_llm import (
     LayerwiseLLMCallbacks,
     build_layerwise_llm_callbacks,
 )
 from kg_doc_parser.workflow_ingest.providers import WorkflowProviderSettings
+from kg_doc_parser.workflow_ingest.semantics import SemanticNode
+from kogwistar.json_types import JsonValue
 from kogwistar.runtime.budget import (
     BudgetEvent,
     StateBackedBudgetLedger,
@@ -21,9 +23,11 @@ from kogwistar.runtime.budget import (
 from kogwistar.runtime.budget_adapters import summarize_budget_events
 
 from ..diagnostics.debug_helpers import summarize_stage_timings
+from ..ingest.contracts import TraceLog
 from ..providers.role_config import provider_config_summary
 from ..usage.provider import (
     ProviderUsageCallback,
+    ProviderUsageEventSink,
     provider_call_count,
     resolve_token_pricing,
 )
@@ -80,6 +84,7 @@ class LayeredParseResult:
     usage_summary: dict[str, object]
     usage_events: list[dict[str, object]]
     layer_log: list[dict[str, object]]
+    semantic_tree: SemanticNode | None = None
 
     @property
     def workflow_status(self) -> str | None:
@@ -87,6 +92,10 @@ class LayeredParseResult:
 
         value = self.diagnostics.get("workflow_status")
         return value if isinstance(value, str) else None
+
+
+def _json_len(value: object) -> int:
+    return len(value) if isinstance(value, (list, tuple, dict, str)) else 0
 
 
 def _summarize_budget_events(
@@ -139,7 +148,7 @@ def _build_provider_layer_callbacks(
     budget_ledger: StateBackedBudgetLedger | None = None,
     run_id: str = "",
     source_document_id: str = "",
-    usage_event_sink: Callable[[BudgetEvent], None] | None = None,
+    usage_event_sink: ProviderUsageEventSink | None = None,
     build_callbacks: LayerCallbackBuilder | None = None,
 ) -> LayerwiseLLMCallbacks:
     model_callbacks: list[ProviderUsageCallback] = []
@@ -174,8 +183,8 @@ def run_workflow_layered_parse(
     provider_settings: WorkflowProviderSettings,
     engine_dir: Path,
     budget_ledger: StateBackedBudgetLedger | None = None,
-    trace: Callable[[str], None] | None = None,
-    heartbeat: Callable[[str], None] | None = None,
+    trace: TraceLog | None = None,
+    heartbeat: TraceLog | None = None,
     run_id: str | None = None,
     resume_from_checkpoint: bool = False,
     usage_event_path: Path | None = None,
@@ -217,7 +226,7 @@ def run_workflow_layered_parse(
             "budget_kind": "token",
         }
     )
-    usage_event_sink: Callable[[BudgetEvent], None] | None = None
+    usage_event_sink: ProviderUsageEventSink | None = None
     if usage_event_path is not None:
         usage_event_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -325,10 +334,7 @@ def run_workflow_layered_parse(
         from kg_doc_parser.workflow_ingest.models import (
             WorkflowExportBundle as _WorkflowExportBundle,
         )
-        from kg_doc_parser.workflow_ingest.semantics import (
-            SemanticNode,
-            semantic_tree_to_kge_payload,
-        )
+        from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 
         semantic_tree = SemanticNode.model_validate(final_state["semantic_tree"])
         graph_payload = semantic_tree_to_kge_payload(semantic_tree, doc_id=source_document_id)
@@ -349,8 +355,8 @@ def run_workflow_layered_parse(
         _layer_event(
             "workflow_layered_export_bundle_synthesized",
             workflow_status=getattr(run_result, "status", None),
-            graph_node_count=len(graph_payload.get("nodes", []) or []),
-            graph_edge_count=len(graph_payload.get("edges", []) or []),
+            graph_node_count=_json_len(graph_payload.get("nodes")),
+            graph_edge_count=_json_len(graph_payload.get("edges")),
         )
     if not bundle:
         _layer_event(
@@ -363,8 +369,8 @@ def run_workflow_layered_parse(
         "workflow_layered_export_bundle_ready",
         workflow_status=getattr(run_result, "status", None),
         bundle_source=bundle_source,
-        graph_node_count=len(bundle.graph_payload.get("nodes", []) or []),
-        graph_edge_count=len(bundle.graph_payload.get("edges", []) or []),
+        graph_node_count=_json_len(bundle.graph_payload.get("nodes")),
+        graph_edge_count=_json_len(bundle.graph_payload.get("edges")),
     )
 
     graph_payload = cast(dict[str, object], _dump_model(bundle.graph_payload))
@@ -390,7 +396,9 @@ def run_workflow_layered_parse(
         list(getattr(budget_ledger, "events", []) or []),
         provider_settings=provider_settings,
     )
-    timing_summary = summarize_stage_timings(cast(list[Mapping[str, Any]], layer_log))
+    timing_summary = summarize_stage_timings(
+        cast(list[Mapping[str, JsonValue]], layer_log)
+    )
     usage_summary["timing_summary"] = timing_summary
     if proposal_summary:
         usage_summary["proposal_summary"] = proposal_summary
@@ -427,11 +435,21 @@ def run_workflow_layered_parse(
         total_cost=usage_summary["total_cost"],
         parse_session_mode=parse_session.get("mode"),
     )
+    semantic_tree_value = final_state.get("semantic_tree")
+    semantic_tree = (
+        SemanticNode.model_validate(semantic_tree_value)
+        if isinstance(semantic_tree_value, Mapping)
+        else None
+    )
     return LayeredParseResult(
         graph_payload=graph_payload,
         evaluation=evaluation,
         diagnostics=diagnostics,
         usage_summary=usage_summary,
-        usage_events=[budget_event_to_dict(event) for event in budget_ledger.events],
+        usage_events=cast(
+            list[dict[str, object]],
+            [budget_event_to_dict(event) for event in budget_ledger.events],
+        ),
         layer_log=layer_log,
+        semantic_tree=semantic_tree,
     )

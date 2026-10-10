@@ -10,8 +10,8 @@ import uuid
 from collections.abc import Mapping
 from typing import cast
 
-from kogwistar.id_provider import stable_id
 from kogwistar.engine_core.jobs import JobQueueItem
+from kogwistar.id_provider import stable_id
 from kogwistar.runtime import RunResult
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.budget_adapters import summarize_budget_events
@@ -19,9 +19,12 @@ from kogwistar.runtime.budget_adapters import summarize_budget_events
 from ..configuration.workspace import WorkspaceNamespaces
 from ..usage.events import persist_usage_events
 from ..usage.projection_engine import UsageProjection
+from ..usage.usage_models import UsageMetaStore
 from ..utils import _background_namespace
-from .maintenance_strategies import MaintenanceJobExecutionContext
-from .maintenance_strategies import MaintenanceWorkerLike
+from .maintenance_strategies import (
+    MaintenanceJobExecutionContext,
+    MaintenanceWorkerLike,
+)
 from .state import persisted_budget_state as _persisted_budget_state
 
 logger = logging.getLogger(__name__)
@@ -121,7 +124,7 @@ class MaintenanceRuntimeWorkerMixin(MaintenanceWorkerLike):
                 renewed = self.engines.conversation.jobs.renew_lease(
                     ctx.job, lease_seconds=self.lease_seconds
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._emit_trace(
                     "maintenance_lease_renewal_failed",
                     job_id=ctx.job_id,
@@ -166,7 +169,7 @@ class MaintenanceRuntimeWorkerMixin(MaintenanceWorkerLike):
             model=self.provider_settings.parser.model,
         )
         UsageProjection(
-            self.engines.conversation.meta_sqlite,
+            cast(UsageMetaStore, self.engines.conversation.meta_sqlite),
             workspace_id=ctx.workspace_id,
             source_namespace=ns.usage_events,
             projection_namespace=ns.usage_projection,

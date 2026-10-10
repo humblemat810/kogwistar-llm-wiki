@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Literal, cast
 from urllib.parse import parse_qs, urlparse
 
+from kogwistar.json_types import JsonObject, JsonValue
+
 from ..agent.gateway import AgentGateway, _jsonrpc_result
 from ..app_contracts.workbench_extensions import (
     WorkbenchExtension,
@@ -34,6 +36,31 @@ MCP_READ_TOOLS = frozenset({
     "query", "search", "source", "status", "hypergraph_search", "history",
     "multimodal_search", "multimodal_status",
 })
+
+
+def _jsonable(value: object) -> JsonValue:
+    """Normalize handler results before crossing the JSON response boundary."""
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in value]
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None and not isinstance(value, (str, bytes)):
+        return _jsonable(enum_value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
+def _request_int(value: object, *, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
 
 
 def build_workbench_handler(
@@ -225,7 +252,7 @@ def build_workbench_handler(
             except (KeyError, TypeError, ValueError) as exc:
                 self._write_json({"error": "invalid_request", "detail": str(exc)}, status=400)
                 return
-            self._write_json(body)
+            self._write_json(_jsonable(body))
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
@@ -236,9 +263,9 @@ def build_workbench_handler(
                 return
             try:
                 size = int(self.headers.get("content-length", "0"))
-                payload = json.loads(self.rfile.read(size))
+                payload = cast(JsonObject, json.loads(self.rfile.read(size)))
                 if not isinstance(payload, dict):
-                    raise ValueError("request body must be a JSON object")  # noqa: TRY004
+                    raise ValueError("request body must be a JSON object")
                 extension_query = _query_mapping(parsed.query)
                 workspace_id = (
                     extension_route.workspace_id(extension_query, payload)
@@ -362,7 +389,9 @@ def build_workbench_handler(
                         workspace_id=str(workspace_id or ""),
                         candidate_key=str(payload.get("candidate_key") or ""),
                         evidence_snapshot_id=str(payload.get("evidence_snapshot_id") or ""),
-                        expected_evidence_version=int(payload.get("expected_evidence_version") or 0),
+                        expected_evidence_version=_request_int(
+                            payload.get("expected_evidence_version")
+                        ),
                         decision=str(payload.get("decision") or ""),
                         confirmed=bool(payload.get("confirmed", False)),
                         actor_id=getattr(identity, "principal_id", None),
@@ -373,9 +402,14 @@ def build_workbench_handler(
                     decisions = payload.get("decisions")
                     if not isinstance(decisions, list) or any(not isinstance(item, dict) for item in decisions):
                         raise ValueError("decisions must be a list of objects")
+                    review_decisions = [
+                        cast(Mapping[str, object], item)
+                        for item in decisions
+                        if isinstance(item, dict)
+                    ]
                     body = api.decide_crosslink_group_reviews(
                         workspace_id=str(workspace_id or ""),
-                        decisions=decisions,
+                        decisions=review_decisions,
                         actor_id=str(getattr(identity, "principal_id", None) or "local-operator"),
                         authority_claims=durable_claims_snapshot(),
                     )
@@ -394,7 +428,7 @@ def build_workbench_handler(
             except RuntimeError as exc:
                 self._write_json({"error": "service_unavailable", "detail": str(exc)}, status=503)
                 return
-            self._write_json(body, status=status)
+            self._write_json(_jsonable(body), status=status)
 
         def _require_agent_api(self) -> None:
             if not agent_api_enabled:
@@ -420,7 +454,7 @@ def build_workbench_handler(
                 self._identity_context_manager = None
             super().finish()
 
-        def _write_json(self, body: object, *, status: int = 200) -> None:
+        def _write_json(self, body: JsonValue, *, status: int = 200) -> None:
             encoded = json.dumps(body, sort_keys=True, default=str).encode("utf-8")
             self.send_response(status)
             self.send_header("content-type", "application/json; charset=utf-8")
@@ -435,7 +469,7 @@ def build_workbench_handler(
             method: Literal["GET", "POST"],
             path: str,
             query: Mapping[str, tuple[str, ...]],
-            payload: dict[str, object],
+            payload: JsonObject,
             workspace_id: str | None,
         ) -> WorkbenchExtensionResponse:
             response = route.handler(
@@ -443,7 +477,7 @@ def build_workbench_handler(
                     method=method,
                     path=path,
                     query={key: tuple(values) for key, values in query.items()},
-                    payload=payload,
+                    payload=cast(JsonObject, payload),
                     workspace_id=workspace_id,
                     identity=getattr(self, "_identity_context", None),
                 )
@@ -496,7 +530,14 @@ def build_workbench_handler(
             self.end_headers()
 
             def emit(body: object) -> None:
-                value = _jsonrpc_result(jsonrpc_id, body) if standard else body
+                value = (
+                    _jsonrpc_result(
+                        cast(JsonValue, jsonrpc_id),
+                        cast(JsonValue, body),
+                    )
+                    if standard
+                    else body
+                )
                 self.wfile.write(_sse_bytes("message" if standard else "task", value))
                 self.wfile.flush()
 
@@ -518,12 +559,12 @@ def build_workbench_handler(
             while time.monotonic() < deadline:
                 time.sleep(interval)
                 if standard:
-                    response = gateway.a2a_jsonrpc({
+                    response = gateway.a2a_jsonrpc(cast(Mapping[str, JsonValue], {
                         "jsonrpc": "2.0",
                         "id": jsonrpc_id,
                         "method": "tasks/get",
                         "params": {"id": task_id, "metadata": {"workspace_id": workspace_id}},
-                    })
+                    }))
                     current = response.get("result") if isinstance(response.get("result"), dict) else None
                 else:
                     current = gateway.a2a_task(workspace_id=workspace_id, task_id=task_id)
@@ -589,7 +630,7 @@ def _first(values: Mapping[str, Sequence[str]], key: str, default: str) -> str:
     return str((values.get(key) or [default])[0])
 
 
-def _payload_workspace(payload: dict[str, object]) -> str | None:
+def _payload_workspace(payload: JsonObject) -> str | None:
     """Resolve a protocol envelope's workspace without silently inventing one."""
     metadata = payload.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
@@ -620,7 +661,7 @@ def _payload_workspace(payload: dict[str, object]) -> str | None:
 
 
 def _payload_string_sequence(
-    payload: dict[str, object],
+    payload: JsonObject,
     key: str,
 ) -> tuple[str, ...] | None:
     value = payload.get(key)

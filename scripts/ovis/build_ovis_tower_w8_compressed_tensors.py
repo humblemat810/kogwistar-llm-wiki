@@ -20,7 +20,6 @@ from llmcompressor.entrypoints.model_free.converter import ModelFreePtqConverter
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-
 TOWER_PATTERNS = {
     # Only 2-D learned projections are eligible for the packed W8 path.
     # Norm vectors, biases, and convolutional tensors remain in source dtype.

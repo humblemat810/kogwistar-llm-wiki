@@ -52,6 +52,12 @@ class DemoEngineBuilder(Protocol):
     ) -> NamespaceEngines: ...
 
 
+class EngineCloser(Protocol):
+    """Release the engine bundle owned by one CLI command."""
+
+    def __call__(self, engines: NamespaceEngines, /) -> None: ...
+
+
 class PersistentBuilderKwargs(TypedDict, total=False):
     """Typed optional arguments accepted by the public engine builders."""
 
@@ -222,6 +228,7 @@ def build_demo_engines(
 
 
 __all__ = [
+    "EngineCloser",
     "InMemoryBuilderKwargs",
     "PersistenceKwargs",
     "PersistenceKwargsFactory",

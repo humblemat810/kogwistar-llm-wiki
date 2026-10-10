@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+
+from kogwistar.json_types import JsonValue
 
 
-def count_job_statuses(jobs: list[dict[str, object]]) -> dict[str, int]:
+def count_job_statuses(jobs: Sequence[Mapping[str, JsonValue]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for job in jobs:
         status = str(job.get("status") or "unknown")
@@ -14,16 +16,16 @@ def count_job_statuses(jobs: list[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
-def answer_text(result: Mapping[str, object]) -> str:
+def answer_text(result: Mapping[str, JsonValue]) -> str:
     answer = result.get("answer")
     return str(answer.get("text") if isinstance(answer, Mapping) else answer or "")
 
 
-def request_id(payload: Mapping[str, object], prefix: str) -> str:
+def request_id(payload: Mapping[str, JsonValue], prefix: str) -> str:
     return str(payload.get("id") or f"{prefix}_{uuid.uuid4().hex}")
 
 
-def a2a_task(interaction: Mapping[str, object], *, standard: bool = False) -> dict[str, object]:
+def a2a_task(interaction: Mapping[str, JsonValue], *, standard: bool = False) -> dict[str, JsonValue]:
     if isinstance(interaction.get("status"), Mapping):
         result = dict(interaction)
         metadata = result.get("metadata")
@@ -38,7 +40,7 @@ def a2a_task(interaction: Mapping[str, object], *, standard: bool = False) -> di
     }.get(status, status)
     response = interaction.get("response")
     text = answer_text(response) if isinstance(response, Mapping) else ""
-    result: dict[str, object] = {
+    result: dict[str, JsonValue] = {
         "id": interaction.get("interaction_id"),
         "contextId": interaction.get("context_id") or interaction.get("workspace_id") or "default",
         "status": {"state": state},
@@ -57,17 +59,17 @@ def a2a_task(interaction: Mapping[str, object], *, standard: bool = False) -> di
     return result
 
 
-def jsonrpc_result(request_id: object, result: object) -> dict[str, object]:
+def jsonrpc_result(request_id: JsonValue, result: JsonValue) -> dict[str, JsonValue]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
 def jsonrpc_error(
-    request_id: object,
+    request_id: JsonValue,
     code: int,
     message: str,
-    data: object | None = None,
-) -> dict[str, object]:
-    error: dict[str, object] = {"code": code, "message": message}
+    data: JsonValue | None = None,
+) -> dict[str, JsonValue]:
+    error: dict[str, JsonValue] = {"code": code, "message": message}
     if data is not None:
         error["data"] = data
     return {"jsonrpc": "2.0", "id": request_id, "error": error}

@@ -59,7 +59,7 @@ class MultimodalSourceBundle:
     def from_payload(cls, payload: Mapping[str, object]) -> MultimodalSourceBundle:
         raw_units = payload.get("units")
         if not isinstance(raw_units, Sequence) or isinstance(raw_units, (str, bytes)):
-            raise ValueError("source bundle payload requires a units sequence")  # noqa: TRY004
+            raise ValueError("source bundle payload requires a units sequence")
         if not all(isinstance(item, Mapping) for item in raw_units):
             raise ValueError("source bundle units must be mappings")
         return cls(
@@ -434,7 +434,7 @@ def manifest_units(
 
     raw_units = manifest.get("units")
     if not isinstance(raw_units, Sequence) or isinstance(raw_units, (str, bytes)):
-        raise ValueError("multimodal manifest requires a units sequence")  # noqa: TRY004
+        raise ValueError("multimodal manifest requires a units sequence")
     if not all(isinstance(item, Mapping) for item in raw_units):
         raise ValueError("multimodal manifest units must be mappings")
     units = tuple(
@@ -488,10 +488,10 @@ def pdf_manifest_units(
         for kind, modality in (("images", "image"), ("tables", "table"), ("charts", "chart")):
             values = page.get(kind, ())
             if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
-                raise ValueError(f"PDF page {page_number} field {kind!r} must be a sequence")  # noqa: TRY004
+                raise ValueError(f"PDF page {page_number} field {kind!r} must be a sequence")
             for asset_index, value in enumerate(values):
                 if not isinstance(value, Mapping):
-                    raise ValueError(f"PDF page {page_number} {kind} entries must be mappings")  # noqa: TRY004
+                    raise ValueError(f"PDF page {page_number} {kind} entries must be mappings")
                 item = dict(value)
                 item.setdefault("modality", modality)
                 item.setdefault("locator", {**page_locator, "asset_index": asset_index})

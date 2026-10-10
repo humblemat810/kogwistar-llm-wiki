@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from .contracts import Clock
 from .investigation_history import (
     InvestigationHistoryRecord,
     InvestigationHistoryService,
@@ -24,12 +25,6 @@ WorkbenchMode = Literal["deterministic", "codex"]
 
 class MutationExecutor(Protocol):
     def __call__(self, proposal: Mapping[str, object]) -> Mapping[str, object]: ...
-
-
-class Clock(Protocol):
-    """Return the current wall-clock time in milliseconds."""
-
-    def __call__(self, /) -> int: ...
 
 
 class AgentAnswerer(Protocol):

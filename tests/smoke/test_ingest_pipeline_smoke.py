@@ -36,7 +36,7 @@ def test_ingest_pipeline_smoke(pipeline, ingest_request, parser_provider, parser
 
         try:
             response = requests.get(f"{base_url}/api/version", timeout=1.5)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             pytest.skip(f"local Ollama is not available at {base_url}: {exc}")
         if not response.ok:
             pytest.skip(f"local Ollama is not healthy at {base_url}")

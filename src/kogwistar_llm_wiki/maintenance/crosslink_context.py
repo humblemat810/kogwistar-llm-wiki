@@ -6,12 +6,37 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import ceil
+from typing import cast
 
 from kogwistar.conversation.conversation_context import (
     ContextItem,
     ContextMessage,
     ConversationContextBuilder,
 )
+from kogwistar.json_types import JsonObject, JsonValue
+
+
+def _json_object(value: Mapping[str, object]) -> JsonObject:
+    """Normalize an app record to the core's recursive JSON contract."""
+
+    decoded = json.loads(json.dumps(dict(value), ensure_ascii=False))
+    if not isinstance(decoded, dict):
+        raise TypeError("cross-link records must serialize as JSON objects")
+    return cast(JsonObject, decoded)
+
+
+def _record_from_extra(extra: Mapping[str, JsonValue] | None) -> dict[str, object]:
+    if extra is None:
+        return {}
+    value = extra.get("crosslink_record")
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _kind_from_extra(extra: Mapping[str, JsonValue] | None) -> str:
+    if extra is None:
+        return ""
+    value = extra.get("crosslink_kind")
+    return value if isinstance(value, str) else ""
 
 
 def _integer_value(value: object, *, field: str) -> int:
@@ -113,8 +138,8 @@ def pack_crosslink_context(
 ) -> dict[str, object]:
     """Pack deterministic graph records using Kogwistar context semantics."""
 
-    nodes = sorted((dict(item) for item in node_records), key=_record_key)
-    edges = sorted((dict(item) for item in edge_records), key=_record_key)
+    nodes = sorted((_json_object(item) for item in node_records), key=_record_key)
+    edges = sorted((_json_object(item) for item in edge_records), key=_record_key)
     if budget.max_nodes:
         nodes, omitted_nodes_by_count = nodes[: budget.max_nodes], max(
             0, len(nodes) - budget.max_nodes
@@ -128,7 +153,7 @@ def pack_crosslink_context(
     else:
         omitted_edges_by_count = 0
 
-    records: list[tuple[str, dict[str, object]]] = [
+    records: list[tuple[str, JsonObject]] = [
         ("node", item) for item in nodes
     ] + [("edge", item) for item in edges]
     items = [
@@ -161,8 +186,8 @@ def pack_crosslink_context(
     omitted_edges = omitted_edges_by_count
     used_characters = 0
     for item in packed.items:
-        record = dict((item.extra or {}).get("crosslink_record") or {})
-        kind = str((item.extra or {}).get("crosslink_kind") or "")
+        record = _record_from_extra(item.extra)
+        kind = _kind_from_extra(item.extra)
         characters = len(item.text)
         if budget.max_characters and used_characters + characters > budget.max_characters:
             if kind == "node":

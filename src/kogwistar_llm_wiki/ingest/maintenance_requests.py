@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from kogwistar.engine_core.models import (
     GraphExtractionWithIDs,
 )
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonValue
 from kogwistar.policy import PromotionDecision
 from kogwistar.provenance import EvidencePackDigest, evidence_pack_digest_hash
 
@@ -25,7 +27,6 @@ from ..models import (
     IngestPipelineRequest,
 )
 from ..parsing.parse_session_store import parse_session_scope_id
-from .contracts import IngestPipelineHost
 from ..parsing.parse_views import (
     ParseTarget,
     ParseViewStore,
@@ -33,10 +34,10 @@ from ..parsing.parse_views import (
     reparse_session_id,
 )
 from ..utils import _background_namespace, _temporary_namespace
-from .contracts import ParseSourceResult
+from .contracts import IngestPipelineHost, ParseSourceResult
 
 
-def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:
+def _metadata_digest_value(digest: dict[str, JsonValue] | None) -> str | None:
     if digest is None:
         return None
     return json.dumps(digest, sort_keys=True, separators=(",", ":"))
@@ -60,11 +61,11 @@ class MaintenanceRequestMixin:
         maintenance_kind: str | None = None,
         topic: str | None = None,
         objective: str | None = None,
-        budgets: Mapping[str, object] | None = None,
+        budgets: Mapping[str, JsonValue] | None = None,
         seed_node_ids: Sequence[str] | None = None,
-        maintenance_context: Mapping[str, object] | None = None,
+        maintenance_context: Mapping[str, JsonValue] | None = None,
         max_rounds: int | None = None,
-        parse_target: Mapping[str, object] | ParseTarget | None = None,
+        parse_target: Mapping[str, JsonValue] | ParseTarget | None = None,
     ) -> str:
         if maintenance_execution_active():
             raise RuntimeError(
@@ -201,7 +202,7 @@ class MaintenanceRequestMixin:
                 visibility="internal",
                 label="Maintenance Job Request",
                 summary=f"Maintenance requested for {request.title}",
-                extra_metadata={
+                extra_metadata=cast(dict[str, JsonValue], {
                     "job_type": "maintenance",
                     "trigger_type": "ingest",
                     "status": "pending",
@@ -223,7 +224,7 @@ class MaintenanceRequestMixin:
                     "request_fingerprint": request_fingerprint,
                     "budgets": _metadata_digest_value(dict(budgets or {})),
                     "parse_target": target.model_dump(mode="json") if target is not None else None,
-                },
+                }),
             )
             with _background_namespace(self.engines.conversation, namespace):
                 self.engines.conversation.write.add_node(node)
@@ -430,7 +431,7 @@ class MaintenanceRequestMixin:
             visibility="internal",
             label=f"Parse retry history: {request.title}",
             summary=summary,
-            extra_metadata={
+            extra_metadata=cast(dict[str, JsonValue], {
                 "retry_history_json": json.dumps(history_payload, sort_keys=True, separators=(",", ":")),
                 "parser_lane": parser_lane,
                 "assignment_mode": assignment_mode,
@@ -450,7 +451,7 @@ class MaintenanceRequestMixin:
                 "validation_errors": validation_errors,
                 "workflow_run_id": history_payload["workflow_run_id"],
                 "workflow_status": history_payload["workflow_status"],
-            },
+            }),
         )
         with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
@@ -528,7 +529,7 @@ class MaintenanceRequestMixin:
         source_document_id: str,
         candidate_link_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, object] | None = None,
+        promotion_evidence_pack_digest: dict[str, JsonValue] | None = None,
         lineage_node_ids: list[str] | None = None,
         lineage_edge_ids: list[str] | None = None,
         namespace: str,
@@ -567,7 +568,7 @@ class MaintenanceRequestMixin:
             visibility="review",
             label=f"Promotion candidate: {request.title}",
             summary=f"Promotion candidate linked from {candidate_link_id}",
-            extra_metadata={
+            extra_metadata=cast(dict[str, JsonValue], {
                 "candidate_link_id": candidate_link_id,
                 "promotion_evidence_pack_id": promotion_evidence_pack_id,
                 "promotion_evidence_pack_digest": _metadata_digest_value(promotion_evidence_pack_digest),
@@ -581,7 +582,7 @@ class MaintenanceRequestMixin:
                 ),
                 "lineage_edge_ids": _metadata_list_value(list(lineage_edge_ids or [])),
                 "review_namespace": self.namespaces_for(request.workspace_id).review,
-            },
+            }),
         )
         with _background_namespace(self.engines.conversation, namespace):
             self.engines.conversation.write.add_node(node)
@@ -603,7 +604,7 @@ class MaintenanceRequestMixin:
         candidate_link_id: str,
         graph_extraction: GraphExtractionWithIDs,
         namespace: str,
-    ) -> tuple[str, dict[str, object]]:
+    ) -> tuple[str, dict[str, JsonValue]]:
         node_ids = sorted(
             str(node.id) for node in (graph_extraction.nodes or []) if str(getattr(node, "id", "") or "")
         )
@@ -685,7 +686,7 @@ class MaintenanceRequestMixin:
         source_document_id: str,
         promotion_candidate_id: str,
         promotion_evidence_pack_id: str | None = None,
-        promotion_evidence_pack_digest: dict[str, object] | None = None,
+        promotion_evidence_pack_digest: dict[str, JsonValue] | None = None,
         promotion_decision: PromotionDecision | None = None,
         namespace: str,
     ) -> str:
@@ -780,10 +781,10 @@ class MaintenanceRequestMixin:
         revision_document_id: str = "",
         required_stage: str = "parsed_graph_persisted",
         objective: str | None = None,
-        budgets: Mapping[str, object] | None = None,
+        budgets: Mapping[str, JsonValue] | None = None,
         topic: str | None = None,
         seed_node_ids: Sequence[str] | None = None,
-        maintenance_context: Mapping[str, object] | None = None,
+        maintenance_context: Mapping[str, JsonValue] | None = None,
         max_rounds: int | None = None,
         parse_target: ParseTarget | None = None,
         parse_session_id_override: str | None = None,

@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from typing import NoReturn
+from typing import NoReturn, cast
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
+from kogwistar.json_types import JsonValue
+
+JsonObject = dict[str, JsonValue]
+
 
 def validate_supplied_provenance(
-    provenance: Mapping[str, object],
+    provenance: Mapping[str, JsonValue],
     *,
     workspace_id: str,
     source_uri: str,
@@ -55,14 +59,19 @@ def validate_agent_source_uri(source_uri: str) -> None:
         raise ValueError("source_uri must be a credential-free http(s) URL")
 
 
-def validate_reingest_revision(existing: Mapping[str, object], provenance: object) -> None:
+def validate_reingest_revision(
+    existing: Mapping[str, JsonValue], provenance: JsonValue | None
+) -> None:
     if not isinstance(provenance, Mapping):
         return
     requested = str(provenance.get("source_revision_id") or "").strip()
     if not requested:
         return
     known: set[str] = set()
-    for revision in existing.get("revisions") or []:
+    revisions = existing.get("revisions")
+    if not isinstance(revisions, list):
+        revisions = []
+    for revision in revisions:
         if not isinstance(revision, Mapping):
             continue
         known.add(str(revision.get("id") or ""))
@@ -111,7 +120,7 @@ def fetch_source_text(source_uri: str) -> str:
     return data.decode("utf-8")
 
 
-def redact_source_text(value: object) -> object:
+def redact_source_text(value: JsonValue) -> JsonValue:
     if isinstance(value, Mapping):
         return {
             str(key): redact_source_text(item)
@@ -123,16 +132,16 @@ def redact_source_text(value: object) -> object:
     return value
 
 
-def decode_metadata_mapping(value: object) -> dict[str, object] | None:
+def decode_metadata_mapping(value: object) -> JsonObject | None:
     if isinstance(value, Mapping):
-        return {str(key): item for key, item in value.items()}
+        return cast(JsonObject, {str(key): item for key, item in value.items()})
     if isinstance(value, str) and value:
         try:
             decoded = json.loads(value)
         except json.JSONDecodeError:
             return None
         if isinstance(decoded, dict):
-            return {str(key): item for key, item in decoded.items()}
+            return cast(JsonObject, {str(key): item for key, item in decoded.items()})
     return None
 
 
@@ -140,7 +149,7 @@ def node_json(
     node: object | None,
     *,
     redact_source_text: bool = False,
-) -> dict[str, object] | None:
+) -> JsonObject | None:
     if node is None:
         return None
     dump = getattr(node, "model_dump", None)
@@ -155,16 +164,16 @@ def node_json(
     return _json_object(value, redact_source_text=redact_source_text)
 
 
-def _json_object(value: object, *, redact_source_text: bool) -> dict[str, object] | None:
+def _json_object(value: object, *, redact_source_text: bool) -> JsonObject | None:
     if not isinstance(value, Mapping):
         return None
     result = {str(key): item for key, item in value.items()}
     redacted = redact_source_text_value(result) if redact_source_text else result
     if not isinstance(redacted, Mapping):
         return None
-    return {str(key): item for key, item in redacted.items()}
+    return cast(JsonObject, {str(key): item for key, item in redacted.items()})
 
 
-def redact_source_text_value(value: object) -> object:
+def redact_source_text_value(value: JsonValue) -> JsonValue:
     """Compatibility alias used internally by ``node_json``."""
     return redact_source_text(value)

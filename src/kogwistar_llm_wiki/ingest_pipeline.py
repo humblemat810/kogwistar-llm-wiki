@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal, cast
 
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
@@ -91,7 +91,7 @@ from .otel import LlmWikiTelemetry
 from .policies.rules import LlmWikiPolicies, build_default_policies
 from .projection import ProjectionManager
 from .usage.projection_engine import UsageProjection
-from .usage.usage_models import UsageProjectionSnapshot
+from .usage.usage_models import UsageMetaStore, UsageProjectionSnapshot
 from .utils import _temporary_namespace  # noqa: F401 - compatibility helper seam
 from .workbench.investigation_history import InvestigationHistoryService
 from .workbench.query import GraphSpaceQueryService
@@ -106,26 +106,62 @@ def _metadata_list_value(items: list[str] | None) -> list[str] | None:
 
 
 def _resolve_embedding_function(
-    *args: Any,
-    **kwargs: Any,
+    *,
+    namespace: str = "global",
+    embedding_function: EmbeddingFunctionLike | None = None,
+    embedding_config: EmbeddingProviderConfig | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key_env: str | None = None,
+    embedding_max_sequence_length: int | None = None,
+    embedding_crop_token_budget: int | None = None,
+    embedding_tokenizer_fingerprint: str | None = None,
 ) -> tuple[EmbeddingFunctionLike, EmbeddingProviderConfig]:
     """Preserve the historical monkeypatch seam for provider-free tests."""
 
     return _resolve_embedding_function_impl(
-        *args,
+        namespace=namespace,
+        embedding_function=embedding_function,
+        embedding_config=embedding_config,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_base_url=embedding_base_url,
+        embedding_api_key_env=embedding_api_key_env,
+        embedding_max_sequence_length=embedding_max_sequence_length,
+        embedding_crop_token_budget=embedding_crop_token_budget,
+        embedding_tokenizer_fingerprint=embedding_tokenizer_fingerprint,
         embedding_factory=build_embedding_function,
-        **kwargs,
     )
 
 
 def _resolve_embedding_functions(
-    **kwargs: Any,
+    *,
+    embedding_function: EmbeddingFunctionLike | None = None,
+    embedding_config: EmbeddingProviderConfig | None = None,
+    embedding_functions: Mapping[str, EmbeddingFunctionLike] | None = None,
+    embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+    embedding_base_url: str | None = None,
+    embedding_api_key_env: str | None = None,
 ) -> tuple[dict[str, EmbeddingFunctionLike], dict[str, EmbeddingProviderConfig]]:
     """Preserve provider-factory injection for all graph-space embeddings."""
 
     return _resolve_embedding_functions_impl(
+        embedding_function=embedding_function,
+        embedding_config=embedding_config,
+        embedding_functions=embedding_functions,
+        embedding_configs=embedding_configs,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_base_url=embedding_base_url,
+        embedding_api_key_env=embedding_api_key_env,
         embedding_factory=build_embedding_function,
-        **kwargs,
     )
 
 
@@ -287,6 +323,8 @@ class IngestPipeline(
     SourceLifecycleMixin,
     WorkbenchAccessMixin,
 ):
+    conversation_persistence_mode: Literal["single_stage", "two_stage"]
+
     def __init__(
         self,
         engines: NamespaceEngines,
@@ -348,7 +386,7 @@ class IngestPipeline(
     def usage_projection(self, workspace_id: str) -> UsageProjection:
         namespaces = self.namespaces_for(workspace_id)
         return UsageProjection(
-            self.engines.conversation.meta_sqlite,
+            cast(UsageMetaStore, self.engines.conversation.meta_sqlite),
             workspace_id=workspace_id,
             source_namespace=namespaces.usage_events,
             projection_namespace=namespaces.usage_projection,

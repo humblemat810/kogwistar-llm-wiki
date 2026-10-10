@@ -272,7 +272,7 @@ class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
             if self._advance_maintenance_plan(ctx):
                 return
             self._acknowledge_job(ctx)
-        except Exception as exc:  # noqa: BLE001 - failed maintenance is reported and fenced
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_parse_failed",
                 workspace_id=ctx.workspace_id,
@@ -907,7 +907,7 @@ class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
             raise ValueError("durable parse parser-call budget is exhausted")
         selected = min(frontier, key=lambda item: (item.depth, item.ordinal))
         state = dict(session.parser_state)
-        if int(state.get("schema_version") or 0) != 1:
+        if _as_int(state.get("schema_version"), 0) != 1:
             raise ValueError("durable parse session has no supported parser state")
         revision_document_id = str(state.get("source_revision_document_id") or "")
         if revision_document_id != session.revision_document_id:
@@ -1137,6 +1137,10 @@ class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
                     else ParseGenerationStatus.EXPANDING
                 ),
             )
+        review_value = state.get("last_review")
+        if not isinstance(review_value, Mapping):
+            review_value = state.get("critic")
+        review_payload = dict(review_value) if isinstance(review_value, Mapping) else {}
         member = ParseGenerationMember(
             member_id=member_id,
             generation_id=session.generation_id,
@@ -1158,11 +1162,7 @@ class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
                 ),
                 "attempt": int(selected.attempt),
                 "parser_call": int(session.parser_calls + 1),
-                "critic": (
-                    dict(state.get("last_review") or state.get("critic") or {})
-                    if isinstance(state.get("last_review") or state.get("critic"), Mapping)
-                    else {}
-                ),
+                "critic": review_payload,
             },
             parent_member_id=selected.parent_member_id,
         )

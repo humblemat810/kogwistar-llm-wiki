@@ -8,6 +8,7 @@ from typing import cast
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonObject
 from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 
@@ -298,10 +299,10 @@ class CrosslinkGroupReviewService:
             embedding=None,
             level_from_root=None,
             mentions=[Grounding(spans=[Span.from_dummy_for_workflow(artifact_id)])],
-            metadata={
+            metadata=cast(JsonObject, {
                 "artifact_kind": "crosslink_group_decision",
                 **dict(event),
-            },
+            }),
         )
         with _background_namespace(self.engines.conversation, WorkspaceNamespaces(workspace_id).conv_bg):
             self.engines.conversation.write.add_node(node)

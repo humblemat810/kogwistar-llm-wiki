@@ -12,6 +12,21 @@ from kogwistar.runtime.checkpointed_projection import (
 )
 
 
+class UsageEventStore(Protocol):
+    """Minimal append-only contract needed to persist usage events."""
+
+    def append_entity_event(
+        self,
+        *,
+        namespace: str = "default",
+        event_id: str,
+        entity_kind: str,
+        entity_id: str,
+        op: str,
+        payload_json: str,
+    ) -> int: ...
+
+
 class UsageMetaStore(CheckpointedProjectionStore, Protocol):
     def append_entity_event(
         self,

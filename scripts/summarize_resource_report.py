@@ -28,7 +28,7 @@ def _format_percent(value: Any) -> str:
 def render(report: dict[str, Any]) -> str:
     summary = report.get("summary")
     if not isinstance(summary, dict):
-        raise ValueError(  # noqa: TRY004 - preserve the CLI's validation contract
+        raise ValueError(
             "resource report does not contain a summary object"
         )
     implementation = report.get("implementation", "unknown")

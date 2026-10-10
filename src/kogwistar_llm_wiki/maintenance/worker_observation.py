@@ -7,6 +7,7 @@ from contextlib import AbstractContextManager
 from typing import Literal, cast
 
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonValue
 from kogwistar.server.auth_middleware import can_access_security_scope
 
 from ..configuration.workspace import WorkspaceNamespaces
@@ -14,9 +15,11 @@ from ..parsing.parse_views import ParseTarget, ParseViewResolver, ParseViewStore
 from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_context import append_maintenance_round
 from .maintenance_observation import (
+    MaintenanceObservationFrame,
     ObservationFinding,
     ObservationRuntimeLimits,
     ObservationSubject,
+    ParseAndGraphQualityAssessment,
     SubjectKind,
     assess_observation_frame,
     build_observation_frame,
@@ -268,7 +271,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 for item in raw_findings
             )
             return cast(Literal["succeeded", "failed"], status), findings
-        except Exception as exc:  # noqa: BLE001 - critic failure is fail-closed
+        except Exception as exc:
             if is_context_window_error(exc):
                 self._emit_trace(
                     "maintenance_observation_context_limit_blocked",
@@ -280,7 +283,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 if callable(pause_background):
                     try:
                         pause_background()
-                    except Exception as pause_error:  # noqa: BLE001 - keep assessment fail-closed
+                    except Exception as pause_error:
                         self._emit_trace(
                             "maintenance_observation_context_pause_failed",
                             workspace_id=ctx.workspace_id,
@@ -410,7 +413,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
             next_payload["parse_target"] = derived_parse_target.model_dump(mode="json")
         raw_context = ctx.payload.get("maintenance_context")
         next_payload["maintenance_context"] = append_maintenance_round(
-            cast(Mapping[str, object], raw_context)
+            cast(Mapping[str, JsonValue], raw_context)
             if isinstance(raw_context, Mapping)
             else None,
             round_number=current_round + 1,
@@ -561,7 +564,12 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 ]
         return source_context, relation_context, neighborhood_context, parent_context
 
-    def _persist_observation_audit(self, ctx, frame, assessment) -> None:
+    def _persist_observation_audit(
+        self,
+        ctx: MaintenanceJobExecutionContext,
+        frame: MaintenanceObservationFrame,
+        assessment: ParseAndGraphQualityAssessment,
+    ) -> None:
         """Persist assessment metadata without storing raw source text."""
 
         ns = WorkspaceNamespaces(ctx.workspace_id)
@@ -622,7 +630,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 fallback_revision_document_id=subject.revision_document_id,
             )
             return resolution.view_id, resolution.view_version, active
-        except Exception as exc:  # noqa: BLE001 - unresolved activity must fail closed
+        except Exception as exc:
             self._emit_trace(
                 "maintenance_observation_active_view_check_failed",
                 workspace_id=subject.workspace_id,

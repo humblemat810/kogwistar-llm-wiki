@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
+from typing import Protocol
 
 from kogwistar.runtime.budget import (
     BudgetAttribution,
@@ -18,6 +19,12 @@ from kogwistar.runtime.pricing import TokenPricing, estimate_token_cost_usd
 from langchain_core.callbacks import BaseCallbackHandler
 
 _USAGE_KEYS = ("usage_metadata", "token_usage", "usage")
+
+
+class ProviderUsageEventSink(Protocol):
+    """Receive one normalized budget event emitted by provider accounting."""
+
+    def __call__(self, event: BudgetEvent, /) -> None: ...
 
 
 def provider_call_count(events: Sequence[BudgetEvent]) -> int:
@@ -191,7 +198,7 @@ class ProviderUsageCallback(BaseCallbackHandler):
         provider: str,
         model: str,
         pricing: TokenPricing | None = None,
-        event_sink: Callable[[BudgetEvent], None] | None = None,
+        event_sink: ProviderUsageEventSink | None = None,
     ) -> None:
         self.ledger = ledger
         self.run_id = run_id

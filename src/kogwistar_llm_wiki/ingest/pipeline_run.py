@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+
 from kg_doc_parser.semantic_document_splitting_layerwise_edits import (
     parser_llm_cache_transaction,
 )
@@ -25,13 +26,13 @@ from .contracts import (  # noqa: F401 - compatibility type seam
 ParserFn = ParserCallable
 
 
-def _limit_int(value: int | float | str | None) -> int:
+def _limit_int(value: float | str | None) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("validated parse limit must be an integer")
     return value
 
 
-def _limit_float(value: int | float | str | None) -> float:
+def _limit_float(value: float | str | None) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("validated parse limit must be numeric")
     return float(value)

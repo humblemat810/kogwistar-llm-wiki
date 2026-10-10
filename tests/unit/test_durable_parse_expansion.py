@@ -30,7 +30,6 @@ from kogwistar_llm_wiki.parsing.parse_views import (
 from kogwistar_llm_wiki.utils import _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 
-
 pytestmark = pytest.mark.ci_full
 
 

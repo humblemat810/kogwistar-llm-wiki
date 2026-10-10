@@ -9,7 +9,6 @@ from pathlib import Path
 
 from safetensors import safe_open
 
-
 DTYPE_BYTES = {
     "F64": 8,
     "F32": 4,

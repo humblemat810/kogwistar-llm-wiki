@@ -7,7 +7,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Literal
+from typing import Literal, TypeAlias
 
 EmbeddingKind = Literal["single_vector", "dense", "late_interaction"]
 SimilarityMetric = Literal["dot", "cosine"]
@@ -23,6 +23,9 @@ SourceModality = Literal[
     "video_frame",
 ]
 EmbeddingSet = tuple[tuple[float, ...], ...]
+JsonScalar: TypeAlias = None | bool | int | float | str
+JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+JsonObject = dict[str, JsonValue]
 
 
 class ContractValidationError(ValueError):
@@ -68,7 +71,7 @@ class EmbeddingProfile:
                 "embedding crop_token_budget must be positive and no greater than max_sequence_length"
             )
 
-    def canonical_payload(self) -> dict[str, object]:
+    def canonical_payload(self) -> JsonObject:
         payload = {
             "provider": str(self.provider),
             "model": str(self.model),
@@ -94,7 +97,7 @@ class EmbeddingProfile:
         return sha256(encoded).hexdigest()
 
     @classmethod
-    def from_payload(cls, payload: Mapping[str, object]) -> EmbeddingProfile:
+    def from_payload(cls, payload: Mapping[str, JsonValue]) -> EmbeddingProfile:
         try:
             return cls(
                 provider=str(payload["provider"]),
@@ -160,6 +163,8 @@ __all__ = [
     "EmbeddingKind",
     "EmbeddingProfile",
     "EmbeddingSet",
+    "JsonObject",
+    "JsonValue",
     "SimilarityMetric",
     "SourceModality",
     "validate_asset_bytes",

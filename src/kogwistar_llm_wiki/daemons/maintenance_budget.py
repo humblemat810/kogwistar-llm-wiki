@@ -12,7 +12,9 @@ import logging
 import os
 import time
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
+
+from kogwistar.json_types import JsonValue
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..maintenance import (
@@ -34,6 +36,8 @@ from ..providers.role_config import resolve_maintenance_provider_settings
 from ..utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)
+
+JsonObject = dict[str, JsonValue]
 
 if TYPE_CHECKING:
     from ..maintenance.maintenance_control import MaintenanceControl
@@ -109,22 +113,22 @@ class MaintenanceBudgetMixin:
     background_interval: float
     _recorded_usage_attempts: set[str]
 
-    def _load_background_state(self) -> dict[str, Any]:
+    def _load_background_state(self) -> JsonObject:
         path = getattr(self, "_background_state_path", None)
         if path is None:
             return {}
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
+            value = cast(JsonValue, json.loads(path.read_text(encoding="utf-8")))
         except (FileNotFoundError, OSError, TypeError, ValueError):
             return {}
         return value if isinstance(value, dict) else {}
 
-    def _load_budget_state(self) -> dict[str, Any]:
+    def _load_budget_state(self) -> JsonObject:
         path = getattr(self, "_budget_state_path", None)
         if path is None:
             return {}
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
+            value = cast(JsonValue, json.loads(path.read_text(encoding="utf-8")))
         except (FileNotFoundError, OSError, TypeError, ValueError):
             return {}
         return value if isinstance(value, dict) else {}
@@ -391,7 +395,7 @@ class MaintenanceBudgetMixin:
                     list[_BackgroundNode],
                     self.engines.kg.read.get_nodes(limit=500),
                 )
-        except Exception as exc:  # noqa: BLE001 - backend failures degrade exploration only
+        except Exception as exc:
             logger.warning("Background maintenance selection degraded: %s", exc)
             nodes = []
         nodes = [

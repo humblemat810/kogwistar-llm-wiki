@@ -7,12 +7,12 @@ from collections.abc import Callable
 from threading import Lock
 from typing import cast
 
-from kg_doc_parser.llm_structured_output import StructuredOutputModel
 from kg_doc_parser.workflow_ingest.providers import (
     ProviderEndpointConfig,
     WorkflowProviderSettings,
     build_chat_model,
 )
+from kogwistar.llm_tasks.providers import StructuredOutputRunnable, SupportsStructuredOutput
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .maintenance_observation import MaintenanceObservationFrame, ObservationFinding
@@ -150,7 +150,7 @@ def build_observation_critic(
     observation frame and returns bounded recommendations.
     """
 
-    model: StructuredOutputModel | None = None
+    model: SupportsStructuredOutput | None = None
     model_lock = Lock()
 
     def critique(frame_value: object, _context: object) -> dict[str, object]:
@@ -190,7 +190,11 @@ def build_observation_critic(
                 json.dumps(frame.model_dump(mode="json"), sort_keys=True, ensure_ascii=True),
             ),
         ]
-        result = model.with_structured_output(ObservationCriticOutput).invoke(messages)
+        structured = cast(
+            StructuredOutputRunnable[ObservationCriticOutput],
+            model.with_structured_output(ObservationCriticOutput),
+        )
+        result = structured.invoke(messages)
         if isinstance(result, dict):
             parsed = result.get("parsed", result)
         else:

@@ -9,16 +9,38 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TypedDict, cast
+
+from kogwistar.json_types import JsonObject, JsonValue
 
 from ..parsing import parse_statistics as _parse_statistics
+
+
+class _StageTotals(TypedDict):
+    count: int
+    total_ms: int
+    open_count: int
+    average_ms: int | float
+
+
+def _json_int(value: JsonValue) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def summarize_stage_timings(layer_log: list[Mapping[str, Any]]) -> dict[str, Any]:
+def summarize_stage_timings(layer_log: list[Mapping[str, JsonValue]]) -> JsonObject:
     """Summarize paired ``*_start``/completion events from a parser layer log.
 
     This is deliberately derived from the existing event log so it remains useful
@@ -50,7 +72,7 @@ def summarize_stage_timings(layer_log: list[Mapping[str, Any]]) -> dict[str, Any
     for base, pending in starts.items():
         if pending:
             open_counts[base] = len(pending)
-    stages: dict[str, dict[str, Any]] = {}
+    stages: dict[str, JsonObject] = {}
     for base in sorted(set(durations) | set(open_counts)):
         values = durations.get(base, [])
         stages[base] = {
@@ -65,25 +87,37 @@ def summarize_stage_timings(layer_log: list[Mapping[str, Any]]) -> dict[str, Any
         item for item in ranked
         if not item[0].endswith("_parse") and item[0] not in {"parse", "workflow_layered_parse"}
     ]
-    return {
-        "stage_count": len(stages),
-        "stages": stages,
-        "dominant_stage": ranked[0][0] if ranked and ranked[0][1]["total_ms"] > 0 else None,
-        "dominant_stage_total_ms": ranked[0][1]["total_ms"] if ranked else 0,
-        "dominant_operation_stage": operation_ranked[0][0] if operation_ranked else None,
-        "dominant_operation_stage_total_ms": operation_ranked[0][1]["total_ms"] if operation_ranked else 0,
-    }
+    return cast(
+        JsonObject,
+        {
+            "stage_count": len(stages),
+            "stages": stages,
+            "dominant_stage": ranked[0][0] if ranked and _json_int(ranked[0][1]["total_ms"]) > 0 else None,
+            "dominant_stage_total_ms": _json_int(ranked[0][1]["total_ms"]) if ranked else 0,
+            "dominant_operation_stage": operation_ranked[0][0] if operation_ranked else None,
+            "dominant_operation_stage_total_ms": _json_int(operation_ranked[0][1]["total_ms"]) if operation_ranked else 0,
+        },
+    )
 
 
-def aggregate_stage_timings(summaries: list[Mapping[str, Any]]) -> dict[str, Any]:
+def aggregate_stage_timings(summaries: list[Mapping[str, JsonValue]]) -> JsonObject:
     """Aggregate per-document timing summaries for a run-level report."""
-    stages: dict[str, dict[str, int | float]] = {}
+    stages: dict[str, _StageTotals] = {}
     for summary in summaries:
-        for name, values in dict(summary.get("stages") or {}).items():
-            target = stages.setdefault(name, {"count": 0, "total_ms": 0, "open_count": 0})
-            target["count"] += int(values.get("count") or 0)
-            target["total_ms"] += int(values.get("total_ms") or 0)
-            target["open_count"] += int(values.get("open_count") or 0)
+        raw_stages = summary.get("stages")
+        if not isinstance(raw_stages, Mapping):
+            continue
+        for name, raw_values in raw_stages.items():
+            if not isinstance(name, str) or not isinstance(raw_values, Mapping):
+                continue
+            values = cast(Mapping[str, JsonValue], raw_values)
+            target = stages.setdefault(
+                name,
+                {"count": 0, "total_ms": 0, "open_count": 0, "average_ms": 0},
+            )
+            target["count"] += _json_int(values.get("count"))
+            target["total_ms"] += _json_int(values.get("total_ms"))
+            target["open_count"] += _json_int(values.get("open_count"))
     for values in stages.values():
         values["average_ms"] = round(float(values["total_ms"]) / int(values["count"]), 2) if values["count"] else 0
     ranked = sorted(stages.items(), key=lambda item: (item[1]["total_ms"], item[0]), reverse=True)
@@ -91,13 +125,13 @@ def aggregate_stage_timings(summaries: list[Mapping[str, Any]]) -> dict[str, Any
         item for item in ranked
         if not item[0].endswith("_parse") and item[0] not in {"parse", "workflow_layered_parse"}
     ]
-    return {
-        "stages": dict(ranked),
+    return cast(JsonObject, {
+        "stages": cast(JsonValue, dict(ranked)),
         "dominant_stage": ranked[0][0] if ranked else None,
         "dominant_stage_total_ms": ranked[0][1]["total_ms"] if ranked else 0,
         "dominant_operation_stage": operation_ranked[0][0] if operation_ranked else None,
         "dominant_operation_stage_total_ms": operation_ranked[0][1]["total_ms"] if operation_ranked else 0,
-    }
+    })
 
 
 def _json_default(value: object) -> object:
@@ -121,7 +155,7 @@ def dump_json(obj: object, *, indent: int | None = None) -> str:
     return json.dumps(obj, indent=indent, sort_keys=True, default=_json_default)
 
 
-def append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
+def append_jsonl(path: Path, payload: Mapping[str, JsonValue]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(dump_json(dict(payload)))
@@ -191,7 +225,7 @@ def _compact_live_trace_value(value: object) -> str:
     return text
 
 
-def _decode_payload_json(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _decode_payload_json(payload: Mapping[str, JsonValue]) -> JsonObject:
     raw_payload = payload.get("payload_json")
     if not isinstance(raw_payload, str) or not raw_payload.strip():
         return {}
@@ -202,7 +236,7 @@ def _decode_payload_json(payload: Mapping[str, Any]) -> dict[str, Any]:
     return dict(decoded) if isinstance(decoded, Mapping) else {}
 
 
-def format_live_trace(prefix: str, payload: Mapping[str, Any]) -> str:
+def format_live_trace(prefix: str, payload: Mapping[str, JsonValue]) -> str:
     stage = payload.get("stage") or payload.get("type") or payload.get("phase") or "event"
     parts = [f"[{prefix}] {stage}"]
     decoded_payload = _decode_payload_json(payload)
@@ -219,7 +253,7 @@ class LiveTracePrinter:
     def __init__(self, *, prefix: str = "llm-wiki") -> None:
         self.prefix = prefix
 
-    def emit(self, event: Mapping[str, Any]) -> None:
+    def emit(self, event: Mapping[str, JsonValue]) -> None:
         print(format_live_trace(self.prefix, event), file=sys.stderr, flush=True)
 
 

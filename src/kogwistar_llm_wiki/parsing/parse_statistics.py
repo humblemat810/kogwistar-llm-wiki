@@ -11,9 +11,11 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TypeAlias
+from typing import TypeAlias, cast
 
-JsonObject: TypeAlias = dict[str, object]
+from kogwistar.json_types import JsonValue
+
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +178,19 @@ class ParseStatisticsStore:
                 """,
                 (limit,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [cast(JsonObject, dict(row)) for row in rows]
 
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"\S+", text or ""))
+
+
+def _optional_float(value: JsonValue | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    raise TypeError("parse evaluation numeric values must be scalar")
 
 
 def build_parse_statistics_record(
@@ -197,9 +207,9 @@ def build_parse_statistics_record(
     model: str | None,
     parse_runtime_ms: int,
     semantic_tree: object,
-    graph_payload: Mapping[str, object] | None,
-    diagnostics: Mapping[str, object] | None,
-    evaluation: Mapping[str, object] | None,
+    graph_payload: Mapping[str, JsonValue] | None,
+    diagnostics: Mapping[str, JsonValue] | None,
+    evaluation: Mapping[str, JsonValue] | None,
     status: str,
 ) -> ParseStatisticsRecord:
     from ..diagnostics.debug_helpers import dump_json, now_ms, summarize_semantic_tree
@@ -238,21 +248,13 @@ def build_parse_statistics_record(
         tree_leaf_count=int(tree_summary["tree_leaf_count"]),
         node_count=len(graph_nodes),
         edge_count=len(graph_edges),
-        basic_sense_score=(
-            float(evaluation_dict["basic_sense_score"])
-            if evaluation_dict.get("basic_sense_score") is not None
-            else None
-        ),
+        basic_sense_score=_optional_float(evaluation_dict.get("basic_sense_score")),
         basic_sense_verdict=(
             str(evaluation_dict["basic_sense_verdict"])
             if evaluation_dict.get("basic_sense_verdict") is not None
             else None
         ),
-        coverage_ratio=(
-            float(evaluation_dict["coverage_ratio"])
-            if evaluation_dict.get("coverage_ratio") is not None
-            else None
-        ),
+        coverage_ratio=_optional_float(evaluation_dict.get("coverage_ratio")),
         fallback_used=(
             bool(evaluation_dict["fallback_used"])
             if evaluation_dict.get("fallback_used") is not None
@@ -268,7 +270,7 @@ def build_parse_statistics_record(
     )
 
 
-def _object_records(value: object) -> list[Mapping[str, object]]:
+def _object_records(value: JsonValue | None) -> list[Mapping[str, JsonValue]]:
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, Mapping)]
+    return [cast(Mapping[str, JsonValue], item) for item in value if isinstance(item, Mapping)]

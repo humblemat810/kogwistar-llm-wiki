@@ -6,7 +6,6 @@ import logging
 import os
 import threading
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -17,6 +16,11 @@ from ..daemons.maintenance_budget import MaintenanceBudgetMixin
 from ..maintenance.maintenance_control import (
     MaintenanceControl,
     MaintenanceControlState,
+)
+from ..maintenance.maintenance_strategies import (
+    MaintenanceContextLimitSink,
+    MaintenanceTraceSink,
+    MaintenanceUsageSink,
 )
 from ..models import NamespaceEngines
 from ..otel import LlmWikiTelemetry
@@ -39,7 +43,35 @@ class ProviderResolver(Protocol):
     def __call__(self) -> WorkflowProviderSettings: ...
 
 
-WorkerFactory = Callable[..., MaintenanceWorker]
+
+
+class WorkerFactory(Protocol):
+    """Construct a maintenance worker with injected runtime dependencies."""
+
+    def __call__(
+        self,
+        engines: NamespaceEngines,
+        *,
+        provider_settings: WorkflowProviderSettings,
+        fair_scheduling: bool,
+        trace_sink: MaintenanceTraceSink,
+        usage_sink: MaintenanceUsageSink,
+        context_limit_sink: MaintenanceContextLimitSink,
+    ) -> MaintenanceWorker: ...
+
+
+def _state_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    return 0
+
+
+def _state_strings(value: object) -> set[str]:
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return set()
+    return {str(item) for item in value if str(item).strip()}
 
 
 class MaintenanceDaemonRuntime(MaintenanceBudgetMixin):
@@ -66,13 +98,13 @@ class MaintenanceDaemonRuntime(MaintenanceBudgetMixin):
             Path(data_dir) / "maintenance" / "background_state.json" if data_dir else None
         )
         self._background_state = self._load_background_state()
-        self._last_background_cycle_at_ms = int(self._background_state.get("last_cycle_at_ms") or 0)
-        self._cycle_number = int(self._background_state.get("cycle_number") or 0)
-        self._recent_background_ids = {
-            str(item)
-            for item in (self._background_state.get("recent_candidate_ids") or [])
-            if str(item).strip()
-        }
+        self._last_background_cycle_at_ms = _state_int(
+            self._background_state.get("last_cycle_at_ms")
+        )
+        self._cycle_number = _state_int(self._background_state.get("cycle_number"))
+        self._recent_background_ids = _state_strings(
+            self._background_state.get("recent_candidate_ids")
+        )
         self._budget_state_path = (
             Path(data_dir) / "maintenance" / "budget_state.json" if data_dir else None
         )
@@ -80,11 +112,9 @@ class MaintenanceDaemonRuntime(MaintenanceBudgetMixin):
         self._empty_poll_streak = 0
         self._last_profile_reason = "configured"
         self._active_profile_level: str | None = None
-        self._recorded_usage_attempts: set[str] = {
-            str(item)
-            for item in (self._budget_state.get("usage_attempt_ids") or [])
-            if str(item).strip()
-        }
+        self._recorded_usage_attempts = _state_strings(
+            self._budget_state.get("usage_attempt_ids")
+        )
         self.provider_settings = provider_resolver()
         self.telemetry = LlmWikiTelemetry.from_environment()
         self._worker = worker_factory(

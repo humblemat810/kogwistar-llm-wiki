@@ -870,7 +870,7 @@ class DiagnosticDumper:
                 parser_trace_tails[parser_trace.parent.name] = (
                     parser_trace.read_text(encoding="utf-8").splitlines()[-200:]
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 parser_trace_tails[parser_trace.parent.name] = [
                     f"trace unavailable: {type(exc).__name__}: {exc}"
                 ]
@@ -1439,7 +1439,7 @@ class LongRunHarness:
             outcome = "succeeded"
             try:
                 outcome = self._run_document_workflow(record)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 failure = self._classify_exception(exc, doc_id=record.doc_id, phase="runtime")
                 self._record_failure(failure)
                 self._move_failed_or_quarantine(record, failure)
@@ -1514,7 +1514,7 @@ class LongRunHarness:
                 record = futures[future]
                 try:
                     outcome = future.result()
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     failure = self._classify_exception(exc, doc_id=record.doc_id, phase="runtime")
                     self._record_failure(failure)
                     self._move_failed_or_quarantine(record, failure)
@@ -1913,7 +1913,7 @@ class LongRunHarness:
             entity_ids = [entity.kg_id for entity in snapshot.entities]
             status = "ok"
             error = None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             entity_count = 0
             entity_ids = []
             status = "failed"
@@ -2214,7 +2214,7 @@ class LongRunHarness:
         if summary_path.exists():
             try:
                 summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 summary = {}
             call_count = summary.get("call_count")
             if isinstance(call_count, int) and call_count >= 0:
@@ -3670,7 +3670,7 @@ class LongRunHarness:
                 continue
             try:
                 verified.append(self._verify_promotion_provenance(record))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 missing.append(
                     {
                         "doc_id": record.doc_id,
@@ -4268,14 +4268,14 @@ class LongRunHarness:
         with context:
             try:
                 nodes = engine.read.get_nodes(where=where, limit=10_000)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 nodes = []
                 node_error = f"{type(exc).__name__}: {exc}"
             else:
                 node_error = None
             try:
                 edges = engine.read.get_edges(where=where, limit=10_000)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 edges = []
                 edge_error = f"{type(exc).__name__}: {exc}"
             else:
@@ -4609,11 +4609,11 @@ def test_longrun_doc_profile_token_bounds_are_applied_by_default():
 def _check_ollama_available(config: LongRunConfig) -> tuple[bool, str | None]:
     try:
         import requests
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"requests import failed: {exc}"
     try:
         response = requests.get(f"{config.ollama_base_url}/api/version", timeout=1.5)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"local Ollama is not available at {config.ollama_base_url}: {exc}"
     if not response.ok:
         return False, f"local Ollama is not healthy at {config.ollama_base_url}: {response.status_code}"
@@ -8120,7 +8120,7 @@ def test_longrun_runtime_workflow_ingestion(tmp_path: Path):
         )
         try:
             __import__("langchain_ollama")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             failure = harness._failure_record(
                 doc_id=None,
                 phase="ollama_dependency_check",

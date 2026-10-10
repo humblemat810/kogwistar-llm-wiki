@@ -32,7 +32,6 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-
 MODEL_IDS: dict[str, str] = {
     "all-minilm-l6-v2": "sentence-transformers/all-MiniLM-L6-v2",
     "multilingual-e5-small": "intfloat/multilingual-e5-small",

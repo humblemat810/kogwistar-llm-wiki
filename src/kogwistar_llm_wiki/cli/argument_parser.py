@@ -5,10 +5,11 @@ import os
 from collections.abc import Mapping
 from typing import Protocol
 
+
 class CommandHandler(Protocol):
     """Handle one parsed CLI command."""
 
-    def __call__(self, args: argparse.Namespace, /) -> object: ...
+    def __call__(self, args: argparse.Namespace, /) -> None: ...
 
 
 def build_argument_parser(handlers: Mapping[str, CommandHandler]) -> argparse.ArgumentParser:

@@ -104,7 +104,7 @@ class NamespaceEngines:
             if callable(close):
                 try:
                     close()
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     if first_error is None:
                         first_error = exc
         self._closed = True

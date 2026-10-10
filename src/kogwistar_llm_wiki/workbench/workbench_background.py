@@ -391,7 +391,7 @@ class CodexWorkbenchWorker:
             acknowledged = self.engines.conversation.jobs.mark_done(job.job_id, claim_token=job.claim_token)
             event = "codex_turn_completed" if acknowledged and created else "codex_turn_duplicate_result_ignored"
             self._trace(event, job_id=job.job_id, interaction_id=interaction.interaction_id)
-        except Exception as exc:  # noqa: BLE001 - durable worker reports and retries all handler failures
+        except Exception as exc:
             final_failure = int(job.retry_count) + 1 >= int(job.max_retries)
             owns_claim = not claim_lost.is_set() and self.engines.conversation.jobs.renew_lease(
                 job,

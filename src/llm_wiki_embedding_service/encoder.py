@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from io import BytesIO
-from typing import Any, Protocol
+from typing import Protocol, cast
 
 from llm_wiki_embedding_contract import (
     ContractValidationError,
@@ -35,10 +35,64 @@ class DenseEncoder(Protocol):
     ) -> list[tuple[tuple[float, ...], ...]]: ...
 
 
+class _ModelLike(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+    def eval(self) -> _ModelLike: ...
+    def to(self, device: str) -> _ModelLike: ...
+
+
+class _ProcessorLike(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+
+class _VisionProcessorLike(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> Sequence[object]: ...
+
+
+class _TorchCudaLike(Protocol):
+    def is_available(self) -> bool: ...
+
+
+class _TorchVersionLike(Protocol):
+    cuda: str | None
+
+
+class _TorchLike(Protocol):
+    __version__: str
+    version: _TorchVersionLike
+    cuda: _TorchCudaLike
+
+
+class _TensorLike(Protocol):
+    ndim: int
+    shape: Sequence[int]
+    device: object
+
+    def to(self, device: str) -> _TensorLike: ...
+    def long(self) -> _TensorLike: ...
+    def sum(self, dim: int) -> _TensorLike: ...
+    def clamp_min(self, value: int) -> _TensorLike: ...
+    def __sub__(self, other: int) -> _TensorLike: ...
+    def __getitem__(self, key: object) -> _TensorLike: ...
+    def detach(self) -> _TensorLike: ...
+    def cpu(self) -> _TensorLike: ...
+    def tolist(self) -> Sequence[Sequence[float]]: ...
+
+
 class Qwen3VLDenseEncoder:
     """One dense vector per text, image, or mixed request item."""
 
-    def __init__(self, model: Any, processor: Any, *, profile: EmbeddingProfile, device: str, batch_size: int = 1, vision_processor: Any | None = None, instruction: str) -> None:
+    def __init__(
+        self,
+        model: _ModelLike,
+        processor: _ProcessorLike,
+        *,
+        profile: EmbeddingProfile,
+        device: str,
+        batch_size: int = 1,
+        vision_processor: _VisionProcessorLike | None = None,
+        instruction: str,
+    ) -> None:
         self._model = model
         self._processor = processor
         self._vision_processor = vision_processor
@@ -59,7 +113,7 @@ class Qwen3VLDenseEncoder:
             from transformers import AutoModelForMultimodalLM, AutoProcessor
         except ImportError as exc:
             raise RuntimeError("embedding service requires Torch, Transformers, qwen-vl-utils, and Accelerate") from exc
-        _validate_torch(torch, config)
+        _validate_torch(cast(_TorchLike, torch), config)
         model_source = config.model_path or config.model
         kwargs: dict[str, object] = {"trust_remote_code": True, "revision": config.revision}
         if config.device == "cuda":
@@ -68,7 +122,15 @@ class Qwen3VLDenseEncoder:
             kwargs["torch_dtype"] = torch.float32
         model = AutoModelForMultimodalLM.from_pretrained(model_source, **kwargs).eval()
         processor = AutoProcessor.from_pretrained(model_source, trust_remote_code=True, revision=config.revision, padding_side="right")
-        return cls(model, processor, profile=config.profile, device=config.device, batch_size=config.batch_size, vision_processor=process_vision_info, instruction=config.instruction)
+        return cls(
+            cast(_ModelLike, model),
+            cast(_ProcessorLike, processor),
+            profile=config.profile,
+            device=config.device,
+            batch_size=config.batch_size,
+            vision_processor=cast(_VisionProcessorLike, process_vision_info),
+            instruction=config.instruction,
+        )
 
     def _conversation(self, item: Mapping[str, object], *, value: object | None = None) -> list[dict[str, object]]:
         content: list[dict[str, object]] = []
@@ -80,7 +142,7 @@ class Qwen3VLDenseEncoder:
             raise ContractValidationError("embedding item requires text or asset")
         return [{"role": "system", "content": [{"type": "text", "text": self.instruction}]}, {"role": "user", "content": content}]
 
-    def _prepare(self, conversations: Sequence[list[dict[str, object]]]) -> Any:
+    def _prepare(self, conversations: Sequence[list[dict[str, object]]]) -> object:
         template = getattr(self._processor, "apply_chat_template", None)
         texts = template(conversations, add_generation_prompt=True, tokenize=False) if callable(template) else [str(c) for c in conversations]
         kwargs: dict[str, object] = {"text": texts, "truncation": True, "max_length": self.profile.max_sequence_length, "padding": True, "return_tensors": "pt"}
@@ -91,30 +153,43 @@ class Qwen3VLDenseEncoder:
                 kwargs.update(rest[-1])
         return self._processor(**kwargs)
 
-    def _run(self, inputs: Any) -> list[tuple[tuple[float, ...], ...]]:
+    def _run(self, inputs: object) -> list[tuple[tuple[float, ...], ...]]:
         import torch
         if isinstance(inputs, Mapping):
-            inputs = {key: value.to(self.device) if hasattr(value, "to") else value for key, value in inputs.items()}
+            inputs = {
+                key: cast(_TensorLike, value).to(self.device)
+                if hasattr(value, "to")
+                else value
+                for key, value in inputs.items()
+            }
         elif hasattr(inputs, "to"):
-            inputs = inputs.to(self.device)
+            inputs = cast(_TensorLike, inputs).to(self.device)
         with torch.inference_mode():
             output = getattr(self._model, "model", self._model)(**inputs) if isinstance(inputs, Mapping) else getattr(self._model, "model", self._model)(inputs)
-        values = getattr(output, "embeddings", getattr(output, "last_hidden_state", output))
+        values = cast(
+            _TensorLike,
+            getattr(output, "embeddings", getattr(output, "last_hidden_state", output)),
+        )
         if getattr(values, "ndim", None) == 3:
             mask = inputs.get("attention_mask") if isinstance(inputs, Mapping) else None
             if mask is None:
                 values = values[:, -1, :]
             else:
-                positions = mask.long().sum(dim=1).clamp_min(1) - 1
-                values = values[torch.arange(values.shape[0], device=values.device), positions]
+                typed_mask = cast(_TensorLike, mask)
+                positions = typed_mask.long().sum(dim=1).clamp_min(1) - 1
+                arange = cast(Callable[..., _TensorLike], torch.arange)
+                values = values[arange(values.shape[0], device=str(values.device)), positions]
         if getattr(values, "ndim", None) != 2:
             raise EmbeddingInferenceError("model did not return one dense vector per item")
-        values = torch.nn.functional.normalize(values[..., : self.profile.dimension], p=2, dim=-1).detach().cpu().tolist()
+        normalize = cast(Callable[..., _TensorLike], torch.nn.functional.normalize)
+        values = normalize(
+            values[..., : self.profile.dimension], p=2, dim=-1
+        ).detach().cpu().tolist()
         return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in values]
 
     def encode(self, items: Sequence[Mapping[str, object]]) -> list[tuple[tuple[float, ...], ...]]:
         conversations: list[list[dict[str, object]]] = []
-        owned: list[Any] = []
+        owned: list[object] = []
         try:
             for item in items:
                 asset = item.get("asset")
@@ -142,8 +217,8 @@ class BgeSmallTextEncoder:
 
     def __init__(
         self,
-        model: Any,
-        tokenizer: Any,
+        model: _ModelLike,
+        tokenizer: _ProcessorLike,
         *,
         profile: EmbeddingProfile,
         device: str,
@@ -162,7 +237,7 @@ class BgeSmallTextEncoder:
             from transformers import AutoModel, AutoTokenizer
         except ImportError as exc:
             raise RuntimeError("BGE embedding service requires Torch and Transformers") from exc
-        _validate_torch(torch, config)
+        _validate_torch(cast(_TorchLike, torch), config)
         model_source = config.model_path or config.model
         tokenizer = AutoTokenizer.from_pretrained(
             model_source,
@@ -195,25 +270,29 @@ class BgeSmallTextEncoder:
                 raise ContractValidationError("embedding operation must be query or document")
             texts.append(text)
 
-        encoded: Any = self._tokenizer(
+        encoded = self._tokenizer(
             texts,
             padding=True,
             truncation=True,
             max_length=BGE_SMALL_MAX_SEQUENCE_LENGTH,
             return_tensors="pt",
         )
+        if not isinstance(encoded, Mapping):
+            raise EmbeddingInferenceError("BGE tokenizer returned invalid inputs")
         encoded = {
             key: value.to(self.device) if hasattr(value, "to") else value
             for key, value in encoded.items()
         }
         with torch.inference_mode():
             output = self._model(**encoded)
-        hidden: Any = getattr(output, "last_hidden_state", None)
+        hidden_value = getattr(output, "last_hidden_state", None)
+        hidden = cast(_TensorLike, hidden_value)
         if getattr(hidden, "ndim", None) != 3:
             raise EmbeddingInferenceError("BGE model did not return token hidden states")
         if hidden.shape[-1] != self.profile.dimension:
             raise EmbeddingInferenceError("BGE model output dimension does not match its profile")
-        vectors = torch.nn.functional.normalize(hidden[:, 0, :], p=2, dim=-1).detach().cpu().tolist()
+        normalize = cast(Callable[..., _TensorLike], torch.nn.functional.normalize)
+        vectors = normalize(hidden[:, 0, :], p=2, dim=-1).detach().cpu().tolist()
         if len(vectors) != len(items):
             raise EmbeddingInferenceError("model returned a different number of vectors")
         return [validate_dense_vectors([row], dimension=self.profile.dimension) for row in vectors]
@@ -231,7 +310,7 @@ def build_dense_encoder(config: EmbeddingServiceConfig) -> DenseEncoder:
     return Qwen3VLDenseEncoder.from_pretrained(config)
 
 
-def _validate_torch(torch: Any, config: EmbeddingServiceConfig) -> None:
+def _validate_torch(torch: _TorchLike, config: EmbeddingServiceConfig) -> None:
     version = str(torch.__version__).partition("+")[0]
     if version != "2.8.0":
         raise RuntimeError(f"embedding service requires torch 2.8.0, found {torch.__version__}")

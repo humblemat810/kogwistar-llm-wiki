@@ -14,6 +14,7 @@ from typing import Protocol, cast
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonObject, JsonValue
 from kogwistar.runtime.budget import (
     BudgetEvent,
     BudgetExhaustedError,
@@ -22,6 +23,7 @@ from kogwistar.runtime.budget import (
 from kogwistar.runtime.models import RunSuccess
 from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
+from kogwistar.llm_tasks.providers import StructuredOutputRunnable
 
 from ..configuration.identity import runtime_authority_context
 from ..configuration.workspace import WorkspaceNamespaces
@@ -183,6 +185,12 @@ def _mapping_or_none(value: object) -> Mapping[str, object] | None:
     return value if isinstance(value, Mapping) else None
 
 
+def _json_mapping_or_none(value: object) -> Mapping[str, JsonValue] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[str, JsonValue], value)
+
+
 def _string_items(value: object) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
@@ -294,20 +302,23 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         owner = str(self._maintenance_run_identity(ctx)["maintenance_run_id"])
         now = int(time.time() * 1000)
         expires = now + 180_000
-        updates: list[dict[str, object]] = []
+        updates: list[JsonObject] = []
         for key in keys:
             current = store.get_named_projection(namespace, key)
             if current is not None:
-                current_payload = current.get("payload") or {}
+                raw_current_payload = current.get("payload")
+                current_payload = (
+                    raw_current_payload if isinstance(raw_current_payload, Mapping) else {}
+                )
                 current_owner = str(current_payload.get("owner_run_id") or "")
                 current_expires = _as_int(current_payload.get("expires_at_ms"), 0)
                 if current_owner and current_owner != owner and current_expires > now:
                     return None
-                expected_authoritative = int(current.get("last_authoritative_seq") or 0)
-                expected_materialized = int(current.get("last_materialized_seq") or 0)
+                expected_authoritative = _as_int(current.get("last_authoritative_seq"), 0)
+                expected_materialized = _as_int(current.get("last_materialized_seq"), 0)
             else:
                 expected_authoritative = expected_materialized = None
-            updates.append({
+            updates.append(cast(JsonObject, {
                 "namespace": namespace,
                 "key": key,
                 "payload": {
@@ -322,7 +333,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 "last_materialized_seq": now,
                 "projection_schema_version": 1,
                 "materialization_status": "ready",
-            })
+            }))
         if not store.compare_and_swap_named_projections(updates):
             return None
         return keys
@@ -336,14 +347,18 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         namespace = f"{WorkspaceNamespaces(ctx.workspace_id).maintenance_jobs}:resource_locks"
         owner = str(self._maintenance_run_identity(ctx)["maintenance_run_id"])
         now = int(time.time() * 1000)
-        updates: list[dict[str, object]] = []
+        updates: list[JsonObject] = []
         for key in keys:
             current = store.get_named_projection(namespace, key)
-            if current is None or str((current.get("payload") or {}).get("owner_run_id") or "") != owner:
+            raw_current_payload = current.get("payload") if current is not None else None
+            current_payload = (
+                raw_current_payload if isinstance(raw_current_payload, Mapping) else {}
+            )
+            if current is None or str(current_payload.get("owner_run_id") or "") != owner:
                 continue
-            current_seq = int(current.get("last_authoritative_seq") or 0)
-            current_materialized = int(current.get("last_materialized_seq") or 0)
-            updates.append({
+            current_seq = _as_int(current.get("last_authoritative_seq"), 0)
+            current_materialized = _as_int(current.get("last_materialized_seq"), 0)
+            updates.append(cast(JsonObject, {
                 "namespace": namespace,
                 "key": key,
                 "payload": {
@@ -358,7 +373,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 "last_materialized_seq": now,
                 "projection_schema_version": 1,
                 "materialization_status": "released",
-            })
+            }))
         if updates:
             store.compare_and_swap_named_projections(updates)
 
@@ -418,7 +433,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 )
                 return False
         next_payload["maintenance_context"] = append_maintenance_round(
-            _mapping_or_none(ctx.payload.get("maintenance_context")),
+            _json_mapping_or_none(ctx.payload.get("maintenance_context")),
             round_number=_as_int(ctx.payload.get("maintenance_round"), 0),
             summary=f"Completed maintenance phase: {ctx.maintenance_kind}",
             touched_node_ids=[
@@ -432,7 +447,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 if str(item.get("candidate_id") or "").strip()
             ],
             selection_reasons=[
-                item
+                cast(Mapping[str, JsonValue], item)
                 for item in _mapping_items(ctx.payload.get("maintenance_candidates"))
             ],
         )
@@ -610,7 +625,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 source_cluster_id=None,
                 verification=None,
             )])],
-            metadata={
+            metadata=cast(JsonObject, {
                 "workspace_id": ctx.workspace_id,
                 "source_document_id": decision.source_document_id,
                 "artifact_kind": "maintenance_guard_decision",
@@ -624,7 +639,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 "selection_strategy": ctx.payload.get("selection_strategy"),
                 "maintenance_candidates": list(_mapping_items(ctx.payload.get("maintenance_candidates")))[:24],
                 "created_at_ms": int(time.time() * 1000),
-            },
+            }),
         )
         with _background_namespace(self.engines.conversation, ns.conv_bg):
             if not self.engines.conversation.read.node_exists(ids=[artifact_id]):
@@ -1074,7 +1089,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 patch_id=patch.patch_id,
                 lifecycle=next_payload["crosslink_lifecycle"],
             )
-        except Exception as exc:  # noqa: BLE001 - durable job boundary must record provider/backend failures
+        except Exception as exc:
             if self._claim_lost.is_set():
                 self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_crosslink")
                 return
@@ -1276,7 +1291,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     raise ValueError("group_id values must be unique within a proposal")
                 group_ids.add(group.group_id)
                 groups.append(group)
-            except Exception as exc:  # noqa: BLE001 - isolate one provider group
+            except Exception as exc:
                 malformed_groups.append((raw_group, str(exc)))
         self._trace_crosslink_workflow_stage(
             ctx, "propose", "groups_proposed" if raw_groups else "no_candidate",
@@ -1387,7 +1402,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             )
             try:
                 self._validate_crosslink_authority(ctx, patch)
-            except Exception as exc:  # noqa: BLE001 - isolate one invalid group
+            except Exception as exc:
                 artifact_id = self._persist_crosslink_group_rejection(
                     ctx, stable_group_id, group.model_dump(mode="json"), str(exc)
                 )
@@ -1421,7 +1436,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     explanation="Human review required because the provider-call budget is exhausted.",
                     evidence_ids=tuple(group_evidence),
                 )
-            except Exception as exc:  # noqa: BLE001 - isolate one invalid group
+            except Exception as exc:
                 artifact_id = self._persist_crosslink_group_rejection(
                     ctx, stable_group_id, group.model_dump(mode="json"), str(exc)
                 )
@@ -1579,7 +1594,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     payload=stage_payload,
                     idempotency_key=stage_key,
                 )
-        except Exception as exc:  # noqa: BLE001 - trace persistence must be visible
+        except Exception as exc:
             ctx.payload["maintenance_trace_persistence_failed"] = True
             self._emit_trace(
                 "maintenance_workflow_trace_persistence_failed",
@@ -1710,12 +1725,18 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 CrosslinkProposer,
                 callback,
             )
-            result = callback_fn(projected_evidence, callback_ctx)
+            result = callback_fn(
+                cast(list[Mapping[str, object]], projected_evidence),
+                callback_ctx,
+            )
             return restore_crosslink_response(result, projection)
         from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
 
         model = build_chat_model_for_role("parser", self.provider_settings)
-        structured = model.with_structured_output(CrosslinkProposalResponse)
+        structured = cast(
+            StructuredOutputRunnable[CrosslinkProposalResponse],
+            model.with_structured_output(CrosslinkProposalResponse),
+        )
         prompt = {
             "task": "Propose only evidence-supported semantic links between distinct nodes.",
             "constraints": [
@@ -1768,7 +1789,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
 
         model = build_chat_model_for_role("parser", self.provider_settings)
-        structured = model.with_structured_output(CrosslinkCriticResponse)
+        structured = cast(
+            StructuredOutputRunnable[CrosslinkCriticResponse],
+            model.with_structured_output(CrosslinkCriticResponse),
+        )
         critic_evidence = [CrosslinkEvidence.model_validate(item) for item in evidence]
         neighbor_context = self._crosslink_prompt_context(critic_evidence, ctx)
         projection, projected_evidence, projected_context = project_crosslink_payload(
@@ -2875,7 +2899,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                                 ),
                                 "selection_strategy": str(ctx.payload.get("selection_strategy") or ""),
                                 "maintenance_context": bound_maintenance_context(
-                                    _mapping_or_none(ctx.payload.get("maintenance_context"))
+                                    _json_mapping_or_none(ctx.payload.get("maintenance_context"))
                                 ),
                                 "_deps": runtime_deps,
                             },

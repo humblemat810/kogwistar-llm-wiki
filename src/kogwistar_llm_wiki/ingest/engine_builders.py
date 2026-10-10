@@ -7,15 +7,19 @@ parent pipeline module.
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from kg_doc_parser.workflow_ingest.providers import EmbeddingProviderConfig
-from kogwistar.engine_core import GraphKnowledgeEngine, StorageBackendFactory
+from kogwistar.engine_core import (
+    GraphKnowledgeEngine,
+    StorageBackendFactory,
+)
 from kogwistar.engine_core.embedding_profile import EmbeddingProfile
 from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
+from kogwistar.engine_core.storage_backend import StorageBackend
 from kogwistar.typing_interfaces import EmbeddingFunctionLike
 
 from ..backends import VectorBackendSettings, build_backend_factory
@@ -24,7 +28,6 @@ from ..embeddings.embedding_config_resolver import (
     validate_shared_postgres_embedding_profile,
 )
 from ..models import NamespaceEngines
-
 
 
 class EmbeddingResolver(Protocol):
@@ -51,7 +54,41 @@ class ProfileResolver(Protocol):
     def __call__(self, config: EmbeddingProviderConfig) -> EmbeddingProfile | None: ...
 
 
-GraphEngineFactory = Callable[..., GraphKnowledgeEngine]
+
+
+class GraphEngineFactory(Protocol):
+    """Construct one PostgreSQL graph engine for an application graph space."""
+
+    def __call__(
+        self,
+        persist_directory: Path,
+        *,
+        kg_graph_type: str,
+        embedding_function: EmbeddingFunctionLike,
+        dsn: str,
+        embedding_dim: int,
+        schema: str,
+        embedding_profile: EmbeddingProfile | None = None,
+        embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
+        persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    ) -> GraphKnowledgeEngine: ...
+
+
+class CoreGraphEngineFactory(Protocol):
+    """Construct a core engine after the application has opened its backend."""
+
+    def __call__(
+        self,
+        *,
+        persist_directory: str | None = None,
+        embedding_function: EmbeddingFunctionLike | None = None,
+        kg_graph_type: str = "knowledge",
+        backend: str | StorageBackend | None = None,
+        embedding_profile: EmbeddingProfile | None = None,
+        embedding_profile_mode: str = "enforce",
+        namespace: str = "default",
+        persistence_mode: str = "single_stage",
+    ) -> GraphKnowledgeEngine: ...
 
 
 def _require_profile(profile: EmbeddingProfile | None) -> EmbeddingProfile:
@@ -393,7 +430,7 @@ def _build_postgres_engine(
     embedding_profile: EmbeddingProfile | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
-    graph_engine_factory: GraphEngineFactory = GraphKnowledgeEngine,
+    graph_engine_factory: CoreGraphEngineFactory = GraphKnowledgeEngine,
 ) -> GraphKnowledgeEngine:
     from kogwistar.engine_core.engine_postgres import (
         EnginePostgresConfig,
@@ -413,7 +450,9 @@ def _build_postgres_engine(
         persist_directory=str(persist_directory),
         kg_graph_type=kg_graph_type,
         embedding_function=embedding_function,
-        backend=backend,
+        # The PostgreSQL backend is validated by the core constructor at runtime;
+        # keep this adapter aligned with the constructor's public annotation.
+        backend=cast(StorageBackend, backend),
         embedding_profile=embedding_profile,
         embedding_profile_mode=embedding_profile_mode,
         namespace=kg_graph_type,

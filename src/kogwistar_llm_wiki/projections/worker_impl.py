@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import cast
 
 from kogwistar.engine_core.jobs import JobQueueItem
+from kogwistar.json_types import JsonObject
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -13,6 +15,30 @@ from ..projection import ProjectionManager
 from ..utils import _temporary_namespace
 
 logger = logging.getLogger(__name__)
+
+
+def _string_ids(value: object) -> list[str]:
+    """Decode a persisted JSON list of identifiers without iterating scalars."""
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
+
+
+def _json_int(value: object, default: int = 1) -> int:
+    """Decode a persisted JSON integer while tolerating legacy string values."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
 
 class ProjectionWorker:
     """
@@ -115,14 +141,16 @@ class ProjectionWorker:
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except Exception:  # noqa: BLE001 - corrupt optional payload is treated as empty
+            except Exception:
                 payload = {}
         if not isinstance(payload, dict):
             payload = {}
+        else:
+            payload = {str(key): value for key, value in payload.items()}
 
-        desired_ids = [str(item) for item in payload.get("desired_projected_ids", []) if str(item)]
-        ready_ids = [str(item) for item in payload.get("ready_projected_ids", payload.get("projected_ids", [])) if str(item)]
-        failed_ids = [str(item) for item in payload.get("failed_projected_ids", []) if str(item)]
+        desired_ids = _string_ids(payload.get("desired_projected_ids", []))
+        ready_ids = _string_ids(payload.get("ready_projected_ids", payload.get("projected_ids", [])))
+        failed_ids = _string_ids(payload.get("failed_projected_ids", []))
         if promoted_entity_id not in desired_ids:
             desired_ids.append(promoted_entity_id)
         if status == "ready":
@@ -137,20 +165,20 @@ class ProjectionWorker:
             ready_ids = [item for item in ready_ids if item != promoted_entity_id]
             failed_ids = [item for item in failed_ids if item != promoted_entity_id]
 
-        version = int(payload.get("projection_schema_version", 1) or 1)
+        version = _json_int(payload.get("projection_schema_version", 1) or 1)
         projected_ids = list(ready_ids)
         count = len(projected_ids)
         meta.replace_named_projection(
             namespace=ns.projection_manifest,
             key=workspace_id,
-            payload={
+            payload=cast(JsonObject, {
                 "workspace_id": workspace_id,
                 "desired_projected_ids": desired_ids,
                 "ready_projected_ids": ready_ids,
                 "failed_projected_ids": failed_ids,
                 "projected_ids": projected_ids,
                 "status": status,
-            },
+            }),
             last_authoritative_seq=count,
             last_materialized_seq=count if status == "ready" else max(0, count - 1),
             projection_schema_version=version,
@@ -229,7 +257,7 @@ class ProjectionWorker:
                 summary=f"Projection request {req_node_id} transitioned to {status}",
                 mentions=[Grounding(spans=[span])],
                 properties={},
-                metadata=metadata,
+                metadata=cast(JsonObject, metadata),
                 doc_id=f"conv:{ns.conv_bg}",
                 domain_id=None,
                 canonical_entity_id=None,

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
+
+from kogwistar.json_types import JsonValue
 
 from .options import ComposeOptions
 
+JsonObject = dict[str, JsonValue]
 
-def check_compose_text(text: str) -> dict[str, object]:
+
+def check_compose_text(text: str) -> JsonObject:
     """Perform dependency-free structural checks on generated or hand-written YAML."""
     checks: dict[str, str] = {}
     errors: list[str] = []
@@ -29,7 +34,7 @@ def check_compose_text(text: str) -> dict[str, object]:
         for name in ("LLM_WIKI_MULTIMODAL_MODEL_REVISION", "LLM_WIKI_EMBEDDING_MODEL_REVISION")
     ):
         errors.append("Qwen3-VL embedding requires an immutable model revision")
-    return {"valid": not errors, "errors": errors, "checks": checks}
+    return cast(dict[str, JsonValue], {"valid": not errors, "errors": errors, "checks": checks})
 
 
 def write_compose(

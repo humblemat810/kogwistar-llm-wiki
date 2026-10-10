@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from typing import cast
 from urllib import (
     request as urllib_request,  # noqa: F401 - legacy source-fetch test seam
 )
+
+from kogwistar.json_types import JsonValue
 
 from ..models import IngestPipelineRequest
 from ..otel import LlmWikiTelemetry
@@ -63,12 +66,14 @@ from .read_tools import AgentReadToolsMixin
 from .source_tools import AgentSourceMixin
 from .tool_catalog import AgentToolCatalogMixin
 
+JsonObject = dict[str, JsonValue]
+
 
 @dataclass(frozen=True, slots=True)
 class AgentTurn:
     request_id: str
     model: str
-    response: dict[str, object]
+    response: JsonObject
     status: str = "completed"
 
 
@@ -85,10 +90,10 @@ class AgentGateway(
         self.api = api
         self.telemetry = telemetry or LlmWikiTelemetry.from_environment()
 
-    def ingest(self, arguments: ToolArguments) -> dict[str, object]:
+    def ingest(self, arguments: ToolArguments) -> JsonObject:
         return self._ingest(arguments, reingest=False)
 
-    def reingest(self, arguments: ToolArguments) -> dict[str, object]:
+    def reingest(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         source_uri = str(arguments.get("source_uri") or arguments.get("uri") or "").strip()
         source_document_id = str(arguments.get("source_document_id") or "").strip()
@@ -123,7 +128,7 @@ class AgentGateway(
                     request_arguments[key] = existing_metadata[key]
         return self._ingest(request_arguments, reingest=True)
 
-    def source(self, arguments: ToolArguments) -> dict[str, object]:
+    def source(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         source_uri = str(arguments.get("source_uri") or arguments.get("uri") or "").strip()
         source_document_id = str(arguments.get("source_document_id") or "").strip()
@@ -155,7 +160,7 @@ class AgentGateway(
             )
         jobs = self._maintenance_jobs(workspace_id, source_document_id=source_document_id)
         redacted_metadata = _redact_source_text(dict(source_item["metadata"]))
-        metadata: dict[str, object] = (
+        metadata: JsonObject = (
             {str(key): value for key, value in redacted_metadata.items()}
             if isinstance(redacted_metadata, Mapping)
             else {}
@@ -166,10 +171,10 @@ class AgentGateway(
             source_document_id=source_document_id,
             metadata=metadata,
             request=request,
-            maintenance_jobs=jobs,
+            maintenance_jobs=cast(Sequence[JsonObject], jobs),
         )
         latest_revision = max(revisions, key=lambda node: int((getattr(node, "metadata", {}) or {}).get("created_at_ms") or 0), default=None)
-        return {
+        return cast(JsonObject, {
             "exists": True,
             "workspace_id": workspace_id,
             "source_document_id": source_document_id,
@@ -182,17 +187,17 @@ class AgentGateway(
             "readiness": [_node_json(node, redact_source_text=True) for node in readiness],
             "parse_status": parse_status,
             "maintenance_jobs": jobs,
-        }
+        })
 
     def _parse_status(
         self,
         *,
         workspace_id: str,
         source_document_id: str,
-        metadata: Mapping[str, object],
+        metadata: Mapping[str, JsonValue],
         request: IngestPipelineRequest,
-        maintenance_jobs: list[dict[str, object]] | None = None,
-    ) -> dict[str, object]:
+        maintenance_jobs: Sequence[JsonObject] | None = None,
+    ) -> JsonObject:
         """Expose durable session/view state without exposing raw source bytes."""
 
         revision_id = str(metadata.get("source_revision_id") or "")
@@ -217,11 +222,11 @@ class AgentGateway(
 
         def session_payload(
             stored: tuple[ParseSessionState, Sequence[ParseFrontierItem], int],
-        ) -> dict[str, object]:
+        ) -> JsonObject:
             session, frontier, version = stored
             counts: dict[str, int] = {}
             depth_distribution: dict[str, int] = {}
-            frontier_items: list[dict[str, object]] = []
+            frontier_items: list[JsonObject] = []
             for item in frontier:
                 status = getattr(getattr(item, "status", None), "value", "unknown")
                 counts[status] = counts.get(status, 0) + 1
@@ -247,7 +252,7 @@ class AgentGateway(
                     continue
                 if str(payload.get("parse_session_id") or "") == session.session_id:
                     linked_jobs.append(str(job.get("job_id") or ""))
-            return {
+            return cast(JsonObject, {
                 "session_id": session.session_id,
                 "phase": session.phase.value,
                 "source_revision_id": session.source_revision_id,
@@ -276,7 +281,7 @@ class AgentGateway(
                 "maintenance_job_ids": [job_id for job_id in linked_jobs if job_id],
                 "last_progress_at": session.last_progress_at.isoformat(),
                 "projection_version": version,
-            }
+            })
 
         sessions_payload = [session_payload(row) for row in session_rows]
         generation_rows = ParseGenerationStore(
@@ -290,7 +295,7 @@ class AgentGateway(
             source_document_id,
             fallback_revision_document_id=str(metadata.get("revision_document_id") or ""),
         )
-        return {
+        return cast(JsonObject, {
             "session": sessions_payload[0] if sessions_payload else None,
             "sessions": sessions_payload,
             "generations": [
@@ -314,9 +319,9 @@ class AgentGateway(
                 "member_ids": list(view.member_ids),
                 "is_legacy": view.is_legacy,
             },
-        }
+        })
 
-    def status(self, arguments: ToolArguments) -> dict[str, object]:
+    def status(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         if not workspace_id:
             raise ValueError("status requires workspace_id")
@@ -328,24 +333,24 @@ class AgentGateway(
         maintenance_errors: list[str] = []
         jobs = self._maintenance_jobs(workspace_id, errors=maintenance_errors)
         usage_error: str | None = None
-        usage_snapshot: dict[str, object] | None = None
+        usage_snapshot: JsonObject | None = None
         try:
             snapshot = self.api.pipeline.usage_projection(workspace_id).snapshot()
-            usage_snapshot = snapshot.as_dict() if snapshot is not None else None
-        except Exception as exc:  # noqa: BLE001
+            usage_snapshot = cast(JsonObject, snapshot.as_dict()) if snapshot is not None else None
+        except Exception as exc:
             usage_error = f"{type(exc).__name__}: {exc}"
         source_states: dict[str, int] = {}
         for item in self._source_documents(workspace_id):
             state = str(item["metadata"].get("revision_status") or "registered")
             source_states[state] = source_states.get(state, 0) + 1
-        return {
+        return cast(JsonObject, {
             "workspace_id": workspace_id,
             "health": self.api.readiness(),
             "graph": asdict(report),
             "sources": {"count": len(self._source_documents(workspace_id)), "states": source_states},
             "maintenance": {
                 "available": not maintenance_errors,
-                "counts": _count_job_statuses(jobs),
+                "counts": _count_job_statuses(cast(Sequence[JsonObject], jobs)),
                 "jobs": jobs[:100],
                 "errors": maintenance_errors,
             },
@@ -354,35 +359,35 @@ class AgentGateway(
                 "snapshot": usage_snapshot,
                 "error": usage_error,
             },
-        }
+        })
 
-    def propose(self, arguments: ToolArguments) -> dict[str, object]:
+    def propose(self, arguments: ToolArguments) -> JsonObject:
         validation = self.api.validate_proposal(arguments)
         if not validation.get("accepted"):
-            return validation
+            return cast(JsonObject, validation)
         request = arguments.get("request")
         proposal = arguments.get("proposal")
         if not isinstance(request, Mapping) or not isinstance(proposal, Mapping):
-            return validation
+            return cast(JsonObject, validation)
         workspace_id = str(request.get("workspace_id") or "").strip()
         if not workspace_id:
-            return {**validation, "accepted": False, "reason": "workspace_id_required"}
+            return cast(JsonObject, {**validation, "accepted": False, "reason": "workspace_id_required"})
         interaction = self.api.interactions.persist_proposal(
             workspace_id=workspace_id,
             request=request,
             proposal=proposal,
         )
-        return {
+        return cast(JsonObject, {
             **validation,
             "interaction_id": interaction.interaction_id,
             "status": interaction.status,
             "confirmation_required": True,
-        }
+        })
 
-    def confirm(self, arguments: ToolArguments) -> dict[str, object]:
-        return self.api.confirm_cockpit_proposal(arguments)
+    def confirm(self, arguments: ToolArguments) -> JsonObject:
+        return cast(JsonObject, self.api.confirm_cockpit_proposal(arguments))
 
-    def _ingest(self, arguments: ToolArguments, *, reingest: bool) -> dict[str, object]:
+    def _ingest(self, arguments: ToolArguments, *, reingest: bool) -> JsonObject:
         request = self._source_request(arguments, allow_existing_revision=reingest)
         if reingest and self._load_source_request(
             workspace_id=request.workspace_id,
@@ -390,12 +395,12 @@ class AgentGateway(
         ) is None:
             raise ValueError("reingest source identity could not be resolved")
         artifacts = self.api.pipeline.run(request)
-        return {"status": "reingested" if reingest else "ingested", "request": request.model_dump(dump_format="json"), "artifacts": asdict(artifacts)}
+        return cast(JsonObject, {"status": "reingested" if reingest else "ingested", "request": request.model_dump(dump_format="json"), "artifacts": asdict(artifacts)})
 
-    def _answer(self, payload: Mapping[str, object]) -> dict[str, object]:
+    def _answer(self, payload: Mapping[str, JsonValue]) -> JsonObject:
         request = _request_payload(payload)
         request = _bounded_lens_arguments(request)
-        return self.api.ask(request)
+        return cast(JsonObject, self.api.ask(request))
 
 
 __all__ = ["AgentGateway", "AgentTurn"]

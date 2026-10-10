@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Node
-from kogwistar.logical_refs import logical_ref_from_entity
+from kogwistar.logical_refs import LogicalRef, logical_ref_from_entity
 
 from ..configuration.workspace import GraphSpace, WorkspaceNamespaces
 from ..models import NamespaceEngines
@@ -255,7 +255,7 @@ class GraphSpaceQueryService:
         self,
         *,
         workspace_ns: WorkspaceNamespaces,
-        logical_ref,
+        logical_ref: LogicalRef,
         resolve_mode: str,
     ) -> Node | None:
         if logical_ref.target_kind != "node":

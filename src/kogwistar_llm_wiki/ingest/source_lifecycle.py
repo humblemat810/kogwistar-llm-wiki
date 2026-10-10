@@ -23,7 +23,6 @@ from ..parsing.parse_session_store import (
     ParseSessionStoreConflict,
     parse_session_scope_id,
 )
-from .contracts import IngestPipelineHost
 from ..parsing.parse_views import (
     ParseFrontierItem,
     ParseGeneration,
@@ -36,6 +35,7 @@ from ..parsing.parse_views import (
     parse_session_id,
 )
 from ..utils import _temporary_namespace
+from .contracts import IngestPipelineHost
 
 
 def _metadata_digest_value(digest: dict[str, object] | None) -> str | None:

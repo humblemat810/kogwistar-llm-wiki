@@ -12,11 +12,12 @@ import shutil
 import tarfile
 import tempfile
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from kogwistar.engine_core.event_envelope import EntityEventEnvelope
+from kogwistar.json_types import JsonValue
 
 from ..models import NamespaceEngines
 from ..utils import _temporary_namespace
@@ -54,6 +55,27 @@ from .validation import event_reader as _event_reader
 from .validation import inspect_archive, verify_archive
 from .validation import load_chain as _load_chain
 
+JsonObject = dict[str, JsonValue]
+
+
+def _payload_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _object_items(value: object) -> list[Mapping[str, JsonValue]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
 
 def create_archive(
     engines: NamespaceEngines,
@@ -65,7 +87,7 @@ def create_archive(
     include_backend_snapshot: bool = False,
     require_quiescent: bool = True,
     backend: str | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Create a full or incremental archive at fixed namespace watermarks."""
     if require_quiescent:
         assert_quiescent(engines)
@@ -117,7 +139,7 @@ def create_archive(
                 if expected != end + 1:
                     raise ArchiveError(f"watermark {end} is not fully readable for {spec.namespace!r}")
 
-        artifact_entries: list[dict[str, Any]] = []
+        artifact_entries: list[JsonObject] = []
         if data_dir is not None:
             root = Path(data_dir).expanduser().resolve()
             for source, arcname in _artifact_files(root):
@@ -126,7 +148,7 @@ def create_archive(
                 shutil.copy2(source, target)
                 artifact_entries.append({"path": arcname, "sha256": _sha256_file(target)})
 
-        snapshot_entries: list[dict[str, Any]] = []
+        snapshot_entries: list[JsonObject] = []
         if include_backend_snapshot:
             seen_paths: set[Path] = set()
             for spec in specs:
@@ -190,9 +212,23 @@ def create_archive(
     return manifest
 
 
-def _remap_value(value: Any, *, old_workspace: str, new_workspace: str, key: str | None = None) -> Any:
+def _remap_value(
+    value: JsonValue,
+    *,
+    old_workspace: str,
+    new_workspace: str,
+    key: str | None = None,
+) -> JsonValue:
     if isinstance(value, dict):
-        return {str(k): _remap_value(v, old_workspace=old_workspace, new_workspace=new_workspace, key=str(k)) for k, v in value.items()}
+        return {
+            key: _remap_value(
+                item,
+                old_workspace=old_workspace,
+                new_workspace=new_workspace,
+                key=key,
+            )
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_remap_value(item, old_workspace=old_workspace, new_workspace=new_workspace, key=key) for item in value]
     if isinstance(value, str) and key in {"workspace_id", "workspace", "namespace", "source_namespace", "projection_namespace", "graph_namespace"}:
@@ -205,7 +241,7 @@ def _remap_value(value: Any, *, old_workspace: str, new_workspace: str, key: str
 
 
 def _remapped_event(event: EntityEventEnvelope, *, old_workspace: str, new_workspace: str) -> EntityEventEnvelope:
-    payload = json.loads(event.payload_json)
+    payload = cast(JsonValue, json.loads(event.payload_json))
     payload = _remap_value(payload, old_workspace=old_workspace, new_workspace=new_workspace)
     return EntityEventEnvelope(
         namespace=_remap_namespace(event.namespace, old_workspace=old_workspace, new_workspace=new_workspace),
@@ -267,7 +303,7 @@ def restore_archive(
     _assert_target_empty(target_specs)
 
     if not apply:
-        return RestoreReport(manifest["archive_id"], source_workspace, target_workspace, True, len(events), 0, False)
+        return RestoreReport(str(manifest["archive_id"]), source_workspace, target_workspace, True, len(events), 0, False)
 
     if target_data_dir is not None:
         data_root = Path(target_data_dir).expanduser().resolve()
@@ -277,7 +313,7 @@ def restore_archive(
             archive_manifest = verify_archive(archive_path)
             expected = {
                 str(item["path"]): str(item["sha256"])
-                for item in archive_manifest.get("artifact_entries", [])
+                for item in _object_items(archive_manifest.get("artifact_entries"))
             }
             with tarfile.open(archive_path, "r:gz") as incoming:
                 _restore_artifacts(incoming, data_root, expected, predecessor_entries=previous_artifacts)
@@ -298,7 +334,7 @@ def restore_archive(
         replayed += 1
     # Portable replay always regenerates derived vector/index state.  Workspace
     # remapping is a separate concern from whether those projections are rebuilt.
-    return RestoreReport(manifest["archive_id"], source_workspace, target_workspace, False, len(events), replayed, True)
+    return RestoreReport(str(manifest["archive_id"]), source_workspace, target_workspace, False, len(events), replayed, True)
 
 
 def restore_backend_snapshot(
@@ -308,7 +344,7 @@ def restore_backend_snapshot(
     backend: str,
     embedding_fingerprint: str | None = None,
     apply: bool = False,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Validate, and optionally extract, an exact compatible local snapshot."""
     manifest = verify_archive(archive)
     if manifest.get("archive_kind") != "base":
@@ -318,21 +354,21 @@ def restore_backend_snapshot(
     expected = str(manifest.get("embedding_fingerprint") or "")
     if not embedding_fingerprint or embedding_fingerprint != expected:
         raise ArchiveError("exact embedding_fingerprint is required to restore a backend snapshot")
-    entries = list(manifest.get("backend_snapshot_entries") or [])
+    entries = _object_items(manifest.get("backend_snapshot_entries"))
     if not entries:
         raise ArchiveError("archive does not contain a backend snapshot")
-    if int(manifest.get("archive_format_version", 1)) < 2:
+    if _payload_int(manifest.get("archive_format_version"), 1) < 2:
         raise ArchiveError("legacy snapshots without per-file checksums are not eligible for fast restore")
     target = Path(target_data_dir).expanduser().resolve()
     if target.exists() and any(target.iterdir()):
         raise ArchiveError(f"snapshot restore target is not empty: {target}")
     artifact_expected = {
         str(item["path"]): str(item["sha256"])
-        for item in manifest.get("artifact_entries", [])
+        for item in _object_items(manifest.get("artifact_entries"))
     }
     if not apply:
         return {
-            "archive_id": manifest["archive_id"],
+            "archive_id": str(manifest["archive_id"]),
             "target_data_dir": str(target),
             "backend": backend,
             "embedding_fingerprint": expected,
@@ -366,7 +402,7 @@ def restore_backend_snapshot(
                 destination.write_bytes(source.read())
         _restore_artifacts(incoming, target, artifact_expected)
     return {
-        "archive_id": manifest["archive_id"],
+        "archive_id": str(manifest["archive_id"]),
         "target_data_dir": str(target),
         "backend": backend,
         "embedding_fingerprint": str(manifest.get("embedding_fingerprint") or ""),

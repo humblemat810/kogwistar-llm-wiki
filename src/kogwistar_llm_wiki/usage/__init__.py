@@ -7,11 +7,12 @@ from .provider import (
     extract_provider_usage,
     resolve_token_pricing,
 )
-from .usage_models import UsageMetaStore, UsageProjectionSnapshot
+from .usage_models import UsageEventStore, UsageMetaStore, UsageProjectionSnapshot
 
 __all__ = [
     "ProviderUsageCallback",
     "UsageMetaStore",
+    "UsageEventStore",
     "UsageProjection",
     "UsageProjectionSnapshot",
     "append_usage_event",

@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Literal, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -46,6 +47,37 @@ MIN_VLLM_DIMENSION = 64
 MAX_VLLM_DIMENSION = 2048
 DEFAULT_VLLM_MAX_MODEL_LEN = 8192
 DEFAULT_VLLM_CROP_TOKEN_BUDGET = 7680
+
+
+class VllmTextPart(TypedDict):
+    type: Literal["text"]
+    text: str
+
+
+class VllmImageLocation(TypedDict):
+    url: str
+
+
+class VllmImagePart(TypedDict):
+    type: Literal["image_url"]
+    image_url: VllmImageLocation
+
+
+class VllmVideoLocation(TypedDict):
+    url: str
+
+
+class VllmVideoPart(TypedDict):
+    type: Literal["video_url"]
+    video_url: VllmVideoLocation
+
+
+VllmContentPart = VllmTextPart | VllmImagePart | VllmVideoPart
+
+
+class VllmMessage(TypedDict):
+    role: Literal["system", "user", "assistant"]
+    content: list[VllmContentPart]
 
 
 def _model_family(model: str) -> str:
@@ -140,8 +172,8 @@ def _content_parts(
     resolver: AssetResolver | None,
     *,
     max_image_bytes: int,
-) -> list[dict[str, object]]:
-    parts: list[dict[str, object]] = []
+) -> list[VllmContentPart]:
+    parts: list[VllmContentPart] = []
     if unit.content_ref is not None:
         if resolver is None:
             raise ProjectionIntegrityError(
@@ -167,14 +199,11 @@ def _content_parts(
             raise ProjectionIntegrityError(
                 f"vLLM requires image/video bytes for unit {unit.view_id!r}"
             )
-        parts.append(
-            {
-                "type": "image_url" if content_type.startswith("image/") else "video_url",
-                "image_url" if content_type.startswith("image/") else "video_url": {
-                    "url": f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
-                },
-            }
-        )
+        encoded_url = f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+        if content_type.startswith("image/"):
+            parts.append({"type": "image_url", "image_url": {"url": encoded_url}})
+        else:
+            parts.append({"type": "video_url", "video_url": {"url": encoded_url}})
     if unit.text is not None:
         parts.append({"type": "text", "text": unit.text})
     elif parts:
@@ -271,7 +300,7 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             raise EmbeddingProtocolError("vLLM response must be an object")
         return result
 
-    def _token_count(self, messages: list[dict[str, object]]) -> int:
+    def _token_count(self, messages: list[VllmMessage]) -> int:
         result = self._post_json(
             "/tokenize",
             {
@@ -292,29 +321,27 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
 
     @staticmethod
     def _with_text_prefix(
-        messages: list[dict[str, object]], text_index: int, prefix_length: int
-    ) -> list[dict[str, object]]:
+        messages: list[VllmMessage], text_index: int, prefix_length: int
+    ) -> list[VllmMessage]:
         result = deepcopy(messages)
-        content = result[1].get("content")
-        if not isinstance(content, list):
-            return result
+        content = result[1]["content"]
         text_part = content[text_index]
-        if isinstance(text_part, Mapping):
-            mutable_part = dict(text_part)
-            mutable_part["text"] = str(text_part.get("text", ""))[:prefix_length]
-            content[text_index] = mutable_part
+        if text_part["type"] == "text":
+            content[text_index] = {
+                "type": "text",
+                "text": text_part["text"][:prefix_length],
+            }
         return result
 
-    def _bounded_messages(self, messages: list[dict[str, object]]) -> list[dict[str, object]]:
+    def _bounded_messages(self, messages: list[VllmMessage]) -> list[VllmMessage]:
         count = self._token_count(messages)
         if count <= self.settings.crop_token_budget:
             return messages
-        content = messages[1].get("content")
-        content_parts = content if isinstance(content, list) else []
+        content_parts = messages[1]["content"]
         text_indexes = [
             index
             for index, part in enumerate(content_parts)
-            if isinstance(part, Mapping) and part.get("type") == "text"
+            if part["type"] == "text"
         ]
         if not text_indexes:
             raise ProjectionIntegrityError(
@@ -323,9 +350,9 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             )
         text_index = text_indexes[-1]
         text_part = content_parts[text_index]
-        original = str(text_part.get("text", "")) if isinstance(text_part, Mapping) else ""
+        original = text_part["text"] if text_part["type"] == "text" else ""
         low, high = 0, len(original)
-        best: list[dict[str, object]] | None = None
+        best: list[VllmMessage] | None = None
         while low <= high:
             middle = (low + high) // 2
             candidate = self._with_text_prefix(messages, text_index, middle)
@@ -340,7 +367,7 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             )
         return best
 
-    def _request_unchecked(self, messages: list[dict[str, object]]) -> EmbeddingSet:
+    def _request_unchecked(self, messages: list[VllmMessage]) -> EmbeddingSet:
         payload: dict[str, object] = {
             "model": self.settings.model,
             "encoding_format": "float",
@@ -375,7 +402,7 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             raise EmbeddingProtocolError("vLLM returned a non-finite embedding vector")
         return embedding
 
-    def _request(self, messages: list[dict[str, object]]) -> EmbeddingSet:
+    def _request(self, messages: list[VllmMessage]) -> EmbeddingSet:
         bounded = self._bounded_messages(messages)
         if not self._capabilities_checked:
             self._request_unchecked(
@@ -384,7 +411,7 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
             self._capabilities_checked = True
         return self._request_unchecked(bounded)
 
-    def _messages(self, parts: list[dict[str, object]]) -> list[dict[str, object]]:
+    def _messages(self, parts: list[VllmContentPart]) -> list[VllmMessage]:
         return [
             {"role": "system", "content": [{"type": "text", "text": self.settings.instruction}]},
             {"role": "user", "content": parts},
@@ -393,7 +420,7 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
 
     def _request_many(
         self,
-        messages: Sequence[list[dict[str, object]]],
+        messages: Sequence[list[VllmMessage]],
         *,
         batch_size: int | None,
     ) -> list[EmbeddingSet]:
@@ -437,12 +464,12 @@ class VllmMultimodalEncoder(MultimodalEncoder, MultimodalImageQueryEncoder):
         )
 
     def encode_image_queries(self, images: Sequence[object], *, batch_size: int | None = None) -> Sequence[EmbeddingSet]:
-        messages: list[list[dict[str, object]]] = []
+        messages: list[list[VllmMessage]] = []
         for image in images:
             raw = _asset_bytes(image)
             if len(raw) > self.settings.max_image_bytes:
                 raise ProjectionIntegrityError("image query exceeds the vLLM image byte limit")
-            parts = [{
+            parts: list[VllmContentPart] = [{
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"

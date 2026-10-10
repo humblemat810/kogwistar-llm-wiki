@@ -2,17 +2,33 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import cast
-
 from kogwistar.engine_core import NamedProjectionStore
-from kogwistar.runtime import ProjectionPayload
+from kogwistar.json_types import JsonObject, JsonValue
 
 from .parse_views import ParseFrontierItem, ParseSessionState, SourceRegion
 
 
 class ParseSessionStoreConflict(RuntimeError):
     """Another worker committed this session first."""
+
+
+def _object(value: JsonValue | None) -> JsonObject:
+    return value if isinstance(value, dict) else {}
+
+
+def _sequence(value: JsonValue | None, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def _objects(value: JsonValue | None) -> list[JsonObject]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
 def parse_session_scope_id(region: SourceRegion | None = None) -> str:
@@ -82,8 +98,8 @@ class ParseSessionStore:
             if row is not None:
                 if self.active_session_id(session.source_document_id, scope_id=scope_id) == session.session_id:
                     return
-                expected_authoritative = int(row.get("last_authoritative_seq", 0))
-                expected_materialized = int(row.get("last_materialized_seq", 0))
+                expected_authoritative = _sequence(row.get("last_authoritative_seq"))
+                expected_materialized = _sequence(row.get("last_materialized_seq"))
             else:
                 expected_authoritative = None
                 expected_materialized = None
@@ -113,7 +129,7 @@ class ParseSessionStore:
         payload = row.get("payload")
         if not isinstance(payload, dict):
             raise TypeError("parse session projection payload must be an object")
-        session = ParseSessionState.model_validate(payload.get("session", {}))
+        session = ParseSessionState.model_validate(_object(payload.get("session")))
         if session.workspace_id != self.workspace_id:
             raise ValueError("parse session workspace does not match store workspace")
         if session.session_id != session_id:
@@ -121,10 +137,10 @@ class ParseSessionStore:
         self._validate_session_identity(session)
         frontier = [
             ParseFrontierItem.model_validate(item)
-            for item in payload.get("frontier", [])
+            for item in _objects(payload.get("frontier"))
         ]
         self._validate_frontier(session, frontier)
-        return session, frontier, int(row.get("last_authoritative_seq", 0))
+        return session, frontier, _sequence(row.get("last_authoritative_seq"))
 
     def list_for_source(
         self,
@@ -132,29 +148,23 @@ class ParseSessionStore:
     ) -> list[tuple[ParseSessionState, list[ParseFrontierItem], int]]:
         """List durable sessions for one source using Kogwistar's projection index."""
 
-        list_projections = cast(
-            Callable[[str], list[ProjectionPayload]] | None,
-            getattr(self.metadata, "list_named_projections", None),
-        )
-        if not callable(list_projections):
-            return []
         result: list[tuple[ParseSessionState, list[ParseFrontierItem], int]] = []
-        for row in list_projections(self.namespace):
+        for row in self.metadata.list_named_projections(self.namespace):
             if not str(row.get("key") or "").startswith("parse_session:"):
                 continue
             payload = row.get("payload")
             if not isinstance(payload, dict):
                 continue
-            session = ParseSessionState.model_validate(payload.get("session", {}))
+            session = ParseSessionState.model_validate(_object(payload.get("session")))
             if session.workspace_id != self.workspace_id or session.source_document_id != source_document_id:
                 continue
             self._validate_session_identity(session)
             frontier = [
                 ParseFrontierItem.model_validate(item)
-                for item in payload.get("frontier", [])
+                for item in _objects(payload.get("frontier"))
             ]
             self._validate_frontier(session, frontier)
-            result.append((session, frontier, int(row.get("last_authoritative_seq", 0))))
+            result.append((session, frontier, _sequence(row.get("last_authoritative_seq"))))
         result.sort(key=lambda item: (item[0].last_progress_at, item[0].session_id), reverse=True)
         return result
 
@@ -179,8 +189,8 @@ class ParseSessionStore:
             self._validate_transition(current[0], session)
             next_version = expected_version + 1
             row = self.metadata.get_named_projection(self.namespace, self.key(session.session_id))
-            expected_authoritative = int(row.get("last_authoritative_seq", -1)) if row else -1
-            expected_materialized = int(row.get("last_materialized_seq", -1)) if row else -1
+            expected_authoritative = _sequence(row.get("last_authoritative_seq"), -1) if row else -1
+            expected_materialized = _sequence(row.get("last_materialized_seq"), -1) if row else -1
         payload = {
             "session": session.model_dump(mode="json"),
             "frontier": [item.model_dump(mode="json") for item in frontier],

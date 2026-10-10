@@ -21,8 +21,9 @@ from collections.abc import (
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
+from kogwistar.json_types import JsonValue
 from mcp import types
 from mcp.server.lowlevel import Server
 
@@ -36,12 +37,14 @@ from ..configuration.identity import (
 from ..memory import MemoryRecord
 from .gateway import AgentGateway
 
+JsonObject = dict[str, JsonValue]
+
 _MCP_REQUEST_HEADERS: ContextVar[dict[str, str] | None] = ContextVar(
     "llm_wiki_mcp_request_headers", default=None
 )
 
 
-ASGIMessage = MutableMapping[str, Any]
+ASGIMessage = MutableMapping[str, object]
 
 
 class _ASGIReceive(Protocol):
@@ -55,7 +58,7 @@ class _ASGISend(Protocol):
 class _ASGIApplication(Protocol):
     async def __call__(
         self,
-        scope: MutableMapping[str, Any],
+        scope: MutableMapping[str, object],
         receive: _ASGIReceive,
         send: _ASGISend,
     ) -> None: ...
@@ -95,7 +98,7 @@ def _truthy(value: str) -> bool:
 
 
 def _make_tool(
-    name: str, description: str, input_schema: dict[str, object]
+    name: str, description: str, input_schema: JsonObject
 ) -> types.Tool:
     """Construct a Tool across MCP SDK naming generations.
 
@@ -111,7 +114,7 @@ def _make_tool(
 def _make_call_result(
     *,
     content: list[types.TextContent],
-    structured_content: dict[str, object] | None = None,
+    structured_content: JsonObject | None = None,
     is_error: bool = False,
 ) -> types.CallToolResult:
     """Construct a result without leaking SDK keyword-version details."""
@@ -124,19 +127,19 @@ def _make_call_result(
 
 
 def _object_schema(
-    properties: dict[str, dict[str, object]],
+    properties: dict[str, JsonObject],
     *,
     required: tuple[str, ...] = (),
-) -> dict[str, object]:
-    return {
+) -> JsonObject:
+    return cast(JsonObject, {
         "additionalProperties": False,
         "properties": properties,
         "required": list(required),
         "type": "object",
-    }
+    })
 
 
-def _memory_record_schema() -> dict[str, object]:
+def _memory_record_schema() -> JsonObject:
     """Expose the same nested contract used by memory persistence.
 
     The MCP SDK publishes this schema to clients, but the gateway still
@@ -151,13 +154,13 @@ def _memory_record_schema() -> dict[str, object]:
         definitions = {}
     schema.pop("title", None)
     schema["$defs"] = definitions
-    return schema
+    return cast(JsonObject, schema)
 
 
-def _tool_specs() -> tuple[tuple[str, str, dict[str, object]], ...]:
+def _tool_specs() -> tuple[tuple[str, str, JsonObject], ...]:
     """Return the frozen input contracts emitted by the previous adapter."""
 
-    def string(**extra: object) -> dict[str, object]:
+    def string(**extra: JsonValue) -> JsonObject:
         return {"type": "string", **extra}
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None}
     object_value = {"additionalProperties": True, "type": "object"}
@@ -558,7 +561,7 @@ class AgentMcpServer:
                 params.arguments or {},
                 identity=identity,
             )
-        except Exception as exc:  # noqa: BLE001 - expose failures as tool results
+        except Exception as exc:
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
                 is_error=True,
@@ -577,8 +580,12 @@ class AgentMcpServer:
     ) -> types.CallToolResult:
         try:
             identity = self._authenticate_request()
-            result = self._dispatch(name, arguments, identity=identity)
-        except Exception as exc:  # noqa: BLE001 - expose failures as tool results
+            result = self._dispatch(
+                name,
+                cast(Mapping[str, JsonValue], arguments),
+                identity=identity,
+            )
+        except Exception as exc:
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
                 is_error=True,
@@ -596,7 +603,7 @@ class AgentMcpServer:
         return authenticate_bearer(authorization)
 
     @staticmethod
-    def _headers_from_scope(scope: Mapping[str, Any]) -> dict[str, str]:
+    def _headers_from_scope(scope: Mapping[str, object]) -> dict[str, str]:
         raw_headers = scope.get("headers", ())
         if not isinstance(raw_headers, Sequence):
             return {}
@@ -613,7 +620,7 @@ class AgentMcpServer:
 
     async def _with_request_headers(
         self,
-        scope: Mapping[str, Any],
+        scope: Mapping[str, object],
         operation: Callable[[], Awaitable[None]],
     ) -> None:
         token = _MCP_REQUEST_HEADERS.set(self._headers_from_scope(scope))
@@ -625,10 +632,10 @@ class AgentMcpServer:
     def _dispatch(
         self,
         name: str,
-        arguments: dict[str, object],
+        arguments: Mapping[str, JsonValue],
         *,
         identity: LlmWikiIdentity | None = None,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         """Authorize and dispatch one validated MCP call to the gateway."""
 
         workspace = str(arguments.get("workspace_id") or "").strip() or None
@@ -654,7 +661,7 @@ class AgentMcpServer:
         scope = "read" if name in READ_TOOL_NAMES else "write"
         authorize(identity, workspace_id=workspace, scope=scope)
         with claims_context(identity):
-            return self.gateway.call_mcp_tool(name, arguments)
+            return cast(JsonObject, self.gateway.call_mcp_tool(name, arguments))
 
     async def call_tool(
         self, name: str, arguments: dict[str, object] | None = None
@@ -662,8 +669,11 @@ class AgentMcpServer:
         """Invoke a tool directly for provider-free contract tests."""
 
         try:
-            result = self._dispatch(name, arguments or {})
-        except Exception as exc:  # noqa: BLE001 - MCP tools expose errors as protocol results
+            result = self._dispatch(
+                name,
+                cast(Mapping[str, JsonValue], arguments or {}),
+            )
+        except Exception as exc:
             return _make_call_result(
                 content=[types.TextContent(type="text", text=str(exc))],
                 is_error=True,
@@ -703,7 +713,7 @@ class AgentMcpServer:
                     manager_holder.pop("manager", None)
 
         async def scoped_handler(
-            scope: MutableMapping[str, Any],
+            scope: MutableMapping[str, object],
             receive: _ASGIReceive,
             send: _ASGISend,
         ) -> None:
@@ -741,7 +751,7 @@ class AgentMcpServer:
         transport = SseServerTransport(messages_path)
 
         async def app(
-            scope: MutableMapping[str, Any],
+            scope: MutableMapping[str, object],
             receive: _ASGIReceive,
             send: _ASGISend,
         ) -> None:

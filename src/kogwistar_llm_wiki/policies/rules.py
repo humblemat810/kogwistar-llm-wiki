@@ -13,13 +13,15 @@ from kogwistar.policy import (
     DefaultProjectionEligibilityPolicy,
     DefaultPromotionPolicy,
     DefaultWisdomPolicy,
+    PolicyEntityLike,
     PromotionContext,
     PromotionDecision,
     SourceQueryDecision,
 )
+from kogwistar.json_types import JsonValue
 
 
-def _and_where(*clauses: dict[str, object]) -> dict[str, list[dict[str, object]]]:
+def _and_where(*clauses: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """Build a portable Chroma conjunction for app-owned metadata filters."""
     return {"$and": [dict(clause) for clause in clauses]}
 
@@ -39,7 +41,13 @@ class LlmWikiArtifactTaxonomy:
 class LlmWikiPromotionPolicy:
     default_accept_threshold: float = 0.95
 
-    def decide(self, *, promotion_mode: str, auto_accept_threshold: float, metadata: Mapping[str, object] | None = None) -> PromotionDecision:
+    def decide(
+        self,
+        *,
+        promotion_mode: str,
+        auto_accept_threshold: float,
+        metadata: Mapping[str, JsonValue] | None = None,
+    ) -> PromotionDecision:
         core = DefaultPromotionPolicy(default_accept_threshold=self.default_accept_threshold)
         return core.decide(
             PromotionContext(
@@ -58,7 +66,7 @@ class LlmWikiVisibilityPolicy:
     taxonomy: LlmWikiArtifactTaxonomy = field(default_factory=LlmWikiArtifactTaxonomy)
     _core: DefaultArtifactVisibilityPolicy = field(default_factory=DefaultArtifactVisibilityPolicy)
 
-    def visibility_for(self, metadata: Mapping[str, object]) -> str:
+    def visibility_for(self, metadata: Mapping[str, JsonValue]) -> str:
         meta = dict(metadata or {})
         artifact_kind = str(meta.get("artifact_kind") or "").strip()
         if artifact_kind == self.taxonomy.promoted_knowledge:
@@ -79,7 +87,7 @@ class LlmWikiVisibilityPolicy:
             return "internal" if artifact_kind == self.taxonomy.maintenance_job_request else "wisdom"
         return self._core.visibility_for(meta)
 
-    def is_projection_eligible(self, metadata: Mapping[str, object]) -> bool:
+    def is_projection_eligible(self, metadata: Mapping[str, JsonValue]) -> bool:
         return DefaultProjectionEligibilityPolicy(
             visibility_policy=self,
         ).is_projection_eligible(dict(metadata or {}))
@@ -91,7 +99,7 @@ class LlmWikiDerivedKnowledgePolicy:
     _core: DefaultDerivedKnowledgePolicy = field(default_factory=DefaultDerivedKnowledgePolicy)
 
     def group_key(self, node: Node) -> str:
-        return self._core.group_key(node)
+        return self._core.group_key(cast(PolicyEntityLike, node))
 
     def source_query(self, *, workspace_id: str) -> SourceQueryDecision:
         self._core.source_query(workspace_id=workspace_id)
@@ -210,7 +218,7 @@ class LlmWikiProjectionPolicy:
     """Projection eligibility stays policy-owned instead of namespace-owned."""
     visibility: LlmWikiVisibilityPolicy = field(default_factory=LlmWikiVisibilityPolicy)
 
-    def is_projection_eligible(self, metadata: Mapping[str, object]) -> bool:
+    def is_projection_eligible(self, metadata: Mapping[str, JsonValue]) -> bool:
         return self.visibility.is_projection_eligible(metadata)
 
 

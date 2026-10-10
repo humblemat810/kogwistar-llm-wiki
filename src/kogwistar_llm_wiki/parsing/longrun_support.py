@@ -64,7 +64,7 @@ def close_resources_quietly(*resources: object) -> None:
             continue
         try:
             close()
-        except Exception:  # noqa: BLE001, S112 - cleanup must not mask the original failure
+        except Exception:
             continue
 
 

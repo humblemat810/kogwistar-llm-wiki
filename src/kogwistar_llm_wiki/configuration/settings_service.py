@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol, cast
 
+from kogwistar.json_types import JsonValue
+
 from ..embeddings.multimodal_projection import MultimodalEncoder
 from ..embeddings.multimodal_runtime import (
     configured_embedding_crop_token_budget,
@@ -70,6 +72,7 @@ _DESIRED_KEYS = frozenset({
 })
 _SECRET_WORDS = ("token", "secret", "password", "api_key", "credential")
 _WORKER_PROVIDERS = frozenset({"fake", "ollama", "gemini", "openai", "azure", "azure_openai", "vertex", "router", "llm_router", "codex"})
+JsonObject = dict[str, JsonValue]
 
 
 class SettingsPipelineLike(Protocol):
@@ -93,24 +96,26 @@ class SettingsMemoryLike(Protocol):
     max_recall_records: int
 
 
-def _redact(value: object) -> object:
+def _redact(value: object) -> JsonValue:
     if isinstance(value, Mapping):
-        return {
+        return cast(JsonObject, {
             str(key): ("[redacted]" if any(word in str(key).lower() for word in _SECRET_WORDS) else _redact(item))
             for key, item in value.items()
-        }
+        })
     if isinstance(value, list):
         return [_redact(item) for item in value]
-    return value
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
 
 
-def _object_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
+def _object_mapping(value: object) -> Mapping[str, JsonValue]:
+    return cast(Mapping[str, JsonValue], value) if isinstance(value, Mapping) else {}
 
 
 def _setting_int(value: object, *, name: str) -> int:
     if not isinstance(value, (int, float, str)):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
@@ -127,6 +132,8 @@ class SettingsService:
         "path",
         "pipeline",
     )
+    _runtime_multimodal_enabled: bool | None
+    _runtime_otel_enabled: bool | None
 
     def __init__(
         self,
@@ -145,7 +152,7 @@ class SettingsService:
             Path(data_dir) / "settings" / "desired.json" if data_dir else None
         )
 
-    def _load_desired(self) -> dict[str, object]:
+    def _load_desired(self) -> JsonObject:
         if self.path is None or not self.path.exists():
             return {}
         try:
@@ -157,9 +164,9 @@ class SettingsService:
         values = payload.get("settings", payload)
         if not isinstance(values, dict):
             raise TypeError("desired settings.settings must be a JSON object")
-        return {key: value for key, value in values.items() if key in _DESIRED_KEYS}
+        return cast(JsonObject, {key: value for key, value in values.items() if key in _DESIRED_KEYS})
 
-    def _save_desired(self, desired: Mapping[str, object]) -> None:
+    def _save_desired(self, desired: Mapping[str, JsonValue]) -> None:
         if self.path is None:
             raise RuntimeError("desired settings persistence requires KOGWISTAR_DATA_DIR or LLM_WIKI_SETTINGS_PATH")
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,8 +181,8 @@ class SettingsService:
             if os.path.exists(temp_name):
                 os.unlink(temp_name)
 
-    def _effective_embeddings(self) -> dict[str, object]:
-        result: dict[str, object] = {}
+    def _effective_embeddings(self) -> JsonObject:
+        result: JsonObject = {}
         for space in ("conversation", "workflow", "kg", "wisdom", "derived_knowledge"):
             engine = getattr(self.pipeline.engines, space, None)
             if engine is None:
@@ -201,7 +208,7 @@ class SettingsService:
             }
         return result
 
-    def snapshot(self, *, workspace_id: str = "default") -> dict[str, object]:
+    def snapshot(self, *, workspace_id: str = "default") -> JsonObject:
         parser = resolve_parser_provider_settings().parser
         maintenance = resolve_maintenance_provider_settings().parser
         data_dir = os.getenv("KOGWISTAR_DATA_DIR")
@@ -297,7 +304,7 @@ class SettingsService:
             },
         }
         impact = self._impact(effective, desired)
-        return cast(dict[str, object], _redact({
+        return cast(JsonObject, _redact({
             "version": 1,
             "effective": effective,
             "desired": desired,
@@ -305,7 +312,7 @@ class SettingsService:
             **impact,
         }))
 
-    def health(self, *, workspace_id: str = "default", readiness: Mapping[str, object] | None = None) -> dict[str, object]:
+    def health(self, *, workspace_id: str = "default", readiness: Mapping[str, JsonValue] | None = None) -> JsonObject:
         readiness = dict(readiness or self.pipeline_ready())
         multimodal = getattr(self.pipeline, "multimodal_encoder", None)
         embedding: dict[str, object] = {"state": "disabled"}
@@ -313,11 +320,11 @@ class SettingsService:
             try:
                 probe = multimodal.readiness() if hasattr(multimodal, "readiness") else {"ready": True}
                 embedding = {"state": "up" if probe.get("ready") else "degraded", **probe}
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 embedding = {"state": "unavailable", "reason": str(exc)}
         return {"version": 1, "workspace_id": workspace_id, "state": "up" if readiness.get("ready") else "degraded", "readiness": readiness, "embedding_service": _redact(embedding), "checked_at_ms": int(time.time() * 1000)}
 
-    def update_desired(self, changes: Mapping[str, object], *, workspace_id: str = "default") -> dict[str, object]:
+    def update_desired(self, changes: Mapping[str, JsonValue], *, workspace_id: str = "default") -> JsonObject:
         unknown = sorted(set(changes) - _DESIRED_KEYS)
         if unknown:
             raise ValueError(f"unsupported settings: {', '.join(unknown)}")
@@ -361,7 +368,7 @@ class SettingsService:
                 levels = normalize_profile_ladder(next_desired["maintenance_profile_ladder"])
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"invalid maintenance_profile_ladder: {exc}") from exc
-            next_desired["maintenance_profile_ladder"] = [
+            next_desired["maintenance_profile_ladder"] = cast(JsonValue, [
                 {
                     "name": level.name,
                     "provider": level.provider,
@@ -370,7 +377,7 @@ class SettingsService:
                     "budget": level.budget,
                 }
                 for level in levels
-            ]
+            ])
         if "maintenance_token_budget_rate" in next_desired:
             value = _setting_int(
                 next_desired["maintenance_token_budget_rate"],
@@ -384,7 +391,9 @@ class SettingsService:
                 raise ValueError("maintenance_budget must be an object")
             from ..maintenance.maintenance_profiles import normalize_budget
 
-            next_desired["maintenance_budget"] = normalize_budget(next_desired["maintenance_budget"])
+            next_desired["maintenance_budget"] = cast(
+                JsonValue, normalize_budget(next_desired["maintenance_budget"])
+            )
         if (
             "embedding_max_model_len" in next_desired
             and "embedding_crop_token_budget" in next_desired
@@ -403,7 +412,7 @@ class SettingsService:
         self._save_desired(next_desired)
         return self.snapshot(workspace_id=workspace_id)
 
-    def apply(self, *, workspace_id: str, confirmed: bool) -> dict[str, object]:
+    def apply(self, *, workspace_id: str, confirmed: bool) -> JsonObject:
         if not confirmed:
             return {"status": "confirmation_required", **self.snapshot(workspace_id=workspace_id)}
         snapshot = self.snapshot(workspace_id=workspace_id)
@@ -414,21 +423,22 @@ class SettingsService:
                 return {"status": "rejected", "reason": "opentelemetry_runtime_not_available", **snapshot}
             if telemetry is not None and hasattr(telemetry, "set_enabled"):
                 telemetry.set_enabled(desired["otel_enabled"])
-            self._runtime_otel_enabled = desired["otel_enabled"]
+            self._runtime_otel_enabled = cast(bool, desired["otel_enabled"])
         if isinstance(desired, Mapping) and isinstance(desired.get("multimodal_enabled"), bool):
             if desired["multimodal_enabled"] and self.pipeline.multimodal_encoder is None:
                 return {"status": "rejected", "reason": "multimodal_embedding_service_not_configured", **snapshot}
-            self._runtime_multimodal_enabled = desired["multimodal_enabled"]
+            self._runtime_multimodal_enabled = cast(bool, desired["multimodal_enabled"])
             snapshot = self.snapshot(workspace_id=workspace_id)
-        if self.codex_memory is not None and isinstance(desired, Mapping):
+        memory = self.codex_memory
+        if memory is not None and isinstance(desired, Mapping):
             if isinstance(desired.get("codex_memory_enabled"), bool):
-                self.codex_memory.enabled = desired["codex_memory_enabled"]
+                memory.enabled = cast(bool, desired["codex_memory_enabled"])
             for key, attribute in (
                 ("codex_memory_max_records_per_capture", "max_records_per_capture"),
                 ("codex_memory_max_recall_records", "max_recall_records"),
             ):
                 if key in desired:
-                    setattr(self.codex_memory, attribute, _setting_int(desired[key], name=key))
+                    setattr(memory, attribute, _setting_int(desired[key], name=key))
             snapshot = self.snapshot(workspace_id=workspace_id)
         pending_changes = snapshot.get("pending_changes", [])
         if {"maintenance_enabled", "maintenance_profile", "maintenance_budget"}.intersection(
@@ -439,7 +449,7 @@ class SettingsService:
             return {"status": "staged", "reason": "restart_and_or_reembedding_required", **snapshot}
         return {"status": "applied", "applied_live": ["multimodal_enabled"] if self._runtime_multimodal_enabled is not None else [], **snapshot}
 
-    def pipeline_ready(self) -> dict[str, object]:
+    def pipeline_ready(self) -> JsonObject:
         engines = self.pipeline.engines
         if getattr(engines, "_closed", False):
             return {"ready": False, "reason": "engines_closed"}
@@ -450,7 +460,7 @@ class SettingsService:
         backend = getattr(backend, "backend", None)
         return type(backend).__name__ if backend is not None else "unknown"
 
-    def _components(self, effective: Mapping[str, object]) -> dict[str, object]:
+    def _components(self, effective: Mapping[str, JsonValue]) -> JsonObject:
         multimodal = effective["multimodal"]
         assert isinstance(multimodal, Mapping)
         otel = effective.get("otel", {})
@@ -470,7 +480,7 @@ class SettingsService:
         }
 
     @staticmethod
-    def _impact(effective: Mapping[str, object], desired: Mapping[str, object]) -> dict[str, object]:
+    def _impact(effective: Mapping[str, JsonValue], desired: Mapping[str, JsonValue]) -> JsonObject:
         restart_keys = {"auth_mode", "parser_model", "maintenance_model", "parser_provider", "maintenance_provider", "maintenance_provider_chain", "maintenance_profile_ladder", "parser_base_url", "maintenance_base_url", "embedding_max_model_len", "embedding_crop_token_budget", "maintenance_default_request_max_rounds"}
         parser = _object_mapping(effective.get("parser"))
         maintenance = _object_mapping(effective.get("maintenance"))
@@ -514,4 +524,9 @@ class SettingsService:
             warnings.append("Embedding profile changes require an isolated projection and re-embedding.")
         if {"maintenance_enabled", "maintenance_profile", "maintenance_profile_ladder", "maintenance_budget"}.intersection(pending_changes):
             warnings.append("Maintenance profile changes are applied through the local docker-exec control command.")
-        return {"pending_changes": pending_changes, "restart_required": restart_required, "reembedding_required": reembedding_required, "warnings": warnings}
+        return cast(JsonObject, {
+            "pending_changes": pending_changes,
+            "restart_required": restart_required,
+            "reembedding_required": reembedding_required,
+            "warnings": warnings,
+        })

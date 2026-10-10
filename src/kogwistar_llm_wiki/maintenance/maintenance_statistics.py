@@ -2,6 +2,41 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from typing import TypedDict
+
+
+class MaintenanceDocumentStats(TypedDict):
+    source_document_id: str
+    attempt_count: int
+    completed_count: int
+    suspended_count: int
+    requeued_count: int
+    blocked_count: int
+    failed_count: int
+    duration_ms_total: int
+    duration_ms_max: int
+    operation_categories: dict[str, int]
+    workers: list[str]
+    derived_node_count: int
+    source_node_count: int
+    parse_count: int
+    parse_duration_ms_total: int
+    parsed_node_count: int
+    parsed_edge_count: int
+    llm_call_count: int
+    failure_reasons: dict[str, int]
+    average_duration_ms: float
+
+
+def _int_value(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    return default
 
 
 def operation_category(maintenance_kind: str) -> str:
@@ -28,12 +63,12 @@ def build_maintenance_statistics(
     trace_rows: Iterable[Mapping[str, object]],
 ) -> dict[str, object]:
     """Build a read-side maintenance report from append-only worker traces."""
-    documents: dict[str, dict[str, object]] = {}
+    documents: dict[str, MaintenanceDocumentStats] = {}
     totals = Counter()
     failure_hotspots: Counter[str] = Counter()
     operation_totals: Counter[str] = Counter()
 
-    def document(row: Mapping[str, object]) -> dict[str, object]:
+    def document(row: Mapping[str, object]) -> MaintenanceDocumentStats:
         doc_id = str(row.get("source_document_id") or "unattributed")
         if doc_id not in documents:
             documents[doc_id] = {
@@ -56,6 +91,7 @@ def build_maintenance_statistics(
                 "parsed_edge_count": 0,
                 "llm_call_count": 0,
                 "failure_reasons": {},
+                "average_duration_ms": 0.0,
             }
         return documents[doc_id]
 
@@ -85,7 +121,7 @@ def build_maintenance_statistics(
             totals["attempt_count"] += 1
         elif event == "maintenance_runtime_attempt_complete":
             status = str(row.get("runtime_status") or "unknown")
-            duration = int(row.get("duration_ms") or 0)
+            duration = _int_value(row.get("duration_ms"))
             item["duration_ms_total"] += duration
             item["duration_ms_max"] = max(item["duration_ms_max"], duration)
             item["completed_count"] += int(status in {"success", "succeeded", "completed", "finished"})
@@ -111,20 +147,23 @@ def build_maintenance_statistics(
         elif event == "maintenance_graph_effect":
             operation_counts[category] = int(operation_counts.get(category, 0)) + 1
             operation_totals[category] += 1
-            item["derived_node_count"] += int(row.get("derived_node_count") or 0)
-            item["source_node_count"] += int(row.get("source_node_count") or 0)
-            totals["derived_node_count"] += int(row.get("derived_node_count") or 0)
-            totals["source_node_count"] += int(row.get("source_node_count") or 0)
+            derived_nodes = _int_value(row.get("derived_node_count"))
+            source_nodes = _int_value(row.get("source_node_count"))
+            item["derived_node_count"] += derived_nodes
+            item["source_node_count"] += source_nodes
+            totals["derived_node_count"] += derived_nodes
+            totals["source_node_count"] += source_nodes
         elif event == "maintenance_parse_complete":
             operation_counts[category] = int(operation_counts.get(category, 0)) + 1
             operation_totals[category] += 1
             item["parse_count"] += 1
-            item["parse_duration_ms_total"] += int(row.get("duration_ms") or 0)
-            item["parsed_node_count"] += int(row.get("node_count") or 0)
-            item["parsed_edge_count"] += int(row.get("edge_count") or 0)
-            item["llm_call_count"] += int(row.get("llm_call_count") or 0)
+            item["parse_duration_ms_total"] += _int_value(row.get("duration_ms"))
+            item["parsed_node_count"] += _int_value(row.get("node_count"))
+            item["parsed_edge_count"] += _int_value(row.get("edge_count"))
+            llm_calls = _int_value(row.get("llm_call_count"))
+            item["llm_call_count"] += llm_calls
             totals["parse_count"] += 1
-            totals["llm_call_count"] += int(row.get("llm_call_count") or 0)
+            totals["llm_call_count"] += llm_calls
         elif event == "maintenance_parse_failed":
             operation_counts[category] = int(operation_counts.get(category, 0)) + 1
             operation_totals[category] += 1

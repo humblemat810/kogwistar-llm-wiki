@@ -21,16 +21,15 @@ from __future__ import annotations
 
 import argparse
 import base64
-from hashlib import sha256
 import json
 import math
 import time
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from statistics import median
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-
 
 # A deterministic valid 1x1 PNG keeps image comparisons independent of fixture
 # loading and makes the only changing input dimension the text context.

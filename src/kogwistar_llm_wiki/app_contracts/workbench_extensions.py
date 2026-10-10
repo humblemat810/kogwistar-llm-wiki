@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from typing import Literal, Protocol
 
+from kogwistar.json_types import JsonObject, JsonValue
+
 from ..configuration.identity import LlmWikiIdentity
 
 ExtensionMethod = Literal["GET", "POST"]
@@ -24,7 +26,7 @@ class WorkspaceIdResolver(Protocol):
     def __call__(
         self,
         query: Mapping[str, tuple[str, ...]],
-        payload: Mapping[str, object],
+        payload: JsonObject,
         /,
     ) -> str | None: ...
 
@@ -37,14 +39,14 @@ class WorkbenchExtensionRequest:
     method: ExtensionMethod
     path: str
     query: Mapping[str, tuple[str, ...]]
-    payload: Mapping[str, object]
+    payload: JsonObject
     workspace_id: str | None
     identity: LlmWikiIdentity | None
 
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchExtensionResponse:
-    body: object
+    body: JsonValue
     status: int = 200
     content_type: ExtensionContentType = "application/json"
 
@@ -190,15 +192,15 @@ def load_workbench_extensions(
 __all__ = [
     "WORKBENCH_EXTENSION_ENTRY_POINT_GROUP",
     "ExtensionContentType",
+    "ExtensionHandler",
     "ExtensionMethod",
     "ExtensionScope",
-    "ExtensionHandler",
-    "WorkspaceIdResolver",
     "WorkbenchExtension",
     "WorkbenchExtensionFactory",
     "WorkbenchExtensionRequest",
     "WorkbenchExtensionResponse",
     "WorkbenchExtensionRoute",
+    "WorkspaceIdResolver",
     "index_workbench_extensions",
     "load_workbench_extensions",
 ]

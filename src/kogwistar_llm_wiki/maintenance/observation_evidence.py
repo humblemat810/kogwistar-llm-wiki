@@ -136,7 +136,7 @@ def _entity_spans(entity: object) -> list[dict[str, object]]:
                 data = _mapping(raw_data) if raw_data is not None else _mapping(span)
                 if data:
                     spans.append({key: data.get(key) for key in _SPAN_FIELDS})
-        except Exception:  # noqa: BLE001 - malformed grounding must fail closed
+        except Exception:
             return []
     if spans:
         return spans
@@ -192,7 +192,7 @@ def _verified_span_record(
     try:
         with _temporary_namespace(engine, source_namespace):
             document = engine.read.get_document(document_id)
-    except Exception:  # noqa: BLE001 - any backend miss must fail closed
+    except Exception:
         return _unavailable_record(
             workspace_id=workspace_id,
             namespace=source_namespace,
@@ -392,7 +392,7 @@ def build_authoritative_source_evidence(
             with _temporary_namespace(engine, source_namespace):
                 getter = engine.read.get_edges if target_kind == "edge" else engine.read.get_nodes
                 targets = list(getter(ids=[target_id], limit=1))
-        except Exception:  # noqa: BLE001 - any backend miss must fail closed
+        except Exception:
             targets = []
         if not targets:
             return _unavailable_record(

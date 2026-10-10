@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from typing import cast
 
-from kg_doc_parser.workflow_ingest.semantics import SemanticNode, semantic_tree_to_kge_payload
+from kg_doc_parser.workflow_ingest.semantics import (
+    SemanticNode,
+    semantic_tree_to_kge_payload,
+)
 from kogwistar.engine_core.models import GraphExtractionWithIDs
 from kogwistar.id_provider import stable_id
 

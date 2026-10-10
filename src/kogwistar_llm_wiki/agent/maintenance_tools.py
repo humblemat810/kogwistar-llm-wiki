@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from ..agent.protocol import (
     budgets as _budgets,
@@ -15,11 +16,11 @@ from ..agent.protocol import (
 )
 from ..maintenance.maintenance_control import configured_default_request_max_rounds
 from ..models import IngestPipelineRequest
-from .host import AgentGatewayHost, ToolArguments
+from .host import AgentGatewayHost, JsonObject, SourceDocumentRecord, ToolArguments
 
 
 class AgentMaintenanceToolsMixin(AgentGatewayHost):
-    def maintain(self, arguments: ToolArguments) -> dict[str, object]:
+    def maintain(self, arguments: ToolArguments) -> JsonObject:
         workspace_id = str(arguments.get("workspace_id") or "").strip()
         topic = str(arguments.get("topic") or "").strip()
         objective = str(arguments.get("objective") or arguments.get("policy") or "").strip()
@@ -43,7 +44,7 @@ class AgentMaintenanceToolsMixin(AgentGatewayHost):
         if not isinstance(raw_source_ids, (list, tuple, set, frozenset)):
             raise TypeError("source_document_ids must be a list of IDs")
         source_ids = [str(value) for value in raw_source_ids if str(value).strip()]
-        source_candidates: Sequence[Mapping[str, object]] | None = None
+        source_candidates: Sequence[SourceDocumentRecord] | None = None
         if not source_ids:
             source_candidates = self._source_documents(workspace_id)
             source_ids = self._source_ids_for_topic(
@@ -96,7 +97,7 @@ class AgentMaintenanceToolsMixin(AgentGatewayHost):
                 parse_target=parse_target,
             )
             jobs.append(job_id)
-        return {
+        return cast(JsonObject, {
             "workspace_id": workspace_id,
             "topic": topic,
             "objective": objective,
@@ -104,5 +105,5 @@ class AgentMaintenanceToolsMixin(AgentGatewayHost):
             "job_ids": jobs,
             "budgets": budgets,
             "skipped_source_document_ids": skipped_source_ids,
-        }
+        })
 

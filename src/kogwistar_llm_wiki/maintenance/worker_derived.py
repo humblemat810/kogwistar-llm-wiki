@@ -8,6 +8,8 @@ from typing import cast
 
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
+from kogwistar.json_types import JsonObject
+from kogwistar.maintenance.contracts import BeforeWrite
 from kogwistar.maintenance.models import MaintenanceTemplateResult
 from kogwistar.maintenance.template import run_grouped_maintenance_template
 from kogwistar.runtime.models import RunSuccess, StepRunResult
@@ -51,13 +53,17 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
 
     def _step_distill(self, ctx: StepContext) -> StepRunResult:
         """Aggregate promoted knowledge into derived-knowledge artifacts."""
-        workspace_id = ctx.state_view.get("workspace_id")
+        raw_workspace_id = ctx.state_view.get("workspace_id")
+        workspace_id = raw_workspace_id if isinstance(raw_workspace_id, str) else None
         deps_raw = ctx.state_view.get("_deps")
         if isinstance(deps_raw, dict):
-            engines: NamespaceEngines | None = deps_raw.get("engines")
+            raw_engines = deps_raw.get("engines")
+            engines: NamespaceEngines | None = (
+                raw_engines if isinstance(raw_engines, NamespaceEngines) else None
+            )
             before_write = deps_raw.get("before_authoritative_write")
         else:
-            engines = deps_raw
+            engines = deps_raw if isinstance(deps_raw, NamespaceEngines) else None
             before_write = None
         if not workspace_id or not engines:
             logger.error("Missing workspace_id or engines in distillation step context")
@@ -65,9 +71,10 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
 
         ns = WorkspaceNamespaces(workspace_id)
         maintenance_mode = str(ctx.state_view.get("maintenance_mode") or "request")
+        raw_candidates = ctx.state_view.get("maintenance_candidates")
         selected_ids = {
             str(item.get("candidate_id") or "")
-            for item in (ctx.state_view.get("maintenance_candidates") or [])
+            for item in (raw_candidates if isinstance(raw_candidates, list) else [])
             if isinstance(item, Mapping) and str(item.get("candidate_id") or "").strip()
         }
         derived_policy = cast(LlmWikiDerivedKnowledgePolicy, self.policies.derived_knowledge)
@@ -75,7 +82,10 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         if maintenance_mode == "background":
             if not selected_ids:
                 return RunSuccess(state_update=[("u", {"distillation_complete": True, "candidate_count": 0})])
-            source_where = _and_where(source_where, {"id": {"$in": sorted(selected_ids)}})
+            source_where = _and_where(
+                cast(dict[str, object], source_where),
+                cast(dict[str, object], {"id": {"$in": sorted(selected_ids)}}),
+            )
         with _temporary_namespace(engines.kg, ns.curated_kg_space):
             promoted_nodes = list(engines.kg.read.get_nodes(where=source_where))
 
@@ -130,7 +140,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                     ]
                 ),
             ),
-            before_write=cast(Callable[[str], None], before_write) if callable(before_write) else None,
+            before_write=cast(BeforeWrite[str], before_write) if callable(before_write) else None,
         )
         for result in template_result.grouped_results:
             logger.info(
@@ -164,9 +174,14 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
 
     def _step_check_done(self, ctx: StepContext) -> StepRunResult:
         """Resolver step that cleanly finalizes derived-knowledge maintenance."""
-        workspace_id = ctx.state_view.get("workspace_id")
+        raw_workspace_id = ctx.state_view.get("workspace_id")
+        workspace_id = raw_workspace_id if isinstance(raw_workspace_id, str) else None
         deps_raw = ctx.state_view.get("_deps")
-        engines: NamespaceEngines | None = deps_raw.get("engines") if isinstance(deps_raw, dict) else deps_raw
+        if isinstance(deps_raw, dict):
+            raw_engines = deps_raw.get("engines")
+            engines = raw_engines if isinstance(raw_engines, NamespaceEngines) else None
+        else:
+            engines = deps_raw if isinstance(deps_raw, NamespaceEngines) else None
         if not workspace_id or not engines:
             logger.error("Missing workspace_id or engines in maintenance completion step context")
             return RunSuccess(state_update=[("u", {"error": "Missing context"})])
@@ -193,7 +208,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         for mention in raw_mentions:
             try:
                 mention_key = mention.model_dump_json()
-            except Exception:  # noqa: BLE001 - legacy grounding objects may expose arbitrary serializers
+            except Exception:
                 mention_key = str(mention)
             if mention_key not in seen_mentions:
                 merged_mentions.append(mention)
@@ -214,7 +229,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
             doc_id=None,
             level_from_root=None,
             mentions=merged_mentions,
-            metadata=cast(LlmWikiDerivedKnowledgePolicy, policies.derived_knowledge).build_metadata(
+            metadata=cast(JsonObject, cast(LlmWikiDerivedKnowledgePolicy, policies.derived_knowledge).build_metadata(
                 workspace_id=workspace_id,
                 label=label,
                 source_node_ids=source_node_ids,
@@ -222,7 +237,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                     [*cast(Sequence[Node | str], existing)]
                 ),
                 created_at_ms=created_at_ms,
-            ),
+            )),
         )
 
     def _emit_execution_wisdom_from_history(
@@ -230,7 +245,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         workspace_id: str,
         engines: NamespaceEngines,
         *,
-        before_write: Callable[[object], None] | None = None,
+        before_write: BeforeWrite[object] | None = None,
     ) -> list[str]:
         """Analyze completed execution history and emit execution-derived wisdom."""
         if not workspace_id or not engines:
@@ -293,7 +308,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                         ]
                     )
                 ],
-                metadata=wisdom_policy.build_metadata(
+                metadata=cast(JsonObject, wisdom_policy.build_metadata(
                     workspace_id=workspace_id,
                     step_op=pattern.step_op,
                     failure_count=len(pattern.failure_nodes),
@@ -303,7 +318,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
                     ),
                     created_at_ms=created_at_ms,
                 )
-                | {"label": f"execution_failure_pattern:{pattern.step_op}"},
+                | {"label": f"execution_failure_pattern:{pattern.step_op}"}),
             ),
             before_write=before_write,
         )
@@ -329,7 +344,7 @@ class DerivedMaintenanceWorkerMixin(MaintenanceWorkerLike):
         emitted = self._emit_execution_wisdom_from_history(
             workspace_id,
             engines,
-            before_write=cast(Callable[[object], None], before_write) if callable(before_write) else None,
+            before_write=cast(BeforeWrite[object], before_write) if callable(before_write) else None,
         )
         return RunSuccess(
             state_update=[("u", {"history_wisdom_complete": True, "execution_wisdom_emitted": emitted})]

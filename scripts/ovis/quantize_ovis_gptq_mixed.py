@@ -11,14 +11,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from datasets import Dataset
 from compressed_tensors.offload.convert.from_accelerate import from_accelerate
+from datasets import Dataset
 from llmcompressor import oneshot
 from transformers import AutoProcessor
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
     Qwen2_5OmniForConditionalGeneration,
 )
-
 
 TEXTS = [
     "A document describes a graph of entities and relations.",

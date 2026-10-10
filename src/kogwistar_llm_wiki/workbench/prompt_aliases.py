@@ -12,7 +12,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol, cast
 
 from kogwistar.engine_core.utils import AliasBook
 
@@ -31,6 +31,41 @@ _EDGE_KEYS = frozenset({
 
 class PromptAliasError(ValueError):
     """Raised when a provider returns an invalid prompt alias."""
+
+
+class CockpitActionLike(Protocol):
+    """Typed surface required to restore a model-facing cockpit action."""
+
+    def model_dump(self, *, mode: str) -> dict[str, object]: ...
+
+
+class CockpitActionFactory(Protocol):
+    """Pydantic-like class surface used after alias restoration."""
+
+    @classmethod
+    def model_validate(cls, value: Mapping[str, object]) -> CockpitActionLike: ...
+
+
+class ModelDumpLike(Protocol):
+    def model_dump(self, *, mode: str) -> dict[str, object]: ...
+
+
+def _items(value: object) -> Sequence[object]:
+    if isinstance(value, (list, tuple)):
+        return value
+    return ()
+
+
+def _string_items(value: object) -> list[str]:
+    return [str(item) for item in _items(value) if item]
+
+
+def _dict_items(value: object) -> list[dict[str, object]]:
+    return [item for item in _items(value) if isinstance(item, dict)]
+
+
+def _object_mapping(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _canonical_json(value: object) -> str:
@@ -91,30 +126,30 @@ def _collect_ids(value: object, *, nodes: set[str], edges: set[str], key: str | 
 def _collect_snapshot_ids(canonical: Mapping[str, object]) -> tuple[set[str], set[str]]:
     nodes: set[str] = set()
     edges: set[str] = set()
-    for item in canonical.get("nodes", ()):
+    for item in _items(canonical.get("nodes")):
         if isinstance(item, Mapping) and item.get("id"):
             nodes.add(str(item["id"]))
     for collection_name in ("edges", "hyperedges"):
-        for item in canonical.get(collection_name, ()):
+        for item in _items(canonical.get(collection_name)):
             if not isinstance(item, Mapping):
                 continue
             if item.get("id"):
                 edges.add(str(item["id"]))
-            nodes.update(str(value) for value in item.get("source_ids", ()) if value)
-            nodes.update(str(value) for value in item.get("target_ids", ()) if value)
-            edges.update(str(value) for value in item.get("source_edge_ids", ()) if value)
-            edges.update(str(value) for value in item.get("target_edge_ids", ()) if value)
-    for item in canonical.get("participations", ()):
+            nodes.update(_string_items(item.get("source_ids")))
+            nodes.update(_string_items(item.get("target_ids")))
+            edges.update(_string_items(item.get("source_edge_ids")))
+            edges.update(_string_items(item.get("target_edge_ids")))
+    for item in _items(canonical.get("participations")):
         if isinstance(item, Mapping):
             if item.get("node_id"):
                 nodes.add(str(item["node_id"]))
             if item.get("edge_id"):
                 edges.add(str(item["edge_id"]))
     for collection_name in ("anchor_explanations", "selection_explanations"):
-        for item in canonical.get(collection_name, ()):
+        for item in _items(canonical.get(collection_name)):
             if isinstance(item, Mapping) and item.get("node_id"):
                 nodes.add(str(item["node_id"]))
-    for item in canonical.get("flat_hits", ()):
+    for item in _items(canonical.get("flat_hits")):
         if isinstance(item, Mapping):
             if item.get("node_id"):
                 nodes.add(str(item["node_id"]))
@@ -126,40 +161,36 @@ def _collect_snapshot_ids(canonical: Mapping[str, object]) -> tuple[set[str], se
 
 def _project_snapshot(book: AliasBook, canonical: Mapping[str, object]) -> dict[str, object]:
     projected = copy.deepcopy(dict(canonical))
-    for item in projected.get("nodes", ()):
+    for item in _dict_items(projected.get("nodes")):
         if isinstance(item, dict) and item.get("id"):
             item["id"] = book.alias_for_node(str(item["id"]))
     for collection_name in ("edges", "hyperedges"):
-        for item in projected.get(collection_name, ()):
-            if not isinstance(item, dict):
-                continue
+        for item in _dict_items(projected.get(collection_name)):
             if item.get("id"):
                 item["id"] = book.alias_for_edge(str(item["id"]))
-            item["source_ids"] = [book.alias_for_node(str(value)) for value in item.get("source_ids", ())]
-            item["target_ids"] = [book.alias_for_node(str(value)) for value in item.get("target_ids", ())]
+            item["source_ids"] = [book.alias_for_node(str(value)) for value in _items(item.get("source_ids"))]
+            item["target_ids"] = [book.alias_for_node(str(value)) for value in _items(item.get("target_ids"))]
             for field in ("source_edge_ids", "target_edge_ids"):
                 if field in item:
-                    item[field] = [book.alias_for_edge(str(value)) for value in item.get(field, ())]
-    for item in projected.get("participations", ()):
-        if isinstance(item, dict):
-            if item.get("node_id"):
-                item["node_id"] = book.alias_for_node(str(item["node_id"]))
-            if item.get("edge_id"):
-                item["edge_id"] = book.alias_for_edge(str(item["edge_id"]))
+                    item[field] = [book.alias_for_edge(str(value)) for value in _items(item.get(field))]
+    for item in _dict_items(projected.get("participations")):
+        if item.get("node_id"):
+            item["node_id"] = book.alias_for_node(str(item["node_id"]))
+        if item.get("edge_id"):
+            item["edge_id"] = book.alias_for_edge(str(item["edge_id"]))
     for collection_name in ("anchor_explanations", "selection_explanations"):
-        for item in projected.get(collection_name, ()):
-            if isinstance(item, dict) and item.get("node_id"):
-                item["node_id"] = book.alias_for_node(str(item["node_id"]))
-    for item in projected.get("flat_hits", ()):
-        if isinstance(item, dict):
+        for item in _dict_items(projected.get(collection_name)):
             if item.get("node_id"):
                 item["node_id"] = book.alias_for_node(str(item["node_id"]))
-            if item.get("edge_id"):
-                item["edge_id"] = book.alias_for_edge(str(item["edge_id"]))
+    for item in _dict_items(projected.get("flat_hits")):
+        if item.get("node_id"):
+            item["node_id"] = book.alias_for_node(str(item["node_id"]))
+        if item.get("edge_id"):
+            item["edge_id"] = book.alias_for_edge(str(item["edge_id"]))
     if isinstance(projected.get("observations"), list):
         projected["observations"] = [
             _project_value(book, None, observation)
-            for observation in projected["observations"]
+            for observation in _items(projected["observations"])
         ]
     return projected
 
@@ -167,46 +198,44 @@ def _project_snapshot(book: AliasBook, canonical: Mapping[str, object]) -> dict[
 def _collect_crosslink_ids(canonical: Mapping[str, object]) -> tuple[set[str], set[str]]:
     nodes: set[str] = set()
     edges: set[str] = set()
-    for item in canonical.get("evidence", ()):
+    for item in _items(canonical.get("evidence")):
         if isinstance(item, Mapping) and item.get("node_id"):
             nodes.add(str(item["node_id"]))
     context = canonical.get("neighbor_context")
     if isinstance(context, Mapping):
-        for item in context.get("nodes", ()):
+        for item in _items(context.get("nodes")):
             if isinstance(item, Mapping) and (item.get("node_id") or item.get("id")):
                 nodes.add(str(item.get("node_id") or item.get("id")))
-        for item in context.get("edges", ()):
+        for item in _items(context.get("edges")):
             if not isinstance(item, Mapping):
                 continue
             if item.get("edge_id") or item.get("id"):
                 edges.add(str(item.get("edge_id") or item.get("id")))
-            nodes.update(str(value) for value in item.get("source_ids", ()) if value)
-            nodes.update(str(value) for value in item.get("target_ids", ()) if value)
+            nodes.update(_string_items(item.get("source_ids")))
+            nodes.update(_string_items(item.get("target_ids")))
     return nodes, edges
 
 
 def _project_crosslink(book: AliasBook, canonical: Mapping[str, object]) -> dict[str, object]:
     projected = copy.deepcopy(dict(canonical))
-    for item in projected.get("evidence", ()):
-        if isinstance(item, dict) and item.get("node_id"):
+    for item in _dict_items(projected.get("evidence")):
+        if item.get("node_id"):
             item["node_id"] = book.alias_for_node(str(item["node_id"]))
     context = projected.get("neighbor_context")
     if isinstance(context, dict):
-        for item in context.get("nodes", ()):
-            if isinstance(item, dict) and item.get("node_id"):
+        for item in _dict_items(context.get("nodes")):
+            if item.get("node_id"):
                 item["node_id"] = book.alias_for_node(str(item["node_id"]))
-        for item in context.get("edges", ()):
-            if not isinstance(item, dict):
-                continue
+        for item in _dict_items(context.get("edges")):
             if item.get("edge_id"):
                 item["edge_id"] = book.alias_for_edge(str(item["edge_id"]))
             elif item.get("id"):
                 item["id"] = book.alias_for_edge(str(item["id"]))
-            item["source_ids"] = [book.alias_for_node(str(value)) for value in item.get("source_ids", ())]
-            item["target_ids"] = [book.alias_for_node(str(value)) for value in item.get("target_ids", ())]
+            item["source_ids"] = [book.alias_for_node(str(value)) for value in _items(item.get("source_ids"))]
+            item["target_ids"] = [book.alias_for_node(str(value)) for value in _items(item.get("target_ids"))]
             for field in ("source_edge_ids", "target_edge_ids"):
                 if field in item:
-                    item[field] = [book.alias_for_edge(str(value)) for value in item.get(field, ())]
+                    item[field] = [book.alias_for_edge(str(value)) for value in _items(item.get(field))]
     return projected
 
 
@@ -226,12 +255,15 @@ class PromptAliasProjection:
         observations: Sequence[object] = (),
     ) -> PromptAliasProjection:
         canonical = snapshot.to_dict()
+        canonical_observations = _items(canonical.get("observations"))
         for observation in observations:
             if hasattr(observation, "model_dump"):
-                canonical_observation = observation.model_dump(mode="json")
+                canonical_observation = cast(ModelDumpLike, observation).model_dump(mode="json")
             else:
                 canonical_observation = observation
-            canonical.setdefault("observations", []).append(canonical_observation)
+            canonical_observations = [*canonical_observations, canonical_observation]
+        if canonical_observations:
+            canonical["observations"] = canonical_observations
         nodes, edges = _collect_snapshot_ids(canonical)
         book = AliasBook.deterministic(sorted(nodes), sorted(edges))
         projected = _project_snapshot(book, canonical)
@@ -280,47 +312,49 @@ class PromptAliasProjection:
         }
 
 
-def restore_cockpit_action(action: Any, projection: PromptAliasProjection) -> Any:
+def restore_cockpit_action(
+    action: CockpitActionLike,
+    projection: PromptAliasProjection,
+) -> CockpitActionLike:
     """Restore graph references in a typed cockpit action before host validation."""
     restored = action.model_dump(mode="python")
-    restored["entity_ids"] = [projection.resolve_any(value) for value in restored.get("entity_ids", [])]
+    restored["entity_ids"] = [projection.resolve_any(value) for value in _string_items(restored.get("entity_ids"))]
     restored["cited_entity_ids"] = [
-        projection.resolve_any(value) for value in restored.get("cited_entity_ids", [])
+        projection.resolve_any(value) for value in _string_items(restored.get("cited_entity_ids"))
     ]
     patch = restored.get("patch")
     if isinstance(patch, Mapping):
         patch = copy.deepcopy(dict(patch))
-        for operation in patch.get("operations", []):
-            if not isinstance(operation, dict):
-                continue
+        for operation in _dict_items(patch.get("operations")):
             raw_kind = operation.get("kind")
             kind = str(getattr(raw_kind, "value", raw_kind) or "")
             if operation.get("from_node_id"):
-                operation["from_node_id"] = projection.resolve_node(operation["from_node_id"])
+                operation["from_node_id"] = projection.resolve_node(str(operation["from_node_id"]))
             if operation.get("to_node_id"):
-                operation["to_node_id"] = projection.resolve_node(operation["to_node_id"])
+                operation["to_node_id"] = projection.resolve_node(str(operation["to_node_id"]))
             if operation.get("supersedes_ids"):
                 operation["supersedes_ids"] = [
-                    projection.resolve_edge(value) for value in operation["supersedes_ids"]
+                    projection.resolve_edge(value) for value in _string_items(operation["supersedes_ids"])
                 ]
             if kind == "ADD_NODE":
                 node_id = operation.get("node_id")
                 if node_id and not str(node_id).startswith("nn:"):
-                    operation["node_id"] = projection.resolve_node(operation["node_id"])
+                    operation["node_id"] = projection.resolve_node(str(operation["node_id"]))
             elif kind == "ADD_EDGE":
                 edge_id = operation.get("edge_id")
                 if edge_id and not str(edge_id).startswith("ne:"):
-                    operation["edge_id"] = projection.resolve_edge(operation["edge_id"])
+                    operation["edge_id"] = projection.resolve_edge(str(operation["edge_id"]))
             elif kind == "TOMBSTONE_NODE":
                 for field in ("target_id", "node_id"):
                     if operation.get(field):
-                        operation[field] = projection.resolve_node(operation[field])
+                        operation[field] = projection.resolve_node(str(operation[field]))
             elif kind == "TOMBSTONE_EDGE":
                 for field in ("target_id", "edge_id"):
                     if operation.get(field):
-                        operation[field] = projection.resolve_edge(operation[field])
+                        operation[field] = projection.resolve_edge(str(operation[field]))
         restored["patch"] = patch
-    return action.__class__.model_validate(restored)
+    factory = cast(CockpitActionFactory, type(action))
+    return factory.model_validate(restored)
 
 
 def project_crosslink_payload(
@@ -344,8 +378,8 @@ def project_crosslink_payload(
     )
     return (
         projection,
-        list(projected.get("evidence", [])),
-        dict(projected.get("neighbor_context", {})),
+        _dict_items(projected.get("evidence")),
+        _object_mapping(projected.get("neighbor_context")),
     )
 
 
@@ -354,18 +388,17 @@ def restore_crosslink_response(
 ) -> dict[str, object]:
     """Restore only graph references in a provider response."""
     restored = copy.deepcopy(dict(response))
-    for group in restored.get("groups", []):
-        if not isinstance(group, dict):
-            continue
-        for operation in group.get("operations", []):
-            if isinstance(operation, dict) and operation.get("supersedes_edge_id"):
+    for group in _dict_items(restored.get("groups")):
+        for operation in _dict_items(group.get("operations")):
+            if operation.get("supersedes_edge_id"):
                 operation["supersedes_edge_id"] = projection.resolve_edge(
-                    operation["supersedes_edge_id"]
+                    str(operation["supersedes_edge_id"])
                 )
     return restored
 
 
 __all__ = [
+    "CockpitActionLike",
     "PromptAliasError",
     "PromptAliasProjection",
     "project_crosslink_payload",
