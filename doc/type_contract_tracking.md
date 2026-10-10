@@ -140,7 +140,7 @@ Current production-source annotation snapshot (`ruff check kogwistar --select AN
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 0 | strict-ANN clean; remote CI pending |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 0 | strict-ANN clean; required remote matrix green for `8d24394` |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
@@ -173,8 +173,8 @@ regenerated.
   not a passing runtime gate; optional backend fixtures and full CI remain
   separately unverified.
 The latest runtime, maintenance, ontology, PostgreSQL, and chat API slices are clean; the remaining
-  work is full runtime/CI verification and legacy Ruff cleanup, not Pyright
-  diagnostics.
+work is downstream runtime/CI verification and protocol review, not Pyright
+diagnostics.
   The conversation
   resolver, cache-wrapper, orchestration, retrieval, agentic-answering, and
   service slices are each measured at `0` Pyright errors and `0` warnings;
@@ -201,13 +201,18 @@ The latest runtime, maintenance, ontology, PostgreSQL, and chat API slices are c
 
 ## Current Exact-SHA Gate
 
-- Kogwistar `33a9cc4` is pushed to `feat/stack-type-contracts`; exact-SHA
-  GitHub Actions run `38013521822` is in progress. No remote success is
-  claimed until it reaches a terminal result.
-- No remote success is
-  claimed until its Python matrix reaches a terminal result.
+- Kogwistar `8d24394` is pushed to `feat/stack-type-contracts`; exact-SHA
+  GitHub Actions run `38018175109` is terminal-green for the required CPython,
+  PyPy 3.11, lint, Rust, native-wheel, and SQLite checks. The optional PyPy
+  3.12 beta check failed and remains non-blocking.
+- KG Doc Parser `a72abd3` has a fresh local full-source Pyright result of zero,
+  but no terminal exact-SHA GitHub result is recorded yet.
+- LLM-Wiki `365c195` has a fresh local full-source Pyright result of zero and
+  its focused maintenance tests pass, but its previous PR is closed and this
+  SHA has no GitHub checks. A new PR or manual workflow dispatch is required.
 - Fresh local Pyright is clean across Core (`276` files), KG Doc Parser
-  (`40` files), and LLM-Wiki (`181` files).
+  (`40` files), and LLM-Wiki (`181` files); strict ANN is clean in all three
+  production source scopes.
 
 ## Remote Verification Status
 
