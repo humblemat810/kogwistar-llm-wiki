@@ -9,7 +9,7 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `dc31a1e` (Core `main` merged at `e9ade29`) |
+| `kogwistar` | `feat/stack-type-contracts` | `15c88da` (rebased onto merged Core `main` at `e9ade29`) |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be75812` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `07b7d85` |
 
@@ -20,8 +20,8 @@ green:
 
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
-| `kogwistar` at merged `main` `e9ade29` plus branch-only `dc31a1e` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; ContextCost metadata slice 6 passed; branch-only commit is not part of merged `main` | merged PR #54 run `37915006232` failed its required matrix; public job pages expose only exit codes, so the underlying failure is not yet proven |
-| `kg-doc-parser` at `be75812` | source Pyright 0 errors/0 warnings; strict ANN 0; SplitPage JSON contract narrowed; resolver/CLI slice 23 passed with 2 Chroma-dependent tests deselected; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
+| `kogwistar` at rebased `15c88da` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; ContextCost metadata slice 6 passed | branch was rebased onto merged `main` and force-pushed; no Actions run for `15c88da` was visible yet when recorded |
+| `kg-doc-parser` at `be75812` | source Pyright 0 errors/0 warnings; strict ANN 0; selected deterministic ingest suite 77 passed, 80 deselected, 32 warnings in 14:57 | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
 | `kogwistar-llm-wiki` at `07b7d85` | configured source Pyright 0 errors/0 warnings across 181 files; strict Ruff `E4,E7,E9,F` passes; embedding-service PyPy regression tests 14 passed | exact-SHA CI run `38043295814` passed on CPython 3.12-3.14 and PyPy 3.11; container smoke `38043295779`, slot benchmarks `38043295786`, and optional PyPy 3.12 beta `38043295796` also passed |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
@@ -127,12 +127,12 @@ the maintenance protocol with Core's `JsonValue` lifecycle contract.
 
 ## Remaining Work
 
-- Core PR #54 is merged at `e9ade29`; its required matrix run `37915006232`
-  was not green. GitHub's public job pages expose only exit codes without the
-  authenticated logs, so the failed reason is not yet proven from this
-  workspace.
-- The Core feature branch has one post-merge commit (`dc31a1e`) and must not
-  be used as the downstream pin until its own CI is independently green.
+- Core PR #54 is merged at `e9ade29`. The follow-up Core branch is now rebased
+  onto that merge as `15c88da`; downstream pins continue to use the merged
+  release/main revision, not the follow-up feature branch.
+- The parser feature branch has a passing local deterministic ingest suite, but
+  its old PR is closed and no remote run exists for the current exact SHA. A
+  new PR or workflow dispatch is required for remote verification.
 - Run or confirm the full downstream CI gates after the merged Core revision
   is available to the parser and LLM-Wiki branches.
 - The latest root compatibility fix is `07b7d85`; its exact-SHA CI and PyPy
