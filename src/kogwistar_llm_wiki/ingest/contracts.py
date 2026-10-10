@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -60,16 +60,14 @@ class ParseSourceResult(Protocol):
     def semantic_tree(self) -> SemanticTreeLike: ...
 
 
-class ParserCallable(Protocol):
-    """Invoke a parser through its keyword-compatible ingestion boundary.
+ParserCallable = Callable[..., ParseSourceResult]
+"""Signature-adaptive parser boundary.
 
-    ``source_parsing`` supports older parser implementations by inspecting
-    their signatures before supplying optional keywords.  The protocol keeps
-    that runtime compatibility while documenting the value contract and
-    avoiding an unbounded ``Callable[..., ...]`` surface.
-    """
-
-    def __call__(self, **kwargs: object) -> ParseSourceResult: ...
+``source_parsing`` inspects parser signatures before supplying optional
+keywords, so concrete parser callables intentionally have different keyword
+sets.  The return contract remains narrow even though the callable shape is
+necessarily variadic for backward compatibility.
+"""
 
 
 class TraceLog(Protocol):
