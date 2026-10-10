@@ -11,7 +11,7 @@ change.
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `0ffb466` |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be75812` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `e34dc30` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `a715bf3` |
 
 ## Current Verification Snapshot
 
@@ -22,7 +22,7 @@ green:
 | --- | --- | --- |
 | `kogwistar` at `0ffb466` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; graph/two-stage slice 10 passed, 20 skipped; added transient Stage-1 adapter protocols | required Actions run `38023702906` is green; optional PyPy 3.12 beta remains best-effort |
 | `kg-doc-parser` at `be75812` | source Pyright 0 errors/0 warnings; strict ANN 0; SplitPage JSON contract narrowed; resolver/CLI slice 23 passed with 2 Chroma-dependent tests deselected; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
-| `kogwistar-llm-wiki` at `e34dc30` | configured source Pyright 0 errors/0 warnings; typed vision-processor protocol; multimodal/Qwen suite 33 passed, 4 skipped; changed-file Ruff passes | no checks created for this exact SHA; a new PR or manual dispatch is required |
+| `kogwistar-llm-wiki` at `a715bf3` | configured source Pyright 0 errors/0 warnings; multimodal/Qwen suite 33 passed, 4 skipped; changed-file Ruff passes | exact SHA Actions run `38039857127`: lint and Rust checks passed, but provider-free CPython/PyPy, container, and slot benchmark checks failed |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
 The remaining gap is runtime/remote verification and downstream integration,
@@ -139,6 +139,13 @@ the maintenance protocol with Core's `JsonValue` lifecycle contract.
   resolver/invariant cases pass with the checked-out Core on `PYTHONPATH`.
 - Keep optional backend tests (Chroma/PostgreSQL) and PyPy beta results
   separately labeled when their dependencies or workflow policy exclude them.
+- The current root CI failures are reproducible as a dependency-sequencing
+  issue: the branch source imports `kogwistar.json_types.JsonObject`, while
+  the released Core revision pinned by CI (`f31888e`, Kogwistar 0.6.4) does
+  not export that alias.  The checked-out Core typing branch adds the alias
+  and the PyPy-safe recursive JSON aliases.  Do not duplicate this contract
+  in LLM-Wiki; merge/release the Core change first, then update downstream
+  pins and rerun the matrix.
 
 ## Quantified Progress
 
