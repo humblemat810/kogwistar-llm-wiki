@@ -10,7 +10,7 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `c949f32` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `ce1fc1c` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `4c7c0b6` |
 | `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `59e7440` |
 
 ## Current Verification Snapshot
@@ -21,7 +21,7 @@ green:
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
 | `kogwistar` at `c949f32` | source-only Pyright 0 errors/0 warnings with the shared workspace venv; strict production Ruff 0; MCP diagnostic regression 1 passed; MCP suite 14 passed, 1 skipped | required matrix run `38018175109` is green for predecessor `8d24394`; no run exists yet for `c949f32`; optional PyPy 3.12 beta remains best-effort |
-| `kg-doc-parser` at `ce1fc1c` | source Pyright 0 errors/0 warnings; changed modules pass strict Ruff; strategy/server focused suite 16 passed, 1 skipped; released-Core compatibility imports verified | no Actions run exists for this exact SHA; full remote verification remains outstanding |
+| `kg-doc-parser` at `4c7c0b6` | source Pyright 0 errors/0 warnings; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed; released-Core cache compatibility verified | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
 | `kogwistar-llm-wiki` at `59e7440` | configured source Pyright 0 errors/0 warnings; changed-file Ruff passes; maintenance regression 16 passed | no checks created for this exact SHA; a new PR or manual dispatch is required |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
