@@ -380,7 +380,17 @@ class _TensorMetadataLike(Protocol):
     ndim: int
 
 
-NativeVisionProcessor = Callable[..., object]
+class NativeVisionProcessor(Protocol):
+    """Provider boundary for Qwen's optional vision preprocessing helper."""
+
+    def __call__(
+        self,
+        conversations: Sequence[list[dict[str, object]]],
+        *,
+        image_patch_size: int,
+        return_video_metadata: bool,
+        return_video_kwargs: bool,
+    ) -> object: ...
 
 
 @runtime_checkable
