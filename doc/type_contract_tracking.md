@@ -22,7 +22,7 @@ green:
 | --- | --- | --- |
 | `kogwistar` at rebased `15c88da` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; ContextCost metadata slice 6 passed | branch was rebased onto merged `main` and force-pushed; no Actions run for `15c88da` was visible yet when recorded |
 | `kg-doc-parser` at `be75812` | source Pyright 0 errors/0 warnings; strict ANN 0; selected deterministic ingest suite 77 passed, 80 deselected, 32 warnings in 14:57 | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
-| `kogwistar-llm-wiki` at `07b7d85` | configured source Pyright 0 errors/0 warnings across 181 files; strict Ruff `E4,E7,E9,F` passes; embedding-service PyPy regression tests 14 passed | exact-SHA CI run `38043295814` passed on CPython 3.12-3.14 and PyPy 3.11; container smoke `38043295779`, slot benchmarks `38043295786`, and optional PyPy 3.12 beta `38043295796` also passed |
+| `kogwistar-llm-wiki` at `07b7d85` | configured source Pyright 0 errors/0 warnings across 181 files; strict Ruff `E4,E7,E9,F` passes; embedding-service PyPy regression tests 14 passed | earlier exact-SHA CI run `38043295814` passed on CPython 3.12-3.14 and PyPy 3.11; current PR run `38045114062` is still in progress; current PyPy 3.11 container `38045114106` and benchmark run `38045114201` passed; optional PyPy 3.12 beta `38045114034` has a failed probe step despite a successful non-blocking run summary |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
 The remaining gap is runtime/remote verification and downstream integration,
