@@ -8,18 +8,23 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
-from typing import Protocol
+from typing import Protocol, Self, cast
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
 class _UrlOpenResponse(Protocol):
-    def __enter__(self) -> _UrlOpenResponse: ...
+    def __enter__(self) -> Self: ...
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None: ...
 
     def read(self, amount: int = -1) -> bytes: ...
+
+
+class _UrlOpener(Protocol):
+    """Minimal HTTP opener surface used by model discovery and its tests."""
+
+    def __call__(self, request: Request, *, timeout: float) -> _UrlOpenResponse: ...
 
 
 def _safe_endpoint(value: str) -> str:
@@ -42,14 +47,14 @@ def available_models(
     *,
     provider: str | None = None,
     base_url: str | None = None,
-    opener: Callable[..., _UrlOpenResponse] | None = None,
+    opener: _UrlOpener | None = None,
 ) -> dict[str, object]:
     role = role.strip().lower()
     prefix = "KOGWISTAR_PARSER" if role == "parser" else "KOGWISTAR_MAINTENANCE"
     provider = (provider or os.getenv(f"{prefix}_PROVIDER", "ollama")).strip().lower()
     raw_base_url = base_url or os.getenv(f"{prefix}_BASE_URL", "http://localhost:11434")
     if opener is None:
-        opener = urlopen
+        opener = cast(_UrlOpener, urlopen)
     safe_base_url = _safe_endpoint(raw_base_url)
     if not safe_base_url:
         return {"role": role, "provider": provider, "base_url": "", "models": [], "source": "invalid_endpoint"}
@@ -78,7 +83,7 @@ def available_models(
             entries = payload.get("models", []) if provider == "ollama" else payload.get("data", [])
             models.extend(str(entry.get("name") or entry.get("id")) for entry in entries if isinstance(entry, dict))
             source = "provider"
-        except Exception:
+        except Exception:  # noqa: BLE001 - discovery is an optional best-effort hint
             source = "unavailable"
     deduplicated = sorted({model for model in models if model and model != "None"})
     return {"role": role, "provider": provider, "base_url": base_url, "models": deduplicated, "source": source}
