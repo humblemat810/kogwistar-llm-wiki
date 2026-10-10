@@ -30,7 +30,7 @@ from hashlib import sha256
 from io import BytesIO
 from math import sqrt
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from kogwistar.engine_core import (
     EmbeddingProfile as CoreEmbeddingProfile,
@@ -73,6 +73,24 @@ DEFAULT_COLQWEN_REVISION = "ddc07d2317c80f75fc742b7362ee9ad1912908f9"
 DEFAULT_QWEN3_VL_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
 QWEN3_VL_MIN_DIMENSION = 64
 QWEN3_VL_MAX_DIMENSION = 2048
+
+ChromaMetadataValue = str | int | float | bool | None
+
+
+class ChromaCollectionLike(Protocol):
+    """Small optional-SDK surface used by the profile-scoped projection."""
+
+    def count(self) -> int: ...
+
+    def upsert(
+        self,
+        *,
+        ids: Sequence[str],
+        embeddings: Sequence[Sequence[float]],
+        metadatas: Sequence[Mapping[str, ChromaMetadataValue]],
+    ) -> object: ...
+
+    def get(self, *, include: Sequence[str]) -> Mapping[str, object]: ...
 
 
 def _as_int(value: object, *, field_name: str) -> int:
@@ -889,7 +907,10 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         self._client = chromadb.PersistentClient(path=str(self.persist_directory))
         collection_basis = collection_name or self.scope
         name = f"mm_{sha256(f'{collection_basis}:profile:{self.profile.fingerprint}'.encode()).hexdigest()[:24]}"
-        self._collection = self._client.get_or_create_collection(name=name)
+        self._collection: ChromaCollectionLike = cast(
+            ChromaCollectionLike,
+            self._client.get_or_create_collection(name=name),
+        )
         self._validate_physical_rows()
 
     def _expected_vector_count(self) -> int:
@@ -939,7 +960,7 @@ class ChromaMultimodalProjectionStore(SQLiteMultimodalProjectionStore):
         self._collection.upsert(
             ids=ids,
             embeddings=[list(vector) for vector in normalised],
-            metadatas=cast(Any, metadatas),
+            metadatas=metadatas,
         )
         SQLiteMultimodalProjectionStore.upsert_embedding(
             self, unit, normalised, profile=profile
