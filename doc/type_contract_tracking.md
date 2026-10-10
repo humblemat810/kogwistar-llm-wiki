@@ -21,7 +21,7 @@ green:
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
 | `kogwistar` at `0ffb466` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; graph/two-stage slice 10 passed, 20 skipped; added transient Stage-1 adapter protocols | required Actions run `38023702906` is green; optional PyPy 3.12 beta remains best-effort |
-| `kg-doc-parser` at `4c7c0b6` | source Pyright 0 errors/0 warnings; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed; released-Core cache compatibility verified | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
+| `kg-doc-parser` at `4c7c0b6` | source Pyright 0 errors/0 warnings; strict ANN 0; resolver/CLI slice 21 passed, 2 failures at optional Chroma initialization; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
 | `kogwistar-llm-wiki` at `e34dc30` | configured source Pyright 0 errors/0 warnings; typed vision-processor protocol; multimodal/Qwen suite 33 passed, 4 skipped; changed-file Ruff passes | no checks created for this exact SHA; a new PR or manual dispatch is required |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
@@ -134,6 +134,9 @@ the maintenance protocol with Core's `JsonValue` lifecycle contract.
   is available to the parser and LLM-Wiki branches.
 - The latest root branch push `f92f23c` has no GitHub Actions run visible yet;
   local static and focused runtime evidence is recorded above.
+- The parser CLI failures are dependency-gated: both fail while constructing
+  the optional Chroma backend because local `chromadb` is not installed; the
+  resolver/invariant cases pass with the checked-out Core on `PYTHONPATH`.
 - Keep optional backend tests (Chroma/PostgreSQL) and PyPy beta results
   separately labeled when their dependencies or workflow policy exclude them.
 
