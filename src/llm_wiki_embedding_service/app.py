@@ -8,7 +8,8 @@ import hmac
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast
+from typing import Literal, cast
+from typing_extensions import TypedDict
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
