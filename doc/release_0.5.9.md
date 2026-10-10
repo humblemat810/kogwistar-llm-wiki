@@ -9,8 +9,8 @@
 - Keeps the runtime compatible with CPython 3.12-3.14 and the supported PyPy
   3.11 Python-authority profile.
 - Preserves the merged dependency pins used by the reproducible image builds:
-  Kogwistar `e9ade2975e54be7925865555209ccbdea88cc6ae`, KG Doc Parser
-  `6110e0c3bdb1bb3cac7fd9bdbfe4b6b3978201e9`, and Obsidian Sink
+  Kogwistar `v0.6.4` / `e9ade2975e54be7925865555209ccbdea88cc6ae`, KG Doc
+  Parser `v0.2.6` / `6110e0c3bdb1bb3cac7fd9bdbfe4b6b3978201e9`, and Obsidian Sink
   `36f51e5c23522cd3e467ee49bc7127461b4753c2`.
 
 ## Compatibility
