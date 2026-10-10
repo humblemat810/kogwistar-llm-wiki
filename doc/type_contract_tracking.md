@@ -9,9 +9,9 @@ change.
 
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
-| `kogwistar` | `feat/stack-type-contracts` | `0ffb466` |
+| `kogwistar` | `feat/stack-type-contracts` | `dc31a1e` (Core `main` merged at `e9ade29`) |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be75812` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `a715bf3` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `a2715f7` |
 
 ## Current Verification Snapshot
 
@@ -20,9 +20,9 @@ green:
 
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
-| `kogwistar` at `0ffb466` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; graph/two-stage slice 10 passed, 20 skipped; added transient Stage-1 adapter protocols | required Actions run `38023702906` is green; optional PyPy 3.12 beta remains best-effort |
+| `kogwistar` at merged `main` `e9ade29` plus branch-only `dc31a1e` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; ContextCost metadata slice 6 passed; branch-only commit is not part of merged `main` | merged PR #54 run `37915006232` failed its required matrix; public job pages expose only exit codes, so the underlying failure is not yet proven |
 | `kg-doc-parser` at `be75812` | source Pyright 0 errors/0 warnings; strict ANN 0; SplitPage JSON contract narrowed; resolver/CLI slice 23 passed with 2 Chroma-dependent tests deselected; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
-| `kogwistar-llm-wiki` at `a715bf3` | configured source Pyright 0 errors/0 warnings; multimodal/Qwen suite 33 passed, 4 skipped; changed-file Ruff passes | exact SHA Actions run `38039857127`: lint and Rust checks passed, but provider-free CPython/PyPy, container, and slot benchmark checks failed |
+| `kogwistar-llm-wiki` at `a2715f7` | configured source Pyright 0 errors/0 warnings across 181 files; strict Ruff `E4,E7,E9,F` passes | downstream remote verification remains pending after the merged Core SHA pin |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
 The remaining gap is runtime/remote verification and downstream integration,
@@ -127,25 +127,27 @@ the maintenance protocol with Core's `JsonValue` lifecycle contract.
 
 ## Remaining Work
 
-- Core required remote verification is complete for `0ffb466`; workflow
-  `38023702906` is green. The optional PyPy 3.12 beta failure remains
-  non-blocking.
+- Core PR #54 is merged at `e9ade29`; its required matrix run `37915006232`
+  was not green. GitHub's public job pages expose only exit codes without the
+  authenticated logs, so the failed reason is not yet proven from this
+  workspace.
+- The Core feature branch has one post-merge commit (`dc31a1e`) and must not
+  be used as the downstream pin until its own CI is independently green.
 - Run or confirm the full downstream CI gates after the merged Core revision
   is available to the parser and LLM-Wiki branches.
-- The latest root branch push `f92f23c` has no GitHub Actions run visible yet;
-  local static and focused runtime evidence is recorded above.
+- The latest root branch pin update is `a2715f7`; local static and focused
+  runtime evidence is recorded above, while its corresponding remote result
+  remains pending.
 - The parser CLI failures are dependency-gated: both fail while constructing
   the optional Chroma backend because local `chromadb` is not installed; the
   resolver/invariant cases pass with the checked-out Core on `PYTHONPATH`.
 - Keep optional backend tests (Chroma/PostgreSQL) and PyPy beta results
   separately labeled when their dependencies or workflow policy exclude them.
-- The current root CI failures are reproducible as a dependency-sequencing
-  issue: the branch source imports `kogwistar.json_types.JsonObject`, while
-  the released Core revision pinned by CI (`f31888e`, Kogwistar 0.6.4) does
-  not export that alias.  The checked-out Core typing branch adds the alias
-  and the PyPy-safe recursive JSON aliases.  Do not duplicate this contract
-  in LLM-Wiki; merge/release the Core change first, then update downstream
-  pins and rerun the matrix.
+- The previous root CI failure caused by the old `f31888e` Core pin is
+  addressed in the current branch: workflows now pin merged Core SHA
+  `e9ade2975e54be7925865555209ccbdea88cc6ae`. Do not duplicate Core's JSON
+  aliases in LLM-Wiki; use the merged Core contract and verify the downstream
+  matrix.
 
 ## Quantified Progress
 
@@ -153,7 +155,7 @@ Current production-source annotation snapshot (`ruff check kogwistar --select AN
 
 | Repository | Pyright | Strict ANN findings | Interpretation |
 | --- | ---: | ---: | --- |
-| Kogwistar | 0 errors, 0 warnings across 276 files | 0 | strict-ANN clean; required remote matrix green for `8d24394` |
+| Kogwistar | 0 errors, 0 warnings across 276 files | 0 | strict-ANN clean; merged Core remote matrix requires follow-up diagnosis |
 | KG Doc Parser | 0 errors, 0 warnings across 40 files | 0 | strict-ANN clean; runtime verification remains |
 | LLM-Wiki | 0 errors, 0 warnings across 181 files | 0 in `src/` | production source is strict-ANN clean |
 
