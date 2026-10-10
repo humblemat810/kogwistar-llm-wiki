@@ -11,7 +11,7 @@ change.
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `dc31a1e` (Core `main` merged at `e9ade29`) |
 | `kg-doc-parser` | `feat/stack-type-contracts` | `be75812` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `a2715f7` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `07b7d85` |
 
 ## Current Verification Snapshot
 
@@ -22,7 +22,7 @@ green:
 | --- | --- | --- |
 | `kogwistar` at merged `main` `e9ade29` plus branch-only `dc31a1e` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; ContextCost metadata slice 6 passed; branch-only commit is not part of merged `main` | merged PR #54 run `37915006232` failed its required matrix; public job pages expose only exit codes, so the underlying failure is not yet proven |
 | `kg-doc-parser` at `be75812` | source Pyright 0 errors/0 warnings; strict ANN 0; SplitPage JSON contract narrowed; resolver/CLI slice 23 passed with 2 Chroma-dependent tests deselected; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
-| `kogwistar-llm-wiki` at `a2715f7` | configured source Pyright 0 errors/0 warnings across 181 files; strict Ruff `E4,E7,E9,F` passes | downstream remote verification remains pending after the merged Core SHA pin |
+| `kogwistar-llm-wiki` at `07b7d85` | configured source Pyright 0 errors/0 warnings across 181 files; strict Ruff `E4,E7,E9,F` passes; embedding-service PyPy regression tests 14 passed | exact-SHA CI run `38043295814` passed on CPython 3.12-3.14 and PyPy 3.11; container smoke `38043295779`, slot benchmarks `38043295786`, and optional PyPy 3.12 beta `38043295796` also passed |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
 The remaining gap is runtime/remote verification and downstream integration,
@@ -135,9 +135,10 @@ the maintenance protocol with Core's `JsonValue` lifecycle contract.
   be used as the downstream pin until its own CI is independently green.
 - Run or confirm the full downstream CI gates after the merged Core revision
   is available to the parser and LLM-Wiki branches.
-- The latest root branch pin update is `a2715f7`; local static and focused
-  runtime evidence is recorded above, while its corresponding remote result
-  remains pending.
+- The latest root compatibility fix is `07b7d85`; its exact-SHA CI and PyPy
+  container workflows are green. The fix switches the Pydantic-facing
+  embedding response contracts to `typing_extensions.TypedDict`, which is
+  required for PyPy 3.11.
 - The parser CLI failures are dependency-gated: both fail while constructing
   the optional Chroma backend because local `chromadb` is not installed; the
   resolver/invariant cases pass with the checked-out Core on `PYTHONPATH`.
