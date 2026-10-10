@@ -10,8 +10,8 @@ change.
 | Repository | Working branch | Latest typing commit |
 | --- | --- | --- |
 | `kogwistar` | `feat/stack-type-contracts` | `c949f32` |
-| `kg-doc-parser` | `feat/stack-type-contracts` | `5e416b3` |
-| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `b07c43b` |
+| `kg-doc-parser` | `feat/stack-type-contracts` | `ce1fc1c` |
+| `kogwistar-llm-wiki` | `feat/stack-type-contracts` | `59e7440` |
 
 ## Current Verification Snapshot
 
@@ -20,9 +20,9 @@ green:
 
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
-| `kogwistar` at `c949f32` | source-only Pyright 0 errors/0 warnings with the shared workspace venv; strict production Ruff 0; MCP V2 diagnostic regression 1 passed; focused Rust/SQLite baseline remains 75 passed, 2 skipped | required matrix run `38018175109` is green for predecessor `8d24394`; no run exists yet for `c949f32`; optional PyPy 3.12 beta remains best-effort |
-| `kg-doc-parser` at `5e416b3` | full source Pyright 0 errors/0 warnings; changed modules pass strict Ruff; deterministic workflow suite passed 127 tests with 25 skips; focused non-real-provider OCR suite passed 11 tests | no Actions run exists for this exact SHA; five excluded manual OCR cases require local Ollama models or a Gemini API key |
-| `kogwistar-llm-wiki` at `b07c43b` | full configured Pyright 0 errors/0 warnings; changed-file Ruff passes; maintenance regression 16 passed | no checks created because the former PR is closed; a new PR or manual dispatch is required |
+| `kogwistar` at `c949f32` | source-only Pyright 0 errors/0 warnings with the shared workspace venv; strict production Ruff 0; MCP diagnostic regression 1 passed; MCP suite 14 passed, 1 skipped | required matrix run `38018175109` is green for predecessor `8d24394`; no run exists yet for `c949f32`; optional PyPy 3.12 beta remains best-effort |
+| `kg-doc-parser` at `ce1fc1c` | source Pyright 0 errors/0 warnings; changed modules pass strict Ruff; strategy/server focused suite 16 passed, 1 skipped; released-Core compatibility imports verified | no Actions run exists for this exact SHA; full remote verification remains outstanding |
+| `kogwistar-llm-wiki` at `59e7440` | configured source Pyright 0 errors/0 warnings; changed-file Ruff passes; maintenance regression 16 passed | no checks created for this exact SHA; a new PR or manual dispatch is required |
 
 The old ``>1,000`` Pyright count is therefore no longer the active measure.
 The remaining gap is runtime/remote verification and downstream integration,
