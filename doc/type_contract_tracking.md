@@ -20,7 +20,7 @@ green:
 
 | Repository | Current local result | Remote result |
 | --- | --- | --- |
-| `kogwistar` at `0ffb466` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; graph/two-stage slice 10 passed, 20 skipped; added transient Stage-1 adapter protocols | exact Actions run `38023702906` is in progress; optional PyPy 3.12 beta remains best-effort |
+| `kogwistar` at `0ffb466` | source-only Pyright 0 errors/0 warnings; strict production Ruff 0; graph/two-stage slice 10 passed, 20 skipped; added transient Stage-1 adapter protocols | required Actions run `38023702906` is green; optional PyPy 3.12 beta remains best-effort |
 | `kg-doc-parser` at `4c7c0b6` | source Pyright 0 errors/0 warnings; strategy/server focused suite 16 passed, 1 skipped; semantic layer compatibility suite 4 passed; released-Core cache compatibility verified | no Actions run exists for this exact SHA; full remote verification remains outstanding; legacy monolithic parser lint remains noisy |
 | `kogwistar-llm-wiki` at `e34dc30` | configured source Pyright 0 errors/0 warnings; typed vision-processor protocol; multimodal/Qwen suite 33 passed, 4 skipped; changed-file Ruff passes | no checks created for this exact SHA; a new PR or manual dispatch is required |
 
@@ -127,8 +127,9 @@ the maintenance protocol with Core's `JsonValue` lifecycle contract.
 
 ## Remaining Work
 
-- Complete the remote verification gate for Core commit `33a9cc4`; workflow
-  `38013521822` is still in progress and has not been counted as green.
+- Core required remote verification is complete for `0ffb466`; workflow
+  `38023702906` is green. The optional PyPy 3.12 beta failure remains
+  non-blocking.
 - Run or confirm the full downstream CI gates after the merged Core revision
   is available to the parser and LLM-Wiki branches.
 - The latest root branch push `f92f23c` has no GitHub Actions run visible yet;
