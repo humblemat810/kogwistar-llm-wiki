@@ -60,9 +60,14 @@ class ParseSourceResult(Protocol):
     def semantic_tree(self) -> SemanticTreeLike: ...
 
 
-# This boundary is intentionally broad: ``source_parsing`` introspects legacy
-# parser signatures and conditionally supplies optional keyword arguments.
 ParserCallable = Callable[..., ParseSourceResult]
+"""Signature-adaptive parser boundary.
+
+``source_parsing`` inspects parser signatures before supplying optional
+keywords, so concrete parser callables intentionally have different keyword
+sets.  The return contract remains narrow even though the callable shape is
+necessarily variadic for backward compatibility.
+"""
 
 
 class TraceLog(Protocol):

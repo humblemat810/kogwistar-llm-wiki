@@ -141,12 +141,28 @@ def test_clip_cpu_overlay_isolated_and_resource_bounded() -> None:
     assert "LLM_WIKI_EMBEDDING_ENCODER: clip-vit-b32" in text
     assert "LLM_WIKI_EMBEDDING_MODEL_REVISION: 327ab6726d33c0e22f920c83f2ff9e4bd38ca37f" in text
     assert 'LLM_WIKI_EMBEDDING_DIMENSION: "512"' in text
-    assert "mem_limit: ${LLM_WIKI_CLIP_MEMORY_LIMIT:-2g}" in text
-    assert "cpus: ${LLM_WIKI_CLIP_CPU_LIMIT:-1.0}" in text
+    assert "mem_limit: ${LLM_WIKI_CLIP_MEMORY_LIMIT:-4g}" in text
+    assert "cpus: ${LLM_WIKI_CLIP_CPU_LIMIT:-2.0}" in text
     assert '"127.0.0.1:${LLM_WIKI_CLIP_PORT:-8792}:8790"' in text
     assert "read_only: true" in text
     assert "    rest:" not in text
     assert "    postgres:" not in text
+
+
+def test_qwen_gpu_tutorial_overlay_is_protocol_compatible_and_gpu_bound() -> None:
+    text = (Path(__file__).parents[2] / "compose.embedding-gpu.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "embedding-qwen-gpu:" in text
+    assert "Dockerfile.embedding-service" in text
+    assert "LLM_WIKI_EMBEDDING_ENCODER: qwen3-vl" in text
+    assert "LLM_WIKI_EMBEDDING_DEVICE: cuda" in text
+    assert "LLM_WIKI_EMBEDDING_TORCH_BACKEND" in text
+    assert '"127.0.0.1:${LLM_WIKI_QWEN_GPU_PORT:-8794}:8790"' in text
+    assert "driver: nvidia" in text
+    assert "capabilities: [gpu]" in text
+    assert "/readyz" in text
 
 
 def test_static_compose_helper_contains_persistent_service_contract() -> None:

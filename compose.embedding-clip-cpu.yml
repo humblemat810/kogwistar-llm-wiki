@@ -8,8 +8,10 @@ services:
       args:
         LLM_WIKI_EMBEDDING_TORCH_BACKEND: cpu
     image: llm-wiki-embedding-clip-cpu:local
-    mem_limit: ${LLM_WIKI_CLIP_MEMORY_LIMIT:-2g}
-    cpus: ${LLM_WIKI_CLIP_CPU_LIMIT:-1.0}
+    # CPU CLIP needs more than the old 2 GiB cap for reliable cold starts.
+    # Override these values when Docker Desktop has a smaller/larger budget.
+    mem_limit: ${LLM_WIKI_CLIP_MEMORY_LIMIT:-4g}
+    cpus: ${LLM_WIKI_CLIP_CPU_LIMIT:-2.0}
     environment:
       LLM_WIKI_EMBEDDING_ENCODER: clip-vit-b32
       LLM_WIKI_EMBEDDING_MODEL: sentence-transformers/clip-ViT-B-32

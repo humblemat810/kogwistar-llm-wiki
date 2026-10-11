@@ -1,0 +1,44 @@
+# Standalone GPU Qwen3-VL embedding demo for the pure vision RAG tutorial.
+# Requires Docker Desktop/WSL2 with NVIDIA Container Toolkit support.
+services:
+  embedding-qwen-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.embedding-service
+      args:
+        LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-cu128}
+    image: llm-wiki-embedding-qwen-gpu:local
+    mem_limit: ${LLM_WIKI_QWEN_GPU_MEMORY_LIMIT:-8g}
+    cpus: ${LLM_WIKI_QWEN_GPU_CPU_LIMIT:-2.0}
+    environment:
+      LLM_WIKI_EMBEDDING_ENCODER: qwen3-vl
+      LLM_WIKI_EMBEDDING_MODEL: ${LLM_WIKI_EMBEDDING_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      LLM_WIKI_EMBEDDING_MODEL_REVISION: ${LLM_WIKI_EMBEDDING_MODEL_REVISION:-}
+      LLM_WIKI_EMBEDDING_DIMENSION: ${LLM_WIKI_EMBEDDING_DIMENSION:-1024}
+      LLM_WIKI_EMBEDDING_DEVICE: cuda
+      LLM_WIKI_EMBEDDING_TORCH_BACKEND: ${LLM_WIKI_EMBEDDING_TORCH_BACKEND:-cu128}
+      LLM_WIKI_EMBEDDING_BATCH_SIZE: "1"
+      LLM_WIKI_EMBEDDING_TOKEN: ${LLM_WIKI_EMBEDDING_TOKEN:-}
+      HF_HOME: /var/lib/huggingface
+      LLM_WIKI_EMBEDDING_HOST: 0.0.0.0
+      LLM_WIKI_EMBEDDING_PORT: "8790"
+    volumes:
+      - embedding_qwen_gpu_hf_cache:/var/lib/huggingface
+    ports:
+      - "127.0.0.1:${LLM_WIKI_QWEN_GPU_PORT:-8794}:8790"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+volumes:
+  embedding_qwen_gpu_hf_cache:
