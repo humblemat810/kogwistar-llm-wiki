@@ -5,7 +5,7 @@
 - Version: `0.5.11`
 - Parser dependency: `graph-knowledge-doc-parser>=0.2.13,<0.3`
 - Parser release: `0.2.13`
-- Parser pinned commit: `cf325d0eebe606ba25a7506ff5eb13a137b92254`
+- Parser pinned commit: `c65556e4df864a6033cffe5cb57ede7bdd43a8c0`
 
 ## Changes
 
