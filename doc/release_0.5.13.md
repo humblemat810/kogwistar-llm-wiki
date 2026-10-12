@@ -7,7 +7,7 @@
 - Parser release: `0.2.14`
 - Kogwistar release: `0.6.8`
 - Obsidian source plugin: optional external package, pinned for the source
-  contract CI job at `53e31c97f188f25b582fc6b2458117d6f45d5d6a`; not bundled
+  contract CI job at `416be6cb4343dfad2328f7ff5657795bbcb83a58`; not bundled
   into the runtime or Docker image
 
 ## Changes
