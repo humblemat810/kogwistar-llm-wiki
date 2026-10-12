@@ -108,6 +108,7 @@ class MaintenancePatchApplier(Protocol):
         patch: MaintenancePatch,
         *,
         namespace_prefix: str | None = None,
+        expected_revisions: Mapping[str, str | int | None] | None = None,
     ) -> MaintenancePatchApplyResult: ...
 
 
@@ -231,6 +232,7 @@ def apply_maintenance_patch_for_scope(
     patch: MaintenancePatch,
     *,
     namespace_prefix: str | None = None,
+    expected_revisions: Mapping[str, str | int | None] | None = None,
 ) -> MaintenancePatchApplyResult:
     """Resolve the legacy worker hook so existing monkeypatches remain effective."""
     from .. import worker as worker_module
@@ -239,7 +241,30 @@ def apply_maintenance_patch_for_scope(
         MaintenancePatchApplier,
         getattr(worker_module, "apply_maintenance_patch_for_scope", _default_apply_maintenance_patch_for_scope),
     )
-    return callback(engines, patch, namespace_prefix=namespace_prefix)
+    return callback(
+        engines,
+        patch,
+        namespace_prefix=namespace_prefix,
+        expected_revisions=expected_revisions,
+    )
+
+
+def _expected_revisions_from_payload(
+    payload: Mapping[str, object],
+) -> Mapping[str, str | int | None] | None:
+    """Narrow queued optimistic-concurrency data without weakening its fence."""
+
+    raw = payload.get("expected_revisions")
+    if not isinstance(raw, Mapping):
+        return None
+    normalized: dict[str, str | int | None] = {}
+    for entity_id, revision in raw.items():
+        if not isinstance(entity_id, str) or not entity_id:
+            return {"__invalid_expected_revision_key__": None}
+        if revision is not None and (isinstance(revision, bool) or not isinstance(revision, (str, int))):
+            return {entity_id: None}
+        normalized[entity_id] = revision
+    return normalized
 
 
 class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
@@ -831,6 +856,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     # The job workspace, not mutable payload data, selects the
                     # destination namespace.
                     namespace_prefix=f"ws:{ctx.workspace_id}:",
+                    expected_revisions=_expected_revisions_from_payload(ctx.payload),
                 )
             finally:
                 self._release_crosslink_resource_locks(ctx, lock_keys)
@@ -2685,7 +2711,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         plan: DependencyInvalidationPlan,
     ) -> None:
         ns = WorkspaceNamespaces(ctx.workspace_id)
-        source_metadata: dict[str, dict[str, object]] = {}
+        source_revisions: dict[str, tuple[Node, dict[str, object]]] = {}
         with _temporary_namespace(self.engines.kg, ns.source_space):
             revisions = self.engines.kg.read.get_nodes(
                 where={"artifact_kind": "source_revision"},
@@ -2698,10 +2724,11 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             source_id = str(metadata.get("source_document_id") or "").strip()
             if not source_id or source_id not in plan.affected_source_document_ids:
                 continue
-            created_at = _as_int(metadata.get("created_at_ms"), 0)
-            previous = source_metadata.get(source_id)
-            if previous is None or created_at > _as_int(previous.get("created_at_ms"), 0):
-                source_metadata[source_id] = metadata
+            previous = source_revisions.get(source_id)
+            if previous is None or _revision_node_sort_key(
+                revision, metadata
+            ) > _revision_node_sort_key(*previous):
+                source_revisions[source_id] = (revision, metadata)
 
         self.engines.conversation.jobs.require_available(enqueue=True)
         for source_id in plan.affected_source_document_ids:
@@ -2709,9 +2736,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 ctx,
                 reason="claim_lost_before_dependency_job_enqueue",
             )
-            metadata = source_metadata.get(source_id)
-            if metadata is None:
+            source_revision = source_revisions.get(source_id)
+            if source_revision is None:
                 continue
+            _revision, metadata = source_revision
             for maintenance_kind in plan.follow_up_kinds:
                 job_id = str(
                     stable_id(

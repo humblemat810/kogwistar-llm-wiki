@@ -5,6 +5,7 @@ from kogwistar.engine_core.models import Grounding, Node, Span
 
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.maintenance.dependency_planning import (
+    DependencyInvalidationPlan,
     plan_dependency_invalidation,
 )
 from kogwistar_llm_wiki.maintenance.maintenance_patches import (
@@ -152,6 +153,55 @@ def test_invalidation_bound_applies_to_source_and_projection_followups() -> None
     assert plan.truncated is True
     assert len(plan.affected_entity_ids) == 2
     assert len(plan.affected_source_document_ids) == 2
+
+
+def test_dependency_enqueue_uses_stable_source_revision_tie_breaker(pipeline) -> None:
+    """Equal-millisecond revisions must not inherit backend iteration order."""
+
+    workspace_id = "invalidation-tie-breaker"
+    source_id = "source:tie-breaker"
+    ns = WorkspaceNamespaces(workspace_id)
+    with _temporary_namespace(pipeline.engines.kg, ns.source_space):
+        for revision_id in ("revision-a", "revision-b"):
+            pipeline.engines.kg.write.add_node(
+                Node(
+                    id=revision_id,
+                    label=revision_id,
+                    type="entity",
+                    summary=revision_id,
+                    mentions=[Grounding(spans=[Span.from_dummy_for_conversation(revision_id)])],
+                    metadata={
+                        "workspace_id": workspace_id,
+                        "artifact_kind": "source_revision",
+                        "source_document_id": source_id,
+                        "source_revision_id": revision_id,
+                        "revision_document_id": f"document:{revision_id}",
+                        "source_digest": revision_id,
+                        "created_at_ms": 1000,
+                    },
+                )
+            )
+    worker = MaintenanceWorker(pipeline.engines)
+    worker._assert_claim_owned = lambda *_args, **_kwargs: None
+    ctx = SimpleNamespace(workspace_id=workspace_id, job_id="job-tie-breaker", payload={})
+    plan = DependencyInvalidationPlan(
+        workspace_id=workspace_id,
+        changed_entity_ids=("changed",),
+        affected_entity_ids=("derived",),
+        affected_source_document_ids=(source_id,),
+        follow_up_kinds=("document_summarize_units",),
+    )
+
+    worker._enqueue_dependency_jobs(ctx, plan)
+
+    jobs = pipeline.engines.conversation.jobs.list(
+        namespace=ns.maintenance_jobs,
+        status="PENDING",
+        limit=10,
+    )
+    assert len(jobs) == 1
+    assert jobs[0].payload["source_revision_id"] == "revision-b"
+    assert jobs[0].payload["revision_document_id"] == "document:revision-b"
 
 
 def test_worker_enqueues_one_bounded_same_workspace_invalidation_job(pipeline, ingest_request) -> None:

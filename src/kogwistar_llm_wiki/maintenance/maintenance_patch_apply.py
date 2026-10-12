@@ -410,6 +410,11 @@ def _acl_issues_for_patch(
 
     node_ids: set[str] = set()
     edge_ids: set[str] = set()
+    created_node_ids = {
+        str(operation.node_id)
+        for operation in patch.operations
+        if operation.kind == MaintenanceOperationKind.ADD_NODE and operation.node_id
+    }
     for operation in patch.operations:
         if operation.kind == MaintenanceOperationKind.ADD_EDGE:
             node_ids.update(
@@ -426,17 +431,52 @@ def _acl_issues_for_patch(
         ):
             edge_ids.add(operation.tombstone_target_id)
 
-    read = getattr(engine, "read", engine)
-    node_getter = getattr(read, "get_nodes", None)
-    edge_getter = getattr(read, "get_edges", None)
-    entities: list[MaintenanceEntity] = []
-    if node_ids and callable(node_getter):
-        entities.extend(node_getter(ids=sorted(node_ids), resolve_mode="active_only"))
-    if edge_ids and callable(edge_getter):
-        entities.extend(edge_getter(ids=sorted(edge_ids), resolve_mode="active_only"))
-
     issues: list[MaintenancePatchValidationIssue] = []
-    for entity in entities:
+    # An edge may point at a node created by this same atomic patch. Before
+    # exempting it from the ACL check, inspect the raw store: graph writes are
+    # upserts, so a hidden existing ID must never masquerade as a new node.
+    raw_existing = _raw_existing_entity_ids(engine, "node", created_node_ids)
+    if raw_existing is None and created_node_ids:
+        issues.append(
+            MaintenancePatchValidationIssue(
+                code="acl_new_target_unverifiable",
+                message="cannot prove maintenance ADD_NODE targets are new",
+            )
+        )
+        raw_existing_node_ids = set()
+    elif raw_existing is None:
+        raw_existing_node_ids = set()
+    else:
+        raw_existing_node_ids = raw_existing
+    # Every pre-existing endpoint remains subject to the final visibility
+    # check below. Only a raw-store-confirmed new ID may be used immediately.
+    existing_node_ids = (node_ids - created_node_ids) | raw_existing_node_ids
+    visible_nodes = {
+        str(entity.id): entity
+        for entity in _read_entities_by_ids(engine, "node", existing_node_ids)
+    }
+    visible_edges = {
+        str(entity.id): entity
+        for entity in _read_entities_by_ids(engine, "edge", edge_ids)
+    }
+    # Core lifecycle writes deliberately operate by identifier and do not run an
+    # ACL decision themselves. A filtered read must therefore fail closed here:
+    # a caller-supplied active-id set cannot turn an invisible target writable.
+    for target_id in sorted(existing_node_ids - set(visible_nodes)):
+        issues.append(
+            MaintenancePatchValidationIssue(
+                code="acl_target_unavailable",
+                message="maintenance target is not available to the current principal",
+            )
+        )
+    for target_id in sorted(edge_ids - set(visible_edges)):
+        issues.append(
+            MaintenancePatchValidationIssue(
+                code="acl_target_unavailable",
+                message="maintenance target is not available to the current principal",
+            )
+        )
+    for entity in (*visible_nodes.values(), *visible_edges.values()):
         metadata = dict(getattr(entity, "metadata", None) or {})
         scope = str(
             metadata.get("acl_scope") or metadata.get("security_scope") or ""
@@ -551,6 +591,29 @@ def _read_entities_by_ids(
         return list(getter(ids=sorted(ids), resolve_mode="include_tombstones"))
     except TypeError:
         return list(getter(ids=sorted(ids)))
+
+
+def _raw_existing_entity_ids(
+    engine: _MaintenanceEngineLike,
+    kind: str,
+    ids: set[str],
+) -> set[str] | None:
+    """Return raw-store IDs without treating an ACL-filtered absence as new."""
+
+    if not ids:
+        return set()
+    raw_read = getattr(engine, "raw_read", None)
+    getter = cast(
+        EntityGetter | None,
+        getattr(raw_read, "get_nodes" if kind == "node" else "get_edges", None),
+    )
+    if not callable(getter):
+        return None
+    try:
+        items = getter(ids=sorted(ids), resolve_mode="include_tombstones")
+    except TypeError:
+        items = getter(ids=sorted(ids))
+    return {str(item.id) for item in items if getattr(item, "id", None)}
 
 
 def _is_immutable_raw_fact(entity: MaintenanceEntity) -> bool:

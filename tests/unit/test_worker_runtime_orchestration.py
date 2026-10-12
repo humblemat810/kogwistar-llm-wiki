@@ -26,7 +26,10 @@ from kogwistar_llm_wiki.maintenance.maintenance_statistics import (
 from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
 )
-from kogwistar_llm_wiki.maintenance.worker_execution import _revision_node_sort_key
+from kogwistar_llm_wiki.maintenance.worker_execution import (
+    _expected_revisions_from_payload,
+    _revision_node_sort_key,
+)
 from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
 from kogwistar_llm_wiki.utils import _background_namespace, _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
@@ -118,6 +121,15 @@ def test_source_revision_sort_key_is_deterministic_for_timestamp_ties() -> None:
     metadata = {"created_at_ms": 1000}
 
     assert _revision_node_sort_key(first, metadata) < _revision_node_sort_key(second, metadata)
+
+
+def test_expected_revisions_payload_rejects_malformed_fence_values() -> None:
+    assert _expected_revisions_from_payload({"expected_revisions": {"node:1": 3}}) == {
+        "node:1": 3
+    }
+    assert _expected_revisions_from_payload(
+        {"expected_revisions": {"node:1": []}}
+    ) == {"node:1": None}
 
 
 def test_lease_renewal_exception_fences_the_worker_claim() -> None:
@@ -354,6 +366,69 @@ def test_claim_loss_after_graph_patch_discards_reply_and_ack(monkeypatch) -> Non
         and event["reason"] == "claim_lost_after_graph_patch"
         for event in traces
     )
+
+
+def test_graph_patch_worker_forwards_expected_revisions_to_the_apply_boundary(monkeypatch) -> None:
+    """A queued patch must retain the optimistic-concurrency fence from its proposal."""
+
+    captured: dict[str, object] = {}
+
+    class FakeJobs:
+        def accepted_candidate(self, _job):
+            return None
+
+        def accept_candidate(self, _job, _candidate):
+            return {"status": "accepted"}
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=FakeJobs()))
+    worker._claim_lost = threading.Event()
+    worker.trace_sink = lambda _event: None
+    worker._evaluate_maintenance_guard = lambda _ctx: SimpleNamespace(status="ready")
+    worker._emit_lane_reply = lambda **_kwargs: None
+    worker._acknowledge_job = lambda _ctx: None
+    worker._plan_and_enqueue_dependency_invalidation = lambda _ctx, _patch: None
+
+    def capture_apply(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            status=SimpleNamespace(value="applied"),
+            patch_id="patch-revision-fence",
+            applied_count=1,
+            skipped_count=0,
+            failed_count=0,
+            artifact_id=None,
+        )
+
+    monkeypatch.setattr(worker_module, "apply_maintenance_patch_for_scope", capture_apply)
+    patch = MaintenancePatch(
+        patch_id="patch-revision-fence",
+        intent="derive_summary",
+        scope={"workspace_id": "workspace-fenced"},
+        operations=[
+            {
+                "operation_id": "op-1",
+                "kind": "ADD_NODE",
+                "node_id": "node-1",
+            }
+        ],
+    )
+    ctx = SimpleNamespace(
+        workspace_id="workspace-fenced",
+        job=SimpleNamespace(claim_token="claim-1"),
+        job_id="job-revision-fence",
+        payload={
+            "patch": patch.model_dump(mode="json"),
+            "expected_revisions": {"node:existing": 7},
+        },
+        request_node_id="request-revision-fence",
+        lane_message_id="",
+        maintenance_kind="graph_patch_apply",
+    )
+
+    worker._handle_graph_patch_apply_strategy(ctx)
+
+    assert captured["expected_revisions"] == {"node:existing": 7}
 
 
 def test_claim_loss_before_crosslink_requeue_discards_prepared_patch() -> None:
