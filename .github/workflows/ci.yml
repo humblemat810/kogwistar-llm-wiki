@@ -246,11 +246,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip build
-          python -m pip install -e ".[dev]"
+          python -m pip install --upgrade pip build pytest ruff pyright
+          python -m pip install --editable . --no-deps
           python -m pytest tests -q -p no:cacheprovider
-          python -m ruff check src tests --select E4,E7,E9,F
-          python -m pyright src tests
+          ruff check src tests --select E4,E7,E9,F
+          pyright src tests
           python -m build --sdist --wheel --outdir test-results/dist
           git diff --check
 
