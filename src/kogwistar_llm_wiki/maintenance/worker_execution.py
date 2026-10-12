@@ -15,6 +15,7 @@ from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.json_types import JsonObject, JsonValue
+from kogwistar.llm_tasks.providers import StructuredOutputRunnable
 from kogwistar.runtime.budget import (
     BudgetEvent,
     BudgetExhaustedError,
@@ -23,7 +24,6 @@ from kogwistar.runtime.budget import (
 from kogwistar.runtime.models import RunSuccess
 from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
-from kogwistar.llm_tasks.providers import StructuredOutputRunnable
 
 from ..configuration.identity import runtime_authority_context
 from ..configuration.workspace import WorkspaceNamespaces
@@ -108,6 +108,7 @@ class MaintenancePatchApplier(Protocol):
         patch: MaintenancePatch,
         *,
         namespace_prefix: str | None = None,
+        expected_revisions: Mapping[str, str | int | None] | None = None,
     ) -> MaintenancePatchApplyResult: ...
 
 
@@ -162,6 +163,16 @@ def _as_int(value: object, default: int = 0) -> int:
         except (TypeError, ValueError):
             return default
     return default
+
+
+def _revision_node_sort_key(node: Node, metadata: Mapping[str, object]) -> tuple[int, str, str]:
+    """Order source revisions deterministically when timestamps collide."""
+
+    return (
+        _as_int(metadata.get("created_at_ms"), 0),
+        str(metadata.get("source_revision_id") or node.id),
+        str(metadata.get("revision_document_id") or ""),
+    )
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -221,6 +232,7 @@ def apply_maintenance_patch_for_scope(
     patch: MaintenancePatch,
     *,
     namespace_prefix: str | None = None,
+    expected_revisions: Mapping[str, str | int | None] | None = None,
 ) -> MaintenancePatchApplyResult:
     """Resolve the legacy worker hook so existing monkeypatches remain effective."""
     from .. import worker as worker_module
@@ -229,7 +241,38 @@ def apply_maintenance_patch_for_scope(
         MaintenancePatchApplier,
         getattr(worker_module, "apply_maintenance_patch_for_scope", _default_apply_maintenance_patch_for_scope),
     )
-    return callback(engines, patch, namespace_prefix=namespace_prefix)
+    return callback(
+        engines,
+        patch,
+        namespace_prefix=namespace_prefix,
+        expected_revisions=expected_revisions,
+    )
+
+
+def _expected_revisions_from_payload(
+    payload: Mapping[str, object],
+) -> Mapping[str, str | int | None] | None:
+    """Narrow queued optimistic-concurrency data without weakening its fence."""
+
+    raw = payload.get("expected_revisions")
+    if not isinstance(raw, Mapping):
+        return None
+    normalized: dict[str, str | int | None] = {}
+    for entity_id, revision in raw.items():
+        if not isinstance(entity_id, str) or not entity_id:
+            return {"__invalid_expected_revision_key__": None}
+        if revision is not None and (isinstance(revision, bool) or not isinstance(revision, (str, int))):
+            return {entity_id: None}
+        normalized[entity_id] = revision
+    return normalized
+
+
+def _expected_revisions_from_mapping(
+    raw: object,
+) -> Mapping[str, str | int | None] | None:
+    if not isinstance(raw, Mapping):
+        return None
+    return _expected_revisions_from_payload({"expected_revisions": raw})
 
 
 class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
@@ -535,7 +578,11 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         ]
         current_node = max(
             revision_nodes,
-            key=lambda node: _as_int(metadata(node).get("created_at_ms"), 0),
+            # Timestamp resolution is milliseconds and can legitimately tie
+            # when revisions are created in one ingest batch.  The revision
+            # identity is the deterministic tie-breaker; never depend on
+            # backend iteration order to decide which source is current.
+            key=lambda node: _revision_node_sort_key(node, metadata(node)),
             default=None,
         )
         current_revision = (
@@ -762,9 +809,14 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 raise ValueError(
                     "maintenance patch scope workspace does not match the claimed job workspace"
                 )
+            expected_revisions = self._expected_revisions_for_patch(ctx, patch)
             decision = self.engines.conversation.jobs.accept_candidate(
                 ctx.job,
-                {"kind": "graph_patch", "patch": patch.model_dump(mode="json")},
+                {
+                    "kind": "graph_patch",
+                    "patch": patch.model_dump(mode="json"),
+                    "expected_revisions": expected_revisions,
+                },
             )
             if decision.get("status") == "rejected":
                 self._emit_trace(
@@ -779,6 +831,9 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 winner = self.engines.conversation.jobs.accepted_candidate(ctx.job)
                 if isinstance(winner, dict) and isinstance(winner.get("patch"), dict):
                     patch = MaintenancePatch.model_validate(winner["patch"])
+                    expected_revisions = _expected_revisions_from_mapping(
+                        winner.get("expected_revisions")
+                    ) or expected_revisions
                     self._emit_trace(
                         "maintenance_repeated_work_discarded",
                         workspace_id=ctx.workspace_id,
@@ -817,6 +872,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     # The job workspace, not mutable payload data, selects the
                     # destination namespace.
                     namespace_prefix=f"ws:{ctx.workspace_id}:",
+                    expected_revisions=(
+                        _expected_revisions_from_payload(ctx.payload)
+                        or expected_revisions
+                    ),
                 )
             finally:
                 self._release_crosslink_resource_locks(ctx, lock_keys)
@@ -1006,6 +1065,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                             {
                                 "maintenance_kind": "graph_patch_apply",
                                 "patch": patch.model_dump(mode="json"),
+                                "expected_revisions": self._expected_revisions_for_patch(ctx, patch),
                                 "crosslink_lifecycle": "needs_revalidation",
                                 "maintenance_previous_kind": ctx.maintenance_kind,
                             }
@@ -1065,6 +1125,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 {
                     "maintenance_kind": "graph_patch_apply",
                     "patch": patch.model_dump(mode="json"),
+                    "expected_revisions": self._expected_revisions_for_patch(ctx, patch),
                     "crosslink_lifecycle": (
                         "candidate"
                         if ctx.maintenance_kind == "document_propose_crosslinks"
@@ -2196,6 +2257,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             **self._maintenance_run_identity(ctx),
         })
         payload["source_revision_fences"] = self._source_revision_fences_for_patch(patch)
+        payload["expected_revisions"] = self._expected_revisions_for_patch(ctx, patch)
         self.engines.conversation.jobs.enqueue(
             job_id=str(stable_id("crosslink_apply_job", ctx.workspace_id, group_id)),
             namespace=WorkspaceNamespaces(ctx.workspace_id).maintenance_jobs,
@@ -2205,6 +2267,48 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             op="UPSERT",
             payload=payload,
         )
+
+    def _expected_revisions_for_patch(
+        self, ctx: MaintenanceJobExecutionContext, patch: MaintenancePatch
+    ) -> dict[str, str | int | None]:
+        """Capture fences when a mutation patch is accepted for execution."""
+
+        target_ids = {
+            str(value)
+            for operation in patch.operations
+            for value in (
+                operation.target_id,
+                operation.node_id,
+                operation.edge_id,
+                operation.from_node_id,
+                operation.to_node_id,
+                operation.tombstone_target_id,
+                *operation.supersedes_ids,
+            )
+            if value
+        }
+        if not target_ids:
+            return {}
+        graph_engine = getattr(self.engines, "kg", None)
+        if graph_engine is None:
+            return {}
+        namespace = WorkspaceNamespaces(ctx.workspace_id).curated_kg_space
+        revisions: dict[str, str | int | None] = {}
+        with _temporary_namespace(graph_engine, namespace):
+            nodes = graph_engine.read.get_nodes(
+                ids=sorted(target_ids), resolve_mode="active_only"
+            )
+            edges = graph_engine.read.get_edges(
+                ids=sorted(target_ids), resolve_mode="active_only"
+            )
+        for entity in (*nodes, *edges):
+            metadata = dict(getattr(entity, "metadata", None) or {})
+            for key in ("entity_revision", "revision_id", "revision"):
+                value = metadata.get(key)
+                if isinstance(value, (str, int)) and not isinstance(value, bool) and value != "":
+                    revisions[str(entity.id)] = value
+                    break
+        return revisions
 
     @staticmethod
     def _source_revision_fences_for_patch(patch: MaintenancePatch) -> list[dict[str, str]]:
@@ -2636,6 +2740,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 nodes=nodes,
                 edges=edges,
             )
+            self._assert_claim_owned(
+                ctx,
+                reason="claim_lost_before_dependency_invalidation",
+            )
             if plan.affected_source_document_ids and plan.follow_up_kinds:
                 self._enqueue_dependency_jobs(ctx, plan)
             if plan.projection_entity_ids:
@@ -2667,7 +2775,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         plan: DependencyInvalidationPlan,
     ) -> None:
         ns = WorkspaceNamespaces(ctx.workspace_id)
-        source_metadata: dict[str, dict[str, object]] = {}
+        source_revisions: dict[str, tuple[Node, dict[str, object]]] = {}
         with _temporary_namespace(self.engines.kg, ns.source_space):
             revisions = self.engines.kg.read.get_nodes(
                 where={"artifact_kind": "source_revision"},
@@ -2680,16 +2788,22 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             source_id = str(metadata.get("source_document_id") or "").strip()
             if not source_id or source_id not in plan.affected_source_document_ids:
                 continue
-            created_at = _as_int(metadata.get("created_at_ms"), 0)
-            previous = source_metadata.get(source_id)
-            if previous is None or created_at > _as_int(previous.get("created_at_ms"), 0):
-                source_metadata[source_id] = metadata
+            previous = source_revisions.get(source_id)
+            if previous is None or _revision_node_sort_key(
+                revision, metadata
+            ) > _revision_node_sort_key(*previous):
+                source_revisions[source_id] = (revision, metadata)
 
         self.engines.conversation.jobs.require_available(enqueue=True)
         for source_id in plan.affected_source_document_ids:
-            metadata = source_metadata.get(source_id)
-            if metadata is None:
+            self._assert_claim_owned(
+                ctx,
+                reason="claim_lost_before_dependency_job_enqueue",
+            )
+            source_revision = source_revisions.get(source_id)
+            if source_revision is None:
                 continue
+            _revision, metadata = source_revision
             for maintenance_kind in plan.follow_up_kinds:
                 job_id = str(
                     stable_id(
@@ -2747,6 +2861,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         ns = WorkspaceNamespaces(ctx.workspace_id)
         self.engines.conversation.jobs.require_available(enqueue=True)
         for entity_id in plan.projection_entity_ids[:256]:
+            self._assert_claim_owned(
+                ctx,
+                reason="claim_lost_before_projection_dependency_enqueue",
+            )
             job_id = str(
                 stable_id(
                     "kogwistar_llm_wiki.dependency_projection_request",

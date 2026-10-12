@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from jose import jwt
+from jsonschema import Draft202012Validator
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
@@ -391,6 +392,52 @@ def test_native_mcp_memory_capture_publishes_record_contract():
     assert records_schema["items"] == record_schema
     assert records_schema["minItems"] == 1
     assert records_schema["maxItems"] == 32
+
+
+def test_native_mcp_schema_rejects_wrong_top_level_query_payload():
+    schemas = {name: schema for name, _description, schema in _tool_specs()}
+    errors = list(
+        Draft202012Validator(schemas["query"]).iter_errors(
+            {"semantic_boundaries": {"blocks": []}}
+        )
+    )
+
+    assert errors
+    assert any(error.validator in {"required", "additionalProperties"} for error in errors)
+
+
+def test_native_mcp_memory_capture_invalid_record_does_not_reach_persistence():
+    captured: list[object] = []
+
+    class ValidatingMemoryApi(FakeApi):
+        def capture_memory(self, payload):
+            from kogwistar_llm_wiki.memory import MemoryRecord
+
+            records = [payload] if isinstance(payload, dict) else payload
+            validated = [MemoryRecord.model_validate(item) for item in records]
+            captured.extend(validated)
+            return {"status": "captured"}
+
+    mcp = build_agent_mcp(AgentGateway(ValidatingMemoryApi()))
+    result = asyncio.run(
+        mcp.call_tool(
+            "memory_capture",
+            {
+                "record": {
+                    "workspace_id": "w",
+                    "session_id": "s",
+                    "kind": "finding",
+                    "statement": "provider output",
+                    "confidence": "verified",
+                    "evidence": [],
+                    "unexpected": "free-form payload",
+                }
+            },
+        )
+    )
+
+    assert getattr(result, "isError", getattr(result, "is_error", False)) is True
+    assert captured == []
 
 
 def test_native_mcp_streamable_http_preserves_wire_contract():

@@ -274,6 +274,13 @@ def test_critic_failure_diagnostics_are_safe_and_classified() -> None:
     )
 
 
+def test_observation_critic_rejects_wrong_top_level_provider_shape() -> None:
+    with pytest.raises(ValidationError):
+        ObservationCriticOutput.model_validate(
+            {"semantic_boundaries": {"blocks": []}}
+        )
+
+
 def test_context_limit_blocks_critic_and_pauses_durable_background_control(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

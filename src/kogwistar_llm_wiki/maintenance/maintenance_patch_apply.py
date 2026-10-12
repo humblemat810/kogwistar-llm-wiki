@@ -18,6 +18,7 @@ from kogwistar.engine_core.models import (
 )
 from kogwistar.id_provider import stable_id
 from kogwistar.json_types import JsonObject, JsonValue
+from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.typing_interfaces import ReadLike, WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
@@ -66,6 +67,12 @@ _IMMUTABLE_RAW_ARTIFACT_KINDS = frozenset(
 class _StaleMaintenancePatch(Exception):
     def __init__(self, issues: list[MaintenancePatchValidationIssue]) -> None:
         super().__init__("maintenance patch targets changed after proposal")
+        self.issues = issues
+
+
+class _AuthorizationChanged(Exception):
+    def __init__(self, issues: list[MaintenancePatchValidationIssue]) -> None:
+        super().__init__("maintenance authorization changed before mutation")
         self.issues = issues
 
 
@@ -151,6 +158,12 @@ def apply_maintenance_patch(
         active_edge_ids=active_edge_ids,
         namespace_prefix=namespace_prefix,
     )
+    acl_issues = _acl_issues_for_patch(engine, patch)
+    if acl_issues:
+        validation = MaintenancePatchValidationReport(
+            valid=False,
+            issues=[*validation.issues, *acl_issues],
+        )
     raw_fact_issues = _immutable_raw_fact_issues(
         engine,
         patch,
@@ -216,6 +229,10 @@ def apply_maintenance_patch(
     status = MaintenancePatchStatus.APPLIED
     try:
         with _engine_uow(engine):
+            _lock_maintenance_identities(engine, patch)
+            authorization_issues = _acl_issues_for_patch(engine, patch)
+            if authorization_issues:
+                raise _AuthorizationChanged(authorization_issues)
             stale_issues = _stale_revision_issues(engine, expected_revisions or {})
             if stale_issues:
                 raise _StaleMaintenancePatch(stale_issues)
@@ -230,6 +247,29 @@ def apply_maintenance_patch(
     except _StaleMaintenancePatch as exc:
         validation = MaintenancePatchValidationReport(valid=False, issues=[*validation.issues, *exc.issues])
         artifact_id = _emit_patch_artifact(engine, patch, validation, operation_results, MaintenancePatchStatus.REJECTED) if emit_artifact else None
+        return MaintenancePatchApplyResult(
+            patch_id=patch.patch_id,
+            status=MaintenancePatchStatus.REJECTED,
+            validation=validation,
+            operation_results=operation_results,
+            artifact_id=artifact_id,
+        )
+    except _AuthorizationChanged as exc:
+        validation = MaintenancePatchValidationReport(
+            valid=False,
+            issues=[*validation.issues, *exc.issues],
+        )
+        artifact_id = (
+            _emit_patch_artifact(
+                engine,
+                patch,
+                validation,
+                operation_results,
+                MaintenancePatchStatus.REJECTED,
+            )
+            if emit_artifact
+            else None
+        )
         return MaintenancePatchApplyResult(
             patch_id=patch.patch_id,
             status=MaintenancePatchStatus.REJECTED,
@@ -389,6 +429,132 @@ def _immutable_raw_fact_issues(
     return issues
 
 
+def _acl_issues_for_patch(
+    engine: _MaintenanceEngineLike,
+    patch: MaintenancePatch,
+) -> list[MaintenancePatchValidationIssue]:
+    """Re-check entity ACLs at the final mutation boundary.
+
+    Selection and review happen earlier than application.  A scope can be
+    revoked in between, so workspace membership alone is not sufficient for
+    existing targets.  Crosslink code has a stricter domain-specific check;
+    this shared check covers ordinary maintenance patches as well.
+    """
+
+    node_ids: set[str] = set()
+    edge_ids: set[str] = set()
+    created_node_ids = {
+        str(operation.node_id)
+        for operation in patch.operations
+        if operation.kind == MaintenanceOperationKind.ADD_NODE and operation.node_id
+    }
+    for operation in patch.operations:
+        if operation.kind == MaintenanceOperationKind.ADD_EDGE:
+            node_ids.update(
+                value
+                for value in (operation.from_node_id, operation.to_node_id)
+                if value
+            )
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE:
+            if operation.tombstone_target_id:
+                node_ids.add(operation.tombstone_target_id)
+        elif (
+            operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE
+            and operation.tombstone_target_id
+        ):
+            edge_ids.add(operation.tombstone_target_id)
+
+    issues: list[MaintenancePatchValidationIssue] = []
+    # An edge may point at a node created by this same atomic patch. Before
+    # exempting it from the ACL check, inspect the raw store: graph writes are
+    # upserts, so a hidden existing ID must never masquerade as a new node.
+    raw_existing = _raw_existing_entity_ids(engine, "node", created_node_ids)
+    if raw_existing is None and created_node_ids:
+        issues.append(
+            MaintenancePatchValidationIssue(
+                code="acl_new_target_unverifiable",
+                message="cannot prove maintenance ADD_NODE targets are new",
+            )
+        )
+        raw_existing_node_ids = set()
+    elif raw_existing is None:
+        raw_existing_node_ids = set()
+    else:
+        raw_existing_node_ids = raw_existing
+    # Every pre-existing endpoint remains subject to the final visibility
+    # check below. Only a raw-store-confirmed new ID may be used immediately.
+    existing_node_ids = (node_ids - created_node_ids) | raw_existing_node_ids
+    visible_nodes = {
+        str(entity.id): entity
+        for entity in _read_entities_by_ids(engine, "node", existing_node_ids)
+    }
+    visible_edges = {
+        str(entity.id): entity
+        for entity in _read_entities_by_ids(engine, "edge", edge_ids)
+    }
+    # Core lifecycle writes deliberately operate by identifier and do not run an
+    # ACL decision themselves. A filtered read must therefore fail closed here:
+    # a caller-supplied active-id set cannot turn an invisible target writable.
+    for target_id in sorted(existing_node_ids - set(visible_nodes)):
+        issues.append(
+            MaintenancePatchValidationIssue(
+                code="acl_target_unavailable",
+                message="maintenance target is not available to the current principal",
+            )
+        )
+    for target_id in sorted(edge_ids - set(visible_edges)):
+        issues.append(
+            MaintenancePatchValidationIssue(
+                code="acl_target_unavailable",
+                message="maintenance target is not available to the current principal",
+            )
+        )
+    for entity in (*visible_nodes.values(), *visible_edges.values()):
+        metadata = dict(getattr(entity, "metadata", None) or {})
+        scope = str(
+            metadata.get("acl_scope") or metadata.get("security_scope") or ""
+        ).strip()
+        if scope and not can_access_security_scope(scope):
+            issues.append(
+                MaintenancePatchValidationIssue(
+                    code="acl_scope_denied",
+                    message=f"maintenance target {entity.id!r} is outside the current security scope",
+                )
+            )
+    return issues
+
+
+def _lock_maintenance_identities(
+    engine: _MaintenanceEngineLike, patch: MaintenancePatch
+) -> None:
+    """Serialize ACL reads/mutations against the canonical identity lock."""
+
+    metadata_store = getattr(engine, "meta_sqlite", None)
+    lock_identity = getattr(metadata_store, "lock_entity_identity", None)
+    if not callable(lock_identity):
+        return
+    namespace = str(getattr(engine, "namespace", "default"))
+    identities: set[tuple[str, str]] = set()
+    for operation in patch.operations:
+        if operation.kind == MaintenanceOperationKind.ADD_NODE and operation.node_id:
+            identities.add(("node", str(operation.node_id)))
+        elif operation.kind == MaintenanceOperationKind.ADD_EDGE and operation.edge_id:
+            identities.add(("edge", str(operation.edge_id)))
+            for endpoint_id in (operation.from_node_id, operation.to_node_id):
+                if endpoint_id:
+                    identities.add(("node", str(endpoint_id)))
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE and operation.tombstone_target_id:
+            identities.add(("node", str(operation.tombstone_target_id)))
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE and operation.tombstone_target_id:
+            identities.add(("edge", str(operation.tombstone_target_id)))
+    for entity_kind, entity_id in sorted(identities):
+        lock_identity(
+            namespace=namespace,
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+        )
+
+
 def _derived_crosslink_retraction_issues(
     engine: _MaintenanceEngineLike,
     patch: MaintenancePatch,
@@ -489,6 +655,29 @@ def _read_entities_by_ids(
         return list(getter(ids=sorted(ids), resolve_mode="include_tombstones"))
     except TypeError:
         return list(getter(ids=sorted(ids)))
+
+
+def _raw_existing_entity_ids(
+    engine: _MaintenanceEngineLike,
+    kind: str,
+    ids: set[str],
+) -> set[str] | None:
+    """Return raw-store IDs without treating an ACL-filtered absence as new."""
+
+    if not ids:
+        return set()
+    raw_read = getattr(engine, "raw_read", None)
+    getter = cast(
+        EntityGetter | None,
+        getattr(raw_read, "get_nodes" if kind == "node" else "get_edges", None),
+    )
+    if not callable(getter):
+        return None
+    try:
+        items = getter(ids=sorted(ids), resolve_mode="include_tombstones")
+    except TypeError:
+        items = getter(ids=sorted(ids))
+    return {str(item.id) for item in items if getattr(item, "id", None)}
 
 
 def _is_immutable_raw_fact(entity: MaintenanceEntity) -> bool:
@@ -678,6 +867,32 @@ def _apply_operation(
         )
     if operation.kind == MaintenanceOperationKind.ADD_NODE:
         node_id = str(operation.node_id)
+        creator = getattr(_write(engine), "create_node_if_absent", None)
+        if callable(creator):
+            outcome = creator(_node_from_operation(patch, operation))
+            outcome_status = str(getattr(outcome, "status", ""))
+            if outcome_status == "created":
+                return MaintenancePatchOperationApplyResult(
+                    operation_id=operation.operation_id,
+                    kind=operation.kind,
+                    status="applied",
+                    entity_id=node_id,
+                )
+            if outcome_status == "already_exists":
+                return MaintenancePatchOperationApplyResult(
+                    operation_id=operation.operation_id,
+                    kind=operation.kind,
+                    status="skipped",
+                    entity_id=node_id,
+                    message="canonical node already exists with the same payload",
+                )
+            return MaintenancePatchOperationApplyResult(
+                operation_id=operation.operation_id,
+                kind=operation.kind,
+                status="failed",
+                entity_id=node_id,
+                message=str(getattr(outcome, "message", None) or "canonical node identity conflict"),
+            )
         if _exists(engine, "node", node_id, include_tombstones=True):
             return MaintenancePatchOperationApplyResult(operation_id=operation.operation_id, kind=operation.kind, status="skipped", entity_id=node_id)
         _write(engine).add_node(_node_from_operation(patch, operation))
