@@ -17,6 +17,11 @@ revision-fenced maintenance patch path. A managed vault contains:
   digest, and `kogwistar-obsidian-source/v1` format version;
 - a canonical JSON relation block between the relation markers.
 
+The manifest's SHA-256 digest detects accidental corruption and establishes a
+baseline; it does not authenticate a hostile vault writer. Authorization,
+revision revalidation, and graph-space validation therefore remain mandatory
+inside the LLM-Wiki host's apply unit of work.
+
 Wikilinks, headings, and canvases are presentation only. They never create
 graph relations during import. Unsupported canonical fields remain in the
 manifest sidecar payload so a later export does not silently discard them.
@@ -68,3 +73,9 @@ CLI, and Workbench route adapter. The LLM-Wiki host binding is intentionally an
 explicit deployment seam: it must translate accepted `SyncIntent` records into
 existing ACL-checked, revision-fenced maintenance patches. No plugin code may
 write raw graph storage or immutable source/revision artifacts directly.
+
+`WorkbenchApi` does not yet provide these five host callbacks. Consequently,
+enabling `obsidian-source` now fails closed during extension initialization;
+it does not expose a partially functional synchronization route. The graph-host
+adapter and its end-to-end ACL/revision tests are required before enabling the
+plugin in a production LLM-Wiki deployment.
