@@ -70,6 +70,12 @@ class _StaleMaintenancePatch(Exception):
         self.issues = issues
 
 
+class _AuthorizationChanged(Exception):
+    def __init__(self, issues: list[MaintenancePatchValidationIssue]) -> None:
+        super().__init__("maintenance authorization changed before mutation")
+        self.issues = issues
+
+
 class _AtomicPatchOperationFailed(Exception):
     def __init__(
         self,
@@ -223,6 +229,10 @@ def apply_maintenance_patch(
     status = MaintenancePatchStatus.APPLIED
     try:
         with _engine_uow(engine):
+            _lock_maintenance_identities(engine, patch)
+            authorization_issues = _acl_issues_for_patch(engine, patch)
+            if authorization_issues:
+                raise _AuthorizationChanged(authorization_issues)
             stale_issues = _stale_revision_issues(engine, expected_revisions or {})
             if stale_issues:
                 raise _StaleMaintenancePatch(stale_issues)
@@ -237,6 +247,29 @@ def apply_maintenance_patch(
     except _StaleMaintenancePatch as exc:
         validation = MaintenancePatchValidationReport(valid=False, issues=[*validation.issues, *exc.issues])
         artifact_id = _emit_patch_artifact(engine, patch, validation, operation_results, MaintenancePatchStatus.REJECTED) if emit_artifact else None
+        return MaintenancePatchApplyResult(
+            patch_id=patch.patch_id,
+            status=MaintenancePatchStatus.REJECTED,
+            validation=validation,
+            operation_results=operation_results,
+            artifact_id=artifact_id,
+        )
+    except _AuthorizationChanged as exc:
+        validation = MaintenancePatchValidationReport(
+            valid=False,
+            issues=[*validation.issues, *exc.issues],
+        )
+        artifact_id = (
+            _emit_patch_artifact(
+                engine,
+                patch,
+                validation,
+                operation_results,
+                MaintenancePatchStatus.REJECTED,
+            )
+            if emit_artifact
+            else None
+        )
         return MaintenancePatchApplyResult(
             patch_id=patch.patch_id,
             status=MaintenancePatchStatus.REJECTED,
@@ -489,6 +522,37 @@ def _acl_issues_for_patch(
                 )
             )
     return issues
+
+
+def _lock_maintenance_identities(
+    engine: _MaintenanceEngineLike, patch: MaintenancePatch
+) -> None:
+    """Serialize ACL reads/mutations against the canonical identity lock."""
+
+    metadata_store = getattr(engine, "meta_sqlite", None)
+    lock_identity = getattr(metadata_store, "lock_entity_identity", None)
+    if not callable(lock_identity):
+        return
+    namespace = str(getattr(engine, "namespace", "default"))
+    identities: set[tuple[str, str]] = set()
+    for operation in patch.operations:
+        if operation.kind == MaintenanceOperationKind.ADD_NODE and operation.node_id:
+            identities.add(("node", str(operation.node_id)))
+        elif operation.kind == MaintenanceOperationKind.ADD_EDGE and operation.edge_id:
+            identities.add(("edge", str(operation.edge_id)))
+            for endpoint_id in (operation.from_node_id, operation.to_node_id):
+                if endpoint_id:
+                    identities.add(("node", str(endpoint_id)))
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE and operation.tombstone_target_id:
+            identities.add(("node", str(operation.tombstone_target_id)))
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE and operation.tombstone_target_id:
+            identities.add(("edge", str(operation.tombstone_target_id)))
+    for entity_kind, entity_id in sorted(identities):
+        lock_identity(
+            namespace=namespace,
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+        )
 
 
 def _derived_crosslink_retraction_issues(
@@ -803,6 +867,32 @@ def _apply_operation(
         )
     if operation.kind == MaintenanceOperationKind.ADD_NODE:
         node_id = str(operation.node_id)
+        creator = getattr(_write(engine), "create_node_if_absent", None)
+        if callable(creator):
+            outcome = creator(_node_from_operation(patch, operation))
+            outcome_status = str(getattr(outcome, "status", ""))
+            if outcome_status == "created":
+                return MaintenancePatchOperationApplyResult(
+                    operation_id=operation.operation_id,
+                    kind=operation.kind,
+                    status="applied",
+                    entity_id=node_id,
+                )
+            if outcome_status == "already_exists":
+                return MaintenancePatchOperationApplyResult(
+                    operation_id=operation.operation_id,
+                    kind=operation.kind,
+                    status="skipped",
+                    entity_id=node_id,
+                    message="canonical node already exists with the same payload",
+                )
+            return MaintenancePatchOperationApplyResult(
+                operation_id=operation.operation_id,
+                kind=operation.kind,
+                status="failed",
+                entity_id=node_id,
+                message=str(getattr(outcome, "message", None) or "canonical node identity conflict"),
+            )
         if _exists(engine, "node", node_id, include_tombstones=True):
             return MaintenancePatchOperationApplyResult(operation_id=operation.operation_id, kind=operation.kind, status="skipped", entity_id=node_id)
         _write(engine).add_node(_node_from_operation(patch, operation))

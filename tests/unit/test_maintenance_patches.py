@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import pytest
 from kogwistar.engine_core import AtomicMutationCapability
 from kogwistar.engine_core.models import Grounding, Node, Span
@@ -172,6 +174,63 @@ def test_generic_patch_rechecks_acl_before_tombstoning_existing_entity(monkeypat
 
     assert result.status == "rejected"
     assert any(issue.code == "acl_scope_denied" for issue in result.validation.issues)
+    assert engine.tombstone_node_calls == []
+
+
+def test_generic_patch_rechecks_acl_inside_uow_before_mutation() -> None:
+    """A revoke observed after UoW entry must reject before lifecycle writes."""
+
+    class RevokedAfterUowRead(_FakeRead):
+        def get_nodes(self, ids=None, resolve_mode="active_only", **kwargs):
+            if self.engine.in_uow:
+                return []
+            return super().get_nodes(ids=ids, resolve_mode=resolve_mode, **kwargs)
+
+    class UowEngine(_FakeEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.in_uow = False
+            self.read = RevokedAfterUowRead(self)
+            self.raw_read = _FakeRead(self)
+
+        @contextmanager
+        def uow(self):
+            self.in_uow = True
+            try:
+                yield None
+            finally:
+                self.in_uow = False
+
+    engine = UowEngine()
+    target = Node(
+        id="ws:demo:node:revoked",
+        label="Revoked",
+        type="entity",
+        summary="target",
+        doc_id="doc-1",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation("revoked")])],
+        metadata={"workspace_id": "demo"},
+    )
+    engine.nodes[target.id] = target
+    patch = MaintenancePatch(
+        patch_id="patch-revoked-in-uow",
+        intent=MaintenanceIntent.CORRECT_FACT,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="tombstone-revoked",
+                kind=MaintenanceOperationKind.TOMBSTONE_NODE,
+                target_id=target.id,
+                reason="revoke between preflight and mutation",
+                provenance=_provenance(),
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch(engine, patch, active_node_ids={target.id})
+
+    assert result.status == "rejected"
+    assert any(issue.code == "acl_target_unavailable" for issue in result.validation.issues)
     assert engine.tombstone_node_calls == []
 
 

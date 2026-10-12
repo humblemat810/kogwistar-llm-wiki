@@ -267,6 +267,14 @@ def _expected_revisions_from_payload(
     return normalized
 
 
+def _expected_revisions_from_mapping(
+    raw: object,
+) -> Mapping[str, str | int | None] | None:
+    if not isinstance(raw, Mapping):
+        return None
+    return _expected_revisions_from_payload({"expected_revisions": raw})
+
+
 class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
     """Methods for bounded maintenance planning and runtime execution."""
 
@@ -801,9 +809,14 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 raise ValueError(
                     "maintenance patch scope workspace does not match the claimed job workspace"
                 )
+            expected_revisions = self._expected_revisions_for_patch(ctx, patch)
             decision = self.engines.conversation.jobs.accept_candidate(
                 ctx.job,
-                {"kind": "graph_patch", "patch": patch.model_dump(mode="json")},
+                {
+                    "kind": "graph_patch",
+                    "patch": patch.model_dump(mode="json"),
+                    "expected_revisions": expected_revisions,
+                },
             )
             if decision.get("status") == "rejected":
                 self._emit_trace(
@@ -818,6 +831,9 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 winner = self.engines.conversation.jobs.accepted_candidate(ctx.job)
                 if isinstance(winner, dict) and isinstance(winner.get("patch"), dict):
                     patch = MaintenancePatch.model_validate(winner["patch"])
+                    expected_revisions = _expected_revisions_from_mapping(
+                        winner.get("expected_revisions")
+                    ) or expected_revisions
                     self._emit_trace(
                         "maintenance_repeated_work_discarded",
                         workspace_id=ctx.workspace_id,
@@ -856,7 +872,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                     # The job workspace, not mutable payload data, selects the
                     # destination namespace.
                     namespace_prefix=f"ws:{ctx.workspace_id}:",
-                    expected_revisions=_expected_revisions_from_payload(ctx.payload),
+                    expected_revisions=(
+                        _expected_revisions_from_payload(ctx.payload)
+                        or expected_revisions
+                    ),
                 )
             finally:
                 self._release_crosslink_resource_locks(ctx, lock_keys)
@@ -1046,6 +1065,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                             {
                                 "maintenance_kind": "graph_patch_apply",
                                 "patch": patch.model_dump(mode="json"),
+                                "expected_revisions": self._expected_revisions_for_patch(ctx, patch),
                                 "crosslink_lifecycle": "needs_revalidation",
                                 "maintenance_previous_kind": ctx.maintenance_kind,
                             }
@@ -1105,6 +1125,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 {
                     "maintenance_kind": "graph_patch_apply",
                     "patch": patch.model_dump(mode="json"),
+                    "expected_revisions": self._expected_revisions_for_patch(ctx, patch),
                     "crosslink_lifecycle": (
                         "candidate"
                         if ctx.maintenance_kind == "document_propose_crosslinks"
@@ -2236,6 +2257,7 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             **self._maintenance_run_identity(ctx),
         })
         payload["source_revision_fences"] = self._source_revision_fences_for_patch(patch)
+        payload["expected_revisions"] = self._expected_revisions_for_patch(ctx, patch)
         self.engines.conversation.jobs.enqueue(
             job_id=str(stable_id("crosslink_apply_job", ctx.workspace_id, group_id)),
             namespace=WorkspaceNamespaces(ctx.workspace_id).maintenance_jobs,
@@ -2245,6 +2267,48 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             op="UPSERT",
             payload=payload,
         )
+
+    def _expected_revisions_for_patch(
+        self, ctx: MaintenanceJobExecutionContext, patch: MaintenancePatch
+    ) -> dict[str, str | int | None]:
+        """Capture fences when a mutation patch is accepted for execution."""
+
+        target_ids = {
+            str(value)
+            for operation in patch.operations
+            for value in (
+                operation.target_id,
+                operation.node_id,
+                operation.edge_id,
+                operation.from_node_id,
+                operation.to_node_id,
+                operation.tombstone_target_id,
+                *operation.supersedes_ids,
+            )
+            if value
+        }
+        if not target_ids:
+            return {}
+        graph_engine = getattr(self.engines, "kg", None)
+        if graph_engine is None:
+            return {}
+        namespace = WorkspaceNamespaces(ctx.workspace_id).curated_kg_space
+        revisions: dict[str, str | int | None] = {}
+        with _temporary_namespace(graph_engine, namespace):
+            nodes = graph_engine.read.get_nodes(
+                ids=sorted(target_ids), resolve_mode="active_only"
+            )
+            edges = graph_engine.read.get_edges(
+                ids=sorted(target_ids), resolve_mode="active_only"
+            )
+        for entity in (*nodes, *edges):
+            metadata = dict(getattr(entity, "metadata", None) or {})
+            for key in ("entity_revision", "revision_id", "revision"):
+                value = metadata.get(key)
+                if isinstance(value, (str, int)) and not isinstance(value, bool) and value != "":
+                    revisions[str(entity.id)] = value
+                    break
+        return revisions
 
     @staticmethod
     def _source_revision_fences_for_patch(patch: MaintenancePatch) -> list[dict[str, str]]:
