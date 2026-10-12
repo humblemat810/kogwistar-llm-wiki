@@ -20,7 +20,10 @@ from kogwistar.llm_tasks.providers import (
 from pydantic import BaseModel
 
 from kogwistar_llm_wiki.codex.codex_bridge import CodexBridgeState
-from kogwistar_llm_wiki.codex.codex_workbench_agent import CodexCliSettings
+from kogwistar_llm_wiki.codex.codex_workbench_agent import (
+    CodexCliSettings,
+    _parse_cockpit_action,
+)
 from kogwistar_llm_wiki.providers.role_config import (
     resolve_maintenance_provider_settings,
 )
@@ -56,6 +59,11 @@ def test_bridge_returns_only_valid_structured_object() -> None:
         {"messages": [{"role": "user", "content": "summarize"}], "response_schema": Answer.model_json_schema()}
     )
     assert result == {"output": {"text": "bounded"}, "provider": "codex", "model": "codex-test"}
+
+
+def test_codex_action_parser_rejects_unrelated_free_form_json() -> None:
+    with pytest.raises(ValueError, match="invalid cockpit transport"):
+        _parse_cockpit_action('{"semantic_boundaries": {"blocks": []}}')
 
 
 def test_codex_messages_use_openai_roles_without_paths() -> None:
