@@ -241,15 +241,38 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install and test the pinned source package
+      - name: Install source contract tools
         working-directory: kogwistar-obsidian-source
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip pytest ruff pyright
+
+      - name: Run pinned source tests
+        working-directory: kogwistar-obsidian-source
+        shell: bash
+        run: |
+          set -euo pipefail
           python -m pytest tests -q -p no:cacheprovider
+
+      - name: Lint pinned source package
+        working-directory: kogwistar-obsidian-source
+        shell: bash
+        run: |
+          set -euo pipefail
           ruff check src tests --select E4,E7,E9,F
+
+      - name: Type-check pinned source package
+        working-directory: kogwistar-obsidian-source
+        shell: bash
+        run: |
+          set -euo pipefail
           pyright src tests
+
+      - name: Check pinned source diff
+        working-directory: kogwistar-obsidian-source
+        shell: bash
+        run: |
           git diff --check
 
   python-lint:
