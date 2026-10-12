@@ -247,7 +247,6 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip build pytest ruff pyright
-          python -m pip install --editable . --no-deps
           python -m pytest tests -q -p no:cacheprovider
           ruff check src tests --select E4,E7,E9,F
           pyright src tests
