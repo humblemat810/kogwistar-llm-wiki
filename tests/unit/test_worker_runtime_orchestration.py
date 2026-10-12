@@ -26,6 +26,7 @@ from kogwistar_llm_wiki.maintenance.maintenance_statistics import (
 from kogwistar_llm_wiki.maintenance.maintenance_strategies import (
     MaintenanceJobExecutionContext,
 )
+from kogwistar_llm_wiki.maintenance.worker_execution import _revision_node_sort_key
 from kogwistar_llm_wiki.projections.worker_impl import ProjectionWorker
 from kogwistar_llm_wiki.utils import _background_namespace, _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
@@ -109,6 +110,14 @@ def test_maintenance_dispatch_accepts_matching_payload_workspace() -> None:
     worker._handle_job("workspace", SimpleNamespace(payload={"workspace_id": "workspace"}))
 
     assert dispatched is True
+
+
+def test_source_revision_sort_key_is_deterministic_for_timestamp_ties() -> None:
+    first = SimpleNamespace(id="revision-node-a")
+    second = SimpleNamespace(id="revision-node-b")
+    metadata = {"created_at_ms": 1000}
+
+    assert _revision_node_sort_key(first, metadata) < _revision_node_sort_key(second, metadata)
 
 
 def test_lease_renewal_exception_fences_the_worker_claim() -> None:
@@ -277,6 +286,74 @@ def test_claim_loss_before_graph_patch_never_calls_the_applier(monkeypatch) -> N
 
     assert applied == []
     assert any(event["event"] == "maintenance_repeated_work_discarded" for event in traces)
+
+
+def test_claim_loss_after_graph_patch_discards_reply_and_ack(monkeypatch) -> None:
+    """A late worker result must not acknowledge or publish after mutation.
+
+    The patch application is intentionally idempotent so a later claimant can
+    replay it, while the stale claimant is fenced from producing the durable
+    completion reply.
+    """
+
+    applied: list[str] = []
+    traces: list[dict[str, object]] = []
+
+    class FakeJobs:
+        def accepted_candidate(self, _job):
+            return None
+
+        def accept_candidate(self, _job, _candidate):
+            return {"status": "accepted"}
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=FakeJobs()))
+    worker._claim_lost = threading.Event()
+    worker.trace_sink = traces.append
+    worker._evaluate_maintenance_guard = lambda _ctx: SimpleNamespace(status="ready")
+    worker._emit_lane_reply = lambda **_kwargs: applied.append("reply")
+    worker._acknowledge_job = lambda _ctx: applied.append("ack")
+
+    def apply_then_lose_claim(*_args, **_kwargs):
+        applied.append("graph")
+        worker._claim_lost.set()
+        return SimpleNamespace(status=SimpleNamespace(value="applied"), patch_id="patch-late")
+
+    monkeypatch.setattr(
+        worker_module,
+        "apply_maintenance_patch_for_scope",
+        apply_then_lose_claim,
+    )
+    patch = MaintenancePatch(
+        patch_id="patch-late-claim-loss",
+        intent="derive_summary",
+        scope={"workspace_id": "workspace-late"},
+        operations=[
+            {
+                "operation_id": "op-1",
+                "kind": "ADD_NODE",
+                "node_id": "node-1",
+            }
+        ],
+    )
+    ctx = SimpleNamespace(
+        workspace_id="workspace-late",
+        job=SimpleNamespace(claim_token="claim-1"),
+        job_id="job-late-claim-loss",
+        payload={"patch": patch.model_dump(mode="json")},
+        request_node_id="request-late-claim-loss",
+        lane_message_id="",
+        maintenance_kind="graph_patch_apply",
+    )
+
+    worker._handle_graph_patch_apply_strategy(ctx)
+
+    assert applied == ["graph"]
+    assert any(
+        event["event"] == "maintenance_repeated_work_discarded"
+        and event["reason"] == "claim_lost_after_graph_patch"
+        for event in traces
+    )
 
 
 def test_claim_loss_before_crosslink_requeue_discards_prepared_patch() -> None:

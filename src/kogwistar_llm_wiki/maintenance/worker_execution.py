@@ -15,6 +15,7 @@ from kogwistar.engine_core import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Grounding, Node, Span
 from kogwistar.id_provider import stable_id
 from kogwistar.json_types import JsonObject, JsonValue
+from kogwistar.llm_tasks.providers import StructuredOutputRunnable
 from kogwistar.runtime.budget import (
     BudgetEvent,
     BudgetExhaustedError,
@@ -23,7 +24,6 @@ from kogwistar.runtime.budget import (
 from kogwistar.runtime.models import RunSuccess
 from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
-from kogwistar.llm_tasks.providers import StructuredOutputRunnable
 
 from ..configuration.identity import runtime_authority_context
 from ..configuration.workspace import WorkspaceNamespaces
@@ -162,6 +162,16 @@ def _as_int(value: object, default: int = 0) -> int:
         except (TypeError, ValueError):
             return default
     return default
+
+
+def _revision_node_sort_key(node: Node, metadata: Mapping[str, object]) -> tuple[int, str, str]:
+    """Order source revisions deterministically when timestamps collide."""
+
+    return (
+        _as_int(metadata.get("created_at_ms"), 0),
+        str(metadata.get("source_revision_id") or node.id),
+        str(metadata.get("revision_document_id") or ""),
+    )
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -535,7 +545,11 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         ]
         current_node = max(
             revision_nodes,
-            key=lambda node: _as_int(metadata(node).get("created_at_ms"), 0),
+            # Timestamp resolution is milliseconds and can legitimately tie
+            # when revisions are created in one ingest batch.  The revision
+            # identity is the deterministic tie-breaker; never depend on
+            # backend iteration order to decide which source is current.
+            key=lambda node: _revision_node_sort_key(node, metadata(node)),
             default=None,
         )
         current_revision = (
@@ -2636,6 +2650,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 nodes=nodes,
                 edges=edges,
             )
+            self._assert_claim_owned(
+                ctx,
+                reason="claim_lost_before_dependency_invalidation",
+            )
             if plan.affected_source_document_ids and plan.follow_up_kinds:
                 self._enqueue_dependency_jobs(ctx, plan)
             if plan.projection_entity_ids:
@@ -2687,6 +2705,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
 
         self.engines.conversation.jobs.require_available(enqueue=True)
         for source_id in plan.affected_source_document_ids:
+            self._assert_claim_owned(
+                ctx,
+                reason="claim_lost_before_dependency_job_enqueue",
+            )
             metadata = source_metadata.get(source_id)
             if metadata is None:
                 continue
@@ -2747,6 +2769,10 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         ns = WorkspaceNamespaces(ctx.workspace_id)
         self.engines.conversation.jobs.require_available(enqueue=True)
         for entity_id in plan.projection_entity_ids[:256]:
+            self._assert_claim_owned(
+                ctx,
+                reason="claim_lost_before_projection_dependency_enqueue",
+            )
             job_id = str(
                 stable_id(
                     "kogwistar_llm_wiki.dependency_projection_request",

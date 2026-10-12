@@ -18,6 +18,7 @@ from kogwistar.engine_core.models import (
 )
 from kogwistar.id_provider import stable_id
 from kogwistar.json_types import JsonObject, JsonValue
+from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.typing_interfaces import ReadLike, WriteLike
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
 from pydantic import BaseModel, ConfigDict, Field
@@ -151,6 +152,12 @@ def apply_maintenance_patch(
         active_edge_ids=active_edge_ids,
         namespace_prefix=namespace_prefix,
     )
+    acl_issues = _acl_issues_for_patch(engine, patch)
+    if acl_issues:
+        validation = MaintenancePatchValidationReport(
+            valid=False,
+            issues=[*validation.issues, *acl_issues],
+        )
     raw_fact_issues = _immutable_raw_fact_issues(
         engine,
         patch,
@@ -384,6 +391,61 @@ def _immutable_raw_fact_issues(
                         "maintenance cannot tombstone an edge belonging to a raw source or "
                         "conversation fact"
                     ),
+                )
+            )
+    return issues
+
+
+def _acl_issues_for_patch(
+    engine: _MaintenanceEngineLike,
+    patch: MaintenancePatch,
+) -> list[MaintenancePatchValidationIssue]:
+    """Re-check entity ACLs at the final mutation boundary.
+
+    Selection and review happen earlier than application.  A scope can be
+    revoked in between, so workspace membership alone is not sufficient for
+    existing targets.  Crosslink code has a stricter domain-specific check;
+    this shared check covers ordinary maintenance patches as well.
+    """
+
+    node_ids: set[str] = set()
+    edge_ids: set[str] = set()
+    for operation in patch.operations:
+        if operation.kind == MaintenanceOperationKind.ADD_EDGE:
+            node_ids.update(
+                value
+                for value in (operation.from_node_id, operation.to_node_id)
+                if value
+            )
+        elif operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE:
+            if operation.tombstone_target_id:
+                node_ids.add(operation.tombstone_target_id)
+        elif (
+            operation.kind == MaintenanceOperationKind.TOMBSTONE_EDGE
+            and operation.tombstone_target_id
+        ):
+            edge_ids.add(operation.tombstone_target_id)
+
+    read = getattr(engine, "read", engine)
+    node_getter = getattr(read, "get_nodes", None)
+    edge_getter = getattr(read, "get_edges", None)
+    entities: list[MaintenanceEntity] = []
+    if node_ids and callable(node_getter):
+        entities.extend(node_getter(ids=sorted(node_ids), resolve_mode="active_only"))
+    if edge_ids and callable(edge_getter):
+        entities.extend(edge_getter(ids=sorted(edge_ids), resolve_mode="active_only"))
+
+    issues: list[MaintenancePatchValidationIssue] = []
+    for entity in entities:
+        metadata = dict(getattr(entity, "metadata", None) or {})
+        scope = str(
+            metadata.get("acl_scope") or metadata.get("security_scope") or ""
+        ).strip()
+        if scope and not can_access_security_scope(scope):
+            issues.append(
+                MaintenancePatchValidationIssue(
+                    code="acl_scope_denied",
+                    message=f"maintenance target {entity.id!r} is outside the current security scope",
                 )
             )
     return issues

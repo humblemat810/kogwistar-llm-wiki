@@ -5,6 +5,7 @@ from kogwistar.engine_core import AtomicMutationCapability
 from kogwistar.engine_core.models import Grounding, Node, Span
 from pydantic import ValidationError
 
+import kogwistar_llm_wiki.maintenance.maintenance_patch_apply as patch_apply
 from kogwistar_llm_wiki.maintenance.maintenance_patch_apply import (
     apply_maintenance_patch,
 )
@@ -136,6 +137,42 @@ def test_maintenance_can_add_interpretation_and_support_edge_to_raw_fact() -> No
     assert "ws:demo:interpretation:1" in engine.nodes
     assert engine.nodes["ws:demo:interpretation:1"].metadata["node_type"] == "interpretation_guess"
     assert "ws:demo:edge:interpretation-1" in engine.edges
+
+
+def test_generic_patch_rechecks_acl_before_tombstoning_existing_entity(monkeypatch) -> None:
+    engine = _FakeEngine()
+    protected = Node(
+        id="ws:demo:node:protected",
+        label="Protected",
+        type="entity",
+        summary="protected",
+        doc_id="doc-1",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation("protected")])],
+        metadata={"workspace_id": "demo", "acl_scope": "private:finance"},
+    )
+    engine.nodes[protected.id] = protected
+    monkeypatch.setattr(patch_apply, "can_access_security_scope", lambda _scope: False)
+
+    patch = MaintenancePatch(
+        patch_id="patch-acl-revoked",
+        intent=MaintenanceIntent.CORRECT_FACT,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="tombstone-protected",
+                kind=MaintenanceOperationKind.TOMBSTONE_NODE,
+                target_id=protected.id,
+                reason="stale interpretation",
+                provenance=_provenance(),
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch(engine, patch, active_node_ids={protected.id})
+
+    assert result.status == "rejected"
+    assert any(issue.code == "acl_scope_denied" for issue in result.validation.issues)
+    assert engine.tombstone_node_calls == []
 
 
 def test_maintenance_patch_accepts_add_tombstone_vocabulary() -> None:
@@ -478,6 +515,64 @@ def test_apply_maintenance_patch_is_idempotent_for_retry() -> None:
     assert [result.status for result in second.operation_results] == ["skipped", "skipped"]
     assert engine.node_add_calls.count("ws:demo:node:new") == 1
     assert engine.edge_add_calls.count("ws:demo:edge:new") == 1
+
+
+def test_partial_additive_patch_retry_preserves_applied_operations() -> None:
+    engine = _FakeEngine()
+    existing = Node(
+        id="ws:demo:node:existing",
+        label="Existing",
+        type="entity",
+        summary="existing",
+        doc_id="doc-1",
+        mentions=[Grounding(spans=[Span.from_dummy_for_conversation("existing")])],
+        metadata={"workspace_id": "demo"},
+    )
+    engine.nodes[existing.id] = existing
+    original_tombstone = engine.tombstone_node
+    fail_once = True
+
+    def fail_first_tombstone(node_id: str, **kwargs) -> bool:
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            engine.tombstone_node_calls.append(node_id)
+            return False
+        return original_tombstone(node_id, **kwargs)
+
+    engine.tombstone_node = fail_first_tombstone
+    patch = MaintenancePatch(
+        patch_id="patch-partial-retry",
+        intent=MaintenanceIntent.DERIVE_ENTITY,
+        scope=_scope(),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="add-derived",
+                kind=MaintenanceOperationKind.ADD_NODE,
+                node_id="ws:demo:node:derived",
+                label="Derived",
+                provenance=_provenance(),
+            ),
+            MaintenancePatchOperation(
+                operation_id="tombstone-existing",
+                kind=MaintenanceOperationKind.TOMBSTONE_NODE,
+                target_id=existing.id,
+                reason="replace stale interpretation",
+                provenance=_provenance(),
+            ),
+        ],
+    )
+
+    first = apply_maintenance_patch(engine, patch, namespace_prefix="ws:demo:")
+    second = apply_maintenance_patch(engine, patch, namespace_prefix="ws:demo:")
+
+    assert first.status.value == "needs_review"
+    assert first.applied_count == 1
+    assert second.status.value == "applied"
+    assert second.skipped_count == 1
+    assert second.applied_count == 1
+    assert engine.node_add_calls.count("ws:demo:node:derived") == 1
+    assert engine.tombstone_node_calls.count(existing.id) == 2
 
 
 def test_apply_maintenance_patch_rejects_invalid_character_source_pointer() -> None:
