@@ -19,7 +19,8 @@ env:
   # aligned with the revisions used by publish-dockerhub.yml.
   KOGWISTAR_REVISION: 6d7a4d0cd852b6415165967c8ba130587956c7fb
   KG_DOC_PARSER_REVISION: c65556e4df864a6033cffe5cb57ede7bdd43a8c0
-  OBSIDIAN_SINK_REVISION: 36f51e5c23522cd3e467ee49bc7127461b4753c2
+  OBSIDIAN_SINK_REVISION: 38591e3155e522845cb3c05c1c2db94665ac26ab
+  OBSIDIAN_SOURCE_REVISION: 53e31c97f188f25b582fc6b2458117d6f45d5d6a
 
 jobs:
   python-tests:
@@ -217,6 +218,41 @@ jobs:
       - name: Prune uv cache
         if: always() && matrix.is_pypy == false
         run: uv cache prune --ci
+
+  obsidian-source-contract:
+    name: Obsidian source contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned Obsidian source
+        uses: actions/checkout@v7
+        with:
+          repository: humblemat810/kogwistar-obsidian-source
+          ref: ${{ env.OBSIDIAN_SOURCE_REVISION }}
+          path: kogwistar-obsidian-source
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install and test the pinned source package
+        working-directory: kogwistar-obsidian-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          python -m pip install -e ".[dev]"
+          python -m pytest tests -q -p no:cacheprovider
+          python -m ruff check src tests --select E4,E7,E9,F
+          python -m pyright src tests
+          python -m build --sdist --wheel --outdir test-results/dist
+          git diff --check
 
   python-lint:
     name: Python lint
