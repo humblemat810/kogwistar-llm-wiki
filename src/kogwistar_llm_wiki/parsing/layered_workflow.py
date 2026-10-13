@@ -337,7 +337,11 @@ def run_workflow_layered_parse(
         from kg_doc_parser.workflow_ingest.semantics import semantic_tree_to_kge_payload
 
         semantic_tree = SemanticNode.model_validate(final_state["semantic_tree"])
-        graph_payload = semantic_tree_to_kge_payload(semantic_tree, doc_id=source_document_id)
+        graph_payload = semantic_tree_to_kge_payload(
+            semantic_tree,
+            doc_id=source_document_id,
+            parser_source_map=final_state.get("parser_source_map") or {},
+        )
         bundle = _WorkflowExportBundle(
             graph_payload=graph_payload,
             authoritative_source_map=final_state.get("authoritative_source_map") or {},
