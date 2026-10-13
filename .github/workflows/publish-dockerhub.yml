@@ -26,7 +26,7 @@ jobs:
       # the release image. The adapter source revisions are immutable merged
       # main commits and are installed directly by the release build.
       KOGWISTAR_REVISION: 6d7a4d0cd852b6415165967c8ba130587956c7fb
-      KG_DOC_PARSER_REVISION: c65556e4df864a6033cffe5cb57ede7bdd43a8c0
+      KG_DOC_PARSER_REVISION: d59f7ad5044df8c059f22539f1fef973a713d531
       OBSIDIAN_SINK_REVISION: 38591e3155e522845cb3c05c1c2db94665ac26ab
       PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
       QDRANT_REVISION: af16f6864c1839add7e74f87d29b0d5503d626fc
@@ -98,7 +98,7 @@ jobs:
       # Keep the application image reproducible even though these packages are
       # maintained as sibling repositories rather than Git submodules.
       KOGWISTAR_REVISION: 6d7a4d0cd852b6415165967c8ba130587956c7fb
-      KG_DOC_PARSER_REVISION: c65556e4df864a6033cffe5cb57ede7bdd43a8c0
+      KG_DOC_PARSER_REVISION: d59f7ad5044df8c059f22539f1fef973a713d531
       OBSIDIAN_SINK_REVISION: 38591e3155e522845cb3c05c1c2db94665ac26ab
       PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
       QDRANT_REVISION: af16f6864c1839add7e74f87d29b0d5503d626fc
@@ -175,7 +175,7 @@ jobs:
     timeout-minutes: 90
     env:
       KOGWISTAR_REVISION: 6d7a4d0cd852b6415165967c8ba130587956c7fb
-      KG_DOC_PARSER_REVISION: c65556e4df864a6033cffe5cb57ede7bdd43a8c0
+      KG_DOC_PARSER_REVISION: d59f7ad5044df8c059f22539f1fef973a713d531
       OBSIDIAN_SINK_REVISION: 38591e3155e522845cb3c05c1c2db94665ac26ab
       PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
       QDRANT_REVISION: af16f6864c1839add7e74f87d29b0d5503d626fc
