@@ -44,7 +44,7 @@ def _trivial_tree(document_id: str) -> SemanticNode:
                     HydratedTextPointer(
                         source_cluster_id=document_id,
                         start_char=0,
-                        end_char=19,
+                        end_char=len("NVIDIA builds CUDA.") - 1,
                         verbatim_text="NVIDIA builds CUDA.",
                     )
                 ],
