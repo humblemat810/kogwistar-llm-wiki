@@ -1044,6 +1044,7 @@ class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
             extraction = pipeline.translate_parse_result(
                 parse_result=parse_result,
                 source_document_id=revision_document_id,
+                parser_source_map={revision_document_id: {"text": parser_request.raw_text}},
             )
             self._offset_extraction_spans(extraction, selected.region.start_char)
             semantic_fingerprint = _semantic_fingerprint(extraction)
@@ -1414,6 +1415,7 @@ class DurableParseMaintenanceWorkerMixin(MaintenanceWorkerLike):
                 extraction = pipeline.translate_parse_result(
                     parse_result=parse_result,
                     source_document_id=revision_document_id,
+                    parser_source_map={revision_document_id: {"text": request.raw_text}},
                 )
                 candidate = {
                     "kind": "document_parse",
