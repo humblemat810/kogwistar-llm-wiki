@@ -31,7 +31,7 @@ def _trivial_tree(document_id: str) -> SemanticNode:
             HydratedTextPointer(
                 source_cluster_id=document_id,
                 start_char=0,
-                end_char=len(text),
+                end_char=len(text) - 1,
                 verbatim_text=text,
             )
         ],
@@ -58,7 +58,7 @@ def _trivial_tree(document_id: str) -> SemanticNode:
                     HydratedTextPointer(
                         source_cluster_id=document_id,
                         start_char=21,
-                        end_char=len(text),
+                        end_char=len(text) - 1,
                         verbatim_text="The training service uses CUDA kernels.",
                     )
                 ],
