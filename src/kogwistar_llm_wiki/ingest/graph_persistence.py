@@ -40,10 +40,14 @@ class GraphPersistenceMixin:
             payload["doc_id"] = source_document_id
             result = GraphExtractionWithIDs.model_validate(payload)
         else:
+            effective_source_map = (
+                parser_source_map
+                or getattr(parse_result, "parser_source_map", None)
+            )
             payload = semantic_tree_to_kge_payload(
                 cast(SemanticNode, parse_result.semantic_tree),
                 doc_id=source_document_id,
-                parser_source_map=parser_source_map,
+                parser_source_map=effective_source_map,
             )
             result = GraphExtractionWithIDs.model_validate(payload)
         self._trace_event(
