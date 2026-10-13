@@ -85,6 +85,7 @@ class LayeredParseResult:
     usage_events: list[dict[str, object]]
     layer_log: list[dict[str, object]]
     semantic_tree: SemanticNode | None = None
+    parser_source_map: dict[str, dict[str, object]] | None = None
 
     @property
     def workflow_status(self) -> str | None:
@@ -456,4 +457,8 @@ def run_workflow_layered_parse(
         ),
         layer_log=layer_log,
         semantic_tree=semantic_tree,
+        parser_source_map=cast(
+            dict[str, dict[str, object]],
+            final_state.get("parser_source_map") or {},
+        ),
     )

@@ -59,6 +59,9 @@ class ParseSourceResult(Protocol):
     @property
     def semantic_tree(self) -> SemanticTreeLike: ...
 
+    @property
+    def parser_source_map(self) -> Mapping[str, Mapping[str, object]] | None: ...
+
 
 ParserCallable = Callable[..., ParseSourceResult]
 """Signature-adaptive parser boundary.
