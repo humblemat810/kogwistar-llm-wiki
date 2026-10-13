@@ -202,6 +202,7 @@ def run_longrun_parser_child(
             graph_payload = semantic_tree_to_kge_payload(
                 page_index_result.semantic_tree,
                 doc_id=source_document_id,
+                parser_source_map=page_index_result.parser_source_map,
             )
             _trace("child_page_index_graph_payload_done")
             title = str(getattr(page_index_result.semantic_tree, "title", payload["title"]))

@@ -136,6 +136,10 @@ class IngestRunMixin:
             graph_extraction = self.translate_parse_result(
                 parse_result=parse_result,
                 source_document_id=parse_document_id,
+                parser_source_map=(
+                    getattr(parse_result, "parser_source_map", None)
+                    or {parse_document_id: {"text": request.raw_text}}
+                ),
             )
             self.ingest_parse_result(
                 request=request,

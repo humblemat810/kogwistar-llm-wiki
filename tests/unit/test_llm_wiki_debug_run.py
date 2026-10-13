@@ -520,7 +520,11 @@ def test_debug_run_records_workflow_layered_stats_content(namespace_engines, tmp
         )
         return SimpleNamespace(
             semantic_tree=SimpleNamespace(title=kwargs["title"]),
-            graph_payload=semantic_tree_to_kge_payload(heuristic_result.semantic_tree, doc_id=kwargs["source_document_id"]),
+            graph_payload=semantic_tree_to_kge_payload(
+                heuristic_result.semantic_tree,
+                doc_id=kwargs["source_document_id"],
+                parser_source_map=heuristic_result.parser_source_map,
+            ),
             evaluation={
                 "basic_sense_score": 91.0,
                 "basic_sense_verdict": "good",

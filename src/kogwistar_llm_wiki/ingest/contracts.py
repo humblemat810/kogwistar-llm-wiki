@@ -59,6 +59,9 @@ class ParseSourceResult(Protocol):
     @property
     def semantic_tree(self) -> SemanticTreeLike: ...
 
+    @property
+    def parser_source_map(self) -> Mapping[str, Mapping[str, object]] | None: ...
+
 
 ParserCallable = Callable[..., ParseSourceResult]
 """Signature-adaptive parser boundary.
@@ -226,6 +229,7 @@ class IngestPipelineHost(Protocol):
         *,
         parse_result: ParseSourceResult,
         source_document_id: str,
+        parser_source_map: Mapping[str, Mapping[str, object]] | None = None,
     ) -> GraphExtractionWithIDs: ...
     def ingest_parse_result(
         self,

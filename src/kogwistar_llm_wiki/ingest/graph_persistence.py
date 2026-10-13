@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import cast
 
 from kg_doc_parser.workflow_ingest.semantics import (
@@ -26,6 +27,7 @@ class GraphPersistenceMixin:
         *,
         parse_result: ParseSourceResult,
         source_document_id: str,
+        parser_source_map: Mapping[str, Mapping[str, object]] | None = None,
     ) -> GraphExtractionWithIDs:
         self._trace_event(
             "translate_parse_result_start",
@@ -38,9 +40,14 @@ class GraphPersistenceMixin:
             payload["doc_id"] = source_document_id
             result = GraphExtractionWithIDs.model_validate(payload)
         else:
+            effective_source_map = (
+                parser_source_map
+                or getattr(parse_result, "parser_source_map", None)
+            )
             payload = semantic_tree_to_kge_payload(
                 cast(SemanticNode, parse_result.semantic_tree),
                 doc_id=source_document_id,
+                parser_source_map=effective_source_map,
             )
             result = GraphExtractionWithIDs.model_validate(payload)
         self._trace_event(

@@ -174,6 +174,7 @@ class SourceParsingMixin:
         )
         return cast(ParseSourceResult, SimpleNamespace(
             semantic_tree=semantic_tree,
+            parser_source_map=getattr(result, "parser_source_map", None),
             graph_payload=result.graph_payload,
             evaluation=result.evaluation,
             diagnostics=result.diagnostics,
