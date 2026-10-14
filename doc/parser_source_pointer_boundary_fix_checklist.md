@@ -29,7 +29,7 @@ evidence support it.
 - [x] Focused regression passes on CPython 3.13 with the vendored Kogwistar
   and parser import paths: `1 passed in 59.86s`.
 - [x] Ingestion unit tests plus the crosslink integration suite pass on the
-  same environment: `13 passed in 177.27s`.
+  same environment: `15 passed in 204.75s (0:03:24)`.
 - [ ] Required GitHub CI passes on the fresh corrective PR.
 - [ ] Corrective PR is merged into `main`.
 
