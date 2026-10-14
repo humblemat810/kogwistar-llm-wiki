@@ -1,0 +1,35 @@
+# Parser Source-Pointer Boundary Fix Checklist
+
+This checklist tracks the LLM-Wiki ingestion boundary that consumes parser
+semantic trees. An item is checked only when code and a reusable test or CI
+evidence support it.
+
+## Regression And Implementation
+
+- [x] Preserve the original crosslink integration regression fixture,
+  including its legacy exclusive-end pointer values.
+- [x] Preserve the request-text source-map fallback when a parser result does
+  not carry its own map.
+- [x] Rehydrate every `total_content_pointers` value from the authoritative
+  source map before strict graph export.
+- [x] Rehydrate every `aggregate_content_pointers` value at the same boundary.
+- [x] Rehydrate nested semantic children without mutating the parser result.
+- [x] Reject missing, ambiguous, or unrepairable pointers instead of silently
+  persisting them.
+- [x] Keep strict parser export validation enabled after repair.
+
+## Verification
+
+- [x] Ruff passes for the changed production module.
+- [x] `git diff --check` passes.
+- [ ] Focused pytest passes on a supported local interpreter; local Python is
+  unavailable in the current host environment.
+- [ ] Required GitHub CI passes on the fresh corrective PR.
+- [ ] Corrective PR is merged into `main`.
+
+## Scope Guardrails
+
+- [x] Do not weaken source-pointer validation.
+- [x] Do not change the regression test to fit the exporter failure.
+- [x] Do not stage unrelated workspace artifacts or `AGENTS.md` changes.
+- [x] Do not treat the optional PyPy 3.12 beta lane as required CI.
