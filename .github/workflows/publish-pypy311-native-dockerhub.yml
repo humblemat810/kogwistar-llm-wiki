@@ -27,7 +27,7 @@ jobs:
     env:
       IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/kogwistar-llm-wiki
       KOGWISTAR_REVISION: 6d7a4d0cd852b6415165967c8ba130587956c7fb
-      KG_DOC_PARSER_REVISION: d59f7ad5044df8c059f22539f1fef973a713d531
+      KG_DOC_PARSER_REVISION: ef0f224e81ddebc45d06ecef8aaebd3c398f3495
       OBSIDIAN_SINK_REVISION: 38591e3155e522845cb3c05c1c2db94665ac26ab
     steps:
       - name: Check out tested application commit

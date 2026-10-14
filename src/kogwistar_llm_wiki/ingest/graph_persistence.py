@@ -9,6 +9,7 @@ from typing import cast
 from kg_doc_parser.workflow_ingest.semantics import (
     SemanticNode,
     semantic_tree_to_kge_payload,
+    validate_semantic_tree_integrity,
 )
 from kogwistar.engine_core.models import GraphExtractionWithIDs
 from kogwistar.id_provider import stable_id
@@ -34,18 +35,24 @@ class GraphPersistenceMixin:
             source_document_id=source_document_id,
             semantic_title=getattr(parse_result.semantic_tree, "title", None),
         )
+        effective_source_map = (
+            parser_source_map
+            if parser_source_map is not None
+            else getattr(parse_result, "parser_source_map", None)
+        )
+        semantic_tree = parse_result.semantic_tree
+        if isinstance(semantic_tree, SemanticNode) and effective_source_map is not None:
+            validate_semantic_tree_integrity(
+                semantic_tree, parser_source_map=effective_source_map
+            )
         graph_payload = getattr(parse_result, "graph_payload", None)
         if graph_payload is not None:
             payload = dict(graph_payload)
             payload["doc_id"] = source_document_id
             result = GraphExtractionWithIDs.model_validate(payload)
         else:
-            effective_source_map = (
-                parser_source_map
-                or getattr(parse_result, "parser_source_map", None)
-            )
             payload = semantic_tree_to_kge_payload(
-                cast(SemanticNode, parse_result.semantic_tree),
+                cast(SemanticNode, semantic_tree),
                 doc_id=source_document_id,
                 parser_source_map=effective_source_map,
             )

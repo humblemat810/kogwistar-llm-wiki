@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
+from kg_doc_parser.workflow_ingest.semantics import HydratedTextPointer, SemanticNode
 
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.models import IngestPipelineRequest
@@ -302,6 +303,71 @@ def test_ingest_repairs_boundary_span_before_both_persistence_paths(
     )
     assert graph.nodes[0].mentions[0].spans[0].start_char == original_span.start_char
     assert graph.nodes[0].mentions[0].spans[0].end_char == original_span.end_char
+
+
+def test_translate_parse_result_rejects_transcribed_pointer_even_with_valid_offsets(
+    pipeline, ingest_request
+):
+    source_document_id = pipeline._source_document_id(ingest_request)
+    source_text = ingest_request.raw_text
+    target = "Acme shall pay within 30 days."
+    start_char = source_text.index(target)
+    end_char = start_char + len(target) - 1
+    transcribed = target.replace("pay", "pày")
+    semantic_tree = SemanticNode(
+        node_id="transcribed-root",
+        title="Payment term",
+        total_content_pointers=[
+            HydratedTextPointer(
+                source_cluster_id=source_document_id,
+                start_char=start_char,
+                end_char=end_char,
+                verbatim_text=transcribed,
+            )
+        ],
+    )
+    parse_result = SimpleNamespace(semantic_tree=semantic_tree)
+
+    with pytest.raises(ValueError, match="pointer excerpt does not match authoritative source slice"):
+        pipeline.translate_parse_result(
+            parse_result=parse_result,
+            source_document_id=source_document_id,
+            parser_source_map={source_document_id: {"text": source_text}},
+        )
+
+    assert semantic_tree.total_content_pointers[0].verbatim_text == transcribed
+
+
+def test_translate_parse_result_respects_explicit_empty_source_map(
+    pipeline, ingest_request
+):
+    source_document_id = pipeline._source_document_id(ingest_request)
+    source_text = ingest_request.raw_text
+    target = "Acme shall pay within 30 days."
+    start_char = source_text.index(target)
+    semantic_tree = SemanticNode(
+        node_id="explicit-map-root",
+        title="Payment term",
+        total_content_pointers=[
+            HydratedTextPointer(
+                source_cluster_id=source_document_id,
+                start_char=start_char,
+                end_char=start_char + len(target) - 1,
+                verbatim_text=target,
+            )
+        ],
+    )
+    parse_result = SimpleNamespace(
+        semantic_tree=semantic_tree,
+        parser_source_map={source_document_id: {"text": source_text}},
+    )
+
+    with pytest.raises(ValueError, match="unknown source cluster"):
+        pipeline.translate_parse_result(
+            parse_result=parse_result,
+            source_document_id=source_document_id,
+            parser_source_map={},
+        )
 
 
 def test_targeted_parse_rejects_span_outside_requested_region(
