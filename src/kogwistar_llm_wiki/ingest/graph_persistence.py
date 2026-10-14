@@ -7,10 +7,9 @@ from collections.abc import Mapping
 from typing import cast
 
 from kg_doc_parser.workflow_ingest.semantics import (
-    HydratedTextPointer,
     SemanticNode,
-    correct_and_validate_pointer,
     semantic_tree_to_kge_payload,
+    validate_semantic_tree_integrity,
 )
 from kogwistar.engine_core.models import GraphExtractionWithIDs
 from kogwistar.id_provider import stable_id
@@ -19,49 +18,6 @@ from ..models import IngestPipelineRequest
 from ..parsing.parse_views import SourceRegion
 from ..utils import _temporary_namespace
 from .contracts import IngestPipelineHost, ParseSourceResult
-
-
-def _rehydrate_semantic_tree(
-    root: SemanticNode,
-    source_map: Mapping[str, Mapping[str, object]],
-) -> SemanticNode:
-    """Rehydrate every tree pointer before crossing the graph export boundary.
-
-    Parser results may contain legacy or provider-transcribed offsets.  The
-    parser's repair helper accepts a valid range or one unambiguous textual
-    relocation, and always returns source-derived text.  Keeping this repair
-    at the application boundary prevents strict export from rejecting valid
-    source evidence while still failing closed for ambiguous pointers.
-    """
-
-    def repair_pointers(
-        node_id: str,
-        pointers: list[HydratedTextPointer],
-    ) -> list[HydratedTextPointer]:
-        repaired: list[HydratedTextPointer] = []
-        for pointer in pointers:
-            fixed = correct_and_validate_pointer(pointer, source_map)
-            if fixed is None:
-                raise ValueError(
-                    f"node {node_id!r}: source pointer cannot be uniquely repaired"
-                )
-            repaired.append(fixed)
-        return repaired
-
-    return root.model_copy(
-        update={
-            "total_content_pointers": repair_pointers(
-                root.node_id or "<missing>", root.total_content_pointers
-            ),
-            "aggregate_content_pointers": repair_pointers(
-                root.node_id or "<missing>", root.aggregate_content_pointers
-            ),
-            "child_nodes": [
-                _rehydrate_semantic_tree(child, source_map)
-                for child in root.child_nodes
-            ],
-        }
-    )
 
 
 class GraphPersistenceMixin:
@@ -79,25 +35,24 @@ class GraphPersistenceMixin:
             source_document_id=source_document_id,
             semantic_title=getattr(parse_result.semantic_tree, "title", None),
         )
+        effective_source_map = (
+            parser_source_map
+            if parser_source_map is not None
+            else getattr(parse_result, "parser_source_map", None)
+        )
+        semantic_tree = parse_result.semantic_tree
+        if isinstance(semantic_tree, SemanticNode) and effective_source_map is not None:
+            validate_semantic_tree_integrity(
+                semantic_tree, parser_source_map=effective_source_map
+            )
         graph_payload = getattr(parse_result, "graph_payload", None)
         if graph_payload is not None:
             payload = dict(graph_payload)
             payload["doc_id"] = source_document_id
             result = GraphExtractionWithIDs.model_validate(payload)
         else:
-            effective_source_map = (
-                parser_source_map
-                if parser_source_map is not None
-                else getattr(parse_result, "parser_source_map", None)
-            )
-            semantic_tree = cast(SemanticNode, parse_result.semantic_tree)
-            if effective_source_map is not None:
-                semantic_tree = _rehydrate_semantic_tree(
-                    semantic_tree,
-                    effective_source_map,
-                )
             payload = semantic_tree_to_kge_payload(
-                semantic_tree,
+                cast(SemanticNode, semantic_tree),
                 doc_id=source_document_id,
                 parser_source_map=effective_source_map,
             )

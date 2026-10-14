@@ -305,7 +305,7 @@ def test_ingest_repairs_boundary_span_before_both_persistence_paths(
     assert graph.nodes[0].mentions[0].spans[0].end_char == original_span.end_char
 
 
-def test_translate_parse_result_rehydrates_transcribed_pointer_from_offsets(
+def test_translate_parse_result_rejects_transcribed_pointer_even_with_valid_offsets(
     pipeline, ingest_request
 ):
     source_document_id = pipeline._source_document_id(ingest_request)
@@ -328,13 +328,13 @@ def test_translate_parse_result_rehydrates_transcribed_pointer_from_offsets(
     )
     parse_result = SimpleNamespace(semantic_tree=semantic_tree)
 
-    graph = pipeline.translate_parse_result(
-        parse_result=parse_result,
-        source_document_id=source_document_id,
-        parser_source_map={source_document_id: {"text": source_text}},
-    )
+    with pytest.raises(ValueError, match="pointer excerpt does not match authoritative source slice"):
+        pipeline.translate_parse_result(
+            parse_result=parse_result,
+            source_document_id=source_document_id,
+            parser_source_map={source_document_id: {"text": source_text}},
+        )
 
-    assert graph.nodes[0].mentions[0].spans[0].excerpt == target
     assert semantic_tree.total_content_pointers[0].verbatim_text == transcribed
 
 
@@ -362,7 +362,7 @@ def test_translate_parse_result_respects_explicit_empty_source_map(
         parser_source_map={source_document_id: {"text": source_text}},
     )
 
-    with pytest.raises(ValueError, match="cannot be uniquely repaired"):
+    with pytest.raises(ValueError, match="unknown source cluster"):
         pipeline.translate_parse_result(
             parse_result=parse_result,
             source_document_id=source_document_id,
