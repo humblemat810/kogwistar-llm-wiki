@@ -78,6 +78,7 @@ class CodexRunner(Protocol):
         progress: ProgressCallback,
         trace_line: LineSink | None = None,
         output_schema: Mapping[str, object] | None = None,
+        images: Sequence[Path] = (),
     ) -> str: ...
 
 
@@ -101,6 +102,7 @@ class CodexProcessRunner:
         progress: ProgressCallback,
         trace_line: LineSink | None = None,
         output_schema: Mapping[str, object] | None = None,
+        images: Sequence[Path] = (),
     ) -> str:
         executable = _resolve_codex_executable(settings.executable)
         with tempfile.TemporaryDirectory(prefix="llm-wiki-codex-") as directory:
@@ -129,6 +131,8 @@ class CodexProcessRunner:
                 codex_args.extend(["--model", settings.model])
             if settings.profile:
                 codex_args.extend(["--profile", settings.profile])
+            for image in images:
+                codex_args.extend(["--image", str(image)])
             codex_args.append("-")
             command = _command_for_executable(executable, codex_args)
             process = subprocess.Popen(
@@ -221,7 +225,10 @@ class CodexAppServerRunner:
         progress: ProgressCallback,
         trace_line: LineSink | None = None,
         output_schema: Mapping[str, object] | None = None,
+        images: Sequence[Path] = (),
     ) -> str:
+        if images:
+            raise ValueError("Codex App Server image forwarding is not supported by this bridge")
         executable = _resolve_codex_executable(settings.executable)
         command = _command_for_executable(executable, ["app-server", "--stdio"])
         process = subprocess.Popen(
@@ -310,7 +317,7 @@ class CodexAppServerRunner:
                 except json.JSONDecodeError as exc:
                     raise RuntimeError(f"Codex App Server emitted invalid JSON: {line!r}") from exc
                 if not isinstance(message, dict):
-                    raise RuntimeError(
+                    raise TypeError(
                         "Codex App Server emitted a non-object JSON message"
                     )
                 return message

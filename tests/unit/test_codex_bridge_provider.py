@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -61,6 +62,78 @@ def test_bridge_returns_only_valid_structured_object() -> None:
     assert result == {"output": {"text": "bounded"}, "provider": "codex", "model": "codex-test"}
 
 
+def test_bridge_forwards_data_image_to_codex_runner() -> None:
+    captured: dict[str, object] = {}
+
+    class ImageRunner:
+        def run(self, **kwargs: object) -> str:
+            captured.update(kwargs)
+            images = kwargs["images"]
+            assert isinstance(images, list) and len(images) == 1
+            assert images[0].read_bytes() == b"fake-png"
+            return '{"text":"image seen"}'
+
+    state = CodexBridgeState(token="secret", settings=CodexCliSettings(model="vision-codex"))
+    state.runner = ImageRunner()
+    data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
+    result = state.complete(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "read this page"},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            "response_schema": Answer.model_json_schema(),
+        }
+    )
+    assert result["output"] == {"text": "image seen"}
+    assert "[image attached]" in str(captured["prompt"])
+
+
+def test_bridge_rejects_remote_image_urls() -> None:
+    state = CodexBridgeState(token="secret", settings=CodexCliSettings())
+    with pytest.raises(ValueError, match="base64 data-image"):
+        state.complete(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": "https://example.invalid/page.png"}}
+                        ],
+                    }
+                ],
+                "response_schema": Answer.model_json_schema(),
+            }
+        )
+
+
+def test_bridge_rejects_unsupported_image_formats() -> None:
+    state = CodexBridgeState(token="token", settings=CodexCliSettings())
+    encoded = base64.b64encode(b"fake-svg").decode("ascii")
+    with pytest.raises(ValueError, match="unsupported Codex image format"):
+        state.complete(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/svg+xml;base64,{encoded}"},
+                            }
+                        ],
+                    }
+                ],
+                "response_schema": {"type": "object"},
+            }
+        )
+
+
 def test_codex_action_parser_rejects_unrelated_free_form_json() -> None:
     with pytest.raises(ValueError, match="invalid cockpit transport"):
         _parse_cockpit_action('{"semantic_boundaries": {"blocks": []}}')
@@ -71,6 +144,15 @@ def test_codex_messages_use_openai_roles_without_paths() -> None:
     assert _codex_messages([message]) == [{"role": "user", "content": "file:///secret/path"}]
     assert _codex_messages is bridge_messages
     assert CodexBridgeChatModel is StructuredBridgeChatModel
+
+
+def test_codex_messages_preserve_image_content_parts() -> None:
+    content = [
+        {"type": "text", "text": "inspect"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,ZmFrZQ=="}},
+    ]
+    message = SimpleNamespace(type="human", content=content)
+    assert _codex_messages([message]) == [{"role": "user", "content": content}]
 
 
 def test_provider_chain_falls_back_only_on_retryable_error() -> None:
