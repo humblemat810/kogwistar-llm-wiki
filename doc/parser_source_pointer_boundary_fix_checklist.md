@@ -22,8 +22,8 @@ evidence support it.
 
 - [x] Ruff passes for the changed production module.
 - [x] `git diff --check` passes.
-- [ ] Focused pytest passes on a supported local interpreter; local Python is
-  unavailable in the current host environment.
+- [x] Focused regression passes on CPython 3.13 with the vendored Kogwistar
+  and parser import paths: `1 passed in 59.86s`.
 - [ ] Required GitHub CI passes on the fresh corrective PR.
 - [ ] Corrective PR is merged into `main`.
 
