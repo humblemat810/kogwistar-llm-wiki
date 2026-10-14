@@ -14,8 +14,12 @@ evidence support it.
   source map before strict graph export.
 - [x] Rehydrate every `aggregate_content_pointers` value at the same boundary.
 - [x] Rehydrate nested semantic children without mutating the parser result.
+- [x] Rehydrate a valid offset range even when the provider transcription
+  differs, with a dedicated application-boundary regression test.
 - [x] Reject missing, ambiguous, or unrepairable pointers instead of silently
   persisting them.
+- [x] Respect an explicitly supplied source map, including an explicit empty
+  map, instead of silently substituting another map.
 - [x] Keep strict parser export validation enabled after repair.
 
 ## Verification

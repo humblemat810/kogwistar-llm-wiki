@@ -87,7 +87,8 @@ class GraphPersistenceMixin:
         else:
             effective_source_map = (
                 parser_source_map
-                or getattr(parse_result, "parser_source_map", None)
+                if parser_source_map is not None
+                else getattr(parse_result, "parser_source_map", None)
             )
             semantic_tree = cast(SemanticNode, parse_result.semantic_tree)
             if effective_source_map is not None:
