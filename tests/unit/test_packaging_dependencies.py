@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -13,12 +14,40 @@ def test_root_package_uses_parser_published_distribution_name() -> None:
         requirement.startswith("graph-knowledge-doc-parser")
         for requirement in dependencies
     )
-    assert "graph-knowledge-doc-parser>=0.2.15,<0.3" in dependencies
+    assert "graph-knowledge-doc-parser>=0.2.16,<0.3" in dependencies
     assert "kg-doc-parser" not in project["project"]["dependencies"]
     assert project["tool"]["uv"]["sources"]["graph-knowledge-doc-parser"] == {
         "path": "kg-doc-parser",
         "editable": True,
     }
+
+
+def test_all_parser_checkout_workflows_use_the_published_parser_revision() -> None:
+    root = Path(__file__).resolve().parents[2]
+    expected_revision = "ebcbb407462f1e7b9b353cd8fe8c1cfdaab140ef"
+    old_revision = "d59f7ad5044df8c059f22539f1fef973a713d531"
+    parser_workflows = []
+
+    for workflow_path in sorted((root / ".github" / "workflows").glob("*.yml")):
+        content = workflow_path.read_text(encoding="utf-8")
+        if "KG_DOC_PARSER_REVISION" not in content:
+            continue
+        parser_workflows.append(workflow_path.name)
+        revisions = re.findall(r"KG_DOC_PARSER_REVISION:\s*([0-9a-f]{40})", content)
+        assert revisions, f"{workflow_path} declares no parser revision"
+        assert set(revisions) == {expected_revision}, workflow_path
+        assert old_revision not in content, workflow_path
+
+    assert parser_workflows == [
+        "ci-full.yml",
+        "ci.yml",
+        "publish-dockerhub-main.yml",
+        "publish-dockerhub.yml",
+        "publish-pypy311-native-dockerhub.yml",
+        "pypy-311-ci-container.yml",
+        "pypy-beta.yml",
+        "slots-benchmark.yml",
+    ]
 
 
 def test_dev_extra_keeps_native_multimodal_runtime_explicit() -> None:
