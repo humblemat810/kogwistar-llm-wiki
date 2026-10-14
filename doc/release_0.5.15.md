@@ -5,7 +5,7 @@
 - Version: `0.5.15`
 - Parser dependency: `graph-knowledge-doc-parser>=0.2.16,<0.3`
 - Parser release: `0.2.16`
-- Parser pinned commit: `ebcbb407462f1e7b9b353cd8fe8c1cfdaab140ef`
+- Parser pinned commit: `ef0f224e81ddebc45d06ecef8aaebd3c398f3495` (the commit resolved by tag `v0.2.16`)
 - Kogwistar release: `0.6.8`
 
 ## Changes

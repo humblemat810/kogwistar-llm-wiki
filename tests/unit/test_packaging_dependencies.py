@@ -24,7 +24,7 @@ def test_root_package_uses_parser_published_distribution_name() -> None:
 
 def test_all_parser_checkout_workflows_use_the_published_parser_revision() -> None:
     root = Path(__file__).resolve().parents[2]
-    expected_revision = "ebcbb407462f1e7b9b353cd8fe8c1cfdaab140ef"
+    expected_revision = "ef0f224e81ddebc45d06ecef8aaebd3c398f3495"
     old_revision = "d59f7ad5044df8c059f22539f1fef973a713d531"
     parser_workflows = []
 
