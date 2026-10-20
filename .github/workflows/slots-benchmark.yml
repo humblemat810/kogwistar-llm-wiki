@@ -196,6 +196,13 @@ jobs:
           python-version: pypy-3.11-v7.3.20
           cache: pip
 
+      - name: Install Pillow source-build libraries for PyPy
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libjpeg-dev zlib1g-dev
+
       - name: Install the same benchmark profile for every runtime
         shell: bash
         env:
