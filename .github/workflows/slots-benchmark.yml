@@ -84,6 +84,14 @@ jobs:
           python-version: pypy-3.11-v7.3.20
           cache: pip
 
+      - name: Install Pillow source-build libraries for PyPy
+        if: matrix.runtime == 'pypy311'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libjpeg-dev zlib1g-dev
+
       - name: Report interpreter
         shell: bash
         run: |

@@ -78,6 +78,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libjpeg-dev zlib1g-dev
           pypy_home="$RUNNER_TEMP/pypy"
           archive="$RUNNER_TEMP/pypy.tar.gz"
           mkdir -p "$pypy_home"

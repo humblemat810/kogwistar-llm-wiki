@@ -68,6 +68,8 @@ def test_pypy_ci_image_release_is_manual_pinned_and_separate() -> None:
     assert "cache-from: type=gha,scope=pypy-ci" in workflow
     assert "docker push" in workflow
     assert "PYPY_SHA256" in dockerfile
+    assert "libjpeg-dev" in dockerfile
+    assert "zlib1g-dev" in dockerfile
     assert "ARG PYPY_VERSION=3.12" in dockerfile
     assert "sha256sum --check" in dockerfile
     assert "pypy-c-jit-latest" not in dockerfile
@@ -97,6 +99,8 @@ def test_pypy311_ci_container_uses_the_same_pinned_builder_without_publishing() 
     assert "docker push" not in workflow
     assert "scripts/run_pypy311_ci.py" in workflow
     assert "--venv /tmp/pypy311-venv" in workflow
+    assert "libjpeg-dev" in dockerfile
+    assert "zlib1g-dev" in dockerfile
     assert "safe.directory /workspace" in workflow
     assert "pypy311-container-smoke.log" in workflow
     assert "GITHUB_STEP_SUMMARY" in workflow

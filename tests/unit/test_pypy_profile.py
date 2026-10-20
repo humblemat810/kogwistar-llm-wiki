@@ -324,6 +324,7 @@ def test_pypy_311_is_a_required_normal_ci_matrix_leg() -> None:
     assert '"--expected-python"' in runner
     assert '"3.11"' in runner
     assert 'env.setdefault("KOGWISTAR_IMPL_MODE", "python")' in runner
+    assert "libjpeg-dev zlib1g-dev" in workflow
 
 
 @pytest.mark.ci

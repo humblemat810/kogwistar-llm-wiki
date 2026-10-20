@@ -115,6 +115,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libjpeg-dev zlib1g-dev
           python -c 'import sys; assert sys.implementation.name == "pypy"; assert sys.version_info[:2] == (3, 11); print(sys.implementation); print(sys.version)'
           echo "KOGWISTAR_IMPL_MODE=python" >> "$GITHUB_ENV"
           python -m pip install --upgrade pip
