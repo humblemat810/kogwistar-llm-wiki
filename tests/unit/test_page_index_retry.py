@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from kg_doc_parser.workflow_ingest import page_index
+from kg_doc_parser.workflow_ingest import page_index, page_index_provider
 from kg_doc_parser.workflow_ingest.page_index import parse_page_index_document
 from kg_doc_parser.workflow_ingest.providers import (
     ProviderEndpointConfig,
@@ -110,7 +110,7 @@ def _make_parser(mode: str, monkeypatch):
         return chat
 
     monkeypatch.setattr(
-        "kg_doc_parser.workflow_ingest.page_index.build_chat_model_for_role",
+        "kg_doc_parser.workflow_ingest.page_index_provider.build_chat_model_for_role",
         fake_build_chat_model_for_role,
     )
     return chat
@@ -206,7 +206,7 @@ def test_page_index_llm_retry_salvages_after_second_flatten(monkeypatch):
 
 def test_page_index_structure_retry_succeeds_after_tree_validation_failure(monkeypatch):
     chat = _make_parser("structure_retry", monkeypatch)
-    original_validator = page_index._validate_page_index_block_structure
+    original_validator = page_index_provider._validate_page_index_block_structure
     calls = {"count": 0}
 
     def fake_structure_validator(**kwargs):
@@ -220,7 +220,7 @@ def test_page_index_structure_retry_succeeds_after_tree_validation_failure(monke
             )
         return original_validator(**kwargs)
 
-    monkeypatch.setattr(page_index, "_validate_page_index_block_structure", fake_structure_validator)
+    monkeypatch.setattr(page_index_provider, "_validate_page_index_block_structure", fake_structure_validator)
     result = parse_page_index_document(
         document_id="doc-4",
         title="Retry Doc",
@@ -249,7 +249,7 @@ def test_page_index_structure_retry_succeeds_after_tree_validation_failure(monke
 
 def test_page_index_structure_retry_salvages_after_repair_failure(monkeypatch):
     chat = _make_parser("structure_retry_invalid", monkeypatch)
-    original_validator = page_index._validate_page_index_block_structure
+    original_validator = page_index_provider._validate_page_index_block_structure
     calls = {"count": 0}
 
     def fake_structure_validator(**kwargs):
@@ -263,7 +263,7 @@ def test_page_index_structure_retry_salvages_after_repair_failure(monkeypatch):
             )
         return original_validator(**kwargs)
 
-    monkeypatch.setattr(page_index, "_validate_page_index_block_structure", fake_structure_validator)
+    monkeypatch.setattr(page_index_provider, "_validate_page_index_block_structure", fake_structure_validator)
     result = parse_page_index_document(
         document_id="doc-5",
         title="Retry Doc",

@@ -1791,7 +1791,9 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 callback_ctx,
             )
             return restore_crosslink_response(result, projection)
-        from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
+        from kg_doc_parser.workflow_ingest.page_index_provider import (
+            build_chat_model_for_role,
+        )
 
         model = build_chat_model_for_role("parser", self.provider_settings)
         structured = cast(
@@ -1847,7 +1849,9 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
                 callback,
             )
             return callback_fn(callback_payload, ctx)
-        from kg_doc_parser.workflow_ingest.page_index import build_chat_model_for_role
+        from kg_doc_parser.workflow_ingest.page_index_provider import (
+            build_chat_model_for_role,
+        )
 
         model = build_chat_model_for_role("parser", self.provider_settings)
         structured = cast(
