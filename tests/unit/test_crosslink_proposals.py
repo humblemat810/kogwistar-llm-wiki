@@ -1024,7 +1024,7 @@ def test_real_provider_path_persists_call_and_token_usage_before_retry(
     structured = Structured()
 
     monkeypatch.setattr(
-        "kg_doc_parser.workflow_ingest.page_index_provider.build_chat_model_for_role",
+        "kg_doc_parser.workflow_ingest.build_chat_model_for_role",
         lambda *_args: ChatModel(),
     )
 
