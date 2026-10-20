@@ -6,12 +6,15 @@
 - Parser dependency: `graph-knowledge-doc-parser>=0.2.17,<0.3`
 - Parser release: `0.2.17`
 - Parser pinned commit: `76cdc4f2595a4425523825d05abb0a0fe67cdd85`
-- Kogwistar release: `0.6.8`
+- Kogwistar release: `0.6.14`
+- Kogwistar pinned commit: `cbe4ea9edc0877cb0a419c7ba17302a33203e7f6`
 
 ## Changes
 
 - Consume KG Doc Parser `0.2.17`, including the merged OCR workflow typing and
   modularization updates.
+- Pin Kogwistar `0.6.14` so Codex bridge image content parts remain structured
+  through the provider adapter.
 - Align normal CI, full CI, PyPy, benchmark, container, and Docker publication
   checkouts with the exact merged parser commit.
 - Keep the optional Obsidian source package out of the standard runtime and
