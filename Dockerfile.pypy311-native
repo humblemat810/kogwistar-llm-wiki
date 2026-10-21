@@ -19,8 +19,10 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         curl \
+        libjpeg-dev \
         libssl-dev \
         pkg-config \
+        zlib1g-dev \
     && rm -rf /var/lib/apt/lists/* \
     && curl --fail --silent --show-error https://sh.rustup.rs \
         | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}" \

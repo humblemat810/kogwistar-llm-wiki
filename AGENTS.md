@@ -49,6 +49,6 @@
 
 On every push, you must watch github CI results for errors instead of push and forget
 
-# multi versino support
+# multi version support
 
 It need to support pypy3.11 and cpython 3.12 to 3.14, so for maximum compatibility, some ruff suggestion has to be dropped

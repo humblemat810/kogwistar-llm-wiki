@@ -14,7 +14,7 @@ def test_root_package_uses_parser_published_distribution_name() -> None:
         requirement.startswith("graph-knowledge-doc-parser")
         for requirement in dependencies
     )
-    assert "graph-knowledge-doc-parser>=0.2.16,<0.3" in dependencies
+    assert "graph-knowledge-doc-parser>=0.2.17,<0.3" in dependencies
     assert "kg-doc-parser" not in project["project"]["dependencies"]
     assert project["tool"]["uv"]["sources"]["graph-knowledge-doc-parser"] == {
         "path": "kg-doc-parser",
@@ -24,7 +24,7 @@ def test_root_package_uses_parser_published_distribution_name() -> None:
 
 def test_all_parser_checkout_workflows_use_the_published_parser_revision() -> None:
     root = Path(__file__).resolve().parents[2]
-    expected_revision = "ef0f224e81ddebc45d06ecef8aaebd3c398f3495"
+    expected_revision = "9b489b030034cc7626dcd053fd70ca56d09e3af0"
     old_revision = "d59f7ad5044df8c059f22539f1fef973a713d531"
     parser_workflows = []
 

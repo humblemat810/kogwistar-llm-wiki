@@ -255,10 +255,10 @@ def test_parser_uses_the_released_kogwistar_package() -> None:
         encoding="utf-8"
     )
 
-    assert parser_pin == "0.6.8"
+    assert parser_pin == "0.6.15"
     assert locked_package["version"] == parser_pin
     assert "source" not in locked_package
-    assert "ref: v0.6.8" in parser_ci_workflow
+    assert "ref: v0.6.15" in parser_ci_workflow
 
 
 @pytest.mark.ci
@@ -324,6 +324,7 @@ def test_pypy_311_is_a_required_normal_ci_matrix_leg() -> None:
     assert '"--expected-python"' in runner
     assert '"3.11"' in runner
     assert 'env.setdefault("KOGWISTAR_IMPL_MODE", "python")' in runner
+    assert "libjpeg-dev zlib1g-dev" in workflow
 
 
 @pytest.mark.ci

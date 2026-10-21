@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hmac
 import json
 import logging
 import os
+import tempfile
 import threading
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Literal, cast
 
 from kogwistar.json_types import JsonValue
@@ -17,10 +21,12 @@ from .codex_workbench_agent import CodexCliSettings, CodexProcessRunner
 
 logger = logging.getLogger(__name__)
 
-_MAX_BODY_BYTES = 256 * 1024
+_MAX_BODY_BYTES = 20 * 1024 * 1024
 _MAX_MESSAGES = 64
 _MAX_MESSAGE_CHARS = 120_000
 _MAX_SCHEMA_CHARS = 64_000
+_MAX_IMAGES = 4
+_MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
 JsonObject = dict[str, JsonValue]
 
@@ -54,34 +60,48 @@ class CodexBridgeState:
         encoded_schema = json.dumps(schema, ensure_ascii=False, sort_keys=True)
         if len(encoded_schema) > _MAX_SCHEMA_CHARS:
             raise ValueError("response_schema exceeds the bridge limit")
-        normalized: list[dict[str, str]] = []
+        normalized: list[dict[str, JsonValue]] = []
+        image_payloads: list[tuple[bytes, str]] = []
         total_chars = 0
         for message in messages:
             if not isinstance(message, dict):
                 raise TypeError("each message must be an object")
             role = str(message.get("role") or "user")
             content = message.get("content")
-            if not isinstance(content, str):
-                raise TypeError("message content must be a string")
-            total_chars += len(content)
-            normalized.append({"role": role, "content": content})
+            if isinstance(content, str):
+                normalized_content: JsonValue = content
+                total_chars += len(content)
+            elif isinstance(content, list):
+                normalized_content, extracted = _normalize_multimodal_content(content)
+                image_payloads.extend(extracted)
+                total_chars += len(json.dumps(normalized_content, ensure_ascii=False))
+            else:
+                raise TypeError("message content must be a string or content-part list")
+            normalized.append({"role": role, "content": normalized_content})
         if total_chars > _MAX_MESSAGE_CHARS:
             raise ValueError("maintenance context exceeds the bridge limit")
         model = str(payload.get("model") or self.settings.model or "")
         prompt = _build_prompt(normalized, schema)
-        with self.lock:
-            raw = self.runner.run(
-                settings=CodexCliSettings(
-                    executable=self.settings.executable,
-                    model=model or None,
-                    profile=self.settings.profile,
-                    timeout_seconds=self.settings.timeout_seconds,
-                    transport=self.settings.transport,
-                ),
-                prompt=prompt,
-                progress=lambda: None,
-                output_schema=schema,
-            )
+        with tempfile.TemporaryDirectory(prefix="kogwistar-codex-images-") as directory:
+            image_paths = []
+            for index, (payload_bytes, suffix) in enumerate(image_payloads):
+                path = Path(directory) / f"image-{index}{suffix}"
+                path.write_bytes(payload_bytes)
+                image_paths.append(path)
+            with self.lock:
+                raw = self.runner.run(
+                    settings=CodexCliSettings(
+                        executable=self.settings.executable,
+                        model=model or None,
+                        profile=self.settings.profile,
+                        timeout_seconds=self.settings.timeout_seconds,
+                        transport=self.settings.transport,
+                    ),
+                    prompt=prompt,
+                    progress=lambda: None,
+                    output_schema=schema,
+                    images=image_paths,
+                )
         try:
             output = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -91,7 +111,56 @@ class CodexBridgeState:
         return {"output": output, "provider": "codex", "model": model or "default"}
 
 
-def _build_prompt(messages: list[dict[str, str]], schema: JsonObject) -> str:
+def _normalize_multimodal_content(
+    content: list[JsonValue],
+) -> tuple[list[JsonValue], list[tuple[bytes, str]]]:
+    if len(content) > _MAX_IMAGES + 16:
+        raise ValueError("message content contains too many parts")
+    normalized: list[JsonValue] = []
+    images: list[tuple[bytes, str]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            raise TypeError("multimodal content parts must be objects")
+        part_type = part.get("type")
+        if part_type == "text":
+            text = part.get("text")
+            if not isinstance(text, str):
+                raise TypeError("text content parts require string text")
+            normalized.append({"type": "text", "text": text})
+            continue
+        if part_type != "image_url":
+            raise ValueError("unsupported multimodal content part")
+        image_url = part.get("image_url")
+        if not isinstance(image_url, dict) or not isinstance(image_url.get("url"), str):
+            raise TypeError("image_url content parts require a URL")
+        url = image_url["url"]
+        if not url.startswith("data:image/") or ";base64," not in url:
+            raise ValueError("Codex bridge accepts only base64 data-image URLs")
+        encoded = url.split(";base64,", 1)[1]
+        try:
+            decoded = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("invalid base64 image content") from exc
+        if not decoded or len(decoded) > _MAX_IMAGE_BYTES:
+            raise ValueError("image content exceeds the bridge limit")
+        if len(images) >= _MAX_IMAGES:
+            raise ValueError("too many images for one Codex bridge request")
+        media_type = url.removeprefix("data:image/").split(";", 1)[0].lower()
+        suffix = {
+            "jpeg": ".jpg",
+            "jpg": ".jpg",
+            "png": ".png",
+            "webp": ".webp",
+            "gif": ".gif",
+        }.get(media_type)
+        if suffix is None:
+            raise ValueError(f"unsupported Codex image format: {media_type!r}")
+        images.append((decoded, suffix))
+        normalized.append({"type": "image", "text": "[image attached]"})
+    return normalized, images
+
+
+def _build_prompt(messages: list[dict[str, JsonValue]], schema: JsonObject) -> str:
     return (
         "You are a bounded maintenance reasoning provider. Return only a JSON object "
         "matching the supplied response schema. Use only the supplied messages. "
