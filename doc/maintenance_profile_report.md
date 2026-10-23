@@ -4,6 +4,16 @@
 
 **Status:** Interim evidence; production-scale matrix is not complete.
 
+**Latest validation:** Ruff and Python compilation pass for the profiling
+harness and embedding configuration module. The full lane-message integration
+file currently reports 6 passed, 2 skipped, and 4 failed in 297 s. All four
+failures are Chroma-backed cases that reject a nested `atomic_retained_child`
+metadata mapping; changing the embedding-function parameter name did not
+resolve this storage-adapter failure. A fresh PostgreSQL profile could not be
+started in the latest session because Docker API access was denied and no
+profile DSN was configured in that shell. Do not treat the 1,000-item target as
+run until a new result artifact proves it.
+
 ## Scope
 
 This profile follows the reviewer recommendation to measure complete persistence
@@ -32,6 +42,8 @@ lane run was single-stage with four claim workers.
 | Lane inbox publication and claim/ack | single-stage | 10 | all 11 including warm-up completed exactly once | publish p50 1.41 s, p95 2.05 s; drain 2.40 s | 3,313 |
 | Lane inbox publication and claim/ack | two-stage | 10 | all 11 including warm-up completed exactly once | publish p50 1.27 s, p95 1.50 s; drain 3.25 s | 3,099 |
 | Lane inbox publication and claim/ack | single-stage | 100 | all 101 including warm-up completed exactly once | publish p50 2.21 s, p95 2.94 s; drain 32.65 s | 29,182 |
+| Lane inbox drain, separate processes | single-stage | 10 items, 4 workers | all 11 completed exactly once; pool ready 17.52 s, drain 2.00 s, claim p50 1.05 s | 3,313 |
+| Lane inbox drain, separate processes | single-stage | 10 items, 16 workers | all 11 completed exactly once; pool ready 38.55 s, drain 3.54 s, claim p50 2.54 s | 3,469 |
 | Observation + runtime workflow | single-stage, OTel off | 1 + 1 workflow | pass; 1 run, 3 steps, 3 checkpoints | queue drain 24.06 s | 2,653 |
 | Observation + runtime workflow | single-stage, OTel on | 1 + 1 workflow | pass; 4 spans exported, zero drops/errors | queue drain 24.55 s | 2,653 |
 
@@ -46,25 +58,59 @@ The 100-item lane run confirms publication is the dominant measured cost in this
 profile: 100 messages took 218.1 s to publish, while 101 acknowledgements took
 about 32.6 s to drain. Median publication latency increased from 1.41 s at 10
 items to 2.21 s at 100 items. This is a scaling warning, not a demonstrated
-quadratic law. A 1,000- or 10,000-item full graph publication run was not
-attempted because the observed 100-item runtime already makes those samples
-materially expensive.
+quadratic law. The next scale target is one representative 1,000-item run, but
+only after repeated 100-item samples establish stable cost and the harness can
+run it within a practical budget. A 10,000-item run is optional stress testing,
+not a completion gate.
 
 In the 100-item, four-worker drain, claim-batch p50 was 3.92 s and p95 4.11 s;
 per-message acknowledgment p50 was 11.9 ms. This points to claim/filter/context
 work rather than the individual acknowledgment call as the more promising
-investigation. A 10-item single-stage worker sweep drained in 1.06 s (1 worker),
-2.40 s (4 workers), and 8.77 s (16 workers); all messages completed exactly
-once. The instrumented 16-worker run measured namespace-scope acquisition wait
-at p50 3.97 s / p95 7.35 s, versus scope-hold p50 0.46 s. This aligns with
-Kogwistar's current `scoped_namespace` implementation, which acquires a
-per-engine reentrant lock and holds it throughout the scoped block. In this
-shared-engine harness topology, that app-level lock serializes worker scopes
-and explains why adding threads did not help. This is not a PostgreSQL lock
-wait measurement and may not generalize to separate worker processes with
-separate engine instances. The benchmark applies production-equivalent
-background namespace scoping in each worker thread; without that context, the
-two-stage diagnostic initially claimed zero messages despite persisted rows.
+investigation. All runs below completed messages exactly once:
+
+| Items / workers | Engine topology | Drain | Scope-acquisition wait p50 | Claim + ack rate | SQL p95 |
+|---:|---|---:|---:|---:|---:|
+| 10 / 1 | shared | 1.06 s | not instrumented in that sample | 10.39/s | 2.91 ms |
+| 10 / 4 | shared | 2.40 s | not instrumented in that sample | 4.59/s | 3.72 ms |
+| 10 / 16 | shared | 8.77 s | 3.97 s | 1.25/s | 3.76 ms |
+| 10 / 4 | independent engine per worker | 1.82 s | 0.14 ms | 6.03/s | 4.32 ms |
+| 10 / 16 | independent engine per worker | 4.43 s | 0.14 ms | 2.49/s | 12.01 ms |
+
+Independent engine construction averaged 1.65 s per engine at 4 workers and
+1.61 s per engine at 16 workers. The 16-engine run's before/after RSS delta was
+47.7 MB versus 21.3 MB at 4 engines; these are process samples, not peaks. A
+short two-item independent-engine smoke also passed after temporary-directory
+cleanup was added.
+
+The instrumented 16-worker shared-engine run measured namespace-scope wait at
+p95 7.35 s, versus scope-hold p50 0.46 s. This aligns with Kogwistar's current
+`scoped_namespace` implementation, which acquires a per-engine reentrant lock
+and holds it throughout the scoped block. In the shared-engine harness topology,
+that app-level lock serializes worker scopes. With separate engine instances,
+the wait disappeared; at 16 engines, however, SQL latency and total drain time
+rose again, consistent with backend contention at this small fixture size. DB
+lock-wait time itself is not sampled, so that attribution remains provisional.
+
+The independent-engine thread runs approximate separate daemon replicas'
+per-engine locking but not process costs. A separate-process sweep confirms the
+same direction: four processes took 17.52 s to become ready and drained in
+2.00 s; sixteen took 38.55 s to become ready and drained in 3.54 s. Scope wait
+remained negligible (p50 about 0.16 ms), while claim p50 rose from 1.05 s to
+2.54 s and SQL p95 from 3.16 ms to 6.01 ms. Each process's RSS increase after
+Python startup, during engine setup and work, was about 21 MB; this is not total
+process RSS or a high-water mark. The evidence suggests a shift from local
+namespace-lock serialization to database/query contention as worker engines
+multiply, but PostgreSQL lock waits were not captured and each setting has only
+one sample.
+
+Compose's standard setup has one maintenance daemon service; horizontally
+scaled replicas use separate processes/containers, independent engine instances,
+and shared PostgreSQL. The process benchmark is closer to that topology than
+the shared-engine thread runs, but still runs on one host and is not a full
+container-resource-limited deployment test.
+The benchmark applies production-equivalent background namespace scoping in
+each worker; without that context, the two-stage diagnostic initially claimed
+zero messages despite persisted rows.
 
 ## Observability And Workflow Persistence
 
@@ -92,15 +138,17 @@ separate lane-message mechanism.
 
 | Recommendation | Status | Evidence / remaining work |
 |---|---|---|
-| Profile complete graph/source write path | **Partially measured** | One-subject writes measured; no 1,000-step repeat yet. |
+| Profile complete graph/source write path | **Partially measured** | One-subject maintenance writes and lane-message writes measured separately; no repeated 1,000-item end-to-end sample yet. |
 | Separate lane inbox from telemetry sink | **Measured separately** | 10- and 100-item lane runs disable telemetry; runtime workflow has a separate OTel run. |
 | Evaluate two-stage conversation persistence | **Initial comparison done** | Single sample per mode; repeat with paired samples and real embedding latency before deciding. |
 | Measure workflow step/checkpoint persistence | **Measured** | One workflow emitted 3 steps and 3 checkpoints; per-call timings are captured. |
 | Measure maintenance claim/ack/lease renewal | **Partially measured** | Claim/ack timings measured; forced renewal run had 26 renewals; ordinary production interval not profiled at scale. |
 | Measure best-effort telemetry cost | **Paired exploratory sample done** | One matched sample per mode; no reliable cost estimate until repeated. |
 | Test checkpoint frequency sensitivity | **Exploratory comparison done** | A single interval-2 sample produced 2 checkpoints / 1,434 state bytes versus 3 / 2,210 at interval 1; not enough to change production defaults. |
-| Sizes 100 / 1,000 / 10,000 | **Incomplete** | Lane workload has 100; 1,000 and 10,000 full graph writes deferred due measured cost. |
-| Workers 1 / 4 / 16 | **Exploratory sweep done** | Ten-item single-stage runs all passed exact-once checks; the shared-engine namespace lock serialized scopes, so repeat with production worker topology before tuning. |
+| Representative scale through 1,000 items | **Incomplete** | Lane workload has 100; 1,000-item end-to-end run is the next scale target after repeats establish a practical runtime. |
+| 10,000-item stress scale | **Optional / deferred** | Not required to decide the current production profile; run only if 1,000-item results show a scaling question that needs it. |
+| Chroma persistence path | **Blocked by core adapter incompatibility** | Full integration test fails because a node metadata field contains a nested mapping (`atomic_retained_child`), which current Chroma metadata validation rejects. This is distinct from the embedding callback signature; normalization must preserve metadata round-trip semantics and belongs at the Kogwistar backend boundary. |
+| Workers 1 / 4 / 16 | **Exploratory sweep done** | Ten-item thread and process sweeps passed exact-once checks; separate processes avoid local lock waits but 16-way startup and SQL/claim latency rise. Repeat with larger batches and container limits. |
 | DB operations, memory, lock contention | **Partial** | SQL counts/latencies, before/after RSS, and app namespace-lock wait are captured; peak allocations and PostgreSQL lock waits are not. |
 | Broad Rust rewrite decision | **No decision** | Current evidence is Python service/storage profiling only and cannot justify or reject an end-to-end Rust rewrite. |
 
@@ -110,13 +158,13 @@ separate lane-message mechanism.
    times per setting; compare medians and variation, not individual runs.
 2. Compare telemetry enabled/disabled on the exact same workflow and critic
    workload.
-3. Repeat the lane drain at workers 1, 4, and 16 using the production worker
-   topology (confirm whether workers share one engine instance or run in
-   separate processes), while preserving per-message write boundaries and
-   exact-once checks.
-4. Profile 1,000-item lane publication only after identifying an instrumentation
-   or setup improvement that can make the run practical; do not extrapolate
-   linearly from 100. Keep 10,000 as a deferred stress target.
+3. Repeat separate-process lane drain at workers 1, 4, and 16 with larger
+   prepared inboxes and production-like container memory/CPU limits, preserving
+   per-message write boundaries and exact-once checks.
+4. Repeat the 100-item lane publication sample, then run one 1,000-item sample
+   if the measured runtime is practical. Do not extrapolate linearly from 100.
+   Keep 10,000 optional and defer it unless the 1,000-item result exposes a
+   scaling question it can answer.
 5. Add direct PostgreSQL lock-wait sampling and peak-memory/allocation metrics;
    separately decide whether per-engine namespace serialization is an expected
    correctness tradeoff or needs a safe concurrent namespace-view redesign.

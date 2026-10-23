@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import multiprocessing
 import os
+import shutil
 import statistics
 import tempfile
 import threading
@@ -19,7 +21,7 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -220,6 +222,130 @@ def _process_rss_bytes() -> int | None:
     except ImportError:
         return None
     return int(psutil.Process().memory_info().rss)
+
+
+_LANE_PROCESS_STATE: dict[str, Any] | None = None
+
+
+def _initialize_lane_process_worker(
+    config: tuple[str, str, str, str, int],
+    ready_barrier: Any,
+    work_barrier: Any,
+) -> None:
+    """Construct one process-local engine before the timed drain phase."""
+
+    from sqlalchemy import create_engine
+
+    global _LANE_PROCESS_STATE
+    dsn, schema, temp_root, workspace_id, conversation_persistence_mode = config
+    worker_index = os.getpid()
+    worker_base_dir = Path(temp_root) / f"process-worker-{worker_index}"
+    started = time.perf_counter()
+    rss_before = _process_rss_bytes()
+    engines = build_postgres_namespace_engines(
+        base_dir=worker_base_dir,
+        dsn=dsn,
+        schema=schema,
+        conversation_persistence_mode=conversation_persistence_mode,
+        embedding_function=DeterministicEmbedding(),
+        embedding_dimension=2,
+        embedding_provider="benchmark",
+        embedding_model="deterministic-sha256-2d",
+    )
+    engine_startup_ms = (time.perf_counter() - started) * 1000.0
+    admin = create_engine(dsn, pool_pre_ping=True)
+    sql_metrics = _SqlStatementMetrics(admin)
+    _LANE_PROCESS_STATE = {
+        "dsn": dsn,
+        "workspace_id": workspace_id,
+        "worker_index": worker_index,
+        "engines": engines,
+        "admin": admin,
+        "sql_metrics": sql_metrics,
+        "engine_startup_ms": engine_startup_ms,
+        "rss_before_bytes": rss_before,
+        "work_barrier": work_barrier,
+    }
+    ready_barrier.wait(timeout=180)
+
+
+def _lane_process_worker_ready(_worker_index: int) -> dict[str, float | int]:
+    if _LANE_PROCESS_STATE is None:
+        raise RuntimeError("lane process worker was not initialized")
+    return {
+        "pid": os.getpid(),
+        "engine_startup_ms": float(_LANE_PROCESS_STATE["engine_startup_ms"]),
+    }
+
+
+def _run_lane_inbox_process_worker(_worker_index: int) -> dict[str, Any]:
+    """Claim and acknowledge a shared inbox in an already-started process."""
+
+    from kogwistar.server.auth_middleware import claims_ctx
+
+    state = _LANE_PROCESS_STATE
+    if state is None:
+        raise RuntimeError("lane process worker was not initialized")
+    engines = state["engines"]
+    conversation = engines.conversation
+    namespace = WorkspaceNamespaces(str(state["workspace_id"])).conv_bg
+    worker_index = int(state["worker_index"])
+    sql_metrics = state["sql_metrics"]
+    rss_before = state["rss_before_bytes"]
+    claim_batch_times: list[float] = []
+    ack_times: list[float] = []
+    scope_wait_times: list[float] = []
+    scope_hold_times: list[float] = []
+    claimed_count = 0
+    state["work_barrier"].wait(timeout=120)
+    claims_token = claims_ctx.set({"storage_ns": namespace})
+    try:
+        scope_started = time.perf_counter()
+        with _background_namespace(conversation, namespace):
+            scope_acquired = time.perf_counter()
+            scope_wait_times.append((scope_acquired - scope_started) * 1000.0)
+            try:
+                while True:
+                    started = time.perf_counter()
+                    rows = conversation.claim_projected_lane_messages(
+                        inbox_id="inbox:maintenance-profile",
+                        claimed_by=f"lane-profile-process-{worker_index}",
+                        limit=32,
+                        lease_seconds=300,
+                    )
+                    claim_batch_times.append((time.perf_counter() - started) * 1000.0)
+                    if not rows:
+                        break
+                    for row in rows:
+                        started = time.perf_counter()
+                        conversation.ack_projected_lane_message(
+                            message_id=str(row.message_id),
+                            claimed_by=f"lane-profile-process-{worker_index}",
+                        )
+                        ack_times.append((time.perf_counter() - started) * 1000.0)
+                        claimed_count += 1
+            finally:
+                scope_hold_times.append((time.perf_counter() - scope_acquired) * 1000.0)
+    finally:
+        claims_ctx.reset(claims_token)
+    statement_metrics = sql_metrics.result()
+    rss_after = _process_rss_bytes()
+    return {
+        "claimed_count": claimed_count,
+        "engine_startup_ms": float(state["engine_startup_ms"]),
+        "claim_batch_ms": claim_batch_times,
+        "ack_ms": ack_times,
+        "scope_wait_ms": scope_wait_times,
+        "scope_hold_ms": scope_hold_times,
+        "statement_count": statement_metrics["statement_count"],
+        "statement_counts_by_verb": statement_metrics["statement_counts_by_verb"],
+        "statement_latencies_ms": list(sql_metrics.latencies_ms),
+        "rss_delta_bytes": (
+            rss_after - rss_before
+            if rss_before is not None and rss_after is not None
+            else None
+        ),
+    }
 
 
 def _instrument_method_timings(
@@ -618,6 +744,7 @@ def run_profile(
         with admin.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin.dispose()
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def run_lane_inbox_profile(
@@ -626,6 +753,7 @@ def run_lane_inbox_profile(
     items: int,
     workers: int,
     conversation_persistence_mode: str,
+    worker_engine_topology: str,
 ) -> dict[str, Any]:
     """Measure authoritative lane-message publication separately from telemetry."""
 
@@ -641,6 +769,10 @@ def run_lane_inbox_profile(
     workspace_id = f"lane-profile-{uuid.uuid4().hex[:8]}"
     namespaces = WorkspaceNamespaces(workspace_id)
     engines = None
+    independent_worker_engines: list[object] = []
+    worker_engine_startup_ms: list[float] = []
+    worker_process_results: list[dict[str, Any]] = []
+    worker_process_ids: list[int] = []
     send_times: list[float] = []
     claim_batch_times: list[float] = []
     ack_times: list[float] = []
@@ -659,6 +791,22 @@ def run_lane_inbox_profile(
             embedding_provider="benchmark",
             embedding_model="deterministic-sha256-2d",
         )
+        if worker_engine_topology == "independent":
+            for worker_index in range(workers):
+                started = time.perf_counter()
+                independent_worker_engines.append(
+                    build_postgres_namespace_engines(
+                        base_dir=temp_root / f"worker-{worker_index}",
+                        dsn=dsn,
+                        schema=schema,
+                        conversation_persistence_mode=conversation_persistence_mode,
+                        embedding_function=DeterministicEmbedding(),
+                        embedding_dimension=2,
+                        embedding_provider="benchmark",
+                        embedding_model="deterministic-sha256-2d",
+                    )
+                )
+                worker_engine_startup_ms.append((time.perf_counter() - started) * 1000.0)
         sql_metrics.reset()
         conversation = engines.conversation
         inbox_id = "inbox:maintenance-profile"
@@ -714,18 +862,25 @@ def run_lane_inbox_profile(
             )
 
         def claim_and_ack(worker_index: int) -> int:
+            worker_engines = (
+                independent_worker_engines
+                if worker_engine_topology == "independent"
+                else [engines] * workers
+            )
+            worker_engine = worker_engines[worker_index]
+            worker_conversation = worker_engine.conversation
             token = claims_ctx.set({"storage_ns": namespaces.conv_bg})
             claimed_count = 0
             try:
                 scope_started = time.perf_counter()
-                with _background_namespace(conversation, namespaces.conv_bg):
+                with _background_namespace(worker_conversation, namespaces.conv_bg):
                     scope_acquired = time.perf_counter()
                     with timings_lock:
                         namespace_scope_wait_times.append((scope_acquired - scope_started) * 1000.0)
                     try:
                         while True:
                             started = time.perf_counter()
-                            rows = conversation.claim_projected_lane_messages(
+                            rows = worker_conversation.claim_projected_lane_messages(
                                 inbox_id=inbox_id,
                                 claimed_by=f"lane-profile-worker-{worker_index}",
                                 limit=32,
@@ -738,7 +893,7 @@ def run_lane_inbox_profile(
                                 return claimed_count
                             for row in rows:
                                 started = time.perf_counter()
-                                conversation.ack_projected_lane_message(
+                                worker_conversation.ack_projected_lane_message(
                                     message_id=str(row.message_id),
                                     claimed_by=f"lane-profile-worker-{worker_index}",
                                 )
@@ -754,10 +909,47 @@ def run_lane_inbox_profile(
             finally:
                 claims_ctx.reset(token)
 
-        drain_started = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            results = list(executor.map(claim_and_ack, range(workers)))
-        drain_ms = (time.perf_counter() - drain_started) * 1000.0
+        if worker_engine_topology == "process":
+            process_context = multiprocessing.get_context("spawn")
+            ready_barrier = process_context.Barrier(workers)
+            work_barrier = process_context.Barrier(workers)
+            process_config = (
+                dsn,
+                schema,
+                str(temp_root),
+                workspace_id,
+                conversation_persistence_mode,
+            )
+            process_startup_started = time.perf_counter()
+            with ProcessPoolExecutor(
+                max_workers=workers,
+                mp_context=process_context,
+                initializer=_initialize_lane_process_worker,
+                initargs=(process_config, ready_barrier, work_barrier),
+            ) as executor:
+                ready_results = list(executor.map(_lane_process_worker_ready, range(workers)))
+                worker_engine_startup_ms.extend(
+                    float(result["engine_startup_ms"]) for result in ready_results
+                )
+                worker_process_ids = [int(result["pid"]) for result in ready_results]
+                process_pool_ready_ms = (time.perf_counter() - process_startup_started) * 1000.0
+                drain_started = time.perf_counter()
+                worker_process_results = list(
+                    executor.map(_run_lane_inbox_process_worker, range(workers))
+                )
+                drain_ms = (time.perf_counter() - drain_started) * 1000.0
+            results = [int(result["claimed_count"]) for result in worker_process_results]
+            for result in worker_process_results:
+                claim_batch_times.extend(result["claim_batch_ms"])
+                ack_times.extend(result["ack_ms"])
+                namespace_scope_wait_times.extend(result["scope_wait_ms"])
+                namespace_scope_hold_times.extend(result["scope_hold_ms"])
+        else:
+            process_pool_ready_ms = None
+            drain_started = time.perf_counter()
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                results = list(executor.map(claim_and_ack, range(workers)))
+            drain_ms = (time.perf_counter() - drain_started) * 1000.0
         token = claims_ctx.set({"storage_ns": namespaces.conv_bg})
         try:
             remaining = conversation.list_projected_lane_messages(
@@ -783,6 +975,23 @@ def run_lane_inbox_profile(
             )
         rss_after = _process_rss_bytes()
         completed = sum(results)
+        postgres_metrics = sql_metrics.result()
+        worker_process_rss_deltas = [
+            int(result["rss_delta_bytes"])
+            for result in worker_process_results
+            if isinstance(result.get("rss_delta_bytes"), int)
+        ]
+        if worker_process_results:
+            statement_counts = Counter(postgres_metrics["statement_counts_by_verb"])
+            statement_latencies = list(sql_metrics.latencies_ms)
+            for result in worker_process_results:
+                statement_counts.update(result["statement_counts_by_verb"])
+                statement_latencies.extend(result["statement_latencies_ms"])
+            postgres_metrics = {
+                "statement_count": sum(statement_counts.values()),
+                "statement_counts_by_verb": dict(sorted(statement_counts.items())),
+                "statement_latency_ms": _summary(statement_latencies),
+            }
         return {
             "schema_version": 1,
             "workload": "authoritative-lane-message-publication-and-inbox-drain",
@@ -790,10 +999,14 @@ def run_lane_inbox_profile(
             "items": items,
             "warmup_messages": 1,
             "workers": workers,
+            "worker_engine_topology": worker_engine_topology,
+            "worker_process_count": len(set(worker_process_ids)),
             "claim_batch_size": 32,
             "conversation_persistence_mode": conversation_persistence_mode,
             "telemetry": {"requested": "disabled", "reason": "isolated lane workload"},
             "timings": {
+                "independent_worker_engine_startup": _summary(worker_engine_startup_ms),
+                "process_pool_ready_ms": process_pool_ready_ms,
                 "message_publication_total_ms": send_total_ms,
                 "warmup_message_publication_ms": warmup_send_ms,
                 "per_message_publication": _summary(send_times),
@@ -804,7 +1017,7 @@ def run_lane_inbox_profile(
                 "per_namespace_scope_hold": _summary(namespace_scope_hold_times),
                 "messages_published_per_second": items / (send_total_ms / 1000.0) if send_total_ms else 0.0,
                 "messages_claimed_and_acked_per_second": completed / (drain_ms / 1000.0) if drain_ms else 0.0,
-                "postgres_statements": sql_metrics.result(),
+                "postgres_statements": postgres_metrics,
             },
             "process_memory": {
                 "rss_before_bytes": rss_before,
@@ -814,6 +1027,7 @@ def run_lane_inbox_profile(
                     if rss_before is not None and rss_after is not None
                     else None
                 ),
+                "worker_process_rss_delta_bytes": worker_process_rss_deltas,
                 "measurement": "psutil RSS samples; optional dependency",
             },
             "lease_renewal": {
@@ -830,6 +1044,10 @@ def run_lane_inbox_profile(
                     len(message_ids) == items + 1
                     and completed == items + 1
                     and completed_ids == message_ids
+                    and (
+                        worker_engine_topology != "process"
+                        or len(set(worker_process_ids)) == workers
+                    )
                 ),
             },
             "postgres_schema_table_bytes": table_bytes,
@@ -842,10 +1060,13 @@ def run_lane_inbox_profile(
     finally:
         if engines is not None:
             _close_engines(engines)
+        for worker_engine in independent_worker_engines:
+            _close_engines(worker_engine)
         sql_metrics.close()
         with admin.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin.dispose()
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def main() -> int:
@@ -854,6 +1075,12 @@ def main() -> int:
     parser.add_argument("--dsn", default=os.getenv("KOGWISTAR_POSTGRES_DSN"))
     parser.add_argument("--items", type=int, default=100)
     parser.add_argument("--workers", type=int, choices=(1, 4, 16), default=1)
+    parser.add_argument(
+        "--worker-engine-topology",
+        choices=("shared", "independent", "process"),
+        default="shared",
+        help="share one engine, create per-thread engines, or run workers in independent processes",
+    )
     parser.add_argument("--critic-delay-ms", type=float, default=0.0)
     parser.add_argument("--token-budget", type=int, default=4_000)
     parser.add_argument(
@@ -890,6 +1117,7 @@ def main() -> int:
             items=args.items,
             workers=args.workers,
             conversation_persistence_mode=args.conversation_persistence_mode,
+            worker_engine_topology=args.worker_engine_topology,
         )
     else:
         result = run_profile(
