@@ -80,7 +80,15 @@ def _close_engines(engines: object) -> None:
             dispose()
 
 
-def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, Any]:
+def run_profile(
+    *,
+    dsn: str,
+    items: int,
+    critic_delay_ms: float,
+    token_budget: int,
+    conversation_persistence_mode: str,
+    checkpoint_every_n_steps: int,
+) -> dict[str, Any]:
     from sqlalchemy import create_engine, text
 
     schema = f"profile_maintenance_{uuid.uuid4().hex[:16]}"
@@ -104,6 +112,7 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
             base_dir=temp_root,
             dsn=dsn,
             schema=schema,
+            conversation_persistence_mode=conversation_persistence_mode,
             embedding_function=DeterministicEmbedding(),
             embedding_dimension=2,
             embedding_provider="benchmark",
@@ -126,6 +135,7 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
         )
         worker.lease_seconds = 300
         worker.lease_renew_interval_seconds = 60
+        worker.runtime.checkpoint_every_n_steps = checkpoint_every_n_steps
 
         source_texts: list[tuple[str, str, str, str]] = []
         for index in range(items):
@@ -225,8 +235,8 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
                     "source_digest": digest,
                 },
                 "observation_neighborhood_count": 8,
-                "observation_token_budget": 1200,
-                "budgets": {"max_llm_calls": 1, "max_tokens": 1200, "max_steps": 2},
+                "observation_token_budget": token_budget,
+                "budgets": {"max_llm_calls": 1, "max_tokens": token_budget, "max_steps": 2},
             }
             started = time.perf_counter()
             engines.conversation.jobs.enqueue(
@@ -242,6 +252,10 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
         process_started = time.perf_counter()
         worker.process_pending_jobs(workspace_id)
         processing_ms = (time.perf_counter() - process_started) * 1000.0
+
+        materialization_started = time.perf_counter()
+        materialized_jobs = engines.conversation.reconcile_indexes(max_jobs=100_000)
+        materialization_ms = (time.perf_counter() - materialization_started) * 1000.0
 
         dispatch_ms = [
             float(event["duration_ms"])
@@ -267,6 +281,12 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
             }
             for event in traces
             if event.get("event") == "maintenance_observation_critic_skipped_no_verified_source"
+        ]
+        observation_omitted_counts = [
+            dict(event["omitted_counts"])
+            for event in traces
+            if event.get("event") == "maintenance_observation_completed"
+            and isinstance(event.get("omitted_counts"), Mapping)
         ]
         queue_rows = engines.conversation.meta_sqlite.list_index_jobs(
             namespace=namespaces.maintenance_jobs,
@@ -297,6 +317,13 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
             "embedding": "deterministic 2D SHA-256 projection; not a quality embedding",
             "critic": "fake structured observation critic; model inference excluded",
             "critic_delay_ms": critic_delay_ms,
+            "observation_token_budget": token_budget,
+            "conversation_persistence_mode": conversation_persistence_mode,
+            "checkpoint_every_n_steps": checkpoint_every_n_steps,
+            "checkpoint_frequency_note": (
+                "non-default frequency is a test-only sensitivity comparison; "
+                "production durability defaults remain unchanged"
+            ),
             "telemetry_export_enabled": os.getenv("LLM_WIKI_OTEL_ENABLED", "unset"),
             "timings": {
                 "engine_startup_ms": engine_startup_ms,
@@ -305,6 +332,8 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
                 "per_fake_critic_call": _summary(critic_times),
                 "per_job_worker_dispatch_trace": _summary(dispatch_ms),
                 "queue_drain_total_ms": processing_ms,
+                "conversation_index_materialization_ms": materialization_ms,
+                "conversation_index_jobs_materialized": materialized_jobs,
                 "jobs_per_second": completed / (processing_ms / 1000.0) if processing_ms else 0.0,
             },
             "correctness": {
@@ -316,6 +345,7 @@ def run_profile(*, dsn: str, items: int, critic_delay_ms: float) -> dict[str, An
                 "trace_events": len(traces),
                 "trace_event_counts": trace_counts,
                 "critic_skip_reasons": critic_skip_reasons,
+                "observation_omitted_counts": observation_omitted_counts,
                 "all_jobs_completed": completed == items and provider_success == items,
             },
             "postgres_schema_table_bytes": table_bytes,
@@ -340,6 +370,14 @@ def main() -> int:
     parser.add_argument("--dsn", default=os.getenv("KOGWISTAR_POSTGRES_DSN"))
     parser.add_argument("--items", type=int, default=100)
     parser.add_argument("--critic-delay-ms", type=float, default=0.0)
+    parser.add_argument("--token-budget", type=int, default=4_000)
+    parser.add_argument(
+        "--conversation-persistence-mode",
+        choices=("single_stage", "two_stage"),
+        default="single_stage",
+    )
+    parser.add_argument("--checkpoint-every-n-steps", type=int, default=1)
+    parser.add_argument("--otel", choices=("enabled", "disabled"))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if not args.dsn:
@@ -348,7 +386,20 @@ def main() -> int:
         parser.error("--items must be between 1 and 10000")
     if args.critic_delay_ms < 0 or args.critic_delay_ms > 60_000:
         parser.error("--critic-delay-ms must be between 0 and 60000")
-    result = run_profile(dsn=args.dsn, items=args.items, critic_delay_ms=args.critic_delay_ms)
+    if args.token_budget < 256 or args.token_budget > 100_000:
+        parser.error("--token-budget must be between 256 and 100000")
+    if args.checkpoint_every_n_steps < 1 or args.checkpoint_every_n_steps > 100:
+        parser.error("--checkpoint-every-n-steps must be between 1 and 100")
+    if args.otel is not None:
+        os.environ["LLM_WIKI_OTEL_ENABLED"] = "true" if args.otel == "enabled" else "false"
+    result = run_profile(
+        dsn=args.dsn,
+        items=args.items,
+        critic_delay_ms=args.critic_delay_ms,
+        token_budget=args.token_budget,
+        conversation_persistence_mode=args.conversation_persistence_mode,
+        checkpoint_every_n_steps=args.checkpoint_every_n_steps,
+    )
     rendered = json.dumps(result, indent=2, sort_keys=True)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
