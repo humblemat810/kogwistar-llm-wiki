@@ -644,6 +644,8 @@ def run_lane_inbox_profile(
     send_times: list[float] = []
     claim_batch_times: list[float] = []
     ack_times: list[float] = []
+    namespace_scope_wait_times: list[float] = []
+    namespace_scope_hold_times: list[float] = []
     timings_lock = threading.Lock()
     rss_before = _process_rss_bytes()
     try:
@@ -715,30 +717,40 @@ def run_lane_inbox_profile(
             token = claims_ctx.set({"storage_ns": namespaces.conv_bg})
             claimed_count = 0
             try:
+                scope_started = time.perf_counter()
                 with _background_namespace(conversation, namespaces.conv_bg):
-                    while True:
-                        started = time.perf_counter()
-                        rows = conversation.claim_projected_lane_messages(
-                            inbox_id=inbox_id,
-                            claimed_by=f"lane-profile-worker-{worker_index}",
-                            limit=32,
-                            lease_seconds=300,
-                        )
-                        elapsed_ms = (time.perf_counter() - started) * 1000.0
-                        with timings_lock:
-                            claim_batch_times.append(elapsed_ms)
-                        if not rows:
-                            return claimed_count
-                        for row in rows:
+                    scope_acquired = time.perf_counter()
+                    with timings_lock:
+                        namespace_scope_wait_times.append((scope_acquired - scope_started) * 1000.0)
+                    try:
+                        while True:
                             started = time.perf_counter()
-                            conversation.ack_projected_lane_message(
-                                message_id=str(row.message_id),
+                            rows = conversation.claim_projected_lane_messages(
+                                inbox_id=inbox_id,
                                 claimed_by=f"lane-profile-worker-{worker_index}",
+                                limit=32,
+                                lease_seconds=300,
                             )
                             elapsed_ms = (time.perf_counter() - started) * 1000.0
                             with timings_lock:
-                                ack_times.append(elapsed_ms)
-                            claimed_count += 1
+                                claim_batch_times.append(elapsed_ms)
+                            if not rows:
+                                return claimed_count
+                            for row in rows:
+                                started = time.perf_counter()
+                                conversation.ack_projected_lane_message(
+                                    message_id=str(row.message_id),
+                                    claimed_by=f"lane-profile-worker-{worker_index}",
+                                )
+                                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                                with timings_lock:
+                                    ack_times.append(elapsed_ms)
+                                claimed_count += 1
+                    finally:
+                        with timings_lock:
+                            namespace_scope_hold_times.append(
+                                (time.perf_counter() - scope_acquired) * 1000.0
+                            )
             finally:
                 claims_ctx.reset(token)
 
@@ -788,6 +800,8 @@ def run_lane_inbox_profile(
                 "inbox_drain_total_ms": drain_ms,
                 "per_claim_batch": _summary(claim_batch_times),
                 "per_acknowledgment": _summary(ack_times),
+                "per_namespace_scope_acquisition_wait": _summary(namespace_scope_wait_times),
+                "per_namespace_scope_hold": _summary(namespace_scope_hold_times),
                 "messages_published_per_second": items / (send_total_ms / 1000.0) if send_total_ms else 0.0,
                 "messages_claimed_and_acked_per_second": completed / (drain_ms / 1000.0) if drain_ms else 0.0,
                 "postgres_statements": sql_metrics.result(),
@@ -822,7 +836,7 @@ def run_lane_inbox_profile(
             "measurement_limits": [
                 "No LLM or embedding inference was used; lane-message publication is storage-path measurement.",
                 "RSS is a before/after process sample, not a high-water mark.",
-                "PostgreSQL lock-wait time is not directly instrumented; concurrent claim latency is reported instead.",
+                "PostgreSQL lock-wait time is not directly instrumented; application namespace-scope wait is measured separately.",
             ],
         }
     finally:

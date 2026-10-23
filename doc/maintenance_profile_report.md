@@ -53,8 +53,16 @@ materially expensive.
 In the 100-item, four-worker drain, claim-batch p50 was 3.92 s and p95 4.11 s;
 per-message acknowledgment p50 was 11.9 ms. This points to claim/filter/context
 work rather than the individual acknowledgment call as the more promising
-investigation. PostgreSQL lock-wait time was not sampled directly, so the source
-of claim latency is not yet proven. The benchmark applies production-equivalent
+investigation. A 10-item single-stage worker sweep drained in 1.06 s (1 worker),
+2.40 s (4 workers), and 8.77 s (16 workers); all messages completed exactly
+once. The instrumented 16-worker run measured namespace-scope acquisition wait
+at p50 3.97 s / p95 7.35 s, versus scope-hold p50 0.46 s. This aligns with
+Kogwistar's current `scoped_namespace` implementation, which acquires a
+per-engine reentrant lock and holds it throughout the scoped block. In this
+shared-engine harness topology, that app-level lock serializes worker scopes
+and explains why adding threads did not help. This is not a PostgreSQL lock
+wait measurement and may not generalize to separate worker processes with
+separate engine instances. The benchmark applies production-equivalent
 background namespace scoping in each worker thread; without that context, the
 two-stage diagnostic initially claimed zero messages despite persisted rows.
 
@@ -92,8 +100,8 @@ separate lane-message mechanism.
 | Measure best-effort telemetry cost | **Paired exploratory sample done** | One matched sample per mode; no reliable cost estimate until repeated. |
 | Test checkpoint frequency sensitivity | **Exploratory comparison done** | A single interval-2 sample produced 2 checkpoints / 1,434 state bytes versus 3 / 2,210 at interval 1; not enough to change production defaults. |
 | Sizes 100 / 1,000 / 10,000 | **Incomplete** | Lane workload has 100; 1,000 and 10,000 full graph writes deferred due measured cost. |
-| Workers 1 / 4 / 16 | **Incomplete** | Four-worker claim/ack measured; one- and sixteen-worker matched samples remain. |
-| DB operations, memory, lock contention | **Partial** | SQL counts/latencies and before/after RSS are captured; peak allocations and DB lock waits are not. |
+| Workers 1 / 4 / 16 | **Exploratory sweep done** | Ten-item single-stage runs all passed exact-once checks; the shared-engine namespace lock serialized scopes, so repeat with production worker topology before tuning. |
+| DB operations, memory, lock contention | **Partial** | SQL counts/latencies, before/after RSS, and app namespace-lock wait are captured; peak allocations and PostgreSQL lock waits are not. |
 | Broad Rust rewrite decision | **No decision** | Current evidence is Python service/storage profiling only and cannot justify or reject an end-to-end Rust rewrite. |
 
 ## Next Measurements
@@ -102,13 +110,16 @@ separate lane-message mechanism.
    times per setting; compare medians and variation, not individual runs.
 2. Compare telemetry enabled/disabled on the exact same workflow and critic
    workload.
-3. Run lane drain on the same prepared fixture at workers 1, 4, and 16, while
-   preserving per-message write boundaries and exact-once checks.
+3. Repeat the lane drain at workers 1, 4, and 16 using the production worker
+   topology (confirm whether workers share one engine instance or run in
+   separate processes), while preserving per-message write boundaries and
+   exact-once checks.
 4. Profile 1,000-item lane publication only after identifying an instrumentation
    or setup improvement that can make the run practical; do not extrapolate
    linearly from 100. Keep 10,000 as a deferred stress target.
-5. Add direct PostgreSQL lock-wait sampling and peak-memory/allocation metrics
-   before attributing the claim-batch latency to a specific lock or subsystem.
+5. Add direct PostgreSQL lock-wait sampling and peak-memory/allocation metrics;
+   separately decide whether per-engine namespace serialization is an expected
+   correctness tradeoff or needs a safe concurrent namespace-view redesign.
 6. Keep Python as the baseline. Consider a narrow Rust rewrite only if repeated
    end-to-end results show a stable bottleneck in CPU-bound Kogwistar logic,
    after database, projection, embedding, and serialization costs are separated.
