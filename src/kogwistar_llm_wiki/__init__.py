@@ -1,6 +1,5 @@
 # The bootstrap must run before package imports; those imports intentionally
 # follow the environment setup below.
-# ruff: noqa: E402
 from __future__ import annotations
 
 import os
@@ -48,6 +47,7 @@ from .codex.codex_workbench_agent import (
     CodexCliSettings,
     HostCockpitResponder,
 )
+from .codex.streaming_provider import CodexAppServerProvider
 from .configuration.settings_service import SettingsService
 from .configuration.workspace import (
     GraphSpace,
@@ -218,6 +218,7 @@ __all__ = [
     "ArchiveError",
     "AssetResolver",
     "ChromaMultimodalProjectionStore",
+    "CodexAppServerProvider",
     "CodexAppServerRunner",
     "CodexCliCockpitResponder",
     "CodexCliResponder",

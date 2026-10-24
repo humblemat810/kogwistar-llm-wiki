@@ -15,6 +15,7 @@ from .codex_workbench_agent import (
     CodexCliSettings,
     HostCockpitResponder,
 )
+from .streaming_provider import CodexAppServerProvider, CodexAppServerSession
 
 CodexMemoryError = MemoryValidationError
 CodexMemoryRecord = MemoryRecord
@@ -22,7 +23,9 @@ CodexMemoryService = MemoryService
 
 # Keep these names available to callers of the original Codex-facing facade.
 __all__ = [
+    "CodexAppServerProvider",
     "CodexAppServerRunner",
+    "CodexAppServerSession",
     "CodexCliCockpitResponder",
     "CodexCliResponder",
     "CodexCliSettings",
