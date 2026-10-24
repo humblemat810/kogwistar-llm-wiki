@@ -1,9 +1,10 @@
 """Profile the durable LLM-Wiki maintenance path against disposable PostgreSQL.
 
-This intentionally uses deterministic embeddings and a fake observation critic:
-it measures graph persistence, queue/lease handling, bounded context reads, audit
-publication, and acknowledgement without attributing model inference to storage.
-The runner creates a unique PostgreSQL schema and drops only that schema.
+By default this uses deterministic embeddings and a fake observation critic to
+isolate graph persistence, queue/lease handling, bounded context reads, audit
+publication, and acknowledgement. Optional local model modes include real
+embedding inference and Ollama or OpenAI-compatible llama.cpp critics. The
+runner creates a unique PostgreSQL schema and drops only that schema.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+import re
 import shutil
 import statistics
 import tempfile
@@ -22,31 +24,417 @@ import uuid
 from collections import Counter
 from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from kg_doc_parser.workflow_ingest.providers import (
+    ProviderEndpointConfig,
+    WorkflowProviderSettings,
+)
+from kogwistar.engine_core.engine import GraphKnowledgeEngine
 from kogwistar.engine_core.models import Document, Grounding, Node, Span
+from sqlalchemy.exc import SQLAlchemyError
 
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import build_postgres_namespace_engines
+from kogwistar_llm_wiki.maintenance.observation_critic import build_observation_critic
 from kogwistar_llm_wiki.maintenance.observation_evidence import (
     build_authoritative_source_evidence,
 )
 from kogwistar_llm_wiki.utils import _background_namespace, _temporary_namespace
 from kogwistar_llm_wiki.worker import MaintenanceWorker
 
+_LOCAL_OPENAI_API_KEY_ENV = "LLM_WIKI_PROFILE_LOCAL_OPENAI_API_KEY"
+
+
+def _local_critic_provider_settings(
+    *,
+    provider: str,
+    model: str,
+    base_url: str,
+    timeout_seconds: float,
+    context_tokens: int,
+    output_tokens: int,
+) -> WorkflowProviderSettings:
+    if provider not in {"ollama", "llama_cpp"}:
+        raise ValueError(f"unsupported local critic provider: {provider}")
+    provider_name = "ollama" if provider == "ollama" else "openai"
+    configured_url = base_url
+    api_key_env = None
+    if provider == "llama_cpp":
+        configured_url = base_url.rstrip("/")
+        if not configured_url.endswith("/v1"):
+            configured_url += "/v1"
+        api_key_env = _LOCAL_OPENAI_API_KEY_ENV
+        os.environ.setdefault(api_key_env, "local-no-auth")
+    return WorkflowProviderSettings(
+        parser=ProviderEndpointConfig(
+            provider=provider_name,
+            model=model,
+            base_url=configured_url,
+            api_key_env=api_key_env,
+            timeout_seconds=timeout_seconds,
+            max_output_tokens=output_tokens,
+            ollama_num_ctx=context_tokens if provider == "ollama" else None,
+            max_retries=0,
+            temperature=0.0,
+        )
+    )
+
 
 class DeterministicEmbedding:
     """Fast, fixed-width encoder used only to isolate service/storage work."""
 
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._calls = 0
+        self._items = 0
+        self._latencies_ms: list[float] = []
+        self._invocations: list[dict[str, float | int]] = []
+
     def __call__(self, values: list[str]) -> list[list[float]]:
+        started = time.perf_counter()
         vectors: list[list[float]] = []
         for value in values:
             digest = hashlib.sha256(str(value).encode("utf-8")).digest()
             vectors.append(
                 [float(int.from_bytes(digest[:4], "big")), float(int.from_bytes(digest[4:8], "big"))]
             )
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        with self._lock:
+            self._calls += 1
+            self._items += len(values)
+            self._latencies_ms.append(elapsed_ms)
+            self._invocations.append({"batch_items": len(values), "duration_ms": elapsed_ms})
         return vectors
+
+    def metrics(self) -> dict[str, object]:
+        with self._lock:
+            latencies = list(self._latencies_ms)
+            call_count = self._calls
+            item_count = self._items
+        return {
+            "invocation_count": call_count,
+            "item_count": item_count,
+            "total_time_ms": sum(latencies),
+            "per_invocation_ms": _summary(latencies),
+            "invocations": self._invocations[:100],
+            "invocations_truncated": len(self._invocations) > 100,
+            "meaning": "deterministic synthetic embedding only; not model inference latency",
+        }
+
+
+class LocalE5SmallEmbedding:
+    """Local-only multilingual-e5-small encoder for production-shaped profiles."""
+
+    def __init__(self, *, device: str = "cpu") -> None:
+        started = time.perf_counter()
+        import torch
+        from huggingface_hub import snapshot_download
+        from transformers import AutoModel, AutoTokenizer
+
+        if device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("CUDA was requested for the local embedding model but is unavailable")
+        model_dir = snapshot_download(
+            repo_id="intfloat/multilingual-e5-small", local_files_only=True
+        )
+        self._snapshot_revision = Path(model_dir).name
+        self._torch = torch
+        self._device = torch.device(device)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            model_dir, local_files_only=True
+        )
+        self._model = AutoModel.from_pretrained(
+            model_dir, local_files_only=True
+        ).to(self._device)
+        self._model.eval()
+        self.dimension = int(self._model.config.hidden_size)
+        self._load_ms = (time.perf_counter() - started) * 1000.0
+        self._lock = threading.Lock()
+        self._calls = 0
+        self._items = 0
+        self._latencies_ms: list[float] = []
+
+    def name(self) -> str:
+        """Return cache identity including weights and pooling semantics."""
+        return (
+            "intfloat/multilingual-e5-small:"
+            f"{self._snapshot_revision}:mean-pool-l2-v1:max512"
+        )
+
+    def __call__(self, values: list[str]) -> list[list[float]]:
+        started = time.perf_counter()
+        inputs = self._tokenizer(
+            [f"passage: {value}" for value in values],
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        )
+        inputs = {key: value.to(self._device) for key, value in inputs.items()}
+        with self._torch.inference_mode():
+            hidden = self._model(**inputs).last_hidden_state
+            mask = inputs["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+            vectors = self._torch.nn.functional.normalize(pooled, p=2, dim=1)
+        result = vectors.cpu().tolist()
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        with self._lock:
+            self._calls += 1
+            self._items += len(values)
+            self._latencies_ms.append(elapsed_ms)
+        return result
+
+    def metrics(self) -> dict[str, object]:
+        with self._lock:
+            latencies = list(self._latencies_ms)
+            call_count = self._calls
+            item_count = self._items
+        return {
+            "model": "intfloat/multilingual-e5-small",
+            "model_snapshot": self._snapshot_revision,
+            "device": str(self._device),
+            "dimension": self.dimension,
+            "max_sequence_length": 512,
+            "model_load_ms": self._load_ms,
+            "invocation_count": call_count,
+            "item_count": item_count,
+            "total_time_ms": sum(latencies),
+            "per_invocation_ms": _summary(latencies),
+            "meaning": "local Hugging Face model; snapshot resolution is local-files-only",
+        }
+
+
+class ConversationSemanticVisibilityProbe:
+    """Verify semantic self-retrieval after synchronous lane-message sends."""
+
+    def __init__(
+        self,
+        engine: GraphKnowledgeEngine,
+        namespace: str,
+    ) -> None:
+        self._engine = engine
+        self._namespace = namespace
+        self._send_latencies_ms: list[float] = []
+        self._verification_latencies_ms: list[float] = []
+        self._visible_after_send = 0
+        self._not_visible_after_send = 0
+        self._lock = threading.Lock()
+        self._errors = 0
+
+    def record_send_result(self, message_id: str, send_latency_ms: float) -> None:
+        """Measure the full send call, then verify visibility without a poller.
+
+        ``send_lane_message`` may flush indexing before returning. A concurrent
+        observer would contend on the engine's namespace-scoped lock and distort
+        both the write latency and the visibility measurement.
+        """
+        verification_started = time.perf_counter()
+        visible = False
+        error = False
+        try:
+            visible = self._is_semantically_visible(str(message_id))
+        except (AttributeError, RuntimeError, TypeError, ValueError, SQLAlchemyError):
+            error = True
+        verification_latency_ms = (time.perf_counter() - verification_started) * 1000.0
+        with self._lock:
+            self._send_latencies_ms.append(max(0.0, send_latency_ms))
+            self._verification_latencies_ms.append(verification_latency_ms)
+            self._visible_after_send += int(visible)
+            self._not_visible_after_send += int(not visible)
+            self._errors += int(error)
+
+    def metrics(self) -> dict[str, object]:
+        with self._lock:
+            send_latencies = list(self._send_latencies_ms)
+            verification_latencies = list(self._verification_latencies_ms)
+            visible_after_send = self._visible_after_send
+            not_visible_after_send = self._not_visible_after_send
+            errors = self._errors
+        return {
+            "enabled": True,
+            "messages_sent": len(send_latencies),
+            "messages_semantically_visible_after_send": visible_after_send,
+            "messages_not_visible_after_send": not_visible_after_send,
+            "send_call_latency_ms": _summary(send_latencies),
+            "post_send_semantic_query_latency_ms": _summary(verification_latencies),
+            "measurement": (
+                "synchronous post-return verification; send latency includes any "
+                "index reconciliation performed before send_lane_message returns"
+            ),
+            "probe_errors": errors,
+            "message_ids_persisted": False,
+        }
+
+    def _is_semantically_visible(self, message_id: str) -> bool:
+        with _temporary_namespace(self._engine, self._namespace):
+            nodes = list(self._engine.read.get_nodes(ids=[message_id], limit=1))
+            if not nodes:
+                return False
+            embedding = getattr(nodes[0], "embedding", None)
+            if embedding is None:
+                return False
+            result_batches = self._engine.read.query_nodes(
+                query_embeddings=embedding,
+                n_results=10,
+            )
+        return any(
+            str(hit.id) == message_id
+            for batch in result_batches
+            for hit in batch
+        )
+
+
+_STREAMED_TRACE_FIELDS = (
+    "event",
+    "workflow_stage",
+    "stage",
+    "outcome",
+    "status",
+    "reason",
+    "duration_ms",
+    "job_id",
+    "request_node_id",
+    "mode",
+    "claimed_count",
+    "error_type",
+    "error_code",
+    "source_evidence_status",
+)
+
+
+def _trace_summary_line(event: Mapping[str, object], sequence: int) -> dict[str, object]:
+    """Project worker traces to bounded operational fields, excluding payloads."""
+    result: dict[str, object] = {
+        "trace_sequence": sequence,
+        "observed_at_utc": datetime.now(UTC).isoformat(timespec="milliseconds"),
+    }
+    for field in _STREAMED_TRACE_FIELDS:
+        value = event.get(field)
+        if isinstance(value, (str, int, float, bool)):
+            result[field] = value
+    assessment = event.get("assessment")
+    if isinstance(assessment, Mapping):
+        critic_status = assessment.get("critic_status")
+        if isinstance(critic_status, str):
+            result["critic_status"] = critic_status
+        verdict = assessment.get("verdict")
+        if verdict in {
+            "adequate",
+            "too_coarse",
+            "too_fine",
+            "coverage_gap",
+            "overlap",
+            "duplicate",
+            "misgrouped",
+            "weak_label",
+            "ungrounded",
+            "relation_unsupported",
+            "relation_misplaced",
+            "contradictory",
+            "quality_unknown",
+            "review_required",
+        }:
+            result["assessment_verdict"] = verdict
+        recommended_action = assessment.get("recommended_action")
+        if recommended_action in {
+            "none",
+            "review_parent",
+            "expand_children",
+            "retry_same_strategy",
+            "switch_to_excerpt",
+            "switch_to_boundary",
+            "reparse_region",
+            "propose_relation_patch",
+            "validate_crosslinks",
+            "request_human_review",
+        }:
+            result["recommended_action"] = recommended_action
+        findings = assessment.get("findings")
+        if isinstance(findings, (list, tuple)):
+            result["finding_count"] = len(findings)
+            severities = Counter(
+                str(finding.get("severity"))
+                for finding in findings
+                if isinstance(finding, Mapping)
+                and finding.get("severity") in {"info", "warning", "error"}
+            )
+            result["finding_severity_counts"] = dict(sorted(severities.items()))
+    return result
+
+
+def _assessment_quality_summary(traces: list[Mapping[str, object]]) -> dict[str, object]:
+    """Aggregate allowlisted assessment labels without retaining finding content."""
+    verdicts = {
+        "adequate",
+        "too_coarse",
+        "too_fine",
+        "coverage_gap",
+        "overlap",
+        "duplicate",
+        "misgrouped",
+        "weak_label",
+        "ungrounded",
+        "relation_unsupported",
+        "relation_misplaced",
+        "contradictory",
+        "quality_unknown",
+        "review_required",
+    }
+    actions = {
+        "none",
+        "review_parent",
+        "expand_children",
+        "retry_same_strategy",
+        "switch_to_excerpt",
+        "switch_to_boundary",
+        "reparse_region",
+        "propose_relation_patch",
+        "validate_crosslinks",
+        "request_human_review",
+    }
+    assessment_events = [
+        event
+        for event in traces
+        if event.get("event") == "maintenance_observation_completed"
+        and isinstance(event.get("assessment"), Mapping)
+    ]
+    verdict_counts: Counter[str] = Counter()
+    action_counts: Counter[str] = Counter()
+    severity_counts: Counter[str] = Counter()
+    finding_verdict_counts: Counter[str] = Counter()
+    finding_count = 0
+    for event in assessment_events:
+        assessment = event["assessment"]
+        verdict = assessment.get("verdict")
+        if verdict in verdicts:
+            verdict_counts[str(verdict)] += 1
+        action = assessment.get("recommended_action")
+        if action in actions:
+            action_counts[str(action)] += 1
+        findings = assessment.get("findings")
+        if not isinstance(findings, (list, tuple)):
+            continue
+        finding_count += len(findings)
+        for finding in findings:
+            if not isinstance(finding, Mapping):
+                continue
+            severity = finding.get("severity")
+            if severity in {"info", "warning", "error"}:
+                severity_counts[str(severity)] += 1
+            finding_verdict = finding.get("verdict")
+            if finding_verdict in verdicts:
+                finding_verdict_counts[str(finding_verdict)] += 1
+    return {
+        "assessment_count": len(assessment_events),
+        "verdict_counts": dict(sorted(verdict_counts.items())),
+        "recommended_action_counts": dict(sorted(action_counts.items())),
+        "finding_count": finding_count,
+        "finding_severity_counts": dict(sorted(severity_counts.items())),
+        "finding_verdict_counts": dict(sorted(finding_verdict_counts.items())),
+        "finding_text_persisted": False,
+    }
 
 
 def _percentile(values: list[float], percent: float) -> float | None:
@@ -96,6 +484,7 @@ class _SqlStatementMetrics:
         self._admin_engine = admin_engine
         self.counts: Counter[str] = Counter()
         self.latencies_ms: list[float] = []
+        self.templates: dict[str, dict[str, float | int]] = {}
         self._lock = threading.Lock()
 
         def before_execute(connection: object, _cursor: object, statement: str, _params: object,
@@ -103,9 +492,18 @@ class _SqlStatementMetrics:
             if getattr(connection, "engine", None) is self._admin_engine:
                 return
             operation = statement.lstrip().split(maxsplit=1)[0].upper() if statement.strip() else "EMPTY"
+            template = re.sub(r"\s+", " ", statement).strip()
+            template = re.sub(r"'(?:''|[^'])*'", "?", template)
+            template = re.sub(
+                r"profile_maintenance_[a-z0-9_]+",
+                "profile_maintenance_<schema>",
+                template,
+                flags=re.IGNORECASE,
+            )
             with self._lock:
                 self.counts[operation] += 1
             context._profile_started_at = time.perf_counter()  # type: ignore[attr-defined]
+            context._profile_sql_template = template  # type: ignore[attr-defined]
 
         def after_execute(connection: object, _cursor: object, _statement: str, _params: object,
                           context: object, _executemany: bool) -> None:
@@ -113,8 +511,17 @@ class _SqlStatementMetrics:
                 return
             started = getattr(context, "_profile_started_at", None)
             if isinstance(started, float):
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                template = str(getattr(context, "_profile_sql_template", "<unknown>"))
                 with self._lock:
-                    self.latencies_ms.append((time.perf_counter() - started) * 1000.0)
+                    self.latencies_ms.append(elapsed_ms)
+                    metrics = self.templates.setdefault(
+                        template,
+                        {"count": 0, "total_ms": 0.0, "max_ms": 0.0},
+                    )
+                    metrics["count"] = int(metrics["count"]) + 1
+                    metrics["total_ms"] = float(metrics["total_ms"]) + elapsed_ms
+                    metrics["max_ms"] = max(float(metrics["max_ms"]), elapsed_ms)
 
         self._before = before_execute
         self._after = after_execute
@@ -132,10 +539,24 @@ class _SqlStatementMetrics:
 
     def result(self) -> dict[str, object]:
         with self._lock:
+            top_templates = sorted(
+                (
+                    {
+                        "template": template[:600],
+                        "count": int(metrics["count"]),
+                        "total_ms": round(float(metrics["total_ms"]), 3),
+                        "max_ms": round(float(metrics["max_ms"]), 3),
+                    }
+                    for template, metrics in self.templates.items()
+                ),
+                key=lambda item: float(item["total_ms"]),
+                reverse=True,
+            )[:25]
             return {
                 "statement_count": sum(self.counts.values()),
                 "statement_counts_by_verb": dict(sorted(self.counts.items())),
                 "statement_latency_ms": _summary(list(self.latencies_ms)),
+                "top_statement_templates_by_total_latency": top_templates,
             }
 
 
@@ -385,6 +806,17 @@ def run_profile(
     telemetry_mode: str,
     include_runtime_workflow: bool,
     lease_renew_interval_seconds: int,
+    stream_trace: bool = False,
+    progress_interval_seconds: float = 5.0,
+    critic_provider: str = "fake",
+    critic_model: str = "bonsai-parser-8k:latest",
+    critic_base_url: str = "http://127.0.0.1:11434",
+    critic_timeout_seconds: float = 300.0,
+    critic_context_tokens: int = 2_048,
+    critic_output_tokens: int = 256,
+    embedding_provider: str = "deterministic",
+    embedding_device: str = "cpu",
+    measure_semantic_visibility: bool = False,
 ) -> dict[str, Any]:
     from sqlalchemy import create_engine, text
 
@@ -404,32 +836,94 @@ def run_profile(
     source_evidence_roundtrip: str | None = None
     engines = None
     worker = None
+    visibility_probe: ConversationSemanticVisibilityProbe | None = None
+    visibility_metrics: dict[str, object] | None = None
+    index_backlog_before_reconcile: dict[str, object] | None = None
     otel_provider: object | None = None
     otel_exporter: object | None = None
     runtime_persistence_times: dict[str, list[float]] = {}
     job_queue_times: dict[str, list[float]] = {}
+    phase_timings: dict[str, float] = {}
+    trace_state_lock = threading.Lock()
+    last_trace: dict[str, object] = {}
+    last_trace_at = 0.0
+    acknowledged_jobs = 0
     rss_before = _process_rss_bytes()
     try:
+        embedding_load_started = time.perf_counter()
+        if embedding_provider == "deterministic":
+            embedding = DeterministicEmbedding()
+            embedding_dimension = 2
+            embedding_model = "deterministic-sha256-2d"
+        elif embedding_provider == "multilingual-e5-small":
+            embedding = LocalE5SmallEmbedding(device=embedding_device)
+            embedding_dimension = embedding.dimension
+            embedding_model = "intfloat/multilingual-e5-small"
+        else:
+            raise ValueError(f"unsupported profile embedding provider: {embedding_provider}")
+        embedding_model_load_ms = (
+            getattr(embedding, "_load_ms", 0.0)
+            or (time.perf_counter() - embedding_load_started) * 1000.0
+        )
         started = time.perf_counter()
         engines = build_postgres_namespace_engines(
             base_dir=temp_root,
             dsn=dsn,
             schema=schema,
             conversation_persistence_mode=conversation_persistence_mode,
-            embedding_function=DeterministicEmbedding(),
-            embedding_dimension=2,
-            embedding_provider="benchmark",
-            embedding_model="deterministic-sha256-2d",
+            embedding_function=embedding,
+            embedding_dimension=embedding_dimension,
+            embedding_provider="fake",
+            embedding_model=embedding_model,
         )
         engine_startup_ms = (time.perf_counter() - started) * 1000.0
         sql_metrics.reset()
 
+        if measure_semantic_visibility:
+            visibility_probe = ConversationSemanticVisibilityProbe(
+                engines.conversation,
+                namespaces.conv_bg,
+            )
+            send_message = engines.conversation.send_lane_message
+
+            def track_message_admission(*args: object, **kwargs: object) -> object:
+                admission_started = time.perf_counter()
+                result = send_message(*args, **kwargs)
+                message_id = getattr(result, "message_id", None)
+                if message_id:
+                    visibility_probe.record_send_result(
+                        str(message_id),
+                        (time.perf_counter() - admission_started) * 1000.0,
+                    )
+                return result
+
+            engines.conversation.send_lane_message = track_message_admission
+
+        if critic_provider in {"ollama", "llama_cpp"}:
+            provider_settings = _local_critic_provider_settings(
+                provider=critic_provider,
+                model=critic_model,
+                base_url=critic_base_url,
+                timeout_seconds=critic_timeout_seconds,
+                context_tokens=critic_context_tokens,
+                output_tokens=critic_output_tokens,
+            )
+            provider_critic = build_observation_critic(provider_settings)
+        elif critic_provider == "fake":
+            provider_critic = None
+        else:
+            raise ValueError(f"unsupported profile critic provider: {critic_provider}")
+
         def critic(_frame: object, _ctx: object) -> Mapping[str, object]:
             call_started = time.perf_counter()
-            if critic_delay_ms:
-                time.sleep(critic_delay_ms / 1000.0)
-            critic_times.append((time.perf_counter() - call_started) * 1000.0)
-            return {"status": "succeeded", "findings": []}
+            try:
+                if provider_critic is not None:
+                    return provider_critic(_frame, _ctx)
+                if critic_delay_ms:
+                    time.sleep(critic_delay_ms / 1000.0)
+                return {"status": "succeeded", "findings": []}
+            finally:
+                critic_times.append((time.perf_counter() - call_started) * 1000.0)
 
         if telemetry_mode == "enabled":
             otel_provider, otel_exporter = _install_counting_otel_exporter()
@@ -438,8 +932,29 @@ def run_profile(
             engines,
             worker_id="maintenance-profile-worker",
             observation_critic=critic,
-            trace_sink=lambda event: traces.append(dict(event)),
+            trace_sink=None,
         )
+        def record_trace(event: Mapping[str, object]) -> None:
+            nonlocal acknowledged_jobs, last_trace_at
+            traces.append(dict(event))
+            with trace_state_lock:
+                last_trace.clear()
+                last_trace.update(_trace_summary_line(event, len(traces)))
+                last_trace_at = time.monotonic()
+                if event.get("event") == "maintenance_job_acknowledged":
+                    acknowledged_jobs += 1
+            if stream_trace:
+                print(
+                    "TRACE "
+                    + json.dumps(
+                        _trace_summary_line(event, len(traces)),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    flush=True,
+                )
+
+        worker.trace_sink = record_trace
         worker.lease_seconds = 300
         worker.lease_renew_interval_seconds = lease_renew_interval_seconds
         worker.runtime.checkpoint_every_n_steps = checkpoint_every_n_steps
@@ -453,6 +968,7 @@ def run_profile(
         )
 
         source_texts: list[tuple[str, str, str, str]] = []
+        seed_phase_started = time.perf_counter()
         for index in range(items):
             content = f"Benchmark source {index}: workspace graph maintenance evidence."
             logical_id = f"profile-source-{index:05d}"
@@ -587,18 +1103,107 @@ def run_profile(
                     payload=runtime_payload,
                 )
                 enqueue_times.append((time.perf_counter() - started) * 1000.0)
+        phase_timings["seed_and_enqueue_ms"] = (time.perf_counter() - seed_phase_started) * 1000.0
 
         process_started = time.perf_counter()
-        worker.process_pending_jobs(workspace_id)
+        progress_stop = threading.Event()
+        progress_started = time.monotonic()
+        process_cpu_started = time.process_time()
+
+        def report_progress() -> None:
+            while not progress_stop.wait(progress_interval_seconds):
+                with trace_state_lock:
+                    trace_snapshot = dict(last_trace)
+                    event_age_seconds = (
+                        round(time.monotonic() - last_trace_at, 1) if last_trace_at else None
+                    )
+                    completed_snapshot = acknowledged_jobs
+                embedding_snapshot = embedding.metrics()
+                print(
+                    "PROGRESS "
+                    + json.dumps(
+                        {
+                            "elapsed_seconds": round(time.monotonic() - progress_started, 1),
+                            "process_cpu_seconds": round(time.process_time() - process_cpu_started, 1),
+                            "requested_jobs": items,
+                            "acknowledged_jobs": completed_snapshot,
+                            "last_trace": trace_snapshot,
+                            "seconds_since_last_trace": event_age_seconds,
+                            "embedding_model": embedding_model,
+                            "embedding_device": embedding_device,
+                            "embedding_invocations": embedding_snapshot["invocation_count"],
+                            "embedding_items": embedding_snapshot["item_count"],
+                            "embedding_model_total_ms": round(
+                                float(embedding_snapshot["total_time_ms"]), 3
+                            ),
+                            "rss_bytes": _process_rss_bytes(),
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    flush=True,
+                )
+
+        progress_thread: threading.Thread | None = None
+        if stream_trace:
+            progress_thread = threading.Thread(
+                target=report_progress,
+                name="maintenance-profile-progress",
+                daemon=True,
+            )
+            progress_thread.start()
+        try:
+            worker.process_pending_jobs(workspace_id)
+        finally:
+            progress_stop.set()
+            if progress_thread is not None:
+                progress_thread.join(timeout=max(1.0, progress_interval_seconds + 1.0))
         processing_ms = (time.perf_counter() - process_started) * 1000.0
+        phase_timings["worker_processing_ms"] = processing_ms
 
         runtime_otel_sink = getattr(worker.runtime, "_otel_sink", None)
         worker.close()
         worker = None
 
+        backlog_rows = engines.conversation.meta_sqlite.list_index_jobs(
+            namespace=namespaces.conv_bg,
+            limit=max(100_000, items * 40),
+        )
+        pre_reconcile_status_counts: dict[str, int] = {}
+        pending_embedding_ages_seconds: list[float] = []
+        now_epoch = time.time()
+        for row in backlog_rows:
+            status = str(getattr(row, "status", "unknown"))
+            index_kind = str(getattr(row, "index_kind", "unknown"))
+            pre_reconcile_status_counts[status] = (
+                pre_reconcile_status_counts.get(status, 0) + 1
+            )
+            if status == "PENDING" and index_kind == "node_embedding":
+                try:
+                    created_at = int(getattr(row, "created_at", 0))
+                except (TypeError, ValueError):
+                    continue
+                if created_at > 0:
+                    pending_embedding_ages_seconds.append(
+                        max(0.0, now_epoch - created_at)
+                    )
+        index_backlog_before_reconcile = {
+            "index_job_status_counts": pre_reconcile_status_counts,
+            "pending_embedding_jobs": len(pending_embedding_ages_seconds),
+            "oldest_pending_embedding_age_seconds": max(
+                pending_embedding_ages_seconds,
+                default=None,
+            ),
+        }
         materialization_started = time.perf_counter()
-        materialized_jobs = engines.conversation.reconcile_indexes(max_jobs=100_000)
+        materialized_jobs = engines.conversation.reconcile_indexes(
+            max_jobs=100_000,
+            namespace=namespaces.conv_bg,
+        )
         materialization_ms = (time.perf_counter() - materialization_started) * 1000.0
+        phase_timings["conversation_materialization_ms"] = materialization_ms
+        if visibility_probe is not None:
+            visibility_metrics = visibility_probe.metrics()
         workflow_artifacts = _workflow_artifact_counts(engines.conversation, namespaces.conv_bg)
         if otel_provider is not None:
             force_flush = getattr(otel_provider, "force_flush", None)
@@ -641,10 +1246,39 @@ def run_profile(
             namespace=namespaces.maintenance_jobs,
             limit=(items * (2 if include_runtime_workflow else 1)) + 10,
         )
-        status_counts: dict[str, int] = {}
+        maintenance_status_counts: dict[str, int] = {}
         for row in queue_rows:
             status = str(getattr(row, "status", "unknown"))
-            status_counts[status] = status_counts.get(status, 0) + 1
+            maintenance_status_counts[status] = maintenance_status_counts.get(status, 0) + 1
+        index_rows = engines.conversation.meta_sqlite.list_index_jobs(
+            namespace=namespaces.conv_bg,
+            limit=max(100_000, items * (2 if include_runtime_workflow else 1) * 40),
+        )
+        index_status_counts: dict[str, int] = {}
+        index_kind_counts: dict[str, int] = {}
+        for row in index_rows:
+            status = str(getattr(row, "status", "unknown"))
+            index_kind = str(getattr(row, "index_kind", "unknown"))
+            index_status_counts[status] = index_status_counts.get(status, 0) + 1
+            index_kind_counts[index_kind] = index_kind_counts.get(index_kind, 0) + 1
+
+        semantic_visibility_verified = False
+        with _temporary_namespace(engines.conversation, namespaces.conv_bg):
+            conversation_nodes = engines.conversation.read.get_nodes(limit=100)
+            query_node = next(
+                (node for node in conversation_nodes if getattr(node, "embedding", None)),
+                None,
+            )
+            if query_node is not None:
+                vector_hits = engines.conversation.read.query_nodes(
+                    query_embeddings=query_node.embedding,
+                    n_results=5,
+                )
+                semantic_visibility_verified = any(
+                    hit.id == query_node.id
+                    for result_batch in vector_hits
+                    for hit in result_batch
+                )
         expected_jobs = items * (2 if include_runtime_workflow else 1)
 
         with admin.connect() as connection:
@@ -666,8 +1300,37 @@ def run_profile(
             "runtime_workflow_jobs_included": include_runtime_workflow,
             "lease_renew_interval_seconds": lease_renew_interval_seconds,
             "workspace_id": workspace_id,
-            "embedding": "deterministic 2D SHA-256 projection; not a quality embedding",
-            "critic": "fake structured observation critic; model inference excluded",
+            "embedding": embedding_model,
+            "embedding_dimension": embedding_dimension,
+            "embedding_model_load_ms": embedding_model_load_ms,
+            "embedding_metrics": embedding.metrics(),
+            "trace_streamed": stream_trace,
+            "critic": (
+                f"Ollama structured critic: {critic_model} at {critic_base_url}"
+                if critic_provider == "ollama"
+                else (
+                    f"llama.cpp OpenAI-compatible JSON-schema critic: {critic_model} "
+                    f"at {critic_base_url}"
+                    if critic_provider == "llama_cpp"
+                    else "fake structured observation critic; model inference excluded"
+                )
+            ),
+            "critic_provider": critic_provider,
+            "critic_model": critic_model if critic_provider != "fake" else None,
+            "critic_structured_output": (
+                "Pydantic ObservationCriticOutput via ChatOpenAI json_schema mode"
+                if critic_provider == "llama_cpp"
+                else "Pydantic ObservationCriticOutput via provider structured output"
+            ),
+            "critic_context_tokens": (
+                critic_context_tokens if critic_provider in {"ollama", "llama_cpp"} else None
+            ),
+            "critic_output_tokens": (
+                critic_output_tokens if critic_provider in {"ollama", "llama_cpp"} else None
+            ),
+            "critic_timeout_seconds": (
+                critic_timeout_seconds if critic_provider in {"ollama", "llama_cpp"} else None
+            ),
             "critic_delay_ms": critic_delay_ms,
             "observation_token_budget": token_budget,
             "conversation_persistence_mode": conversation_persistence_mode,
@@ -686,13 +1349,19 @@ def run_profile(
             },
             "timings": {
                 "engine_startup_ms": engine_startup_ms,
+                "phases": phase_timings,
                 "per_subject_source_and_node_write": _summary(seed_write_times),
                 "per_job_enqueue": _summary(enqueue_times),
-                "per_fake_critic_call": _summary(critic_times),
+                "per_critic_call": _summary(critic_times),
                 "per_job_worker_dispatch_trace": _summary(dispatch_ms),
                 "queue_drain_total_ms": processing_ms,
                 "conversation_index_materialization_ms": materialization_ms,
+                "conversation_semantic_visibility": visibility_metrics,
+                "index_backlog_before_reconcile": index_backlog_before_reconcile,
                 "conversation_index_jobs_materialized": materialized_jobs,
+                "conversation_index_job_status_counts": index_status_counts,
+                "conversation_index_job_kind_counts": index_kind_counts,
+                "semantic_visibility_verified": semantic_visibility_verified,
                 "postgres_statements": sql_metrics.result(),
                 "durable_job_queue_operations": {
                     name: _summary(values) for name, values in job_queue_times.items()
@@ -718,7 +1387,25 @@ def run_profile(
                 "jobs_enqueued": expected_jobs,
                 "jobs_acknowledged": completed,
                 "critic_successful_assessments": provider_success,
-                "queue_status_counts": status_counts,
+                "critic_quality_summary": _assessment_quality_summary(traces),
+                "maintenance_queue_status_counts": maintenance_status_counts,
+                "conversation_index_job_status_counts": index_status_counts,
+                "conversation_index_job_kind_counts": index_kind_counts,
+                "conversation_index_jobs_materialized": materialized_jobs,
+                "semantic_visibility_verified": semantic_visibility_verified,
+                "conversation_semantic_visibility": visibility_metrics,
+                "index_backlog_before_reconcile": index_backlog_before_reconcile,
+                "all_messages_semantically_visible_after_send": (
+                    visibility_metrics["messages_not_visible_after_send"] == 0
+                    and visibility_metrics["probe_errors"] == 0
+                    if visibility_metrics is not None
+                    else None
+                ),
+                "all_conversation_index_jobs_completed": (
+                    not index_status_counts.get("PENDING", 0)
+                    and not index_status_counts.get("DOING", 0)
+                    and not index_status_counts.get("FAILED", 0)
+                ),
                 "trace_events": len(traces),
                 "trace_event_counts": trace_counts,
                 "maintenance_lease_renewals": trace_counts.get("maintenance_lease_renewed", 0),
@@ -729,10 +1416,21 @@ def run_profile(
             },
             "postgres_schema_table_bytes": table_bytes,
             "measurement_limits": [
-                "No production embedding or maintenance model was invoked.",
+                *(
+                    ["Synthetic embeddings were used; embedding quality and model latency are excluded."]
+                    if embedding_provider == "deterministic"
+                    else ["Embedding model is local-only; results are specific to this model/device."]
+                ),
+                *(
+                    ["A fake critic was used; maintenance model inference is excluded."]
+                    if critic_provider == "fake"
+                    else [
+                        f"The local {critic_provider} critic was used; results are specific to its model/runtime."
+                    ]
+                ),
                 "OTel enabled runs use a local counting exporter, not Grafana/OTLP network transport.",
                 "Maintenance jobs are processed by one worker; lane inbox concurrency is a separate workload.",
-                "This run is a PostgreSQL-backed maintenance-path baseline, not a deployment-capacity claim.",
+                "This is a bounded PostgreSQL maintenance-path profile, not a deployment-capacity claim.",
             ],
         }
     finally:
@@ -1082,6 +1780,39 @@ def main() -> int:
         help="share one engine, create per-thread engines, or run workers in independent processes",
     )
     parser.add_argument("--critic-delay-ms", type=float, default=0.0)
+    parser.add_argument(
+        "--critic-provider",
+        choices=("fake", "ollama", "llama_cpp"),
+        default="fake",
+        help="use a synthetic, Ollama, or OpenAI-compatible llama.cpp structured-output critic",
+    )
+    parser.add_argument("--critic-model", default="bonsai-parser-8k:latest")
+    parser.add_argument("--critic-base-url", default="http://127.0.0.1:11434")
+    parser.add_argument("--critic-timeout-seconds", type=float, default=300.0)
+    parser.add_argument(
+        "--critic-output-tokens",
+        type=int,
+        default=256,
+        help="completion token cap passed to the local critic provider",
+    )
+    parser.add_argument(
+        "--critic-context-tokens",
+        type=int,
+        default=2_048,
+        help="reported local-model context size; for Ollama this also configures num_ctx",
+    )
+    parser.add_argument(
+        "--embedding-provider",
+        choices=("deterministic", "multilingual-e5-small"),
+        default="deterministic",
+        help="use synthetic vectors or cached local intfloat/multilingual-e5-small",
+    )
+    parser.add_argument("--embedding-device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument(
+        "--measure-semantic-visibility",
+        action="store_true",
+        help="measure full lane-message send duration and verify semantic self-retrieval after return",
+    )
     parser.add_argument("--token-budget", type=int, default=4_000)
     parser.add_argument(
         "--conversation-persistence-mode",
@@ -1097,6 +1828,17 @@ def main() -> int:
     )
     parser.add_argument("--otel", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--stream-trace",
+        action="store_true",
+        help="emit bounded worker trace summaries as they occur (maintenance workload only)",
+    )
+    parser.add_argument(
+        "--progress-interval-seconds",
+        type=float,
+        default=5.0,
+        help="heartbeat interval when --stream-trace is enabled",
+    )
     args = parser.parse_args()
     if not args.dsn:
         parser.error("--dsn or KOGWISTAR_POSTGRES_DSN is required")
@@ -1104,12 +1846,27 @@ def main() -> int:
         parser.error("--items must be between 1 and 10000")
     if args.critic_delay_ms < 0 or args.critic_delay_ms > 60_000:
         parser.error("--critic-delay-ms must be between 0 and 60000")
+    if args.critic_timeout_seconds <= 0 or args.critic_timeout_seconds > 3600:
+        parser.error("--critic-timeout-seconds must be between 0 and 3600")
+    if args.critic_output_tokens < 32 or args.critic_output_tokens > 16_384:
+        parser.error("--critic-output-tokens must be between 32 and 16384")
+    if args.critic_context_tokens < 256 or args.critic_context_tokens > 32_768:
+        parser.error("--critic-context-tokens must be between 256 and 32768")
+    if args.critic_provider != "fake" and args.critic_delay_ms:
+        parser.error("--critic-delay-ms only applies to the fake critic")
+    if args.workload == "lane_inbox" and (
+        args.critic_provider != "fake"
+        or args.embedding_provider != "deterministic"
+    ):
+        parser.error("local model options apply only to the maintenance workload")
     if args.token_budget < 256 or args.token_budget > 100_000:
         parser.error("--token-budget must be between 256 and 100000")
     if args.checkpoint_every_n_steps < 1 or args.checkpoint_every_n_steps > 100:
         parser.error("--checkpoint-every-n-steps must be between 1 and 100")
     if args.lease_renew_interval_seconds < 1 or args.lease_renew_interval_seconds > 300:
         parser.error("--lease-renew-interval-seconds must be between 1 and 300")
+    if args.progress_interval_seconds < 0.2 or args.progress_interval_seconds > 300:
+        parser.error("--progress-interval-seconds must be between 0.2 and 300")
     os.environ["LLM_WIKI_OTEL_ENABLED"] = "true" if args.otel == "enabled" else "false"
     if args.workload == "lane_inbox":
         result = run_lane_inbox_profile(
@@ -1130,6 +1887,17 @@ def main() -> int:
             telemetry_mode=args.otel,
             include_runtime_workflow=args.include_runtime_workflow,
             lease_renew_interval_seconds=args.lease_renew_interval_seconds,
+            stream_trace=args.stream_trace,
+            progress_interval_seconds=args.progress_interval_seconds,
+            critic_provider=args.critic_provider,
+            critic_model=args.critic_model,
+            critic_base_url=args.critic_base_url,
+            critic_timeout_seconds=args.critic_timeout_seconds,
+            critic_context_tokens=args.critic_context_tokens,
+            critic_output_tokens=args.critic_output_tokens,
+            embedding_provider=args.embedding_provider,
+            embedding_device=args.embedding_device,
+            measure_semantic_visibility=args.measure_semantic_visibility,
         )
     rendered = json.dumps(result, indent=2, sort_keys=True)
     if args.output:
@@ -1137,6 +1905,16 @@ def main() -> int:
         args.output.write_text(rendered + "\n", encoding="utf-8")
     print(rendered)
     correctness_key = "all_jobs_completed" if args.workload == "maintenance" else "all_messages_completed_once"
+    if args.workload == "maintenance":
+        return 0 if (
+            result["correctness"][correctness_key]
+            and result["correctness"]["all_conversation_index_jobs_completed"]
+            and result["correctness"]["semantic_visibility_verified"]
+            and (
+                not args.measure_semantic_visibility
+                or result["correctness"]["all_messages_semantically_visible_after_send"]
+            )
+        ) else 1
     return 0 if result["correctness"][correctness_key] else 1
 
 
