@@ -43,6 +43,51 @@ def _cross_doc_provenance(confidence: float = 0.91) -> MaintenanceProvenance:
     )
 
 
+@pytest.mark.parametrize(
+    "intent",
+    [
+        MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
+        MaintenanceIntent.ADD_CROSSLINK,
+    ],
+)
+def test_crosslink_edge_serialization_keeps_both_grounding_spans(
+    intent: MaintenanceIntent,
+) -> None:
+    operation = MaintenancePatchOperation(
+        operation_id="add-crosslink",
+        kind=MaintenanceOperationKind.ADD_EDGE,
+        edge_id="ws:demo:edge:derived",
+        from_node_id="ws:demo:node:left",
+        to_node_id="ws:demo:node:right",
+        relation="used_by",
+        provenance=MaintenanceProvenance(
+            source_document_id="doc-left",
+            source_pointers=[
+                {"doc_id": "doc-left", "start_char": 0, "end_char": 5, "excerpt": "alpha"},
+                {"doc_id": "doc-right", "start_char": 6, "end_char": 11, "excerpt": "omega"},
+            ],
+            maintenance_run_id="run-crosslink",
+            confidence=0.9,
+        ),
+    )
+    patch = MaintenancePatch(
+        patch_id="patch-crosslink-spans",
+        intent=intent,
+        scope=_scope(),
+        operations=[operation],
+    )
+
+    edge = patch_apply._edge_from_operation(patch, operation)
+
+    assert [
+        (span.doc_id, span.start_char, span.end_char, span.excerpt)
+        for span in edge.iter_span()
+    ] == [
+        ("doc-left", 0, 5, "alpha"),
+        ("doc-right", 6, 11, "omega"),
+    ]
+
+
 def _scope() -> MaintenanceScope:
     return MaintenanceScope(workspace_id="demo")
 

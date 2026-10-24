@@ -71,6 +71,8 @@ class GraphEngineFactory(Protocol):
         embedding_profile: EmbeddingProfile | None = None,
         embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
         persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+        acl_enabled: bool = False,
+        embedding_cache_path: str | None = None,
     ) -> GraphKnowledgeEngine: ...
 
 
@@ -88,6 +90,7 @@ class CoreGraphEngineFactory(Protocol):
         embedding_profile_mode: str = "enforce",
         namespace: str = "default",
         persistence_mode: str = "single_stage",
+        embedding_cache_path: str | None = None,
     ) -> GraphKnowledgeEngine: ...
 
 
@@ -247,6 +250,8 @@ def build_postgres_namespace_engines(
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     postgres_embedding_layout: Literal["shared", "profile_isolated"] = "shared",
+    acl_enabled: bool = False,
+    embedding_cache_dir: str | Path | None = None,
     embedding_resolver: EmbeddingResolver,
     profile_resolver: ProfileResolver,
     engine_builder: GraphEngineFactory | None = None,
@@ -295,6 +300,14 @@ def build_postgres_namespace_engines(
     builder: GraphEngineFactory = (
         engine_builder if engine_builder is not None else _build_postgres_engine
     )
+    acl_options: dict[str, bool] = {"acl_enabled": True} if acl_enabled else {}
+    cache_root = Path(embedding_cache_dir) if embedding_cache_dir is not None else None
+
+    def cache_options(space: str) -> dict[str, str]:
+        if cache_root is None:
+            return {}
+        return {"embedding_cache_path": str(cache_root / space)}
+
     derived_engine = builder(
         root / "derived_knowledge",
         kg_graph_type="derived_knowledge",
@@ -304,6 +317,8 @@ def build_postgres_namespace_engines(
         schema=physical_schemas["knowledge"],
         embedding_profile=profile_resolver(resolved_embedding_configs["knowledge"]),
         embedding_profile_mode=embedding_profile_mode,
+        **cache_options("derived_knowledge"),
+        **acl_options,
     ) if split_derived_knowledge else None
     return NamespaceEngines(
         conversation=builder(
@@ -316,6 +331,8 @@ def build_postgres_namespace_engines(
             embedding_profile=profile_resolver(resolved_embedding_configs["conversation"]),
             embedding_profile_mode=embedding_profile_mode,
             persistence_mode=conversation_persistence_mode,
+            **cache_options("conversation"),
+            **acl_options,
         ),
         workflow=builder(
             root / "workflow",
@@ -326,6 +343,8 @@ def build_postgres_namespace_engines(
             schema=physical_schemas["workflow"],
             embedding_profile=profile_resolver(resolved_embedding_configs["workflow"]),
             embedding_profile_mode=embedding_profile_mode,
+            **cache_options("workflow"),
+            **acl_options,
         ),
         kg=builder(
             root / "kg",
@@ -336,6 +355,8 @@ def build_postgres_namespace_engines(
             schema=physical_schemas["knowledge"],
             embedding_profile=profile_resolver(resolved_embedding_configs["knowledge"]),
             embedding_profile_mode=embedding_profile_mode,
+            **cache_options("knowledge"),
+            **acl_options,
         ),
         wisdom=builder(
             root / "wisdom",
@@ -346,6 +367,8 @@ def build_postgres_namespace_engines(
             schema=physical_schemas["wisdom"],
             embedding_profile=profile_resolver(resolved_embedding_configs["wisdom"]),
             embedding_profile_mode=embedding_profile_mode,
+            **cache_options("wisdom"),
+            **acl_options,
         ),
         derived_knowledge=derived_engine,
     )
@@ -430,6 +453,8 @@ def _build_postgres_engine(
     embedding_profile: EmbeddingProfile | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    acl_enabled: bool = False,
+    embedding_cache_path: str | None = None,
     graph_engine_factory: CoreGraphEngineFactory = GraphKnowledgeEngine,
 ) -> GraphKnowledgeEngine:
     from kogwistar.engine_core.engine_postgres import (
@@ -457,4 +482,6 @@ def _build_postgres_engine(
         embedding_profile_mode=embedding_profile_mode,
         namespace=kg_graph_type,
         persistence_mode=persistence_mode,
+        acl_enabled=acl_enabled,
+        embedding_cache_path=embedding_cache_path,
     )

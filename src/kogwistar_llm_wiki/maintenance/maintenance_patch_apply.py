@@ -27,6 +27,7 @@ from ..configuration.workspace import WorkspaceNamespaces
 from ..models import NamespaceEngines
 from ..utils import _background_namespace, _temporary_namespace
 from .maintenance_patches import (
+    MaintenanceIntent,
     MaintenanceOperationKind,
     MaintenancePatch,
     MaintenancePatchOperation,
@@ -521,7 +522,99 @@ def _acl_issues_for_patch(
                     message=f"maintenance target {entity.id!r} is outside the current security scope",
                 )
             )
+    if bool(getattr(engine, "acl_enabled", False)):
+        for operation in patch.operations:
+            if operation.kind != MaintenanceOperationKind.ADD_EDGE or patch.intent not in {
+                MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
+                MaintenanceIntent.ADD_CROSSLINK,
+            }:
+                continue
+            if not operation.from_node_id or not operation.to_node_id:
+                continue
+            if not {operation.from_node_id, operation.to_node_id}.issubset(visible_nodes):
+                continue
+            _metadata, policy_issues = _crosslink_acl_metadata(engine, operation)
+            issues.extend(policy_issues)
     return issues
+
+
+def _crosslink_acl_metadata(
+    engine: _MaintenanceEngineLike,
+    operation: MaintenancePatchOperation,
+) -> tuple[dict[str, JsonValue], list[MaintenancePatchValidationIssue]]:
+    """Derive edge ACL only when both endpoint policies are identical.
+
+    The current graph ACL model cannot represent arbitrary intersections of
+    shared principals, groups, and security scopes. Requiring exact policy
+    parity is conservative and avoids silently broadening or hiding a derived
+    relation under the worker's default identity.
+    """
+
+    if not bool(getattr(engine, "acl_enabled", False)):
+        return {}, []
+    acl_graph = getattr(engine, "acl_graph", None)
+    latest_record = getattr(acl_graph, "latest_record", None)
+    if not callable(latest_record):
+        return {}, [
+            MaintenancePatchValidationIssue(
+                operation_id=operation.operation_id,
+                code="acl_policy_unavailable",
+                message="cannot resolve endpoint ACL policies for derived cross-link",
+            )
+        ]
+    endpoint_ids = (operation.from_node_id, operation.to_node_id)
+    records = [
+        latest_record(
+            grain="node",
+            truth_graph=str(getattr(engine, "kg_graph_type", "")),
+            entity_id=str(endpoint_id),
+        )
+        for endpoint_id in endpoint_ids
+        if endpoint_id
+    ]
+    if len(records) != 2 or any(record is None for record in records):
+        return {}, [
+            MaintenancePatchValidationIssue(
+                operation_id=operation.operation_id,
+                code="acl_policy_unavailable",
+                message="both cross-link endpoints must have current ACL policies",
+            )
+        ]
+
+    def signature(record: object) -> tuple[object, ...]:
+        return (
+            getattr(record, "mode", None),
+            getattr(record, "owner_id", None),
+            getattr(record, "security_scope", None),
+            tuple(sorted(getattr(record, "shared_with_principals", ()) or ())),
+            tuple(sorted(getattr(record, "shared_with_groups", ()) or ())),
+        )
+
+    first = records[0]
+    if signature(first) != signature(records[1]):
+        return {}, [
+            MaintenancePatchValidationIssue(
+                operation_id=operation.operation_id,
+                code="acl_policy_incompatible",
+                message=(
+                    "cross-link endpoints have different ACL policies; an edge ACL "
+                    "intersection is not representable by the current graph policy model"
+                ),
+            )
+        ]
+    assert first is not None
+    metadata: dict[str, JsonValue] = {
+        "acl_mode": str(first.mode),
+        "shared_with_agents": list(getattr(first, "shared_with_principals", ()) or ()),
+        "shared_with_groups": list(getattr(first, "shared_with_groups", ()) or ()),
+    }
+    owner_id = getattr(first, "owner_id", None)
+    security_scope = getattr(first, "security_scope", None)
+    if isinstance(owner_id, str) and owner_id:
+        metadata["owner_id"] = owner_id
+    if isinstance(security_scope, str) and security_scope:
+        metadata["security_scope"] = security_scope
+    return metadata, []
 
 
 def _lock_maintenance_identities(
@@ -901,7 +994,16 @@ def _apply_operation(
         edge_id = str(operation.edge_id)
         if _exists(engine, "edge", edge_id, include_tombstones=True):
             return MaintenancePatchOperationApplyResult(operation_id=operation.operation_id, kind=operation.kind, status="skipped", entity_id=edge_id)
-        _write(engine).add_edge(_edge_from_operation(patch, operation))
+        acl_metadata, acl_issues = _crosslink_acl_metadata(engine, operation)
+        if acl_issues:
+            return MaintenancePatchOperationApplyResult(
+                operation_id=operation.operation_id,
+                kind=operation.kind,
+                status="failed",
+                entity_id=edge_id,
+                message=acl_issues[0].code,
+            )
+        _write(engine).add_edge(_edge_from_operation(patch, operation, acl_metadata))
         return MaintenancePatchOperationApplyResult(operation_id=operation.operation_id, kind=operation.kind, status="applied", entity_id=edge_id)
     if operation.kind == MaintenanceOperationKind.TOMBSTONE_NODE:
         target_id = str(operation.tombstone_target_id)
@@ -940,8 +1042,23 @@ def _node_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOpe
     )
 
 
-def _edge_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOperation) -> Edge:
+def _edge_from_operation(
+    patch: MaintenancePatch,
+    operation: MaintenancePatchOperation,
+    acl_metadata: Mapping[str, JsonValue] | None = None,
+) -> Edge:
     metadata = _operation_metadata(patch, operation)
+    if acl_metadata:
+        metadata.update(acl_metadata)
+    spans = (
+        _spans_from_operation(operation)
+        if patch.intent
+        in {
+            MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
+            MaintenanceIntent.ADD_CROSSLINK,
+        }
+        else [_span_from_operation(operation)]
+    )
     return Edge(
         id=operation.edge_id,
         label=str(operation.label or operation.relation or operation.edge_id),
@@ -957,7 +1074,7 @@ def _edge_from_operation(patch: MaintenancePatch, operation: MaintenancePatchOpe
         source_edge_ids=[],
         target_edge_ids=[],
         properties=operation.properties or None,
-        mentions=[Grounding(spans=[_span_from_operation(operation)])],
+        mentions=[Grounding(spans=spans)],
         metadata=cast(JsonObject, metadata),
     )
 
@@ -1016,6 +1133,30 @@ def _span_from_operation(operation: MaintenancePatchOperation) -> Span:
                 provenance.source_pointers[0],
             )
         )
+    return _span_from_pointer(operation, pointer)
+
+
+def _spans_from_operation(operation: MaintenancePatchOperation) -> list[Span]:
+    provenance = operation.provenance
+    pointers = (
+        [
+            dict(pointer)
+            for pointer in provenance.source_pointers
+            if source_pointer_has_character_span(pointer)
+        ]
+        if provenance is not None
+        else []
+    )
+    if not pointers:
+        return [_span_from_operation(operation)]
+    return [_span_from_pointer(operation, pointer) for pointer in pointers]
+
+
+def _span_from_pointer(
+    operation: MaintenancePatchOperation,
+    pointer: dict[str, str | int | float | bool | None],
+) -> Span:
+    provenance = operation.provenance
     doc_id = str(pointer.get("doc_id") or _source_document_id(operation))
     verified_span = False
     if source_pointer_has_character_span(pointer):

@@ -40,7 +40,17 @@ and rediscover it after Docker/WSL network changes. Do not bind to `0.0.0.0`:
 the llama.cpp endpoint has no authentication configured. Context `8192` is
 verified with this exact local binary/model configuration: maintenance prompts
 of 3,167 tokens and 1,024 generated tokens completed without truncation. This
-proves an operational context size, not the model's maximum.
+proves an operational context size for this vision-enabled Q4-KV profile, not
+the model's maximum.
+
+There is a separate, user-confirmed text-only profile that has been run
+successfully multiple times on this D-drive Bonsai2 setup: omit `--mmproj`, set
+the context to 32K, and use Q8 KV cache (`--cache-type-k q8_0
+--cache-type-v q8_0`). Do not conflate it with the 8K vision-enabled Q4 profile
+above, or with the 4K/Q4 ACL end-to-end profile recorded in
+`maintenance_profile_report.md`. The 32K result is prior local operational
+evidence; raw run logs and peak resource/throughput measurements are not
+captured here. The maximum beyond 32K remains unknown.
 
 The launch helper also sets llama.cpp's server-side reasoning effort and token
 budget. Those options affect only this local llama.cpp server. They are not
@@ -54,14 +64,15 @@ The local GGUF declares `qwen35.context_length=262144`; the upstream model card
 describes the same inherited model limit and an architecture with roughly 75%
 linear attention. Its quickstart uses 32K, while the current known-issues guide
 suggests 64K for long reasoning/output exhaustion. Neither is a measurement of
-VRAM fit for this host. The host GPU is an 8 GiB RTX 3080 Laptop GPU. Therefore
-`8192` remains the conservative verified operating setting. The empirical
-maximum for this machine is unknown; do not raise it based on the model's
-advertised limit or generic quickstart. Establishing a maximum requires a
-controlled ladder (8K, 12K/16K, then 24K/32K only if memory headroom allows),
-with cold-start load, long prompt prefill, full output generation, peak VRAM/RSS,
-and repeatability checks at each step. That benchmark was not run after the
-authorized ten-hour monitoring window closed.
+VRAM fit for this host. The host GPU is an 8 GiB RTX 3080 Laptop GPU. Context
+`8192` remains the verified operating setting for the documented vision-enabled
+maintenance launch. The user-confirmed text-only Q8 profile has also operated
+at 32K, but this document does not contain its raw logs or a controlled
+measurement of peak VRAM/RSS and throughput. Do not infer 32K capacity for the
+vision-enabled profile or a maximum beyond 32K. Further capacity/performance
+characterization requires cold-start load, long prompt prefill, full output
+generation, peak VRAM/RSS, and repeated measurements for the relevant settings;
+that is separate from the successful functional profile.
 
 An offline estimate from this exact GGUF header gives a useful ladder, not a
 fit guarantee: 64 blocks with `full_attention_interval=4` imply 16 full-attention
@@ -70,8 +81,10 @@ values) cost about 18 KiB per context token. That is approximately 144 MiB at
 8K, 288 MiB at 16K, 576 MiB at 32K, 1.125 GiB at 64K, and 4.5 GiB at 262K for
 attention KV alone. This excludes recurrent state, CUDA/runtime workspaces,
 projector residency, allocator overhead, and other GPU users. It supports
-trying 16K and then 32K only in a newly authorized controlled run with observed
-headroom; it does not establish that either fits or that 32K is the maximum.
+trying 16K and then 32K only in a controlled run with observed headroom; the
+estimate alone does not establish fit or maximum. The user-reported successful
+32K/Q8 text-only profile is separate empirical evidence, not derived from this
+Q4 estimate.
 
 The Bonsai `--mmproj` file is its image-input projector. It is not an LLM-Wiki
 embedding encoder. The configured Ovis/Qwen embedding model has its own vision

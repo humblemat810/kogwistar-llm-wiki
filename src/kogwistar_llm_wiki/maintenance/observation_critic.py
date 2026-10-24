@@ -12,7 +12,10 @@ from kg_doc_parser.workflow_ingest.providers import (
     WorkflowProviderSettings,
     build_chat_model,
 )
-from kogwistar.llm_tasks.providers import StructuredOutputRunnable, SupportsStructuredOutput
+from kogwistar.llm_tasks.providers import (
+    StructuredOutputRunnable,
+    SupportsStructuredOutput,
+)
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .maintenance_observation import MaintenanceObservationFrame, ObservationFinding
@@ -55,9 +58,7 @@ def is_context_window_error(error: BaseException) -> bool:
             )
         ).lower()
         exception_name = type(current).__name__.lower()
-        if exception_name in {"lengthfinishreasonerror", "maxoutputtokenserror"} or any(
-            marker in details for marker in ("finish_reason=length", "finish reason: length")
-        ) or "contextoverflow" in exception_name or any(
+        if "contextoverflow" in exception_name or any(
             marker in details for marker in _CONTEXT_LIMIT_MARKERS
         ):
             return True
@@ -74,6 +75,7 @@ def safe_observation_critic_error_code(error: BaseException) -> str:
     seen: set[int] = set()
     value_errors: list[ValueError] = []
     parse_failure = False
+    output_limit_reached = False
     while pending:
         current = pending.pop()
         if id(current) in seen:
@@ -81,7 +83,10 @@ def safe_observation_critic_error_code(error: BaseException) -> str:
         seen.add(id(current))
         if isinstance(current, ValidationError):
             return "structured_schema_validation"
-        if type(current).__name__ in {"OutputParserException", "JSONDecodeError"}:
+        exception_name = type(current).__name__
+        if exception_name in {"LengthFinishReasonError", "MaxOutputTokensError"}:
+            output_limit_reached = True
+        if exception_name in {"OutputParserException", "JSONDecodeError"}:
             parse_failure = True
         if isinstance(current, ValueError):
             value_errors.append(current)
@@ -90,6 +95,8 @@ def safe_observation_critic_error_code(error: BaseException) -> str:
                 pending.append(chained)
     if parse_failure:
         return "structured_output_parse_failure"
+    if output_limit_reached:
+        return "output_token_limit"
     known_invariants = {
         "observation critic finding messages must not exceed 200 characters": (
             "finding_message_too_long"

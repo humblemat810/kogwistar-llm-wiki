@@ -134,7 +134,38 @@ def resolve_embedding_function(
 
     if embedding_function is not None:
         config = embedding_config or EmbeddingProviderConfig(
-            provider="fake", model=_function_name(embedding_function), dimension=2
+            provider=_provider(embedding_provider or "fake"),
+            model=_required_model(embedding_model or _function_name(embedding_function)),
+            dimension=_integer(
+                embedding_dimension
+                if embedding_dimension is not None
+                else embedding_env("DIMENSION"),
+                field="dimension",
+                default=2,
+            ),
+            base_url=embedding_base_url or embedding_env("BASE_URL"),
+            api_key_env=embedding_api_key_env or embedding_env("API_KEY_ENV"),
+            max_sequence_length=(
+                embedding_max_sequence_length
+                if embedding_max_sequence_length is not None
+                else (
+                    _integer(value, field="max_sequence_length")
+                    if (value := embedding_env("MAX_SEQUENCE_LENGTH")) is not None
+                    else None
+                )
+            ),
+            crop_token_budget=(
+                embedding_crop_token_budget
+                if embedding_crop_token_budget is not None
+                else (
+                    _integer(value, field="crop_token_budget")
+                    if (value := embedding_env("CROP_TOKEN_BUDGET")) is not None
+                    else None
+                )
+            ),
+            tokenizer_fingerprint=(
+                embedding_tokenizer_fingerprint or embedding_env("TOKENIZER_FINGERPRINT")
+            ),
         )
         return embedding_function, config
     if embedding_config is None and not configured:

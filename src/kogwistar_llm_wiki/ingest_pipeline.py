@@ -176,6 +176,8 @@ def _build_postgres_engine(
     embedding_profile: EmbeddingProfile | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     persistence_mode: Literal["single_stage", "two_stage"] = "single_stage",
+    acl_enabled: bool = False,
+    embedding_cache_path: str | None = None,
 ) -> GraphKnowledgeEngine:
     """Preserve the historical private seam used by backend tests and wrappers."""
     return _build_postgres_engine_impl(
@@ -188,6 +190,8 @@ def _build_postgres_engine(
         embedding_profile=embedding_profile,
         embedding_profile_mode=embedding_profile_mode,
         persistence_mode=persistence_mode,
+        acl_enabled=acl_enabled,
+        embedding_cache_path=embedding_cache_path,
         graph_engine_factory=GraphKnowledgeEngine,
     )
 
@@ -285,6 +289,8 @@ def build_postgres_namespace_engines(
     embedding_configs: Mapping[str, EmbeddingProviderConfig] | None = None,
     embedding_profile_mode: Literal["enforce", "inspect", "adopt"] = "enforce",
     postgres_embedding_layout: Literal["shared", "profile_isolated"] = "shared",
+    acl_enabled: bool = False,
+    embedding_cache_dir: str | Path | None = None,
 ) -> NamespaceEngines:
     """Build a PostgreSQL namespace bundle through the shared builder module."""
     return _build_postgres_namespace_engines(
@@ -305,6 +311,8 @@ def build_postgres_namespace_engines(
         embedding_configs=embedding_configs,
         embedding_profile_mode=embedding_profile_mode,
         postgres_embedding_layout=postgres_embedding_layout,
+        acl_enabled=acl_enabled,
+        embedding_cache_dir=embedding_cache_dir,
         embedding_resolver=_resolve_embedding_functions,
         profile_resolver=_embedding_profile,
         engine_builder=_build_postgres_engine,

@@ -36,6 +36,25 @@ def test_embedding_profile_exposes_token_context_metadata() -> None:
     assert profile.fingerprint
 
 
+def test_injected_embedding_function_keeps_declared_profile_dimension() -> None:
+    class InjectedEmbedding:
+        def name(self) -> str:
+            return "local-e5-small"
+
+        def __call__(self, input: list[str]) -> list[list[float]]:
+            return [[0.0] * 384 for _ in input]
+
+    embedding, config = ingest_pipeline._resolve_embedding_function(
+        embedding_function=InjectedEmbedding(),
+        embedding_model="intfloat/multilingual-e5-small",
+        embedding_dimension=384,
+    )
+
+    assert config.model == "intfloat/multilingual-e5-small"
+    assert config.dimension == 384
+    assert len(embedding(["sample"])[0]) == config.dimension
+
+
 def test_embedding_provider_knobs_use_shared_provider_factory(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[EmbeddingProviderConfig] = []
 

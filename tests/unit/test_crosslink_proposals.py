@@ -5,7 +5,8 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from kogwistar.engine_core import AtomicMutationCapability
+from kogwistar.engine_core import AtomicMutationCapability, GraphKnowledgeEngine
+from kogwistar.engine_core.in_memory_backend import build_in_memory_backend
 from kogwistar.engine_core.models import Document, Grounding, Node, Span
 from kogwistar.server.auth_middleware import reset_claims_ctx, set_claims_ctx
 from pydantic import ValidationError
@@ -17,6 +18,7 @@ from kogwistar_llm_wiki.maintenance.crosslink_context import (
 )
 from kogwistar_llm_wiki.maintenance.crosslink_proposals import (
     CrosslinkEvidence,
+    CrosslinkProposalOperation,
     CrosslinkProposalResponse,
     CrosslinkReviewDecision,
 )
@@ -110,6 +112,28 @@ def test_crosslink_context_budget_defaults_and_compatibility_aliases() -> None:
         CrosslinkContextBudget.from_payload({"max_nodes": -1})
 
 
+def test_crosslink_context_allows_empty_neighbor_graph() -> None:
+    budget = CrosslinkContextBudget(max_nodes=4, max_edges=4, max_characters=4000)
+
+    packed = pack_crosslink_context([], [], budget=budget)
+
+    assert packed == {
+        "nodes": [],
+        "edges": [],
+        "omitted_nodes": 0,
+        "omitted_edges": 0,
+        "estimated_tokens": 0,
+        "characters": 0,
+        "budget": {
+            "max_nodes": 4,
+            "max_edges": 4,
+            "max_tokens": 0,
+            "max_characters": 4000,
+        },
+        "dropped_by_builder": {},
+    }
+
+
 def test_proposal_response_is_bounded_and_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         CrosslinkProposalResponse.model_validate({"groups": [], "node_ids": ["invented"]})
@@ -188,6 +212,47 @@ def test_group_atomicity_is_carried_into_patch_contract() -> None:
         ],
     )
     assert patch.requires_atomic_replacement is True
+
+
+def test_generated_crosslink_edge_ids_are_workspace_scoped() -> None:
+    worker = object.__new__(MaintenanceExecutionWorkerMixin)
+    ctx = MaintenanceJobExecutionContext(
+        workspace_id="profile-workspace",
+        job=None,
+        job_id="profile-job",
+        payload={},
+        request_node=None,
+        request_node_id="profile-request",
+        lane_message_id="",
+        maintenance_kind="document_propose_crosslinks",
+    )
+    evidence = [
+        CrosslinkEvidence(
+            evidence_id=f"evidence-{index}",
+            node_id=f"ws:profile-workspace:node:{index}",
+            source_document_id=f"source-{index}",
+            source_revision_id=f"revision-{index}",
+            revision_document_id=f"revision-document-{index}",
+            source_digest=str(index) * 64,
+            start_char=0,
+            end_char=5,
+            excerpt=f"text-{index}",
+        )
+        for index in range(2)
+    ]
+    operation = CrosslinkProposalOperation(
+        left_evidence_id=evidence[0].evidence_id,
+        right_evidence_id=evidence[1].evidence_id,
+        relation="related_to",
+        rationale="Both excerpts support this relationship.",
+    )
+
+    patch_operation = worker._crosslink_patch_operation(
+        ctx, "group-1", operation, evidence[0], evidence[1]
+    )
+
+    assert patch_operation.edge_id is not None
+    assert patch_operation.edge_id.startswith("ws:profile-workspace:edge:")
 
 
 def test_required_atomic_group_is_rejected_on_nontransactional_backend() -> None:
@@ -995,6 +1060,130 @@ def test_fake_provider_human_review_pins_every_source_and_queues_fenced_revalida
             ),
             altered_patch,
         )
+
+
+def test_applied_crosslink_persists_both_spans_and_matching_acl_records(
+    tmp_path, request
+) -> None:
+    engine_dir = tmp_path / "crosslink-acl-engine"
+    engine_dir.mkdir()
+    engine = GraphKnowledgeEngine(
+        persist_directory=str(engine_dir),
+        kg_graph_type="knowledge",
+        embedding_function=lambda values: [[1.0, 0.0] for _ in values],
+        backend_factory=build_in_memory_backend,
+        namespace="knowledge",
+        acl_enabled=True,
+    )
+    request.addfinalizer(engine.close)
+    endpoint_ids = ("ws:demo:node:acl-left", "ws:demo:node:acl-right")
+    source_values = (
+        ("doc-left", "alpha source"),
+        ("doc-right", "omega source"),
+    )
+    for node_id, (doc_id, excerpt) in zip(endpoint_ids, source_values, strict=True):
+        engine.write.add_node(
+            Node(
+                id=node_id,
+                label=node_id.rsplit(":", 1)[-1],
+                type="entity",
+                summary=excerpt,
+                doc_id=doc_id,
+                mentions=[
+                    Grounding(
+                        spans=[
+                            Span(
+                                doc_id=doc_id,
+                                start_char=0,
+                                end_char=len(excerpt),
+                                excerpt=excerpt,
+                                document_page_url="",
+                                collection_page_url="",
+                                insertion_method="crosslink-acl-test",
+                            )
+                        ]
+                    )
+                ],
+                metadata={"workspace_id": "demo"},
+            )
+        )
+    edge_id = "ws:demo:edge:acl-crosslink"
+    patch = MaintenancePatch(
+        patch_id="patch-acl-crosslink",
+        intent=MaintenanceIntent.ADD_CROSSLINK,
+        scope=MaintenanceScope(workspace_id="demo"),
+        operations=[
+            MaintenancePatchOperation(
+                operation_id="apply-acl-crosslink",
+                kind=MaintenanceOperationKind.ADD_EDGE,
+                edge_id=edge_id,
+                from_node_id=endpoint_ids[0],
+                to_node_id=endpoint_ids[1],
+                relation="supports",
+                properties={"crosslink_status": "accepted"},
+                provenance=MaintenanceProvenance(
+                    source_document_id="doc-left",
+                    source_pointers=[
+                        {
+                            "doc_id": "doc-left",
+                            "start_char": 0,
+                            "end_char": len(source_values[0][1]),
+                            "excerpt": source_values[0][1],
+                        },
+                        {
+                            "doc_id": "doc-right",
+                            "start_char": 0,
+                            "end_char": len(source_values[1][1]),
+                            "excerpt": source_values[1][1],
+                        },
+                    ],
+                    maintenance_run_id="run-acl-crosslink",
+                    confidence=0.9,
+                ),
+            )
+        ],
+    )
+
+    result = apply_maintenance_patch(engine, patch, namespace_prefix="ws:demo:")
+
+    assert result.status.value == "applied"
+    persisted = engine.read.get_edges(ids=[edge_id])
+    assert len(persisted) == 1
+    edge = persisted[0]
+    assert [(span.doc_id, span.excerpt) for span in edge.iter_span()] == [
+        ("doc-left", "alpha source"),
+        ("doc-right", "omega source"),
+    ]
+
+    def policy(grain: str, entity_id: str, target_item_id: str | None = None):
+        return engine.acl_graph.latest_record(
+            grain=grain,
+            truth_graph=engine.kg_graph_type,
+            entity_id=entity_id,
+            target_item_id=target_item_id,
+        )
+
+    def signature(record):
+        assert record is not None
+        return (
+            record.mode,
+            record.owner_id,
+            record.security_scope,
+            record.shared_with_principals,
+            record.shared_with_groups,
+        )
+
+    expected_acl = signature(policy("node", endpoint_ids[0]))
+    assert signature(policy("node", endpoint_ids[1])) == expected_acl
+    assert signature(policy("edge", edge_id)) == expected_acl
+    assert signature(policy("grounding", edge_id, f"{edge_id}::mention::0")) == expected_acl
+    assert all(
+        signature(
+            policy("span", edge_id, f"{edge_id}::mention::0::span::{index}")
+        )
+        == expected_acl
+        for index in range(2)
+    )
 
 
 def test_real_provider_path_persists_call_and_token_usage_before_retry(

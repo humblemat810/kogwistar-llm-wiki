@@ -12,9 +12,10 @@ from typing import cast
 
 from kogwistar.engine_core.jobs import JobQueueItem
 from kogwistar.id_provider import stable_id
-from kogwistar.runtime import RunResult
 from kogwistar.runtime.budget import StateBackedBudgetLedger
 from kogwistar.runtime.budget_adapters import summarize_budget_events
+
+from kogwistar.runtime import RunResult
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..usage.events import persist_usage_events
@@ -118,13 +119,22 @@ class MaintenanceRuntimeWorkerMixin(MaintenanceWorkerLike):
         traces. Lease ownership is established by the queue renewal result,
         not by application-level progress emitted from another thread.
         """
+        operation_lock = getattr(self, "_active_lease_operation_lock", None)
         while not stop.wait(self.lease_renew_interval_seconds):
             idle_seconds = time.monotonic() - self._last_progress_monotonic
             try:
-                renewed = self.engines.conversation.jobs.renew_lease(
-                    ctx.job, lease_seconds=self.lease_seconds
-                )
-            except Exception as exc:
+                if operation_lock is None:
+                    renewed = self.engines.conversation.jobs.renew_lease(
+                        ctx.job, lease_seconds=self.lease_seconds
+                    )
+                else:
+                    with operation_lock:
+                        if stop.is_set():
+                            return
+                        renewed = self.engines.conversation.jobs.renew_lease(
+                            ctx.job, lease_seconds=self.lease_seconds
+                        )
+            except Exception as exc:  # noqa: BLE001 - any failed renewal must fence the claim
                 self._emit_trace(
                     "maintenance_lease_renewal_failed",
                     job_id=ctx.job_id,
@@ -227,10 +237,23 @@ class MaintenanceRuntimeWorkerMixin(MaintenanceWorkerLike):
 
     def _acknowledge_job(self, ctx: MaintenanceJobExecutionContext) -> bool:
         """Acknowledge only the claim that produced this maintenance result."""
-        acknowledged = self.engines.conversation.jobs.mark_done(
-            ctx.job_id,
-            claim_token=ctx.job.claim_token,
-        )
+        lease_stop = getattr(self, "_active_lease_stop", None)
+        lease_operation_lock = getattr(self, "_active_lease_operation_lock", None)
+        if lease_stop is not None:
+            lease_stop.set()
+        if lease_operation_lock is None:
+            acknowledged = self.engines.conversation.jobs.mark_done(
+                ctx.job_id,
+                claim_token=ctx.job.claim_token,
+            )
+        else:
+            # Wait for an in-flight renewal, and prevent a sleeping renewal
+            # thread from racing the terminal queue transition.
+            with lease_operation_lock:
+                acknowledged = self.engines.conversation.jobs.mark_done(
+                    ctx.job_id,
+                    claim_token=ctx.job.claim_token,
+                )
         self._emit_trace(
             "maintenance_job_acknowledged" if acknowledged else "maintenance_stale_claim_rejected",
             workspace_id=ctx.workspace_id,

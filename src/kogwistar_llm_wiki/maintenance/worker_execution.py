@@ -24,6 +24,7 @@ from kogwistar.runtime.budget import (
 from kogwistar.runtime.models import RunSuccess
 from kogwistar.server.auth_middleware import can_access_security_scope
 from kogwistar.utils import source_pointer_has_character_span, validate_source_pointer
+from pydantic import ValidationError
 
 from ..configuration.identity import runtime_authority_context
 from ..configuration.workspace import WorkspaceNamespaces
@@ -885,6 +886,19 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             invalidation = None
             if result.status.value == "applied":
                 invalidation = self._plan_and_enqueue_dependency_invalidation(ctx, patch)
+            self._emit_trace(
+                "maintenance_graph_patch_apply_completed",
+                workspace_id=ctx.workspace_id,
+                job_id=ctx.job_id,
+                patch_id=result.patch_id,
+                patch_status=result.status.value,
+                applied_count=result.applied_count,
+                skipped_count=result.skipped_count,
+                failed_count=result.failed_count,
+                validation_issue_codes=[
+                    issue.code for issue in result.validation.issues[:16]
+                ],
+            )
             if patch.intent in {
                 MaintenanceIntent.DERIVE_CROSSLINK_CANDIDATE,
                 MaintenanceIntent.ADD_CROSSLINK,
@@ -1154,12 +1168,23 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
             if self._claim_lost.is_set():
                 self._emit_stale_claim_discarded(ctx, reason="claim_lost_during_crosslink")
                 return
+            validation_errors = None
+            if isinstance(exc, ValidationError):
+                validation_errors = [
+                    {
+                        "location": ".".join(str(part) for part in item["loc"]),
+                        "type": str(item["type"]),
+                        "message": str(item["msg"])[:240],
+                    }
+                    for item in exc.errors(include_input=False)[:12]
+                ]
             self._emit_trace(
                 "maintenance_crosslink_patch_rejected",
                 workspace_id=ctx.workspace_id,
                 job_id=ctx.job_id,
                 maintenance_kind=ctx.maintenance_kind,
                 error_type=type(exc).__name__,
+                validation_errors=validation_errors,
                 error=str(exc),
             )
             self._emit_lane_reply(
@@ -2099,12 +2124,15 @@ class MaintenanceExecutionWorkerMixin(MaintenanceWorkerLike):
         left: CrosslinkEvidence, right: CrosslinkEvidence,
     ) -> MaintenancePatchOperation:
         relation = str(operation.relation)
-        edge_id = str(stable_id(
-            "kogwistar_llm_wiki.derived_crosslink", ctx.workspace_id,
-            left.node_id, right.node_id, relation,
-            left.source_document_id, right.source_document_id,
-            str(getattr(operation, "supersedes_edge_id", None) or ""),
-        ))
+        edge_id = (
+            f"ws:{ctx.workspace_id}:edge:"
+            + str(stable_id(
+                "kogwistar_llm_wiki.derived_crosslink", ctx.workspace_id,
+                left.node_id, right.node_id, relation,
+                left.source_document_id, right.source_document_id,
+                str(getattr(operation, "supersedes_edge_id", None) or ""),
+            ))
+        )
         pointers = [
             {
                 "doc_id": item.revision_document_id,

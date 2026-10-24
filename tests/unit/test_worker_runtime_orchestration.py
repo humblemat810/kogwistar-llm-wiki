@@ -10,9 +10,9 @@ import pytest
 from kogwistar.engine_core import in_memory_meta
 from kogwistar.engine_core.in_memory_meta import InMemoryMetaStore
 from kogwistar.engine_core.jobs import DurableQueueUnavailableError, JobQueueSubsystem
-from kogwistar.runtime import BudgetAttribution, BudgetEvent
 
 import kogwistar_llm_wiki.worker as worker_module
+from kogwistar.runtime import BudgetAttribution, BudgetEvent
 from kogwistar_llm_wiki.configuration.workspace import WorkspaceNamespaces
 from kogwistar_llm_wiki.ingest_pipeline import IngestPipeline, IngestPipelineRequest
 from kogwistar_llm_wiki.longrun_trace_sink import LongRunJsonlTraceSink
@@ -193,6 +193,80 @@ def test_lease_renewal_survives_a_long_provider_call_without_progress() -> None:
 
     assert renewals >= 3
     assert not worker._claim_lost.is_set()
+
+
+def test_successful_ack_stops_and_fences_an_inflight_lease_renewal() -> None:
+    renewal_started = threading.Event()
+    finish_renewal = threading.Event()
+    acknowledged = threading.Event()
+    events: list[dict[str, object]] = []
+
+    class Jobs:
+        def renew_lease(self, *_args, **_kwargs):
+            renewal_started.set()
+            assert finish_renewal.wait(2)
+            return True
+
+        def mark_done(self, _job_id, *, claim_token=None):
+            assert finish_renewal.is_set()
+            assert claim_token == "claim-1"
+            acknowledged.set()
+            return True
+
+    worker = object.__new__(MaintenanceWorker)
+    worker.worker_id = "maintenance-ack-renewal-race"
+    worker.engines = SimpleNamespace(conversation=SimpleNamespace(jobs=Jobs()))
+    worker.lease_seconds = 150
+    worker.lease_renew_interval_seconds = 0.001
+    worker._last_progress_monotonic = time.monotonic()
+    worker._claim_lost = threading.Event()
+    worker.trace_sink = None
+    worker._emit_trace = lambda event, **fields: events.append(
+        {"event": event, **fields}
+    )
+    worker._active_lease_stop = threading.Event()
+    worker._active_lease_operation_lock = threading.Lock()
+    ctx = SimpleNamespace(
+        workspace_id="workspace-ack-race",
+        source_document_id="source-ack-race",
+        request_node_id="request-ack-race",
+        job_id="job-ack-race",
+        payload={},
+        maintenance_kind="document_propose_crosslinks",
+        job=SimpleNamespace(claim_token="claim-1"),
+    )
+
+    renewal_thread = threading.Thread(
+        target=worker._renew_claim_while_progressing,
+        args=(ctx, worker._active_lease_stop),
+        name="maintenance-ack-race-renewal",
+    )
+    ack_result: list[bool] = []
+    ack_thread = threading.Thread(
+        target=lambda: ack_result.append(worker._acknowledge_job(ctx)),
+        name="maintenance-ack-race-ack",
+    )
+    renewal_thread.start()
+    try:
+        assert renewal_started.wait(2)
+        ack_thread.start()
+        assert worker._active_lease_stop.wait(2)
+    finally:
+        finish_renewal.set()
+        worker._active_lease_stop.set()
+        if ack_thread.ident is not None:
+            ack_thread.join(timeout=2)
+        renewal_thread.join(timeout=2)
+
+    assert not ack_thread.is_alive()
+    assert not renewal_thread.is_alive()
+    assert ack_result == [True]
+    assert acknowledged.is_set()
+    assert not worker._claim_lost.is_set()
+    assert [event["event"] for event in events].count("maintenance_job_acknowledged") == 1
+    assert "maintenance_stale_claim_rejected" not in {
+        event["event"] for event in events
+    }
 
 
 def test_exhausted_maintenance_budget_is_terminal_not_retried() -> None:
@@ -398,6 +472,7 @@ def test_graph_patch_worker_forwards_expected_revisions_to_the_apply_boundary(mo
             skipped_count=0,
             failed_count=0,
             artifact_id=None,
+            validation=SimpleNamespace(issues=[]),
         )
 
     monkeypatch.setattr(worker_module, "apply_maintenance_patch_for_scope", capture_apply)

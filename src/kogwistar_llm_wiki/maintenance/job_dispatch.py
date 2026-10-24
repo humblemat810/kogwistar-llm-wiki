@@ -104,7 +104,10 @@ class MaintenanceJobDispatchMixin(MaintenanceWorkerLike):
             maintenance_kind=maintenance_kind,
         )
         lease_stop = threading.Event()
+        lease_operation_lock = threading.Lock()
         self._claim_lost.clear()
+        self._active_lease_stop = lease_stop
+        self._active_lease_operation_lock = lease_operation_lock
         lease_thread = threading.Thread(
             target=self._renew_claim_while_progressing,
             args=(ctx, lease_stop),
@@ -117,7 +120,11 @@ class MaintenanceJobDispatchMixin(MaintenanceWorkerLike):
                 strategy.handle(self, ctx)
         finally:
             lease_stop.set()
+            with lease_operation_lock:
+                pass
             lease_thread.join(timeout=2)
+            self._active_lease_stop = None
+            self._active_lease_operation_lock = None
             self._emit_trace(
                 "maintenance_job_dispatch_complete",
                 workspace_id=workspace_id,
