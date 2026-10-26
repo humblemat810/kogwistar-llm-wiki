@@ -141,6 +141,30 @@ resource-matched Kogwistar vertical slice over disk-backed SQLite and
 PostgreSQL, with the same contract and operation trace, followed by separate
 PyO3 and worker-boundary measurements if those seams are candidates.
 
+## Repeat run (2026-10-26)
+
+The checked-in harness was rerun on the current Windows checkout after the
+original measurements. It rebuilt incrementally, completed all parity and
+atomic rollback checks, and passed the Rust-to-Python callback correlation
+check. This run is a repeat on the same host, not an independent machine or a
+production benchmark.
+
+| Transfers per transaction | Python native median (ms) | Rust native median (ms) | Python to Rust JSONL median (ms) | Mixed vs Python |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 93.60 | 72.48 | 366.94 | 3.92x slower |
+| 32 | 48.90 | 38.01 | 51.66 | 1.06x slower |
+| 256 | 48.13 | 31.42 | 39.28 | 0.82x (faster) |
+
+The mixed path's call count falls from 2,000 to 63 to 8 across those batch
+sizes. It remains clearly unsuitable for a per-operation process seam, while
+coarse transaction-sized calls kept it near the Python baseline in this toy.
+The 256-transfer result is encouraging but is not sufficient to claim a
+general Rust rewrite win: commit boundaries differ by batch size, the database
+is in-memory, and this comparison does not exercise Kogwistar or a
+resource-matched deployment. Callback round-trip means in the three sessions
+were 9.63 ms, 12.99 ms, and 9.64 ms, respectively; these are small-sample
+diagnostics, not a stable latency distribution.
+
 ## Reproduction
 
 From the repository root:
