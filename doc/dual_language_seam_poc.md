@@ -177,3 +177,33 @@ The harness builds the standalone Rust owner with Cargo offline, runs the
 parity and rollback checks, performs warm-up and measured samples, then prints
 the raw result JSON. The Rust build output is ignored under the experiment's
 `target/` directory.
+
+## Contract-parity correction and repeat run (2026-10-28)
+
+Reviewing the harness found that the Rust owner rejected non-positive amounts
+and same-account transfers, but the Python owner did not. The Python batch
+operation now enforces the same version-1 preconditions. Before timing, both
+owners are checked against the same invalid cases: a valid operation followed
+by an unknown account, zero amount, negative amount, same source and target,
+and insufficient funds. Each rejection must leave the snapshot unchanged.
+
+The harness passed again on Windows with CPython 3.13.3, NumPy 2.3.5, and Cargo
+1.91.1. The warm-up is excluded; each timing is the median of five runs. Rust
+build took 1.792 seconds and is excluded. First worker startup was 264.7 ms;
+later starts were 19.5–21.0 ms.
+
+| Transfers per transaction | Python native median (ms) | Rust native median (ms) | Python to Rust JSONL median (ms) | Mixed vs Python |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 53.57 | 42.72 | 334.96 | 6.25x slower |
+| 32 | 49.29 | 30.83 | 52.12 | 1.06x slower |
+| 256 | 45.68 | 30.51 | 41.15 | 0.90x (faster) |
+
+The reverse Rust-to-Python NumPy round-trip means for the three worker sessions
+were 12.97 ms, 13.29 ms, and 12.59 ms. Correlation validation passed. These
+are diagnostics from one repeat on the same machine, not a latency distribution
+or an independent-host result. The harness reported `parity: PASS` and
+`atomic_rollback_parity: PASS` after exercising all five invalid cases.
+
+This correction is important: valid-trace output parity alone was not enough
+to establish operation-contract parity. It still does not establish Kogwistar
+backend parity, production worker behavior, or a whole-stack Rust rewrite win.

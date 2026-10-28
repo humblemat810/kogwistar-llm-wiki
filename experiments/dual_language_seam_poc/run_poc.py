@@ -5,11 +5,9 @@ import os
 import statistics
 import struct
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parent
 SEED = 0x4B4F475749535441
@@ -55,6 +53,8 @@ def init_python_db() -> Any:
 def apply_python_batch(connection: Any, transfers: list[dict[str, int]]) -> None:
     with connection:
         for item in transfers:
+            if item["amount"] <= 0 or item["from"] == item["to"]:
+                raise RuntimeError("transfer must be positive and accounts must differ")
             cursor = connection.execute(
                 "UPDATE accounts SET balance = balance - ? WHERE id = ? AND balance >= ?",
                 (item["amount"], item["from"], item["amount"]),
@@ -181,7 +181,7 @@ def main() -> int:
     reverse_seam_results: list[float] = []
 
     for batch_size in BATCH_SIZES:
-        def run_python() -> dict[str, Any]:
+        def run_python(batch_size: int = batch_size) -> dict[str, Any]:
             connection = init_python_db()
             for batch in batches_for(batch_size):
                 apply_python_batch(connection, batch)
@@ -194,42 +194,53 @@ def main() -> int:
         worker_start_ms = (time.perf_counter() - worker_start) * 1000
         try:
             worker.call("reset", account_count=ACCOUNT_COUNT)
-            before = worker.call("snapshot")
-            try:
-                worker.call("apply", transfers=[
-                    {"from": 0, "to": 1, "amount": 1},
-                    {"from": ACCOUNT_COUNT + 10, "to": 2, "amount": 1},
-                ])
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError("Rust accepted a batch containing an unknown account")
-            if worker.call("snapshot") != before:
-                raise AssertionError("Rust did not roll back a failed transfer batch")
-
             python_db = init_python_db()
-            python_before = python_snapshot(python_db)
-            try:
-                apply_python_batch(python_db, [
+            invalid_batches = [
+                [
                     {"from": 0, "to": 1, "amount": 1},
                     {"from": ACCOUNT_COUNT + 10, "to": 2, "amount": 1},
-                ])
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError("Python accepted a batch containing an unknown account")
-            if python_snapshot(python_db) != python_before:
-                raise AssertionError("Python did not roll back a failed transfer batch")
+                ],
+                [{"from": 0, "to": 1, "amount": 0}],
+                [{"from": 0, "to": 1, "amount": -1}],
+                [{"from": 0, "to": 0, "amount": 1}],
+                [{"from": 0, "to": 1, "amount": 1_000_001}],
+            ]
+            for invalid_batch in invalid_batches:
+                before = worker.call("snapshot")
+                try:
+                    worker.call("apply", transfers=invalid_batch)
+                except RuntimeError:
+                    pass
+                else:
+                    raise AssertionError(f"Rust accepted invalid transfer batch: {invalid_batch}")
+                if worker.call("snapshot") != before:
+                    raise AssertionError("Rust did not roll back a failed transfer batch")
+
+                python_before = python_snapshot(python_db)
+                try:
+                    apply_python_batch(python_db, invalid_batch)
+                except RuntimeError:
+                    pass
+                else:
+                    raise AssertionError(
+                        f"Python accepted invalid transfer batch: {invalid_batch}"
+                    )
+                if python_snapshot(python_db) != python_before:
+                    raise AssertionError("Python did not roll back a failed transfer batch")
             python_db.close()
 
             worker.call("run_seeded", count=OP_COUNT, account_count=ACCOUNT_COUNT, batch_size=batch_size, seed=SEED)
             rust_native_snapshot = worker.call("snapshot")
 
-            def run_rust_native() -> dict[str, Any]:
+            def run_rust_native(
+                worker: RustWorker = worker, batch_size: int = batch_size
+            ) -> dict[str, Any]:
                 worker.call("run_seeded", count=OP_COUNT, account_count=ACCOUNT_COUNT, batch_size=batch_size, seed=SEED)
                 return worker.call("snapshot")
 
-            def run_mixed() -> dict[str, Any]:
+            def run_mixed(
+                worker: RustWorker = worker, batch_size: int = batch_size
+            ) -> dict[str, Any]:
                 worker.call("reset", account_count=ACCOUNT_COUNT)
                 for batch in batches_for(batch_size):
                     worker.call("apply", transfers=batch)
