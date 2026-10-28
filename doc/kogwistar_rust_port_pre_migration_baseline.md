@@ -1,8 +1,16 @@
 # Kogwistar Rust Port: Pre-Migration Baseline and Evidence Plan
 
-**Status:** Required before implementing or enabling a Rust-backed core  
+**Status:** Historical pre-migration evidence plan; not a current release gate
 **Prepared:** 2026-07-14  
 **Companion policy:** [Consumer Compatibility Reminder](kogwistar_rust_port_compatibility_reminder.md)
+
+> **Current strategy:** Use
+> [ADR-022: Dual-Language Capability Paths](../kogwistar/kogwistar/docs/ADR-022-dual-language-capability-paths.md)
+> and its checklist for current implementation decisions and promotion gates.
+> This dated document records a pre-migration snapshot; its branch names,
+> revision IDs, sequencing assumptions, and Python-reference framing are not
+> current state. Reuse its fixture and data-safety ideas where relevant, but
+> do not treat its old milestones as prerequisites or completion criteria.
 
 ```mermaid
 flowchart LR
