@@ -1176,13 +1176,13 @@ def test_applied_crosslink_persists_both_spans_and_matching_acl_records(
     expected_acl = signature(policy("node", endpoint_ids[0]))
     assert signature(policy("node", endpoint_ids[1])) == expected_acl
     assert signature(policy("edge", edge_id)) == expected_acl
-    assert signature(policy("grounding", edge_id, f"{edge_id}::mention::0")) == expected_acl
+    grounding_ids, span_ids = engine.acl.usage_ids_for_item(edge)
+    assert len(grounding_ids) == 1
+    assert len(span_ids) == 2
+    assert signature(policy("grounding", edge_id, grounding_ids[0])) == expected_acl
     assert all(
-        signature(
-            policy("span", edge_id, f"{edge_id}::mention::0::span::{index}")
-        )
-        == expected_acl
-        for index in range(2)
+        signature(policy("span", edge_id, span_id)) == expected_acl
+        for span_id in span_ids
     )
 
 

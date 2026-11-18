@@ -579,7 +579,7 @@ def test_expired_maintenance_claim_cannot_be_completed_by_stale_worker() -> None
             max_retries=5,
         )
 
-        real_queue = JobQueueSubsystem(SimpleNamespace(meta_sqlite=store))
+        real_queue = JobQueueSubsystem(SimpleNamespace(meta_sqlite=store, metadata=store))
         result_persisted = threading.Event()
         worker_b_observed_result = threading.Event()
         worker_a_ack_attempted = threading.Event()
@@ -1498,7 +1498,7 @@ def test_maintenance_worker_reply_lookup_converges_after_pre_ack_redelivery(
         )[0]
     request_message_id = str(request_message.id)
 
-    with _temporary_namespace(pipeline.engines.conversation, ns.conv_bg):
+    with _background_namespace(pipeline.engines.conversation, ns.conv_bg):
         pipeline.engines.conversation.send_lane_message(
             conversation_id=f"maintenance:{sync_request.source_uri}",
             inbox_id="inbox:foreground",
