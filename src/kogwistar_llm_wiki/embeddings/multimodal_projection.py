@@ -98,6 +98,13 @@ def _collection_values(value: object) -> Sequence[object]:
         return ()
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return value
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        converted = tolist()
+        if isinstance(converted, Sequence) and not isinstance(
+            converted, (str, bytes, bytearray)
+        ):
+            return converted
     raise ProjectionIntegrityError("Chroma collection returned a non-sequence field")
 
 
