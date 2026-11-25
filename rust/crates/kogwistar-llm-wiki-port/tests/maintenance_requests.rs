@@ -1,6 +1,7 @@
 use kogwistar_llm_wiki_port::ingest::maintenance_requests::{
-    maintenance_request_lane_id, maintenance_request_node_id,
-    maintenance_request_parameters_fingerprint,
+    candidate_link_id, maintenance_request_lane_id, maintenance_request_node_id,
+    maintenance_request_parameters_fingerprint, promotion_candidate_id,
+    promotion_evidence_pack_digest,
 };
 use kogwistar_llm_wiki_port::ingest::source_lifecycle::DurableParseLimits;
 use kogwistar_llm_wiki_port::models::JsonObject;
@@ -59,5 +60,33 @@ fn maintenance_request_ids_match_python_goldens() {
         )
         .to_string(),
         "3d31db7f-f0c3-5337-b5e0-ea1b2bd1fc98"
+    );
+}
+
+#[test]
+fn candidate_and_promotion_ids_match_python_goldens() {
+    assert_eq!(
+        candidate_link_id("demo", "source:1").to_string(),
+        "cb377a24-7793-54d0-a6b2-45dd590e0996"
+    );
+    assert_eq!(
+        promotion_candidate_id("demo", "source:1").to_string(),
+        "d5e25e4e-c5c7-5027-8da4-4c8cffde2e8c"
+    );
+}
+
+#[test]
+fn promotion_evidence_pack_digest_matches_python_golden() {
+    let digest = promotion_evidence_pack_digest(&["b", "a"], &["e2", "e1"]);
+    assert_eq!(
+        serde_json::to_value(&digest).unwrap(),
+        json!({
+            "node_ids": ["a", "b"],
+            "edge_ids": ["e1", "e2"],
+            "depth": "parsed_graph_extraction",
+            "max_chars_per_item": 0,
+            "max_total_chars": 0,
+            "evidence_pack_hash": "2ac176c9f2896a3d3ac0731a9f536fe1beaf629ad2fcfa6c1d2083bc1eaa72dd"
+        })
     );
 }
