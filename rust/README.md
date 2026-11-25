@@ -26,6 +26,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   maintenance request fingerprints and request/lane stable IDs.
 - `kogwistar-llm-wiki-port::parsing` mirrors immutable parse regions/targets and
   parse session, generation, member, frontier, and legacy generation IDs.
+- `kogwistar-llm-wiki-port::provenance` mirrors evidence-pack digest
+  canonicalization and deterministic SHA-256 hashing.
 - `kogwistar-llm-wiki-port::ids` mirrors the Python stable-ID contract,
   including non-ASCII canonical JSON behavior.
 
