@@ -17,6 +17,9 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   snapshot helpers from `src/kogwistar_llm_wiki/projections/snapshot.py`:
   graph-space normalization, supported graph-space namespaces, manifest-based
   node visibility, and bidirectional adjacency construction.
+- `kogwistar-llm-wiki-port::ingest::source_lifecycle` mirrors immutable source
+  IDs, revisions, readiness IDs, operation-mode classification, and durable
+  parse-limit validation from the root ingest source lifecycle.
 
 ## Commands
 
