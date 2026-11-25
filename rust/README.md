@@ -43,6 +43,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   opt-in maintenance provider chains.
 - `kogwistar-llm-wiki-port::longrun` mirrors long-run parser payload path/int
   validation, object mapping, and proposal-mode summaries.
+  It also mirrors child paths, live-trace flags, heartbeat envelopes, and
+  workflow-status result classification.
   It also mirrors parser proposal-mode settings, provider summaries, and
   opt-in maintenance provider chains.
 - `kogwistar-llm-wiki-port::maintenance` mirrors the durable document
