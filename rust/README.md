@@ -50,6 +50,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
 - `kogwistar-llm-wiki-port::layered` mirrors layered-parse persistence modes,
   run-ID fallbacks, layer-log events, engine build options, and typed result
   workflow status.
+- `kogwistar-llm-wiki-port::usage` mirrors budget-event envelopes, attribution,
+  provider call counts, token/cost summaries, and cost-status fallbacks.
   It also mirrors parser proposal-mode settings, provider summaries, and
   opt-in maintenance provider chains.
 - `kogwistar-llm-wiki-port::maintenance` mirrors the durable document
