@@ -1,7 +1,7 @@
 use kogwistar_llm_wiki_port::ingest::maintenance_requests::{
     candidate_link_id, maintenance_request_lane_id, maintenance_request_node_id,
-    maintenance_request_parameters_fingerprint, promotion_candidate_id,
-    promotion_evidence_pack_digest,
+    maintenance_request_parameters_fingerprint, projection_request_id, projection_request_payload,
+    promotion_candidate_id, promotion_evidence_pack_digest,
 };
 use kogwistar_llm_wiki_port::ingest::source_lifecycle::DurableParseLimits;
 use kogwistar_llm_wiki_port::models::JsonObject;
@@ -87,6 +87,22 @@ fn promotion_evidence_pack_digest_matches_python_golden() {
             "max_chars_per_item": 0,
             "max_total_chars": 0,
             "evidence_pack_hash": "2ac176c9f2896a3d3ac0731a9f536fe1beaf629ad2fcfa6c1d2083bc1eaa72dd"
+        })
+    );
+}
+
+#[test]
+fn projection_request_contract_matches_python() {
+    assert_eq!(
+        projection_request_id("demo", "kg:1").to_string(),
+        "7faa7b4e-e660-5908-a78b-05f81cd23d6a"
+    );
+    assert_eq!(
+        serde_json::to_value(projection_request_payload("demo", "kg:1", "pending")).unwrap(),
+        json!({
+            "workspace_id": "demo",
+            "promoted_entity_id": "kg:1",
+            "promotion_mode": "pending"
         })
     );
 }

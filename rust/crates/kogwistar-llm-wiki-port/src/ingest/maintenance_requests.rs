@@ -163,3 +163,27 @@ pub fn promotion_evidence_pack_digest(node_ids: &[&str], edge_ids: &[&str]) -> J
     digest.insert("evidence_pack_hash".to_owned(), Value::String(hash));
     digest
 }
+
+#[must_use]
+pub fn projection_request_id(workspace_id: &str, promoted_entity_id: &str) -> Uuid {
+    stable_id(
+        "kogwistar_llm_wiki.projection_request",
+        &[workspace_id, promoted_entity_id],
+    )
+}
+
+#[must_use]
+pub fn projection_request_payload(
+    workspace_id: &str,
+    promoted_entity_id: &str,
+    promotion_mode: &str,
+) -> JsonObject {
+    [
+        ("workspace_id", Value::from(workspace_id)),
+        ("promoted_entity_id", Value::from(promoted_entity_id)),
+        ("promotion_mode", Value::from(promotion_mode)),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value))
+    .collect()
+}
