@@ -31,6 +31,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   canonicalization and deterministic SHA-256 hashing.
 - `kogwistar-llm-wiki-port::policies` mirrors conservative promotion decisions,
   artifact taxonomy visibility, and projection eligibility.
+  It also mirrors derived-knowledge and execution-wisdom query/metadata contracts
+  plus provenance-required lifecycle classification.
 - `kogwistar-llm-wiki-port::ids` mirrors the Python stable-ID contract,
   including non-ASCII canonical JSON behavior.
 

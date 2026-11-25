@@ -1,5 +1,9 @@
 use kogwistar_llm_wiki_port::models::JsonObject;
-use kogwistar_llm_wiki_port::policies::{is_projection_eligible, visibility_for, PromotionPolicy};
+use kogwistar_llm_wiki_port::policies::{
+    derived_knowledge_match_where, derived_knowledge_metadata, derived_knowledge_source_where,
+    is_projection_eligible, requires_provenance, visibility_for, wisdom_match_where,
+    wisdom_metadata, wisdom_source_where, PromotionPolicy,
+};
 use serde_json::json;
 
 fn metadata(value: serde_json::Value) -> JsonObject {
@@ -91,4 +95,86 @@ fn promoted_projection() -> JsonObject {
         "artifact_kind": "promoted_knowledge",
         "projection_visible": true
     }))
+}
+
+#[test]
+fn derived_and_wisdom_queries_match_python_where_contract() {
+    assert_eq!(
+        derived_knowledge_source_where("demo"),
+        json!({"$and": [
+            {"artifact_kind": "promoted_knowledge"},
+            {"workspace_id": "demo"}
+        ]})
+    );
+    assert_eq!(
+        derived_knowledge_match_where("demo", "Topic"),
+        json!({"$and": [
+            {"artifact_kind": "derived_knowledge"},
+            {"workspace_id": "demo"},
+            {"label": "Topic"}
+        ]})
+    );
+    assert_eq!(
+        wisdom_source_where("demo"),
+        json!({"$and": [
+            {"entity_type": "workflow_step_exec"},
+            {"workspace_id": "demo"}
+        ]})
+    );
+    assert_eq!(
+        wisdom_match_where("demo", "summarize"),
+        json!({"$and": [
+            {"artifact_kind": "execution_wisdom"},
+            {"workspace_id": "demo"},
+            {"step_op": "summarize"}
+        ]})
+    );
+}
+
+#[test]
+fn derived_wisdom_metadata_and_lifecycle_match_python() {
+    assert_eq!(
+        serde_json::to_value(derived_knowledge_metadata(
+            "demo",
+            "Topic",
+            &["", "node:2"],
+            &["node:1"],
+            12,
+            None
+        ))
+        .unwrap(),
+        json!({
+            "workspace_id": "demo",
+            "artifact_kind": "derived_knowledge",
+            "label": "Topic",
+            "source_node_ids": ["node:2"],
+            "replaces_ids": ["node:1"],
+            "created_at_ms": 12
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(wisdom_metadata(
+            "demo",
+            "summarize",
+            2,
+            &["", "run:2"],
+            &["run:1"],
+            13,
+            None
+        ))
+        .unwrap(),
+        json!({
+            "workspace_id": "demo",
+            "artifact_kind": "execution_wisdom",
+            "step_op": "summarize",
+            "failure_count": 2,
+            "evidence_run_ids": ["run:2"],
+            "replaces_ids": ["run:1"],
+            "created_at_ms": 13
+        })
+    );
+    assert!(requires_provenance("promoted_knowledge"));
+    assert!(requires_provenance("derived_knowledge"));
+    assert!(requires_provenance("execution_wisdom"));
+    assert!(!requires_provenance("candidate_link"));
 }

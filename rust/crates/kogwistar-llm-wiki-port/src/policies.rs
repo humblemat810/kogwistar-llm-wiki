@@ -165,3 +165,142 @@ fn python_string(value: Option<&Value>) -> String {
         Some(other) => other.to_string(),
     }
 }
+
+#[must_use]
+fn and_where(clauses: Vec<(&str, Value)>) -> Value {
+    Value::Object(
+        [(
+            "$and".to_owned(),
+            Value::Array(
+                clauses
+                    .into_iter()
+                    .map(|(key, value)| {
+                        Value::Object([(key.to_owned(), value)].into_iter().collect())
+                    })
+                    .collect(),
+            ),
+        )]
+        .into_iter()
+        .collect(),
+    )
+}
+
+#[must_use]
+fn string_list(values: &[&str]) -> Value {
+    Value::Array(
+        values
+            .iter()
+            .map(|value| (*value).to_owned())
+            .filter(|value| !value.is_empty())
+            .map(Value::String)
+            .collect(),
+    )
+}
+
+#[must_use]
+pub fn derived_knowledge_source_where(workspace_id: &str) -> Value {
+    and_where(vec![
+        (
+            "artifact_kind",
+            Value::from(ArtifactTaxonomy::PROMOTED_KNOWLEDGE),
+        ),
+        ("workspace_id", Value::from(workspace_id)),
+    ])
+}
+
+#[must_use]
+pub fn derived_knowledge_match_where(workspace_id: &str, label: &str) -> Value {
+    and_where(vec![
+        (
+            "artifact_kind",
+            Value::from(ArtifactTaxonomy::DERIVED_KNOWLEDGE),
+        ),
+        ("workspace_id", Value::from(workspace_id)),
+        ("label", Value::from(label)),
+    ])
+}
+
+#[must_use]
+pub fn derived_knowledge_metadata(
+    workspace_id: &str,
+    label: &str,
+    source_node_ids: &[&str],
+    replaces_ids: &[&str],
+    created_at_ms: u64,
+    artifact_kind: Option<&str>,
+) -> JsonObject {
+    [
+        ("workspace_id", Value::from(workspace_id)),
+        (
+            "artifact_kind",
+            Value::from(artifact_kind.unwrap_or(ArtifactTaxonomy::DERIVED_KNOWLEDGE)),
+        ),
+        ("label", Value::from(label)),
+        ("source_node_ids", string_list(source_node_ids)),
+        ("replaces_ids", string_list(replaces_ids)),
+        ("created_at_ms", Value::from(created_at_ms)),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value))
+    .collect()
+}
+
+#[must_use]
+pub fn wisdom_source_where(workspace_id: &str) -> Value {
+    and_where(vec![
+        (
+            "entity_type",
+            Value::from(ArtifactTaxonomy::WORKFLOW_STEP_EXEC),
+        ),
+        ("workspace_id", Value::from(workspace_id)),
+    ])
+}
+
+#[must_use]
+pub fn wisdom_match_where(workspace_id: &str, step_op: &str) -> Value {
+    and_where(vec![
+        (
+            "artifact_kind",
+            Value::from(ArtifactTaxonomy::EXECUTION_WISDOM),
+        ),
+        ("workspace_id", Value::from(workspace_id)),
+        ("step_op", Value::from(step_op)),
+    ])
+}
+
+#[must_use]
+pub fn wisdom_metadata(
+    workspace_id: &str,
+    step_op: &str,
+    failure_count: u64,
+    evidence_run_ids: &[&str],
+    replaces_ids: &[&str],
+    created_at_ms: u64,
+    artifact_kind: Option<&str>,
+) -> JsonObject {
+    [
+        ("workspace_id", Value::from(workspace_id)),
+        (
+            "artifact_kind",
+            Value::from(artifact_kind.unwrap_or(ArtifactTaxonomy::EXECUTION_WISDOM)),
+        ),
+        ("step_op", Value::from(step_op)),
+        ("failure_count", Value::from(failure_count)),
+        ("evidence_run_ids", string_list(evidence_run_ids)),
+        ("replaces_ids", string_list(replaces_ids)),
+        ("created_at_ms", Value::from(created_at_ms)),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value))
+    .collect()
+}
+
+#[must_use]
+pub fn requires_provenance(artifact_kind: &str) -> bool {
+    matches!(
+        artifact_kind.trim(),
+        ArtifactTaxonomy::PROMOTED_KNOWLEDGE
+            | ArtifactTaxonomy::DERIVED_KNOWLEDGE
+            | ArtifactTaxonomy::EXECUTION_WISDOM
+    )
+}
