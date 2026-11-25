@@ -37,6 +37,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   artifact taxonomy visibility, and projection eligibility.
   It also mirrors derived-knowledge and execution-wisdom query/metadata contracts
   plus provenance-required lifecycle classification.
+- `kogwistar-llm-wiki-port::providers` mirrors provider aliases, OpenAI model
+  env suffixes, parser endpoint defaults, and environment resolution.
 - `kogwistar-llm-wiki-port::maintenance` mirrors the durable document
   maintenance plan and one-phase continuation planner.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
