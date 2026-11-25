@@ -249,11 +249,13 @@ def test_provider_specific_context_overflow_exception_type_is_detected() -> None
     assert is_context_window_error(AnthropicContextOverflowError("request rejected"))
 
 
-def test_truncated_length_finish_is_treated_as_capacity_blocker() -> None:
+def test_truncated_length_finish_is_output_limit_not_context_blocker() -> None:
     class LengthFinishReasonError(Exception):
         pass
 
-    assert is_context_window_error(LengthFinishReasonError("structured output was truncated"))
+    error = LengthFinishReasonError("Could not parse response content as the length limit was reached")
+    assert not is_context_window_error(error)
+    assert safe_observation_critic_error_code(error) == "output_token_limit"
 
 
 def test_critic_failure_diagnostics_are_safe_and_classified() -> None:
@@ -324,6 +326,56 @@ def test_context_limit_blocks_critic_and_pauses_durable_background_control(
     assert restarted_control.get().request_enabled is False
     assert restarted_control.get().background_enabled is False
     assert any(item["event"] == "maintenance_observation_context_limit_blocked" for item in traces)
+
+
+def test_output_token_limit_fails_critic_without_pausing_background_control(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    class LengthFinishReasonError(Exception):
+        pass
+
+    monkeypatch.setattr(
+        critic_module,
+        "build_chat_model",
+        lambda *_args: _FailingModel(LengthFinishReasonError("completion was truncated")),
+    )
+    critic = build_observation_critic(SimpleNamespace(parser=object()))
+    control = MaintenanceControl(tmp_path)
+    control.update(background_enabled=True)
+    traces: list[dict[str, object]] = []
+    worker = SimpleNamespace(
+        observation_critic=critic,
+        context_limit_sink=lambda: MaintenanceDaemonRuntime._stop_for_context_limit(
+            SimpleNamespace(
+                control=control,
+                control_state=control.get(),
+                _worker=SimpleNamespace(),
+            )
+        ),
+        _emit_trace=lambda event, **fields: traces.append({"event": event, **fields}),
+    )
+    ctx = SimpleNamespace(
+        workspace_id="demo",
+        job_id="job-output-limit",
+        payload={"budgets": {"max_llm_calls": 1}},
+    )
+
+    status, findings = MaintenanceObservationWorkerMixin._run_observation_critic(
+        worker, ctx, _frame()
+    )
+
+    assert status == "failed"
+    assert findings == ()
+    assert MaintenanceControl(tmp_path).get().background_enabled is True
+    assert any(
+        item.get("event") == "maintenance_observation_critic_failed"
+        and item.get("error_code") == "output_token_limit"
+        for item in traces
+    )
+    assert not any(
+        item.get("event") == "maintenance_observation_context_limit_blocked"
+        for item in traces
+    )
 
 
 def test_parser_context_overflow_marks_job_final_and_does_not_retry() -> None:

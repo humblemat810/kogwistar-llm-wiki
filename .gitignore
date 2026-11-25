@@ -85,3 +85,6 @@ Thumbs.db
 /.tmp-pypy311-mcp
 .tmp-pypy311-fastmcp
 .tmp*
+
+# rust builds
+rust/target-api-loopback/

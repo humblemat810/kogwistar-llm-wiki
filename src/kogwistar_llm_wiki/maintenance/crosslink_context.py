@@ -156,6 +156,22 @@ def pack_crosslink_context(
     records: list[tuple[str, JsonObject]] = [
         ("node", item) for item in nodes
     ] + [("edge", item) for item in edges]
+    if not records:
+        return {
+            "nodes": [],
+            "edges": [],
+            "omitted_nodes": omitted_nodes_by_count,
+            "omitted_edges": omitted_edges_by_count,
+            "estimated_tokens": 0,
+            "characters": 0,
+            "budget": {
+                "max_nodes": budget.max_nodes,
+                "max_edges": budget.max_edges,
+                "max_tokens": budget.max_tokens,
+                "max_characters": budget.max_characters,
+            },
+            "dropped_by_builder": {},
+        }
     items = [
         ContextItem(
             kind="kg_ref",

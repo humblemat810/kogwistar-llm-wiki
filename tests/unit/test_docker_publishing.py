@@ -3,6 +3,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -196,11 +197,13 @@ def test_github_workflows_pin_all_checked_out_vendor_revisions() -> None:
     }
     hosted_ci = os.getenv("CI", "").strip().lower() == "true"
     for variable, directory in expected.items():
-        current = subprocess.check_output(
-            ["git", "-C", str(ROOT / directory), "rev-parse", "HEAD"],
-            cwd=ROOT,
-            text=True,
-        ).strip()
+        current = None
+        if hosted_ci:
+            current = subprocess.check_output(
+                ["git", "-C", str(ROOT / directory), "rev-parse", "HEAD"],
+                cwd=ROOT,
+                text=True,
+            ).strip()
         for path in workflow_paths:
             workflow = path.read_text(encoding="utf-8")
             if f"{variable}:" not in workflow:
@@ -208,5 +211,15 @@ def test_github_workflows_pin_all_checked_out_vendor_revisions() -> None:
             pins = re.findall(rf"{variable}:\s*([0-9a-f]{{40}})", workflow)
             assert pins
             assert set(pins) == {pins[0]}
-            if hosted_ci:
+            if current is not None:
                 assert pins[0] == current
+
+
+def test_vendor_revision_pin_check_does_not_require_git_outside_ci() -> None:
+    with patch.dict(os.environ, {"CI": ""}):
+        with patch.object(
+            subprocess,
+            "check_output",
+            side_effect=AssertionError("local source snapshots need no Git metadata"),
+        ):
+            test_github_workflows_pin_all_checked_out_vendor_revisions()

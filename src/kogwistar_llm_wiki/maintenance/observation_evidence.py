@@ -132,12 +132,19 @@ def _entity_spans(entity: object) -> list[dict[str, object]]:
             values = cast(Iterable[object], iter_evidence())
             for span in values:
                 model_dump = getattr(span, "model_dump", None)
-                raw_data = model_dump(mode="python") if callable(model_dump) else None
+                raw_data: object = None
+                if callable(model_dump):
+                    try:
+                        raw_data = model_dump(field_mode="backend")
+                    except TypeError:
+                        # Accept ordinary Pydantic models alongside Kogwistar's
+                        # mode-sliced models, which require field_mode instead.
+                        raw_data = model_dump()
                 data = _mapping(raw_data) if raw_data is not None else _mapping(span)
                 if data:
                     spans.append({key: data.get(key) for key in _SPAN_FIELDS})
-        except Exception:
-            return []
+        except (AttributeError, TypeError, ValueError):
+            spans = []
     if spans:
         return spans
     mentions = getattr(entity, "mentions", ())

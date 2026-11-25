@@ -211,6 +211,16 @@ def test_sqlite_profile_mismatch_is_rejected_on_open(tmp_path) -> None:
         SQLiteMultimodalProjectionStore(path, scope="demo:multimodal", profile=_profile(dimension=3))
 
 
+def test_chroma_collection_values_accepts_array_like_sdk_results() -> None:
+    from kogwistar_llm_wiki.embeddings.multimodal_projection import _collection_values
+
+    class ArrayLike:
+        def tolist(self):
+            return [[0.25, 0.75]]
+
+    assert _collection_values(ArrayLike()) == [[0.25, 0.75]]
+
+
 def test_chroma_projection_persists_stage_two_late_interaction(tmp_path) -> None:
     if importlib.util.find_spec("chromadb") is None:
         pytest.skip("chromadb is not installed")

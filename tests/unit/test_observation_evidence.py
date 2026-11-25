@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
+from kogwistar.engine_core.models import Grounding, Node, Span
+
 from kogwistar_llm_wiki.maintenance.maintenance_observation import (
     ObservationSubject,
     assess_observation_frame,
     build_observation_frame,
 )
 from kogwistar_llm_wiki.maintenance.observation_evidence import (
+    _entity_spans,
     build_authoritative_source_evidence,
 )
 from kogwistar_llm_wiki.maintenance.worker_observation import _redacted_frame_payload
@@ -87,6 +90,41 @@ def _pointer(*, target_namespace: str = SOURCE_NAMESPACE) -> object:
             "target_id": SOURCE_NODE.id,
         },
     )
+
+
+def test_kogwistar_mode_sliced_span_serializer_preserves_source_evidence() -> None:
+    node = Node(
+        id="persisted-node-1",
+        label="Revenue increased",
+        type="entity",
+        summary="Revenue grew during the quarter.",
+        doc_id=DOCUMENT.id,
+        mentions=[
+            Grounding(
+                spans=[
+                    Span(
+                        doc_id=DOCUMENT.id,
+                        start_char=0,
+                        end_char=35,
+                        excerpt=SOURCE_TEXT[:35],
+                        document_page_url="",
+                        collection_page_url="",
+                        insertion_method="test",
+                    )
+                ]
+            )
+        ],
+        metadata={"workspace_id": WORKSPACE},
+    )
+
+    assert _entity_spans(node) == [
+        {
+            "doc_id": DOCUMENT.id,
+            "start_char": 0,
+            "end_char": 35,
+            "excerpt": SOURCE_TEXT[:35],
+        }
+    ]
 
 
 def test_source_pointer_resolves_in_source_namespace_and_verifies_pinned_span() -> None:

@@ -1,20 +1,30 @@
 # Kogwistar Rust Port: Consumer Compatibility Reminder
 
+> **Current architecture authority:** This document is a consumer-compatibility
+> inventory, not the current language-selection strategy. Its original
+> Python-facade-only framing has been superseded by
+> [ADR-022: Dual-Language Capability Paths](../kogwistar/kogwistar/docs/ADR-022-dual-language-capability-paths.md)
+> and the companion checklist. Keep the compatibility safeguards below, but
+> do not use this document to require Rust to remain hidden behind Python or
+> to make Python the only rollback target.
+
 ```mermaid
 flowchart LR
-    PYTHON[Python public contract] --> FACADE[Compatibility facade]
-    FACADE --> RUST[Rust implementation]
-    RUST --> STORE[Backend store]
-    TEST[Parity tests] --> FACADE
-    TEST --> RUST
+    CALLER[Consumer] --> SELECT{Declared capability selection}
+    SELECT --> PY[Python implementation]
+    SELECT --> RS[Rust implementation]
+    PY <-->|Versioned seam, when composed| RS
+    PY --> STORE[Authoritative store]
+    RS --> STORE
+    TEST[Shared contract and parity tests] --> PY
+    TEST --> RS
 ```
 
 ## Purpose
 
-This is a planning and release gate for porting `kogwistar` core
-implementation to Rust. The port is successful only when it is a compatible
-implementation replacement for the Python consumers below; compiling Rust code
-or matching a subset of core unit tests is not sufficient.
+This is a consumer-compatibility inventory for changes to `kogwistar` core.
+Any selected implementation must preserve the consumer contracts below;
+compiling Rust code or matching a subset of core unit tests is not sufficient.
 
 - `kogwistar-llm-wiki` composes the system and owns product policy.
 - `kg-doc-parser` emits grounded, graph-ready extraction artifacts and uses
@@ -27,25 +37,24 @@ This document supplements, rather than changes, the ownership rules in
 and the concrete integration surface in
 [`inter_repo_api_and_event_catalog.md`](inter_repo_api_and_event_catalog.md).
 
-Concrete Python reference facts, fixture requirements, backend safeguards, and
-evidence commands to capture before implementation are in
+Historical Python reference facts, fixture requirements, backend safeguards,
+and evidence commands captured before implementation are in
 [Kogwistar Rust Port: Pre-Migration Baseline and Evidence Plan](kogwistar_rust_port_pre_migration_baseline.md).
 
 ## Decision Rule
 
-For the initial port, **Rust is an implementation detail behind a compatible
-Python-facing Kogwistar facade**. No satellite repository should need to
-discover, import, serialize for, or manage a Rust implementation directly.
+Follow ADR-022 for implementation selection: Python and Rust remain supported
+implementations, a deployment may select either at a declared capability
+boundary, and a composed path may cross languages only through an explicit,
+versioned seam. A seam-free native path in either language is an optional
+optimization, not the only supported architecture.
 
-Keep the current Python package/import paths, model validation behavior, and
-public engine/runtime contracts available. A PyO3 extension, an internal Rust
-service, or another bridge is acceptable only if the facade preserves those
-contracts. If a future design intentionally changes a contract, it is a
-separate, versioned migration with adapters and coordinated releases; it is
-not part of the implementation port.
-
-The first Rust-backed release must retain a fast rollback route to the Python
-implementation without rewriting or discarding user graph data.
+The compatibility requirements below still apply to existing Python
+consumers, Python imports, wire contracts, and stored data. They do not require
+Rust to be hidden behind a Python facade. Before promoting a Rust capability,
+prove its parity and a safe return to the Python implementation where that
+capability shares data or durable contracts; do not imply that every deployment
+must route through Python.
 
 ## Non-Negotiable Compatibility Invariants
 
@@ -168,7 +177,7 @@ consumer adapter if relevant, regression coverage, and a migration/release
 note. "Rust behavior is more correct" is not sufficient justification for a
 silent difference.
 
-### 4. Canary, then promote
+### 4. Canary, then promote a capability
 
 - Start with new, disposable workspaces and a non-destructive shadow/read-only
   comparison path for existing data.
@@ -177,16 +186,19 @@ silent difference.
   time.
 - Capture event sequence, checkpoint/recovery status, graph counts and IDs,
   projection manifests, generated vault hashes, and error classifications.
-- Promote only after clean repeated canaries, an exercised rollback, and the
-  consumer suites below all pass against the Rust-backed facade.
+- Promote the selected implementation only after clean repeated canaries, an
+  exercised compatible handoff/rollback where applicable, and the consumer
+  suites below pass for the named capability and backend.
 
 ## Minimum Release Gate
 
-The Rust port cannot become the default implementation until all of these are
-true:
+These are compatibility evidence gates for promoting a Rust implementation of
+the covered capabilities. They do not impose a single global implementation
+default; Python and Rust remain supported under ADR-022.
 
 - [ ] Existing satellite imports work unchanged in a clean environment.
-- [ ] Contract fixtures pass for both Python and Rust-backed facades.
+- [ ] Shared contract fixtures pass for both Python and Rust implementations,
+      including any declared facade or transport seam.
 - [ ] `kogwistar-llm-wiki` unit and integration coverage passes, including
       ingest, workspace isolation, long-run/recovery, and projection
       consistency paths.

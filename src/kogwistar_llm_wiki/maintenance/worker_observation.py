@@ -9,6 +9,7 @@ from typing import Literal, cast
 from kogwistar.id_provider import stable_id
 from kogwistar.json_types import JsonValue
 from kogwistar.server.auth_middleware import can_access_security_scope
+from pydantic_extension.model_slicing import use_mode
 
 from ..configuration.workspace import WorkspaceNamespaces
 from ..parsing.parse_views import ParseTarget, ParseViewResolver, ParseViewStore
@@ -488,13 +489,11 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
         namespaces = WorkspaceNamespaces(ctx.workspace_id)
         namespace = namespaces.curated_kg_space
         engine = self.engines.kg
-        with _temporary_namespace(engine, namespace):
+        with use_mode("backend"), _temporary_namespace(engine, namespace):
             if subject.kind == "node":
                 subject_entities = list(engine.read.get_nodes(ids=[subject.subject_id], limit=1))
-                all_edges = list(engine.read.get_edges(limit=512))
             else:
                 subject_entities = list(engine.read.get_edges(ids=[subject.subject_id], limit=1))
-                all_edges = list(engine.read.get_edges(limit=512))
             if not subject_entities:
                 raise ValueError("observation subject is not an active entity in the workspace graph")
             subject_entity = subject_entities[0]
@@ -503,14 +502,14 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
                 subject_entity, workspace_id=ctx.workspace_id, namespace=namespace
             )
 
-            related_edges = [
-                edge for edge in all_edges
-                if subject.subject_id in {
-                    str(value) for value in getattr(edge, "source_ids", ()) or ()
-                } | {
-                    str(value) for value in getattr(edge, "target_ids", ()) or ()
-                }
-            ]
+            endpoint_type = "node" if subject.kind == "node" else "edge"
+            related_edges = list(
+                engine.read.get_incident_edges(
+                    subject.subject_id,
+                    endpoint_type=endpoint_type,
+                    limit=512,
+                )
+            )
             for edge in related_edges:
                 _validate_entity_scope(edge, workspace_id=ctx.workspace_id)
             neighbor_ids = sorted(
@@ -526,16 +525,17 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
             )[: limits.neighborhood_count]
             neighbors = list(engine.read.get_nodes(ids=neighbor_ids, limit=len(neighbor_ids))) if neighbor_ids else []
 
-        source_evidence = build_authoritative_source_evidence(
-            engine,
-            subject_entity,
-            workspace_id=ctx.workspace_id,
-            source_namespace=namespaces.source_space,
-            expected_source_document_id=subject.source_document_id,
-            expected_revision_id=subject.revision_id,
-            expected_revision_document_id=subject.revision_document_id,
-            expected_source_digest=subject.source_digest,
-        )
+        with use_mode("backend"):
+            source_evidence = build_authoritative_source_evidence(
+                engine,
+                subject_entity,
+                workspace_id=ctx.workspace_id,
+                source_namespace=namespaces.source_space,
+                expected_source_document_id=subject.source_document_id,
+                expected_revision_id=subject.revision_id,
+                expected_revision_document_id=subject.revision_document_id,
+                expected_source_digest=subject.source_digest,
+            )
         source_context: list[Mapping[str, object]] = [source_evidence, subject_record]
         relation_context: list[Mapping[str, object]] = [
             compact_entity_record(edge, workspace_id=ctx.workspace_id, namespace=namespace)
@@ -553,7 +553,7 @@ class MaintenanceObservationWorkerMixin(MaintenanceWorkerLike):
             or ""
         ).strip()
         if limits.ancestor_hops and parent_id:
-            with _temporary_namespace(engine, namespace):
+            with use_mode("backend"), _temporary_namespace(engine, namespace):
                 parent_nodes = list(engine.read.get_nodes(ids=[parent_id], limit=1))
             if parent_nodes:
                 _validate_entity_scope(parent_nodes[0], workspace_id=ctx.workspace_id)
@@ -658,6 +658,8 @@ def _validate_entity_scope(entity: object, *, workspace_id: str) -> bool:
     if acl_scope and not can_access_security_scope(acl_scope):
         raise PermissionError("observation entity is outside the current security scope")
     return True
+
+
 
 
 def _redacted_frame_payload(frame: object) -> dict[str, object]:
