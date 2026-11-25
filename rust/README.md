@@ -25,6 +25,7 @@ historical `experiments/dual_language_seam_poc` proof of concept.
 - `kogwistar-llm-wiki-port::ingest::maintenance_requests` mirrors deterministic
   maintenance request fingerprints, request/lane stable IDs, candidate-link and
   promotion-candidate IDs, and promotion evidence-pack digests.
+  It also mirrors promoted-knowledge IDs and promotion decision metadata.
 - `kogwistar-llm-wiki-port::parsing` mirrors immutable parse regions/targets and
   parse session, generation, member, frontier, and legacy generation IDs.
 - `kogwistar-llm-wiki-port::provenance` mirrors evidence-pack digest

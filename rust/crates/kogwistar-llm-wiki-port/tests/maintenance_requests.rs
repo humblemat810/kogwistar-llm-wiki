@@ -1,7 +1,8 @@
 use kogwistar_llm_wiki_port::ingest::maintenance_requests::{
     candidate_link_id, maintenance_request_lane_id, maintenance_request_node_id,
     maintenance_request_parameters_fingerprint, projection_request_id, projection_request_payload,
-    promotion_candidate_id, promotion_evidence_pack_digest,
+    promoted_common_metadata, promoted_knowledge_id, promotion_candidate_id,
+    promotion_evidence_pack_digest,
 };
 use kogwistar_llm_wiki_port::ingest::source_lifecycle::DurableParseLimits;
 use kogwistar_llm_wiki_port::models::JsonObject;
@@ -14,6 +15,44 @@ fn map(value: serde_json::Value) -> JsonObject {
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
+}
+
+#[test]
+fn promoted_knowledge_contract_matches_python() {
+    assert_eq!(
+        promoted_knowledge_id("demo", "source:1").to_string(),
+        "f487d7df-7fbb-53e7-8d66-7ec0b04cecf6"
+    );
+    let decision_metadata = serde_json::json!({
+        "promotion_approved": true,
+        "auto_accept_threshold": 0.95,
+        "default_accept_threshold": 0.95
+    })
+    .as_object()
+    .expect("JSON object")
+    .iter()
+    .map(|(key, value)| (key.clone(), value.clone()))
+    .collect();
+    let metadata = promoted_common_metadata(
+        "candidate:1",
+        Some("pack:1"),
+        Some(&Default::default()),
+        Some("explicit promotion approval accepted by default policy"),
+        Some(&decision_metadata),
+    );
+
+    assert_eq!(
+        serde_json::to_value(&metadata).unwrap(),
+        json!({
+            "graph_space": "curated_kg",
+            "projection_visible": true,
+            "promotion_candidate_id": "candidate:1",
+            "promotion_evidence_pack_id": "pack:1",
+            "promotion_evidence_pack_digest": "{}",
+            "promotion_decision_reason": "explicit promotion approval accepted by default policy",
+            "promotion_decision_metadata": "{\"auto_accept_threshold\":0.95,\"default_accept_threshold\":0.95,\"promotion_approved\":true}"
+        })
+    );
 }
 
 #[test]

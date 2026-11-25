@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::ids::stable_id;
 use crate::ingest::source_lifecycle::DurableParseLimits;
 use crate::models::JsonObject;
-use crate::provenance::evidence_pack_digest_hash;
+use crate::provenance::{evidence_pack_digest_hash, python_ascii_json};
 
 fn python_json_spaced(value: &Value) -> String {
     match value {
@@ -135,6 +135,68 @@ pub fn promotion_candidate_id(workspace_id: &str, source_document_id: &str) -> U
         "kogwistar_llm_wiki.promotion_candidate",
         &[workspace_id, source_document_id],
     )
+}
+
+#[must_use]
+pub fn promoted_knowledge_id(workspace_id: &str, source_document_id: &str) -> Uuid {
+    stable_id(
+        "kogwistar_llm_wiki.promoted_knowledge",
+        &[workspace_id, source_document_id],
+    )
+}
+
+#[must_use]
+pub fn promoted_common_metadata(
+    promotion_candidate_id: &str,
+    promotion_evidence_pack_id: Option<&str>,
+    promotion_evidence_pack_digest: Option<&JsonObject>,
+    promotion_decision_reason: Option<&str>,
+    promotion_decision_metadata: Option<&JsonObject>,
+) -> JsonObject {
+    let empty = JsonObject::new();
+    [
+        ("graph_space", Value::from("curated_kg")),
+        ("projection_visible", Value::Bool(true)),
+        (
+            "promotion_candidate_id",
+            Value::from(promotion_candidate_id),
+        ),
+        (
+            "promotion_evidence_pack_id",
+            promotion_evidence_pack_id
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "promotion_evidence_pack_digest",
+            promotion_evidence_pack_digest
+                .map(|digest| {
+                    Value::String(python_ascii_json(&Value::Object(
+                        digest.clone().into_iter().collect(),
+                    )))
+                })
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "promotion_decision_reason",
+            promotion_decision_reason
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "promotion_decision_metadata",
+            Value::String(python_ascii_json(&Value::Object(
+                promotion_decision_metadata
+                    .unwrap_or(&empty)
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ))),
+        ),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value))
+    .collect()
 }
 
 #[must_use]
