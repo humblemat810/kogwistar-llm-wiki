@@ -35,6 +35,12 @@ impl GraphSpace {
     }
 }
 
+impl AsRef<str> for GraphSpace {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl fmt::Display for GraphSpace {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())

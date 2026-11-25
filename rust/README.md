@@ -13,6 +13,10 @@ historical `experiments/dual_language_seam_poc` proof of concept.
 - `kogwistar-llm-wiki-port::models` mirrors the ingest, maintenance,
   Obsidian-build, and projection snapshot contract models from
   `src/kogwistar_llm_wiki/models.py`, including Python wire names and defaults.
+- `kogwistar-llm-wiki-port::projections` mirrors the bounded projection
+  snapshot helpers from `src/kogwistar_llm_wiki/projections/snapshot.py`:
+  graph-space normalization, supported graph-space namespaces, manifest-based
+  node visibility, and bidirectional adjacency construction.
 
 ## Commands
 
