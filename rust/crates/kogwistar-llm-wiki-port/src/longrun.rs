@@ -220,6 +220,100 @@ pub fn result_ok(diagnostics: &JsonObject) -> bool {
     !matches!(workflow_status.as_str(), "failure" | "failed" | "error")
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn result_payload(
+    payload: &JsonObject,
+    source_document_id: &str,
+    parser_lane: &str,
+    title: &str,
+    graph_payload: &Value,
+    evaluation: &Value,
+    usage_summary: &Value,
+    usage_events: &[Value],
+    diagnostics: &JsonObject,
+    workflow_status: Option<&str>,
+    layer_log: Option<&Value>,
+) -> Result<JsonObject, String> {
+    let run_id = match payload.get("parser_workflow_run_id") {
+        Some(Value::String(value)) if !value.is_empty() => value.clone(),
+        _ => format!("parser:{source_document_id}"),
+    };
+    Ok(JsonObject::from([
+        ("ok".to_owned(), Value::from(result_ok(diagnostics))),
+        ("parser_workflow_run_id".to_owned(), Value::from(run_id)),
+        ("parser_lane".to_owned(), Value::from(parser_lane)),
+        ("title".to_owned(), Value::from(title)),
+        ("graph_payload".to_owned(), graph_payload.clone()),
+        ("evaluation".to_owned(), evaluation.clone()),
+        ("usage_summary".to_owned(), usage_summary.clone()),
+        (
+            "usage_events".to_owned(),
+            Value::Array(usage_events.to_vec()),
+        ),
+        ("diagnostics".to_owned(), object_value(diagnostics)),
+        (
+            "workflow_status".to_owned(),
+            workflow_status
+                .filter(|status| !status.trim().is_empty())
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "layer_log".to_owned(),
+            layer_log.cloned().unwrap_or(Value::Null),
+        ),
+    ]))
+}
+
+#[must_use]
+pub fn llm_call_count_from_events(events: &[Value]) -> usize {
+    let mut run_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for event in events {
+        let Some(Value::Object(meta)) = event.get("meta") else {
+            continue;
+        };
+        let Some(provider_run_id) = meta.get("provider_run_id") else {
+            continue;
+        };
+        let Some(provider_run_id) = provider_run_id.as_str() else {
+            continue;
+        };
+        if provider_run_id.trim().is_empty() {
+            continue;
+        }
+        run_ids.insert(provider_run_id.to_owned());
+    }
+    run_ids.len()
+}
+
+#[must_use]
+pub fn failure_payload(
+    error_type: &str,
+    message: &str,
+    traceback: &str,
+    payload_path: &Path,
+    usage_events: &[Value],
+) -> JsonObject {
+    JsonObject::from([
+        ("ok".to_owned(), Value::Bool(false)),
+        ("error_type".to_owned(), Value::from(error_type)),
+        ("message".to_owned(), Value::from(message)),
+        ("traceback".to_owned(), Value::from(traceback)),
+        (
+            "payload_path".to_owned(),
+            Value::from(payload_path.to_string_lossy().to_string()),
+        ),
+        (
+            "usage_events".to_owned(),
+            Value::Array(usage_events.to_vec()),
+        ),
+        (
+            "llm_call_count".to_owned(),
+            Value::from(llm_call_count_from_events(usage_events)),
+        ),
+    ])
+}
+
 fn python_string(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(value)) => value.clone(),
@@ -229,4 +323,9 @@ fn python_string(value: Option<&Value>) -> String {
         Some(other) => other.to_string(),
         None => String::new(),
     }
+}
+
+#[must_use]
+fn object_value(value: &JsonObject) -> Value {
+    Value::Object(value.clone().into_iter().collect())
 }

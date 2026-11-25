@@ -1,6 +1,7 @@
 use kogwistar_llm_wiki_port::longrun::{
-    child_paths, env_flag_enabled, heartbeat_payload, live_trace_enabled, object_mapping,
-    payload_int, payload_path, proposal_mode_summary, result_ok, trace_context,
+    child_paths, env_flag_enabled, failure_payload, heartbeat_payload, live_trace_enabled,
+    llm_call_count_from_events, object_mapping, payload_int, payload_path, proposal_mode_summary,
+    result_ok, result_payload, trace_context,
 };
 use kogwistar_llm_wiki_port::models::JsonObject;
 use serde_json::{json, Value};
@@ -97,6 +98,91 @@ fn result_status_matches_python_contract() {
     assert!(result_ok(&map(json!({"workflow_status": "ok"}))));
     assert!(result_ok(&map(json!({}))));
     assert!(!result_ok(&map(json!({"workflow_status": "failed"}))));
+}
+
+#[test]
+fn result_payload_matches_python_contract() {
+    let payload = map(json!({"parser_workflow_run_id": "run:1"}));
+    let result = result_payload(
+        &payload,
+        "source:1",
+        "page_index",
+        "Title",
+        &json!({"nodes": ["node:1"]}),
+        &json!({"ok": true}),
+        &json!({"llm_call_count": 1}),
+        &[json!({"meta": {"provider_run_id": "run:1"}})],
+        &map(json!({"workflow_status": "ok"})),
+        Some("ok"),
+        Some(&json!({"layer": "root"})),
+    )
+    .unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&result).unwrap(),
+        json!({
+            "ok": true,
+            "parser_workflow_run_id": "run:1",
+            "parser_lane": "page_index",
+            "title": "Title",
+            "graph_payload": {"nodes": ["node:1"]},
+            "evaluation": {"ok": true},
+            "usage_summary": {"llm_call_count": 1},
+            "usage_events": [{"meta": {"provider_run_id": "run:1"}}],
+            "diagnostics": {"workflow_status": "ok"},
+            "workflow_status": "ok",
+            "layer_log": {"layer": "root"}
+        })
+    );
+
+    let fallback = result_payload(
+        &JsonObject::new(),
+        "source:1",
+        "workflow_layered",
+        "Title",
+        &json!({}),
+        &json!({}),
+        &json!({}),
+        &[],
+        &map(json!({})),
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(fallback["parser_workflow_run_id"], json!("parser:source:1"));
+    assert_eq!(fallback["workflow_status"], Value::Null);
+    assert_eq!(fallback["layer_log"], Value::Null);
+}
+
+#[test]
+fn failure_payload_and_llm_call_count_match_python() {
+    let events = vec![
+        json!({"meta": {"provider_run_id": "run:1"}}),
+        json!({"meta": {"provider_run_id": "run:1"}}),
+        json!({"meta": {"provider_run_id": ""}}),
+        json!({"meta": {}}),
+    ];
+    assert_eq!(llm_call_count_from_events(&events), 1);
+
+    let failure = failure_payload(
+        "ValueError",
+        "bad lane",
+        "Traceback",
+        std::path::Path::new("failure_payload.json"),
+        &events,
+    );
+    assert_eq!(
+        serde_json::to_value(&failure).unwrap(),
+        json!({
+            "ok": false,
+            "error_type": "ValueError",
+            "message": "bad lane",
+            "traceback": "Traceback",
+            "payload_path": "failure_payload.json",
+            "usage_events": events,
+            "llm_call_count": 1
+        })
+    );
 }
 
 #[test]
