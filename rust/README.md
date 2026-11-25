@@ -41,6 +41,10 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   env suffixes, parser endpoint defaults, and environment resolution.
   It also mirrors parser proposal-mode settings, provider summaries, and
   opt-in maintenance provider chains.
+- `kogwistar-llm-wiki-port::longrun` mirrors long-run parser payload path/int
+  validation, object mapping, and proposal-mode summaries.
+  It also mirrors parser proposal-mode settings, provider summaries, and
+  opt-in maintenance provider chains.
 - `kogwistar-llm-wiki-port::maintenance` mirrors the durable document
   maintenance plan and one-phase continuation planner.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
