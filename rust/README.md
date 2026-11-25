@@ -23,6 +23,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
 - `kogwistar-llm-wiki-port::ingest::artifacts` mirrors leading artifact spans
   and immutable revision-document selection used by ingest artifacts.
   It also mirrors artifact-node metadata and lifecycle defaults.
+- `kogwistar-llm-wiki-port::ingest::source_parsing` mirrors parser provider
+  mode normalization and environment-backed model priority.
 - `kogwistar-llm-wiki-port::ingest::maintenance_requests` mirrors deterministic
   maintenance request fingerprints, request/lane stable IDs, candidate-link and
   promotion-candidate IDs, and promotion evidence-pack digests.
