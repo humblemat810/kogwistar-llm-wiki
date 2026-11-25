@@ -1,6 +1,7 @@
 pub mod configuration;
 pub mod ids;
 pub mod ingest;
+pub mod maintenance;
 pub mod models;
 pub mod parsing;
 pub mod policies;

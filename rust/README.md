@@ -33,6 +33,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   artifact taxonomy visibility, and projection eligibility.
   It also mirrors derived-knowledge and execution-wisdom query/metadata contracts
   plus provenance-required lifecycle classification.
+- `kogwistar-llm-wiki-port::maintenance` mirrors the durable document
+  maintenance plan and one-phase continuation planner.
 - `kogwistar-llm-wiki-port::ids` mirrors the Python stable-ID contract,
   including non-ASCII canonical JSON behavior.
 
