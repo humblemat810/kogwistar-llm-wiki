@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use kogwistar_llm_wiki_port::providers::{
     build_parser_provider_endpoint_config, normalize_provider_name, openai_env_suffix_for_model,
-    ProviderEndpointConfig,
+    provider_config_summary, resolve_maintenance_provider_settings,
+    resolve_parser_provider_settings, ProviderConfigError, ProviderEndpointConfig,
 };
 
 fn env(value: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -83,4 +84,67 @@ fn parser_endpoint_defaults_match_python() {
             ..ProviderEndpointConfig::default()
         }
     );
+}
+
+#[test]
+fn parser_settings_proposal_mode_and_summary_match_python() {
+    let settings = resolve_parser_provider_settings(&env(&[
+        ("KOGWISTAR_PARSER_PROVIDER", "ollama"),
+        ("KOGWISTAR_PARSER_MODEL", "gemma4:e2b"),
+        ("KOGWISTAR_PARSER_BASE_URL", "http://localhost:11434"),
+        ("KOGWISTAR_PARSER_PROPOSAL_MODE", "boundaries"),
+    ]));
+
+    assert_eq!(settings.proposal_mode.as_deref(), Some("boundaries"));
+    let summary = provider_config_summary(&settings);
+    assert_eq!(summary["proposal_mode"], "boundaries");
+    assert_eq!(summary["provider"], "ollama");
+    assert_eq!(summary["model"], "gemma4:e2b");
+    assert_eq!(summary["base_url"], "http://localhost:11434");
+}
+
+#[test]
+fn maintenance_chain_matches_python_opt_in_contract() {
+    let settings = resolve_maintenance_provider_settings(
+        &env(&[
+            ("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN", "codex,ollama"),
+            ("LLM_WIKI_CODEX_BRIDGE_TOKEN", "bridge-token"),
+            (
+                "KOGWISTAR_MAINTENANCE_CODEX_API_KEY_ENV",
+                "LLM_WIKI_CODEX_BRIDGE_TOKEN",
+            ),
+        ]),
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(settings.parser.provider, "codex");
+    assert_eq!(
+        settings
+            .parser
+            .fallback_specs
+            .iter()
+            .map(|spec| spec.provider.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ollama"]
+    );
+    assert_eq!(
+        settings.parser.fallback_specs[0].base_url.as_deref(),
+        Some("http://host.docker.internal:11434")
+    );
+
+    let no_chain = resolve_maintenance_provider_settings(&env(&[]), false).unwrap();
+    assert!(no_chain.parser.fallback_specs.is_empty());
+}
+
+#[test]
+fn maintenance_chain_rejects_duplicates() {
+    assert!(matches!(
+        resolve_maintenance_provider_settings(
+            &env(&[("KOGWISTAR_MAINTENANCE_PROVIDER_CHAIN", "codex,codex")]),
+            true
+        )
+        .unwrap_err(),
+        ProviderConfigError::DuplicateProviderChain
+    ));
 }

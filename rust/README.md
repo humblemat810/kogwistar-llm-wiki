@@ -39,6 +39,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   plus provenance-required lifecycle classification.
 - `kogwistar-llm-wiki-port::providers` mirrors provider aliases, OpenAI model
   env suffixes, parser endpoint defaults, and environment resolution.
+  It also mirrors parser proposal-mode settings, provider summaries, and
+  opt-in maintenance provider chains.
 - `kogwistar-llm-wiki-port::maintenance` mirrors the durable document
   maintenance plan and one-phase continuation planner.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
