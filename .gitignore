@@ -88,3 +88,7 @@ Thumbs.db
 
 # rust builds
 rust/target-api-loopback/
+rust/target/
+
+# codex
+.codex
