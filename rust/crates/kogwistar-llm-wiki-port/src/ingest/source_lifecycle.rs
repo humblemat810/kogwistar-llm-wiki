@@ -63,7 +63,7 @@ pub struct DurableParseLimits {
 }
 
 impl DurableParseLimits {
-    fn to_json(&self, include_profile: bool) -> Value {
+    pub(crate) fn to_json(&self, include_profile: bool) -> Value {
         let mut limits = BTreeMap::from([
             (
                 "max_depth".to_owned(),
