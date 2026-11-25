@@ -63,6 +63,27 @@ pub fn python_ascii_json(value: &Value) -> String {
     }
 }
 
+#[must_use]
+pub fn python_spaced_json(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => json_string(value),
+        Value::Array(values) => {
+            let items: Vec<String> = values.iter().map(python_spaced_json).collect();
+            format!("[{}]", items.join(", "))
+        }
+        Value::Object(values) => {
+            let items: Vec<String> = values
+                .iter()
+                .map(|(key, value)| format!("{}: {}", json_string(key), python_spaced_json(value)))
+                .collect();
+            format!("{{{}}}", items.join(", "))
+        }
+    }
+}
+
 fn json_string(value: &str) -> String {
     let mut output = String::from("\"");
     for character in value.chars() {

@@ -1,6 +1,6 @@
 use kogwistar_llm_wiki_port::models::JsonObject;
 use kogwistar_llm_wiki_port::provenance::{
-    canonicalize_evidence_pack_digest, evidence_pack_digest_hash,
+    canonicalize_evidence_pack_digest, evidence_pack_digest_hash, python_spaced_json,
 };
 use serde_json::{json, Value};
 
@@ -53,5 +53,13 @@ fn ascii_json_escapes_python_non_ascii() {
     assert_eq!(
         kogwistar_llm_wiki_port::provenance::python_ascii_json(&Value::from("世界")),
         "\"\\u4e16\\u754c\""
+    );
+}
+
+#[test]
+fn spaced_json_matches_python_default_separators() {
+    assert_eq!(
+        python_spaced_json(&serde_json::json!({"z": 2, "a": 1})),
+        "{\"a\": 1, \"z\": 2}"
     );
 }
