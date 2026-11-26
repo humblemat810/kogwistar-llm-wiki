@@ -5,6 +5,7 @@ pub mod ingest;
 pub mod layered;
 pub mod longrun;
 pub mod maintenance;
+pub mod maintenance_queue;
 pub mod models;
 pub mod parse_quality;
 pub mod parse_statistics;
