@@ -49,6 +49,7 @@
 - [x] Bounded cross-link proposal, critic, review, and atomic-replacement contracts.
 - [x] Deterministic graph context packing and optional provider budget limits.
 - [x] Durable cross-link review batches, CAS outcomes, decision metadata, and revalidation payloads.
+- [x] Bounded observation critic output validation and provider failure classification.
 
 ### Projection, Policy, And Usage
 
