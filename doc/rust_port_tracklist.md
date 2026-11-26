@@ -53,6 +53,7 @@
 - [x] Compact observation records, entity metadata flattening, and span extraction.
 - [x] Bounded read-only observation frames and deterministic quality assessments.
 - [x] Durable workflow design artifacts for maintenance, cross-link, and multimodal retrieval.
+- [x] Budget terminalization, bounded selection replies, and acknowledgement trace contracts.
 
 ### Projection, Policy, And Usage
 
