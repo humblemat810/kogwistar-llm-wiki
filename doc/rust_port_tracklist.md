@@ -50,6 +50,7 @@
 - [x] Deterministic graph context packing and optional provider budget limits.
 - [x] Durable cross-link review batches, CAS outcomes, decision metadata, and revalidation payloads.
 - [x] Bounded observation critic output validation and provider failure classification.
+- [x] Compact observation records, entity metadata flattening, and span extraction.
 
 ### Projection, Policy, And Usage
 
