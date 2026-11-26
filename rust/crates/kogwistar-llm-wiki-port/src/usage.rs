@@ -80,6 +80,23 @@ impl std::fmt::Display for BudgetContractError {
 
 impl std::error::Error for BudgetContractError {}
 
+#[derive(Debug)]
+pub enum BudgetError {
+    Exhausted(String),
+    Invalid(&'static str),
+}
+
+impl std::fmt::Display for BudgetError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exhausted(message) => write!(formatter, "{message}"),
+            Self::Invalid(message) => write!(formatter, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for BudgetError {}
+
 pub fn budget_event_from_dict(payload: &Value) -> Result<BudgetEvent, BudgetContractError> {
     let event: BudgetEvent = serde_json::from_value(payload.clone())
         .map_err(|_| BudgetContractError::Field("budget_event"))?;
@@ -531,4 +548,443 @@ pub fn summarize_provider_budget_events(
         summary.insert("cost_source".to_owned(), Value::from("provider"));
     }
     Value::Object(summary)
+}
+
+fn state_i64(state: &JsonObject, key: &str) -> i64 {
+    state
+        .get(key)
+        .and_then(Value::as_f64)
+        .map(|value| value as i64)
+        .unwrap_or_default()
+}
+
+fn state_f64(state: &JsonObject, key: &str) -> f64 {
+    state.get(key).and_then(Value::as_f64).unwrap_or_default()
+}
+
+fn set_state_i64(state: &mut JsonObject, key: &str, value: i64) {
+    state.insert(key.to_owned(), Value::from(value));
+}
+
+fn set_state_f64(state: &mut JsonObject, key: &str, value: f64) {
+    if let Some(number) = serde_json::Number::from_f64(value) {
+        state.insert(key.to_owned(), Value::Number(number));
+    }
+}
+
+fn metadata_with_reason(reason: &str, meta: Option<&JsonObject>) -> JsonObject {
+    let mut value = JsonObject::from([("reason".to_owned(), Value::from(reason))]);
+    if let Some(meta) = meta {
+        for (key, item) in meta {
+            value.insert(key.clone(), item.clone());
+        }
+    }
+    value
+}
+
+fn state_text(state: &JsonObject, key: &str, default: &'static str) -> String {
+    state
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| default.to_owned())
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StateBackedBudgetLedger {
+    pub state: JsonObject,
+    pub events: Vec<BudgetEvent>,
+    ceilings: BTreeMap<String, f64>,
+}
+
+impl StateBackedBudgetLedger {
+    #[must_use]
+    pub fn new(state: JsonObject) -> Self {
+        Self {
+            state,
+            events: Vec::new(),
+            ceilings: BTreeMap::new(),
+        }
+    }
+
+    pub fn set_ceilings(&mut self, ceilings: Option<&BTreeMap<String, f64>>) {
+        let Some(ceilings) = ceilings else {
+            return;
+        };
+        for (key, value) in ceilings {
+            let current = self.ceilings.get(key);
+            let bounded = current.map_or(*value, |current| current.min(*value));
+            self.ceilings.insert(key.clone(), bounded);
+        }
+    }
+
+    fn bounded_limit(&self, key: &str) -> f64 {
+        let raw = if key == "cost_budget" {
+            state_f64(&self.state, key)
+        } else {
+            state_i64(&self.state, key) as f64
+        };
+        match self.ceilings.get(key) {
+            Some(ceiling) if raw > 0.0 => raw.min(*ceiling),
+            Some(ceiling) => *ceiling,
+            None => raw,
+        }
+    }
+
+    #[must_use]
+    pub fn total(&self) -> i64 {
+        self.bounded_limit("token_budget") as i64
+    }
+
+    #[must_use]
+    pub fn used(&self) -> i64 {
+        state_i64(&self.state, "token_used")
+    }
+
+    #[must_use]
+    pub fn remaining(&self) -> i64 {
+        (self.total() - self.used()).max(0)
+    }
+
+    #[must_use]
+    pub fn time_budget_ms(&self) -> i64 {
+        self.bounded_limit("time_budget_ms") as i64
+    }
+
+    #[must_use]
+    pub fn time_used_ms(&self) -> i64 {
+        state_i64(&self.state, "time_used_ms")
+    }
+
+    #[must_use]
+    pub fn rate_limit(&self) -> i64 {
+        self.bounded_limit("rate_limit") as i64
+    }
+
+    #[must_use]
+    pub fn rate_used(&self) -> i64 {
+        state_i64(&self.state, "rate_used")
+    }
+
+    #[must_use]
+    pub fn rate_window_ms(&self) -> i64 {
+        self.bounded_limit("rate_window_ms") as i64
+    }
+
+    #[must_use]
+    pub fn rate_window_started_ms(&self) -> i64 {
+        state_i64(&self.state, "rate_window_started_ms")
+    }
+
+    #[must_use]
+    pub fn rate_window_ready_ms(&self) -> Option<i64> {
+        if self.rate_limit() == 0
+            || self.rate_window_ms() == 0
+            || self.rate_window_started_ms() == 0
+        {
+            return None;
+        }
+        Some(self.rate_window_started_ms() + self.rate_window_ms())
+    }
+
+    #[must_use]
+    pub fn step_budget(&self) -> i64 {
+        self.bounded_limit("step_budget") as i64
+    }
+
+    #[must_use]
+    pub fn step_used(&self) -> i64 {
+        state_i64(&self.state, "step_used")
+    }
+
+    #[must_use]
+    pub fn call_budget(&self) -> i64 {
+        self.bounded_limit("call_budget") as i64
+    }
+
+    #[must_use]
+    pub fn call_used(&self) -> i64 {
+        state_i64(&self.state, "call_used")
+    }
+
+    #[must_use]
+    pub fn cost_budget(&self) -> f64 {
+        self.bounded_limit("cost_budget")
+    }
+
+    #[must_use]
+    pub fn cost_used(&self) -> f64 {
+        state_f64(&self.state, "cost_used")
+    }
+
+    pub fn debit_step(
+        &mut self,
+        amount: i64,
+        reason: Option<&str>,
+        run_id: &str,
+        attribution: Option<&BudgetAttribution>,
+    ) -> Result<(), BudgetError> {
+        let amount = amount.max(0);
+        if amount < 0 {
+            return Err(BudgetError::Invalid("step amount must be >= 0"));
+        }
+        let next_used = self.step_used() + amount;
+        if self.step_budget() != 0 && next_used > self.step_budget() {
+            return Err(BudgetError::Exhausted(format!(
+                "step budget exhausted: used={} total={}",
+                self.step_used(),
+                self.step_budget()
+            )));
+        }
+        set_state_i64(&mut self.state, "step_used", next_used);
+        self.events.push(BudgetEvent {
+            run_id: run_id.to_owned(),
+            source: "runtime".to_owned(),
+            kind: "debit".to_owned(),
+            amount: amount as f64,
+            unit: "step".to_owned(),
+            scope: state_text(&self.state, "budget_scope", "run"),
+            ts_ms: None,
+            meta: JsonObject::from([(
+                "reason".to_owned(),
+                Value::from(reason.unwrap_or("workflow_step")),
+            )]),
+            event_id: None,
+            attribution: attribution.cloned(),
+        });
+        Ok(())
+    }
+
+    pub fn debit_call(
+        &mut self,
+        amount: i64,
+        reason: Option<&str>,
+        run_id: &str,
+        attribution: Option<&BudgetAttribution>,
+    ) -> Result<(), BudgetError> {
+        let amount = amount.max(0);
+        if amount < 0 {
+            return Err(BudgetError::Invalid("call amount must be >= 0"));
+        }
+        let next_used = self.call_used() + amount;
+        if self.call_budget() != 0 && next_used > self.call_budget() {
+            return Err(BudgetError::Exhausted(format!(
+                "call budget exhausted: used={} total={}",
+                self.call_used(),
+                self.call_budget()
+            )));
+        }
+        set_state_i64(&mut self.state, "call_used", next_used);
+        self.events.push(BudgetEvent {
+            run_id: run_id.to_owned(),
+            source: "runtime".to_owned(),
+            kind: "debit".to_owned(),
+            amount: amount as f64,
+            unit: "call".to_owned(),
+            scope: state_text(&self.state, "budget_scope", "run"),
+            ts_ms: None,
+            meta: JsonObject::from([(
+                "reason".to_owned(),
+                Value::from(reason.unwrap_or("llm_call")),
+            )]),
+            event_id: None,
+            attribution: attribution.cloned(),
+        });
+        Ok(())
+    }
+
+    fn refresh_rate_window(&mut self, amount: i64, now_ms: i64) -> Result<(), BudgetError> {
+        let limit = self.rate_limit();
+        let window_ms = self.rate_window_ms();
+        if limit == 0 {
+            return Ok(());
+        }
+        let mut used = self.rate_used();
+        let mut window_started_ms = self.rate_window_started_ms();
+        if window_ms != 0
+            && window_started_ms != 0
+            && now_ms.saturating_sub(window_started_ms) >= window_ms
+        {
+            window_started_ms = now_ms;
+            used = 0;
+        }
+        if window_ms != 0 && window_started_ms == 0 {
+            window_started_ms = now_ms;
+        }
+        if limit != 0 && used + amount > limit {
+            return Err(BudgetError::Exhausted(format!(
+                "rate budget exhausted: used={} total={}",
+                used, limit
+            )));
+        }
+        set_state_i64(&mut self.state, "rate_used", used + amount);
+        set_state_i64(&mut self.state, "rate_window_started_ms", window_started_ms);
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn debit(
+        &mut self,
+        amount: i64,
+        reason: &str,
+        source: &str,
+        run_id: &str,
+        unit: Option<&str>,
+        attribution: Option<&BudgetAttribution>,
+        event_id: Option<&str>,
+        meta: Option<&JsonObject>,
+    ) -> Result<(), BudgetError> {
+        let amount = amount.max(0);
+        if amount < 0 {
+            return Err(BudgetError::Invalid("amount must be >= 0"));
+        }
+        let next_used = self.used() + amount;
+        if next_used > self.total() {
+            self.events.push(BudgetEvent {
+                run_id: run_id.to_owned(),
+                source: source.to_owned(),
+                kind: "exhausted".to_owned(),
+                amount: amount as f64,
+                unit: unit
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| state_text(&self.state, "budget_kind", "token")),
+                scope: state_text(&self.state, "budget_scope", "run"),
+                ts_ms: None,
+                meta: metadata_with_reason(reason, meta),
+                event_id: event_id.map(ToString::to_string),
+                attribution: attribution.cloned(),
+            });
+            return Err(BudgetError::Exhausted(format!(
+                "budget exhausted: used={} total={}",
+                self.used(),
+                self.total()
+            )));
+        }
+        let now_ms = state_i64(&self.state, "now_ms");
+        self.refresh_rate_window(amount, now_ms)?;
+        set_state_i64(&mut self.state, "token_used", next_used);
+        self.events.push(BudgetEvent {
+            run_id: run_id.to_owned(),
+            source: source.to_owned(),
+            kind: "debit".to_owned(),
+            amount: amount as f64,
+            unit: unit
+                .map(ToString::to_string)
+                .unwrap_or_else(|| state_text(&self.state, "budget_kind", "token")),
+            scope: state_text(&self.state, "budget_scope", "run"),
+            ts_ms: None,
+            meta: metadata_with_reason(reason, meta),
+            event_id: event_id.map(ToString::to_string),
+            attribution: attribution.cloned(),
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn debit_time(
+        &mut self,
+        amount_ms: i64,
+        reason: &str,
+        source: &str,
+        run_id: &str,
+        attribution: Option<&BudgetAttribution>,
+        event_id: Option<&str>,
+        meta: Option<&JsonObject>,
+    ) -> Result<(), BudgetError> {
+        let amount_ms = amount_ms.max(0);
+        if amount_ms < 0 {
+            return Err(BudgetError::Invalid("amount_ms must be >= 0"));
+        }
+        let next_used = self.time_used_ms() + amount_ms;
+        if self.time_budget_ms() != 0 && next_used > self.time_budget_ms() {
+            self.events.push(BudgetEvent {
+                run_id: run_id.to_owned(),
+                source: source.to_owned(),
+                kind: "exhausted".to_owned(),
+                amount: amount_ms as f64,
+                unit: "ms".to_owned(),
+                scope: state_text(&self.state, "budget_scope", "run"),
+                ts_ms: None,
+                meta: metadata_with_reason(reason, meta),
+                event_id: event_id.map(ToString::to_string),
+                attribution: attribution.cloned(),
+            });
+            return Err(BudgetError::Exhausted(format!(
+                "time budget exhausted: used={} total={}",
+                self.time_used_ms(),
+                self.time_budget_ms()
+            )));
+        }
+        set_state_i64(&mut self.state, "time_used_ms", next_used);
+        self.events.push(BudgetEvent {
+            run_id: run_id.to_owned(),
+            source: source.to_owned(),
+            kind: "debit".to_owned(),
+            amount: amount_ms as f64,
+            unit: "ms".to_owned(),
+            scope: state_text(&self.state, "budget_scope", "run"),
+            ts_ms: None,
+            meta: metadata_with_reason(reason, meta),
+            event_id: event_id.map(ToString::to_string),
+            attribution: attribution.cloned(),
+        });
+        Ok(())
+    }
+
+    pub fn ingest(&mut self, event: BudgetEvent) -> Result<(), BudgetError> {
+        if (event.kind == "debit" || event.kind == "token") && event.unit != "ms" {
+            self.debit(
+                event.amount as i64,
+                event
+                    .meta
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(event.kind.as_str()),
+                event.source.as_str(),
+                event.run_id.as_str(),
+                Some(event.unit.as_str()),
+                event.attribution.as_ref(),
+                event.event_id.as_deref(),
+                Some(&event.meta),
+            )?;
+            return Ok(());
+        }
+        if event.kind == "time" || event.unit == "ms" {
+            self.debit_time(
+                event.amount as i64,
+                event
+                    .meta
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(event.kind.as_str()),
+                event.source.as_str(),
+                event.run_id.as_str(),
+                event.attribution.as_ref(),
+                event.event_id.as_deref(),
+                Some(&event.meta),
+            )?;
+            return Ok(());
+        }
+        if event.kind == "cost" {
+            let next_cost_used = self.cost_used() + event.amount;
+            set_state_f64(&mut self.state, "cost_used", next_cost_used);
+            self.events.push(event);
+            return Ok(());
+        }
+        self.events.push(event);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn should_suspend_for_budget(&self) -> bool {
+        self.total() != 0 && self.used() >= self.total()
+            || self.time_budget_ms() != 0 && self.time_used_ms() >= self.time_budget_ms()
+            || self.rate_limit() != 0 && self.rate_used() >= self.rate_limit()
+            || self.step_budget() != 0 && self.step_used() >= self.step_budget()
+            || self.call_budget() != 0 && self.call_used() >= self.call_budget()
+            || self.cost_budget() > 0.0 && self.cost_used() >= self.cost_budget()
+    }
 }

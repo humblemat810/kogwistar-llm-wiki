@@ -5,8 +5,8 @@ use kogwistar_llm_wiki_port::providers::ProviderEndpointConfig;
 use kogwistar_llm_wiki_port::usage::{
     budget_event_from_dict, budget_event_to_dict, estimate_token_cost_usd, extract_provider_usage,
     provider_call_count, resolve_token_pricing, summarize_budget_events,
-    summarize_provider_budget_events, BudgetAttribution, BudgetEvent, TokenPricing,
-    WorkflowProviderSettings,
+    summarize_provider_budget_events, BudgetAttribution, BudgetError, BudgetEvent,
+    StateBackedBudgetLedger, TokenPricing, WorkflowProviderSettings,
 };
 use serde_json::{json, Value};
 
@@ -41,6 +41,15 @@ fn event(
             ..BudgetAttribution::default()
         }),
     }
+}
+
+fn map(value: serde_json::Value) -> JsonObject {
+    value
+        .as_object()
+        .expect("JSON object")
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
 }
 
 #[test]
@@ -236,4 +245,116 @@ fn token_cost_estimation_matches_python() {
         Some((0.001, "estimated_partial"))
     );
     assert_eq!(estimate_token_cost_usd(&json!({}), &pricing), None);
+}
+
+#[test]
+fn budget_ledger_tracks_state_and_events() {
+    let state = map(json!({
+        "token_budget": 100,
+        "budget_scope": "test",
+        "budget_kind": "token",
+        "now_ms": 100
+    }));
+    let mut ledger = StateBackedBudgetLedger::new(state);
+    assert_eq!(ledger.total(), 100);
+    assert_eq!(ledger.remaining(), 100);
+    ledger
+        .debit(
+            60,
+            "input",
+            "provider",
+            "run:1",
+            Some("token"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert_eq!(ledger.used(), 60);
+    assert_eq!(ledger.remaining(), 40);
+    assert_eq!(ledger.events[0].kind, "debit");
+    assert_eq!(ledger.events[0].unit, "token");
+    assert_eq!(ledger.events[0].scope, "test");
+
+    assert!(matches!(
+        ledger.debit(
+            41,
+            "input",
+            "provider",
+            "run:2",
+            Some("token"),
+            None,
+            None,
+            None
+        ),
+        Err(BudgetError::Exhausted(_))
+    ));
+    assert_eq!(ledger.used(), 60);
+    assert_eq!(ledger.events[1].kind, "exhausted");
+}
+
+#[test]
+fn budget_ledger_supports_cost_time_and_suspension() {
+    let state = map(json!({
+        "token_budget": 10,
+        "time_budget_ms": 20,
+        "step_budget": 1,
+        "call_budget": 1,
+        "cost_budget": 0.1,
+        "budget_scope": "test"
+    }));
+    let mut ledger = StateBackedBudgetLedger::new(state);
+    ledger.debit_step(1, None, "run:1", None).unwrap();
+    ledger.debit_call(1, None, "run:1", None).unwrap();
+    ledger
+        .debit_time(20, "step", "runtime", "run:1", None, None, None)
+        .unwrap();
+    ledger
+        .ingest(event("cost", 0.1, "total_cost", Some("call:1"), None))
+        .unwrap();
+
+    assert_eq!(ledger.step_used(), 1);
+    assert_eq!(ledger.call_used(), 1);
+    assert_eq!(ledger.time_used_ms(), 20);
+    assert_eq!(ledger.cost_used(), 0.1);
+    assert!(ledger.should_suspend_for_budget());
+}
+
+#[test]
+fn budget_ledger_uses_trusted_ceilings() {
+    let state = map(json!({"token_budget": 100, "cost_budget": 10.0}));
+    let mut ledger = StateBackedBudgetLedger::new(state);
+    ledger.set_ceilings(Some(&BTreeMap::from([
+        ("token_budget".to_owned(), 20.0),
+        ("cost_budget".to_owned(), 1.0),
+    ])));
+
+    assert_eq!(ledger.total(), 20);
+    assert_eq!(ledger.cost_budget(), 1.0);
+}
+
+#[test]
+fn budget_ingest_uses_python_event_kinds() {
+    let mut ledger = StateBackedBudgetLedger::new(map(json!({
+        "token_budget": 100,
+        "time_budget_ms": 100,
+        "budget_scope": "test"
+    })));
+
+    ledger
+        .ingest(event("token", 20.0, "input_tokens", Some("call:1"), None))
+        .unwrap();
+    ledger
+        .ingest(event("time", 12.0, "ms", Some("call:1"), None))
+        .unwrap();
+    ledger
+        .ingest(event("cost", 0.01, "total_cost", Some("call:1"), None))
+        .unwrap();
+
+    assert_eq!(ledger.used(), 20);
+    assert_eq!(ledger.time_used_ms(), 12);
+    assert_eq!(ledger.cost_used(), 0.01);
+    assert_eq!(ledger.events[0].kind, "debit");
+    assert_eq!(ledger.events[1].kind, "debit");
+    assert_eq!(ledger.events[2].kind, "cost");
 }

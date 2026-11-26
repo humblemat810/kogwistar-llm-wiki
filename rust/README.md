@@ -52,6 +52,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   workflow status.
 - `kogwistar-llm-wiki-port::usage` mirrors budget-event envelopes, attribution,
   provider call counts, token/cost summaries, and cost-status fallbacks.
+  It also mirrors state-backed token/time/rate/step/call/cost budget ledgers
+  with trusted ceilings and suspension checks.
   It also mirrors token-pricing overrides/reference cards, provider usage
   extraction, and labelled cost estimation.
   It also mirrors parser proposal-mode settings, provider summaries, and
