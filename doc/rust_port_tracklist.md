@@ -52,6 +52,7 @@
 - [x] Bounded observation critic output validation and provider failure classification.
 - [x] Compact observation records, entity metadata flattening, and span extraction.
 - [x] Bounded read-only observation frames and deterministic quality assessments.
+- [x] Durable workflow design artifacts for maintenance, cross-link, and multimodal retrieval.
 
 ### Projection, Policy, And Usage
 
