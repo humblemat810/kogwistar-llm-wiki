@@ -48,6 +48,7 @@
 - [x] Request-scoped seed collection, edge visibility, topic probes, and selection audit envelopes.
 - [x] Bounded cross-link proposal, critic, review, and atomic-replacement contracts.
 - [x] Deterministic graph context packing and optional provider budget limits.
+- [x] Durable cross-link review batches, CAS outcomes, decision metadata, and revalidation payloads.
 
 ### Projection, Policy, And Usage
 
