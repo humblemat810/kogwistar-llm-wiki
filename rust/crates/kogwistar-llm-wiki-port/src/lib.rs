@@ -40,6 +40,7 @@ pub mod provenance;
 pub mod providers;
 pub mod seeding;
 pub mod usage;
+pub mod worker_contacts;
 pub mod worker_derived;
 pub mod worker_observation;
 pub mod worker_runtime;

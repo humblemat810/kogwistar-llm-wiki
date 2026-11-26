@@ -122,6 +122,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   persistence and bounded same-job continuation decisions.
 - `kogwistar-llm-wiki-port::worker_derived` mirrors bounded derived-knowledge
   candidate queries and deterministic group-node plans.
+- `kogwistar-llm-wiki-port::worker_contacts` mirrors ACL-first contact scan
+  payload validation, observation bounds, and completion trace contracts.
 - `kogwistar-llm-wiki-port::maintenance_state` mirrors workspace metadata
   guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - `kogwistar-llm-wiki-port::maintenance_selection` mirrors connected, semantic,
