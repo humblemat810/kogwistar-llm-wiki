@@ -152,6 +152,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+kogwistar_llm_wiki = ["_kogwistar_llm_wiki_rust.pyd", "_kogwistar_llm_wiki_rust*.so"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

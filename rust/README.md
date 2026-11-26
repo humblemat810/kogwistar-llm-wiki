@@ -97,6 +97,16 @@ evidence-pack hashing, and basic-sense evaluation.
 `KOGWISTAR_LLM_WIKI_RUST=native` to require the extension, `python` to force
 fallback, or `auto` (default) to use the extension when present.
 
+Build and install the current-host extension with:
+
+```powershell
+python scripts/build_native.py
+```
+
+The script maps Cargo's host artifact to Python's extension name and copies it
+into `src/kogwistar_llm_wiki/`; setuptools includes both `.pyd` and `.so`
+facade artifacts in package data.
+
 The port is incremental. Prefer one Python contract slice at a time, keep the
 wire names stable, and add a Rust test for each behavior before expanding
 another module.
