@@ -37,6 +37,8 @@
 - [x] Bounded dependency invalidation planning and queue payload contracts.
 - [x] Maintenance profile decisions, windowed budgets, and provider/profile fallback ladders.
 - [x] Patch status and intent classification into document graph lifecycle states.
+- [x] Maintenance-kind operation categories and append-only trace report aggregation.
+- [x] Maintenance cost grouping by maintenance kind and model.
 
 ### Projection, Policy, And Usage
 
