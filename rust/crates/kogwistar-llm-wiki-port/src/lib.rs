@@ -1,6 +1,7 @@
 pub mod archiving;
 pub mod compose;
 pub mod configuration;
+pub mod crosslink_context;
 pub mod crosslink_proposals;
 pub mod diagnostics;
 pub mod ids;
