@@ -84,6 +84,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   invalidation planning and queue payload contracts.
 - `kogwistar-llm-wiki-port::maintenance_control` mirrors maintenance control
   state, deployment defaults, and fail-closed corruption policy.
+- `kogwistar-llm-wiki-port::maintenance` mirrors bounded structured
+  maintenance continuation context and round append helpers.
 - `kogwistar-llm-wiki-port::maintenance_policy` mirrors maintenance-kind
   normalization and workflow routing.
 - `kogwistar-llm-wiki-port::maintenance_job_lowering` mirrors maintenance job

@@ -1,5 +1,5 @@
 use crate::models::JsonObject;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 pub const MAX_MAINTENANCE_CONTEXT_TOKENS: usize = 10_000;
 const MAX_TURNS: usize = 10;
@@ -238,6 +238,33 @@ pub fn bound_maintenance_context(value: Option<&JsonObject>) -> JsonObject {
         }
     }
     result
+}
+
+#[allow(clippy::too_many_arguments)]
+#[must_use]
+pub fn append_maintenance_round(
+    value: Option<&JsonObject>,
+    round_number: i64,
+    summary: &str,
+    touched_node_ids: &[String],
+    touched_edge_ids: &[String],
+    next_seed_node_ids: &[String],
+    hop_limit: i64,
+    selection_reasons: &[Value],
+) -> JsonObject {
+    let mut context = bound_maintenance_context(value);
+    if let Some(Value::Array(turns)) = context.get_mut("turns") {
+        turns.push(json!({
+            "round": round_number.max(0),
+            "summary": summary,
+            "touched_node_ids": touched_node_ids,
+            "touched_edge_ids": touched_edge_ids,
+            "next_seed_node_ids": next_seed_node_ids,
+            "hop_limit": hop_limit,
+            "selection_reasons": selection_reasons
+        }));
+    }
+    bound_maintenance_context(Some(&context))
 }
 
 fn bounded_turn(value: &Value) -> Option<JsonObject> {

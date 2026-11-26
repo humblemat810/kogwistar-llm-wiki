@@ -62,9 +62,11 @@ pub fn configured_default_request_max_rounds() -> Result<i64, String> {
     }
     let parsed = raw
         .parse::<i64>()
-        .map_err(|_| format!("{REQUEST_MAX_ROUNDS_ENV} must be a positive integer"))?;
-    if parsed <= 0 {
-        return Err(format!("{REQUEST_MAX_ROUNDS_ENV} must be positive"));
+        .map_err(|_| format!("{REQUEST_MAX_ROUNDS_ENV} must be an integer from 1 to 100"))?;
+    if !(1..=100).contains(&parsed) {
+        return Err(format!(
+            "{REQUEST_MAX_ROUNDS_ENV} must be between 1 and 100"
+        ));
     }
     Ok(parsed)
 }

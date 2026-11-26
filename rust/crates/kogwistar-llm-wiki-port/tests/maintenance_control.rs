@@ -13,6 +13,19 @@ fn default_request_max_rounds_reads_environment() {
 }
 
 #[test]
+fn default_request_max_rounds_rejects_out_of_bounds_values() {
+    std::env::set_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "0");
+    assert!(configured_default_request_max_rounds()
+        .unwrap_err()
+        .contains("between 1 and 100"));
+    std::env::set_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "101");
+    assert!(configured_default_request_max_rounds()
+        .unwrap_err()
+        .contains("between 1 and 100"));
+    std::env::remove_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS");
+}
+
+#[test]
 fn control_state_maps_python_wire_fields() {
     std::env::remove_var("LLM_WIKI_MAINTENANCE_PROFILE");
     std::env::remove_var("LLM_WIKI_MAINTENANCE_MODEL_CLASS");
