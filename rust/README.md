@@ -86,6 +86,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   state, deployment defaults, and fail-closed corruption policy.
 - `kogwistar-llm-wiki-port::maintenance_policy` mirrors maintenance-kind
   normalization and workflow routing.
+- `kogwistar-llm-wiki-port::maintenance_job_lowering` mirrors maintenance job
+  lowering into typed review patches.
 - `kogwistar-llm-wiki-port::maintenance_profiles` mirrors maintenance profile
   decisions, windowed budgets, and provider/profile fallback ladders.
 - `kogwistar-llm-wiki-port::maintenance_reporting` mirrors maintenance cost
