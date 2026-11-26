@@ -47,6 +47,7 @@
 - [x] Workspace metadata guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - [x] Request-scoped seed collection, edge visibility, topic probes, and selection audit envelopes.
 - [x] Bounded cross-link proposal, critic, review, and atomic-replacement contracts.
+- [x] Deterministic graph context packing and optional provider budget limits.
 
 ### Projection, Policy, And Usage
 
