@@ -37,6 +37,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   parse session, generation, member, frontier, and legacy generation IDs.
 - `kogwistar-llm-wiki-port::provenance` mirrors evidence-pack digest
   canonicalization and deterministic SHA-256 hashing.
+- `kogwistar-llm-wiki-port::seeding` mirrors graph-seed source grounding,
+  endpoint validation, reserved-property guards, and canonicalization.
 - `kogwistar-llm-wiki-port::policies` mirrors conservative promotion decisions,
   artifact taxonomy visibility, and projection eligibility.
   It also mirrors derived-knowledge and execution-wisdom query/metadata contracts
