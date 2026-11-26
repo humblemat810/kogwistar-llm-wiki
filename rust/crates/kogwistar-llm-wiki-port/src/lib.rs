@@ -27,6 +27,7 @@ pub mod maintenance_selection;
 pub mod maintenance_state;
 pub mod maintenance_statistics;
 pub mod maintenance_status;
+pub mod maintenance_strategies;
 pub mod maintenance_worker;
 pub mod models;
 pub mod observation_critic;

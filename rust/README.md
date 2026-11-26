@@ -112,6 +112,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   observation frames and deterministic quality assessments.
 - `kogwistar-llm-wiki-port::maintenance_designs` mirrors durable workflow
   design artifacts for maintenance, cross-link, and multimodal retrieval.
+- `kogwistar-llm-wiki-port::maintenance_strategies` mirrors specific-first
+  maintenance strategy routing and default registry ordering.
 - `kogwistar-llm-wiki-port::maintenance_state` mirrors workspace metadata
   guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - `kogwistar-llm-wiki-port::worker_selection` mirrors request-scoped seed
