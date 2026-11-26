@@ -43,6 +43,7 @@
 - [x] Maintenance control state, deployment defaults, and fail-closed corruption policy.
 - [x] Maintenance-kind normalization and workflow routing.
 - [x] Maintenance job lowering into typed review patches.
+- [x] Bounded structured maintenance continuation context and round append helpers.
 
 ### Projection, Policy, And Usage
 
