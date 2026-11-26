@@ -64,6 +64,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   maintenance plan and one-phase continuation planner.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
   maintenance-context guards and maintenance-job queue payload construction.
+- `kogwistar-llm-wiki-port::ingest::run` mirrors ingest operation branches,
+  durable-session selection, artifacts, runtime timing, and trace envelopes.
 - `kogwistar-llm-wiki-port::ingest::maintenance_requests` also mirrors
   projection-request IDs and queue payloads.
 - `kogwistar-llm-wiki-port::ids` mirrors the Python stable-ID contract,
