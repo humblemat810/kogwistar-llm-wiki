@@ -56,6 +56,7 @@
 - [x] Budget terminalization, bounded selection replies, and acknowledgement trace contracts.
 - [x] Redacted observation persistence and bounded same-job continuation decisions.
 - [x] Bounded derived-knowledge candidate queries and deterministic group-node plans.
+- [x] ACL-first contact scan payload validation, observation bounds, and completion trace contracts.
 
 ### Projection, Policy, And Usage
 
