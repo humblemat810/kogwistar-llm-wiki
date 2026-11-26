@@ -39,6 +39,7 @@
 - [x] Patch status and intent classification into document graph lifecycle states.
 - [x] Maintenance-kind operation categories and append-only trace report aggregation.
 - [x] Maintenance cost grouping by maintenance kind and model.
+- [x] Connected, semantic, evidence/history candidate selection and seeded embedding probes.
 
 ### Projection, Policy, And Usage
 
