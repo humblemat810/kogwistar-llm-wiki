@@ -55,6 +55,7 @@
 - [x] Durable workflow design artifacts for maintenance, cross-link, and multimodal retrieval.
 - [x] Budget terminalization, bounded selection replies, and acknowledgement trace contracts.
 - [x] Redacted observation persistence and bounded same-job continuation decisions.
+- [x] Bounded derived-knowledge candidate queries and deterministic group-node plans.
 
 ### Projection, Policy, And Usage
 
