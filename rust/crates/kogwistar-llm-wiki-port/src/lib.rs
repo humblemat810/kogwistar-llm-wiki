@@ -19,6 +19,7 @@ pub mod maintenance_profiles;
 pub mod maintenance_queue;
 pub mod maintenance_reporting;
 pub mod maintenance_selection;
+pub mod maintenance_state;
 pub mod maintenance_statistics;
 pub mod maintenance_status;
 pub mod maintenance_worker;

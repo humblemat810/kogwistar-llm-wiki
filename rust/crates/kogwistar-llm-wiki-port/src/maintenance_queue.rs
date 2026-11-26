@@ -1,6 +1,7 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::maintenance_state::persisted_budget_state;
 use crate::models::JsonObject;
 
 const BUDGET_EXHAUSTION_MARKERS: [&str; 7] = [
@@ -64,38 +65,6 @@ pub fn selection_result_payload(payload: &JsonObject) -> Value {
             .map(|candidates| candidates.iter().take(24).cloned().collect::<Vec<_>>())
             .unwrap_or_default()
     })
-}
-
-fn persisted_budget_state(state: &Value) -> Value {
-    const ALLOWED: [&str; 15] = [
-        "token_budget",
-        "token_used",
-        "step_budget",
-        "step_used",
-        "call_budget",
-        "call_used",
-        "time_budget_ms",
-        "time_used_ms",
-        "cost_budget",
-        "cost_used",
-        "request_token_budget",
-        "request_step_budget",
-        "request_call_budget",
-        "request_time_budget_ms",
-        "request_cost_budget",
-    ];
-    let Some(Value::Object(values)) = Some(state) else {
-        return Value::Null;
-    };
-    Value::Object(
-        values
-            .iter()
-            .filter(|(key, value)| {
-                ALLOWED.contains(&key.as_str()) && value.is_number() && !value.is_boolean()
-            })
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect(),
-    )
 }
 
 #[derive(Debug)]
@@ -167,7 +136,7 @@ pub fn requeue_suspended_job(
     if let Some(budget_state) = budget_state {
         next_payload.insert(
             "maintenance_budget_state".to_owned(),
-            persisted_budget_state(budget_state),
+            persisted_budget_state(Some(budget_state)),
         );
     }
     next_payload.insert(

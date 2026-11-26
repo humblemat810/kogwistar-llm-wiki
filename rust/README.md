@@ -98,6 +98,10 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   classification into document graph lifecycle states.
 - `kogwistar-llm-wiki-port::maintenance_statistics` mirrors maintenance-kind
   operation categories and append-only trace report aggregation.
+- `kogwistar-llm-wiki-port::maintenance_state` mirrors workspace metadata
+  guards, semantic fingerprints, edge endpoints, and budget-state helpers.
+- `kogwistar-llm-wiki-port::maintenance_state` mirrors workspace metadata
+  guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - `kogwistar-llm-wiki-port::maintenance_selection` mirrors connected, semantic,
   evidence/history candidate selection and seeded embedding probes.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded

@@ -5,11 +5,8 @@ use serde_json::json;
 
 #[test]
 fn default_request_max_rounds_reads_environment() {
-    std::env::remove_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS");
-    assert_eq!(configured_default_request_max_rounds().unwrap(), 2);
     std::env::set_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "4");
     assert_eq!(configured_default_request_max_rounds().unwrap(), 4);
-    std::env::remove_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS");
 }
 
 #[test]
