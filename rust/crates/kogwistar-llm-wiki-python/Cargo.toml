@@ -1,0 +1,15 @@
+[package]
+name = "kogwistar-llm-wiki-python"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "_kogwistar_llm_wiki_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+kogwistar-llm-wiki-port = { path = "../kogwistar-llm-wiki-port" }
+pyo3.workspace = true
+serde_json.workspace = true

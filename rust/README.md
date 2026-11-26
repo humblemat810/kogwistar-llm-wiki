@@ -87,6 +87,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+## Python facade
+
+`rust/crates/kogwistar-llm-wiki-python` builds a root-native `_kogwistar_llm_wiki_rust`
+PyO3 extension. Its first JSON ABI mirrors stable IDs, canonical JSON,
+evidence-pack hashing, and basic-sense evaluation.
+
 The port is incremental. Prefer one Python contract slice at a time, keep the
 wire names stable, and add a Rust test for each behavior before expanding
 another module.
