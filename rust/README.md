@@ -96,6 +96,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   context packing and optional provider budget limits.
 - `kogwistar-llm-wiki-port::crosslink_reviews` mirrors durable cross-link
   review batches, CAS outcomes, decision metadata, and revalidation payloads.
+- `kogwistar-llm-wiki-port::observation_critic` mirrors bounded observation
+  critic output validation and provider failure classification.
 - `kogwistar-llm-wiki-port::maintenance_profiles` mirrors maintenance profile
   decisions, windowed budgets, and provider/profile fallback ladders.
 - `kogwistar-llm-wiki-port::maintenance_reporting` mirrors maintenance cost

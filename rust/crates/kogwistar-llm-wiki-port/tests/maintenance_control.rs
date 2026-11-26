@@ -4,13 +4,9 @@ use kogwistar_llm_wiki_port::maintenance_control::{
 use serde_json::json;
 
 #[test]
-fn default_request_max_rounds_reads_environment() {
+fn default_request_max_rounds_reads_and_validates_environment() {
     std::env::set_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "4");
     assert_eq!(configured_default_request_max_rounds().unwrap(), 4);
-}
-
-#[test]
-fn default_request_max_rounds_rejects_out_of_bounds_values() {
     std::env::set_var("LLM_WIKI_MAINTENANCE_DEFAULT_REQUEST_MAX_ROUNDS", "0");
     assert!(configured_default_request_max_rounds()
         .unwrap_err()

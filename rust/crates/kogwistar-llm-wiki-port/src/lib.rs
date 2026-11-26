@@ -27,6 +27,7 @@ pub mod maintenance_statistics;
 pub mod maintenance_status;
 pub mod maintenance_worker;
 pub mod models;
+pub mod observation_critic;
 pub mod parse_quality;
 pub mod parse_statistics;
 pub mod parsing;
