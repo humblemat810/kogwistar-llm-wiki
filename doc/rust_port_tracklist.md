@@ -41,6 +41,7 @@
 - [x] Maintenance cost grouping by maintenance kind and model.
 - [x] Connected, semantic, evidence/history candidate selection and seeded embedding probes.
 - [x] Maintenance control state, deployment defaults, and fail-closed corruption policy.
+- [x] Maintenance-kind normalization and workflow routing.
 
 ### Projection, Policy, And Usage
 
