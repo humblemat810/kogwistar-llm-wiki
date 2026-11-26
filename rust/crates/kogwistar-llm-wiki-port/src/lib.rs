@@ -12,6 +12,7 @@ pub mod maintenance_dependency;
 pub mod maintenance_guards;
 pub mod maintenance_lane;
 pub mod maintenance_lease;
+pub mod maintenance_policy;
 pub mod maintenance_profiles;
 pub mod maintenance_queue;
 pub mod maintenance_reporting;
