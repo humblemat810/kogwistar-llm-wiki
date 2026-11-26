@@ -1,8 +1,12 @@
+use std::collections::BTreeMap;
+
 use kogwistar_llm_wiki_port::models::JsonObject;
 use kogwistar_llm_wiki_port::providers::ProviderEndpointConfig;
 use kogwistar_llm_wiki_port::usage::{
-    budget_event_from_dict, budget_event_to_dict, provider_call_count, summarize_budget_events,
-    summarize_provider_budget_events, BudgetAttribution, BudgetEvent, WorkflowProviderSettings,
+    budget_event_from_dict, budget_event_to_dict, estimate_token_cost_usd, extract_provider_usage,
+    provider_call_count, resolve_token_pricing, summarize_budget_events,
+    summarize_provider_budget_events, BudgetAttribution, BudgetEvent, TokenPricing,
+    WorkflowProviderSettings,
 };
 use serde_json::{json, Value};
 
@@ -122,4 +126,114 @@ fn provider_summary_and_cost_status_match_python() {
     let summary = summarize_provider_budget_events(&provider, &settings);
     assert_eq!(summary["cost_status"], json!("provider_reported"));
     assert_eq!(summary["cost_source"], json!("provider"));
+}
+
+#[test]
+fn token_pricing_resolver_matches_python_contract() {
+    let env = BTreeMap::from([
+        (
+            "KOGWISTAR_LONGRUN_PARSER_INPUT_COST_PER_1K_TOKENS".to_owned(),
+            "0.003".to_owned(),
+        ),
+        (
+            "KOGWISTAR_LONGRUN_PARSER_OUTPUT_COST_PER_1K_TOKENS".to_owned(),
+            "0.009".to_owned(),
+        ),
+    ]);
+    let pricing = resolve_token_pricing("azure", "gpt-5-mini", &env).unwrap();
+    assert_eq!(pricing.input_per_1k, Some(0.003));
+    assert_eq!(pricing.output_per_1k, Some(0.009));
+    assert_eq!(
+        pricing.source,
+        "KOGWISTAR_LONGRUN_PARSER_INPUT_COST_PER_1K_TOKENS"
+    );
+
+    let reference = resolve_token_pricing("OpenAI", "GPT-5-MINI", &BTreeMap::new()).unwrap();
+    assert_eq!(reference.input_per_1k, Some(0.00025));
+    assert_eq!(reference.cached_input_per_1k, Some(0.000025));
+    assert_eq!(reference.output_per_1k, Some(0.002));
+    assert!(reference
+        .source
+        .starts_with("reference:openai-public-standard"));
+
+    let unavailable = resolve_token_pricing("other", "model", &BTreeMap::new()).unwrap();
+    assert_eq!(unavailable.source, "unavailable:other/model");
+    assert!(resolve_token_pricing(
+        "other",
+        "model",
+        &BTreeMap::from([(
+            "KOGWISTAR_PARSER_INPUT_COST_PER_1K_TOKENS".to_owned(),
+            "-1".to_owned()
+        )])
+    )
+    .is_err());
+}
+
+#[test]
+fn provider_usage_extraction_matches_python_aliases() {
+    let response = json!({
+        "llm_output": {
+            "token_usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 35,
+                "total_tokens": 155
+            }
+        },
+        "generations": []
+    });
+    let usage = extract_provider_usage(&response);
+    assert_eq!(usage.get("input_tokens"), Some(&120.0));
+    assert_eq!(usage.get("output_tokens"), Some(&35.0));
+    assert_eq!(usage.get("total_tokens"), Some(&155.0));
+
+    let cached = json!({
+        "response_metadata": {
+            "token_usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 100,
+                "prompt_tokens_details": {"cached_tokens": 400}
+            }
+        },
+        "generations": []
+    });
+    let usage = extract_provider_usage(&cached);
+    assert_eq!(usage.get("cached_input_tokens"), Some(&400.0));
+
+    let fallback = extract_provider_usage(&json!({
+        "response_metadata": {"token_usage": {"prompt_tokens": 2, "completion_tokens": 3}}
+    }));
+    assert_eq!(fallback.get("total_tokens"), Some(&5.0));
+}
+
+#[test]
+fn token_cost_estimation_matches_python() {
+    let pricing = TokenPricing::new(
+        Some(0.001),
+        Some(0.002),
+        Some(0.0001),
+        Some("test-rate-card"),
+    )
+    .unwrap();
+    assert!(pricing.configured());
+    assert_eq!(
+        estimate_token_cost_usd(
+            &json!({
+                "input_tokens": 1000,
+                "cached_input_tokens": 400,
+                "output_tokens": 100
+            }),
+            &pricing
+        ),
+        Some((0.00084, "estimated"))
+    );
+
+    let pricing = TokenPricing::new(Some(0.001), None, None, Some("partial")).unwrap();
+    assert_eq!(
+        estimate_token_cost_usd(
+            &json!({"input_tokens": 1000, "output_tokens": 100}),
+            &pricing
+        ),
+        Some((0.001, "estimated_partial"))
+    );
+    assert_eq!(estimate_token_cost_usd(&json!({}), &pricing), None);
 }
