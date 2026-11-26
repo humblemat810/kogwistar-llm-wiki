@@ -51,6 +51,7 @@
 - [x] Durable cross-link review batches, CAS outcomes, decision metadata, and revalidation payloads.
 - [x] Bounded observation critic output validation and provider failure classification.
 - [x] Compact observation records, entity metadata flattening, and span extraction.
+- [x] Bounded read-only observation frames and deterministic quality assessments.
 
 ### Projection, Policy, And Usage
 
