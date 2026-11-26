@@ -12,6 +12,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   graph-space enum, workspace namespace helpers, namespace metadata, and
   workspace/graph-space metadata matcher from
   `src/kogwistar_llm_wiki/configuration/workspace.py`.
+- `kogwistar-llm-wiki-port::compose` mirrors typed deployment option validation
+  and dependency-free Compose text checks.
 - `kogwistar-llm-wiki-port::models` mirrors the ingest, maintenance,
   Obsidian-build, and projection snapshot contract models from
   `src/kogwistar_llm_wiki/models.py`, including Python wire names and defaults.

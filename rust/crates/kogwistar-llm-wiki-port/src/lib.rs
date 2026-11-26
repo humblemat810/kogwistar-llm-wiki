@@ -1,4 +1,5 @@
 pub mod archiving;
+pub mod compose;
 pub mod configuration;
 pub mod diagnostics;
 pub mod ids;
