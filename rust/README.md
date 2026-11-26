@@ -120,6 +120,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   bounded selection replies, and acknowledgement trace contracts.
 - `kogwistar-llm-wiki-port::worker_observation` mirrors redacted observation
   persistence and bounded same-job continuation decisions.
+- `kogwistar-llm-wiki-port::worker_derived` mirrors bounded derived-knowledge
+  candidate queries and deterministic group-node plans.
 - `kogwistar-llm-wiki-port::maintenance_state` mirrors workspace metadata
   guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - `kogwistar-llm-wiki-port::maintenance_selection` mirrors connected, semantic,
