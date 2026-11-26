@@ -57,6 +57,7 @@
 - [x] Redacted observation persistence and bounded same-job continuation decisions.
 - [x] Bounded derived-knowledge candidate queries and deterministic group-node plans.
 - [x] ACL-first contact scan payload validation, observation bounds, and completion trace contracts.
+- [x] Specific-first maintenance strategy routing and default registry ordering.
 
 ### Projection, Policy, And Usage
 
