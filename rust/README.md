@@ -65,6 +65,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
 - `kogwistar-llm-wiki-port::maintenance_queue` mirrors maintenance failure
   retry/fail decisions, bounded selection payloads, suspended frontier
   requeue payloads, persisted budget-state filtering, and lifecycle traces.
+- `kogwistar-llm-wiki-port::maintenance_lease` mirrors lease renewal outcomes,
+  claim fencing, stale-work rejection, and maintenance reply idempotency keys.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
   maintenance-context guards and maintenance-job queue payload construction.
 - `kogwistar-llm-wiki-port::ingest::run` mirrors ingest operation branches,
