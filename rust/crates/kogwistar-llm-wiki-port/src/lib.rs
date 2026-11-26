@@ -13,6 +13,7 @@ pub mod maintenance_lane;
 pub mod maintenance_lease;
 pub mod maintenance_profiles;
 pub mod maintenance_queue;
+pub mod maintenance_status;
 pub mod maintenance_worker;
 pub mod models;
 pub mod parse_quality;

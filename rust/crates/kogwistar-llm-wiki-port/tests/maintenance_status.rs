@@ -1,0 +1,49 @@
+use kogwistar_llm_wiki_port::maintenance_status::{
+    graph_status_for_patch, DocumentGraphStatus, MaintenanceIntent, MaintenancePatchStatus,
+};
+
+#[test]
+fn graph_status_covers_document_lifecycle() {
+    assert_eq!(
+        graph_status_for_patch(
+            MaintenancePatchStatus::Applied,
+            MaintenanceIntent::SeedDocument
+        ),
+        DocumentGraphStatus::Seeded
+    );
+    assert_eq!(
+        graph_status_for_patch(
+            MaintenancePatchStatus::Applied,
+            MaintenanceIntent::SplitNode
+        ),
+        DocumentGraphStatus::Expanding
+    );
+    assert_eq!(
+        graph_status_for_patch(
+            MaintenancePatchStatus::NeedsReview,
+            MaintenanceIntent::AddCrosslink
+        ),
+        DocumentGraphStatus::NeedsReview
+    );
+    assert_eq!(
+        graph_status_for_patch(
+            MaintenancePatchStatus::Applied,
+            MaintenanceIntent::AddCrosslink
+        ),
+        DocumentGraphStatus::Stable
+    );
+    assert_eq!(
+        graph_status_for_patch(
+            MaintenancePatchStatus::Retracted,
+            MaintenanceIntent::RetractCrosslink
+        ),
+        DocumentGraphStatus::Stale
+    );
+    assert_eq!(
+        graph_status_for_patch(
+            MaintenancePatchStatus::Applied,
+            MaintenanceIntent::CorrectFact
+        ),
+        DocumentGraphStatus::Superseded
+    );
+}
