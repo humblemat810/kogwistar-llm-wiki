@@ -40,6 +40,7 @@
 - [x] Maintenance-kind operation categories and append-only trace report aggregation.
 - [x] Maintenance cost grouping by maintenance kind and model.
 - [x] Connected, semantic, evidence/history candidate selection and seeded embedding probes.
+- [x] Maintenance control state, deployment defaults, and fail-closed corruption policy.
 
 ### Projection, Policy, And Usage
 
