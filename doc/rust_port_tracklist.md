@@ -35,6 +35,7 @@
 - [x] Queued revision fences and stable maintenance-run identity.
 - [x] Source revision digests, readiness IDs, CAS guards, and parse-session supersession.
 - [x] Bounded dependency invalidation planning and queue payload contracts.
+- [x] Maintenance profile decisions, windowed budgets, and provider/profile fallback ladders.
 
 ### Projection, Policy, And Usage
 
