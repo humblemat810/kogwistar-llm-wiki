@@ -8,6 +8,7 @@ pub mod maintenance;
 pub mod maintenance_lane;
 pub mod maintenance_lease;
 pub mod maintenance_queue;
+pub mod maintenance_worker;
 pub mod models;
 pub mod parse_quality;
 pub mod parse_statistics;

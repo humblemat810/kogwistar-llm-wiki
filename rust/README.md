@@ -70,6 +70,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
 - `kogwistar-llm-wiki-port::maintenance_lane` mirrors lane-reply normalization
   and suppression, durable authority snapshots/identity, and runtime authority
   context.
+- `kogwistar-llm-wiki-port::maintenance_worker` mirrors queued revision fences
+  and stable maintenance-run identity contracts.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
   maintenance-context guards and maintenance-job queue payload construction.
 - `kogwistar-llm-wiki-port::ingest::run` mirrors ingest operation branches,
