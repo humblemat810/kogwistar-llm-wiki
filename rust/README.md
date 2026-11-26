@@ -54,6 +54,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   provider call counts, token/cost summaries, and cost-status fallbacks.
   It also mirrors state-backed token/time/rate/step/call/cost budget ledgers
   with trusted ceilings and suspension checks.
+  It also mirrors generic usage adapters, stable event IDs, provider callback
+  ingestion, cost estimates, missing-cost labels, and provider errors.
   It also mirrors token-pricing overrides/reference cards, provider usage
   extraction, and labelled cost estimation.
   It also mirrors parser proposal-mode settings, provider summaries, and

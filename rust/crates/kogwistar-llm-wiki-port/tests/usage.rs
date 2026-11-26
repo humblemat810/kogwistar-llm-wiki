@@ -4,9 +4,10 @@ use kogwistar_llm_wiki_port::models::JsonObject;
 use kogwistar_llm_wiki_port::providers::ProviderEndpointConfig;
 use kogwistar_llm_wiki_port::usage::{
     budget_event_from_dict, budget_event_to_dict, estimate_token_cost_usd, extract_provider_usage,
-    provider_call_count, resolve_token_pricing, summarize_budget_events,
-    summarize_provider_budget_events, BudgetAttribution, BudgetError, BudgetEvent,
-    StateBackedBudgetLedger, TokenPricing, WorkflowProviderSettings,
+    generic_usage_adapter, provider_call_count, resolve_token_pricing, stable_event_id,
+    summarize_budget_events, summarize_provider_budget_events, BudgetAttribution, BudgetError,
+    BudgetEvent, ProviderUsageCallback, StateBackedBudgetLedger, TokenPricing,
+    WorkflowProviderSettings,
 };
 use serde_json::{json, Value};
 
@@ -357,4 +358,161 @@ fn budget_ingest_uses_python_event_kinds() {
     assert_eq!(ledger.events[0].kind, "debit");
     assert_eq!(ledger.events[1].kind, "debit");
     assert_eq!(ledger.events[2].kind, "cost");
+}
+
+#[test]
+fn generic_usage_adapter_matches_python() {
+    let attribution = BudgetAttribution {
+        source_document_id: Some("doc:1".to_owned()),
+        ..BudgetAttribution::default()
+    };
+    let usage = BTreeMap::from([
+        ("input_tokens".to_owned(), 120.0),
+        ("cached_input_tokens".to_owned(), 10.0),
+        ("output_tokens".to_owned(), 35.0),
+        ("total_cost".to_owned(), 0.0042),
+    ]);
+    let events = generic_usage_adapter(&usage, "run:1", Some("run"), Some(&attribution));
+
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.unit.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "input_tokens",
+            "cached_input_tokens",
+            "output_tokens",
+            "total_cost"
+        ]
+    );
+    assert_eq!(events[0].kind, "token");
+    assert_eq!(events[3].kind, "cost");
+    assert_eq!(events[0].source, "generic-usage");
+    assert_eq!(events[0].meta["raw_key"], json!("input_tokens"));
+    assert_eq!(events[0].attribution, Some(attribution));
+
+    let total_only = BTreeMap::from([("total_tokens".to_owned(), 15.0)]);
+    let events = generic_usage_adapter(&total_only, "run:1", None, None);
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.unit.as_str())
+            .collect::<Vec<_>>(),
+        vec!["total_tokens"]
+    );
+}
+
+#[test]
+fn provider_usage_callback_estimates_and_ingests_usage() {
+    let ledger = StateBackedBudgetLedger::new(map(json!({"token_budget": 10_000})));
+    let pricing =
+        TokenPricing::new(Some(0.001), Some(0.002), None, Some("test-rate-card")).unwrap();
+    let mut callback = ProviderUsageCallback::new(
+        ledger,
+        "parser:doc",
+        "doc-001",
+        "azure",
+        "gpt-5-mini",
+        Some(pricing),
+    );
+    let response = json!({
+        "response_metadata": {
+            "token_usage": {
+                "prompt_tokens": 1200,
+                "completion_tokens": 300,
+                "total_tokens": 1500
+            }
+        },
+        "generations": []
+    });
+
+    let emitted = callback
+        .on_llm_end(&response, "provider-call-1", 123, 1000, None)
+        .unwrap();
+
+    assert_eq!(callback.ledger.used(), 1500);
+    let cost_events: Vec<&BudgetEvent> = callback
+        .ledger
+        .events
+        .iter()
+        .filter(|event| event.kind == "cost")
+        .collect();
+    assert_eq!(cost_events.len(), 1);
+    assert_eq!(cost_events[0].amount, 0.0018);
+    assert_eq!(
+        cost_events[0].meta["cost_status"],
+        json!("estimated_from_tokens")
+    );
+    assert_eq!(cost_events[0].meta["cost_source"], json!("test-rate-card"));
+    assert_eq!(
+        cost_events[0].event_id.as_deref(),
+        Some("llm-usage-3b2858abafa010c7288a563c")
+    );
+    assert_eq!(emitted.len(), 3);
+}
+
+#[test]
+fn provider_usage_callback_is_idempotent_and_reports_missing_cost() {
+    let ledger = StateBackedBudgetLedger::new(map(json!({"token_budget": 10_000})));
+    let mut callback = ProviderUsageCallback::new(
+        ledger,
+        "parser:doc",
+        "doc-001",
+        "azure",
+        "unknown-model",
+        None,
+    );
+    let response = json!({"response_metadata": {}, "generations": []});
+
+    let emitted = callback
+        .on_llm_end(&response, "provider-call-1", 123, 1000, None)
+        .unwrap();
+    let emitted_again = callback
+        .on_llm_end(&response, "provider-call-1", 124, 1100, None)
+        .unwrap();
+
+    assert_eq!(emitted.len(), 1);
+    assert!(emitted_again.is_empty());
+    assert_eq!(callback.ledger.used(), 0);
+    let cost_events: Vec<&BudgetEvent> = callback
+        .ledger
+        .events
+        .iter()
+        .filter(|event| event.kind == "cost")
+        .collect();
+    assert_eq!(cost_events.len(), 1);
+    assert_eq!(cost_events[0].amount, 0.0);
+    assert_eq!(
+        cost_events[0].meta["cost_status"],
+        json!("unavailable_missing_tokens")
+    );
+    assert_eq!(
+        cost_events[0].event_id.as_deref(),
+        Some("llm-usage-2d553a0920b73babc33bcb93")
+    );
+}
+
+#[test]
+fn provider_usage_callback_records_error_and_time() {
+    let ledger = StateBackedBudgetLedger::new(map(json!({"token_budget": 10_000})));
+    let mut callback =
+        ProviderUsageCallback::new(ledger, "parser:doc", "doc-001", "azure", "gpt-5-mini", None);
+    callback.on_llm_start("provider-call-1", 100);
+    let emitted = callback
+        .on_llm_error("RuntimeError", "provider-call-1", 123, 350)
+        .unwrap();
+
+    assert!(emitted.iter().any(|event| event.unit == "ms"));
+    assert!(callback
+        .ledger
+        .events
+        .iter()
+        .any(|event| event.unit == "ms"));
+    assert!(callback
+        .ledger
+        .events
+        .iter()
+        .any(|event| { event.meta.get("provider_error") == Some(&json!("RuntimeError")) }));
+    assert!(stable_event_id("parser:doc", "provider-call-1", "ms").starts_with("llm-usage-"));
 }

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::models::JsonObject;
 pub use crate::providers::WorkflowProviderSettings;
@@ -987,4 +988,305 @@ impl StateBackedBudgetLedger {
             || self.call_budget() != 0 && self.call_used() >= self.call_budget()
             || self.cost_budget() > 0.0 && self.cost_used() >= self.cost_budget()
     }
+}
+
+#[must_use]
+pub fn stable_event_id(run_id: &str, provider_run_id: &str, unit: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(format!("{run_id}|{provider_run_id}|{unit}").as_bytes());
+    let digest = digest.finalize();
+    let digest = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("llm-usage-{}", &digest[..24])
+}
+
+#[must_use]
+pub fn generic_usage_adapter(
+    usage: &BTreeMap<String, f64>,
+    run_id: &str,
+    scope: Option<&str>,
+    attribution: Option<&BudgetAttribution>,
+) -> Vec<BudgetEvent> {
+    let mut token_keys = ["input_tokens", "cached_input_tokens", "output_tokens"]
+        .iter()
+        .copied()
+        .filter(|key| usage.contains_key(*key))
+        .collect::<Vec<_>>();
+    if token_keys.is_empty() && usage.contains_key("total_tokens") {
+        token_keys.push("total_tokens");
+    }
+    let mut events = Vec::new();
+    for key in token_keys.into_iter().chain(std::iter::once("total_cost")) {
+        let Some(amount) = usage.get(key) else {
+            continue;
+        };
+        events.push(BudgetEvent {
+            run_id: run_id.to_owned(),
+            source: "generic-usage".to_owned(),
+            kind: if key.ends_with("cost") {
+                "cost"
+            } else {
+                "token"
+            }
+            .to_owned(),
+            amount: *amount,
+            unit: (*key).to_owned(),
+            scope: scope.unwrap_or("run").to_owned(),
+            ts_ms: None,
+            meta: JsonObject::from([("raw_key".to_owned(), Value::from(key))]),
+            event_id: None,
+            attribution: attribution.cloned(),
+        });
+    }
+    events
+}
+
+pub struct ProviderUsageCallback {
+    pub ledger: StateBackedBudgetLedger,
+    pub run_id: String,
+    pub source_document_id: String,
+    pub provider: String,
+    pub model: String,
+    pub pricing: Option<TokenPricing>,
+    event_sink: Option<EventSink>,
+    started_at: BTreeMap<String, u64>,
+    recorded_runs: BTreeSet<String>,
+}
+
+type EventSink = Box<dyn FnMut(&BudgetEvent)>;
+
+impl ProviderUsageCallback {
+    #[must_use]
+    pub fn new(
+        ledger: StateBackedBudgetLedger,
+        run_id: &str,
+        source_document_id: &str,
+        provider: &str,
+        model: &str,
+        pricing: Option<TokenPricing>,
+    ) -> Self {
+        Self {
+            ledger,
+            run_id: run_id.to_owned(),
+            source_document_id: source_document_id.to_owned(),
+            provider: provider.to_owned(),
+            model: model.to_owned(),
+            pricing,
+            event_sink: None,
+            started_at: BTreeMap::new(),
+            recorded_runs: BTreeSet::new(),
+        }
+    }
+
+    pub fn set_event_sink(&mut self, sink: Box<dyn FnMut(&BudgetEvent)>) {
+        self.event_sink = Some(sink);
+    }
+
+    pub fn on_llm_start(&mut self, run_id: &str, monotonic_ms: u64) {
+        self.started_at.insert(run_id.to_owned(), monotonic_ms);
+    }
+
+    pub fn on_llm_end(
+        &mut self,
+        response: &Value,
+        run_id: &str,
+        now_ms: u64,
+        monotonic_ms: u64,
+        provider_error: Option<&str>,
+    ) -> Result<Vec<BudgetEvent>, BudgetError> {
+        if self.recorded_runs.contains(run_id) {
+            return Ok(Vec::new());
+        }
+        self.recorded_runs.insert(run_id.to_owned());
+        let usage = extract_provider_usage(response);
+        let attribution = BudgetAttribution {
+            workspace_id: None,
+            source_document_id: Some(self.source_document_id.clone()),
+            operation_id: Some(run_id.to_owned()),
+            operation_kind: Some("llm_call".to_owned()),
+            maintenance_job_id: None,
+            dream_job_id: None,
+            provider: Some(self.provider.clone()),
+            model: Some(self.model.clone()),
+        };
+        let mut provider_events = generic_usage_adapter(
+            &usage,
+            self.run_id.as_str(),
+            Some("run"),
+            Some(&attribution),
+        );
+        let has_provider_cost = provider_events.iter().any(|event| {
+            (event.kind == "cost" || event.unit == "total_cost")
+                && !matches!(
+                    event.meta.get("cost_status").and_then(Value::as_str),
+                    Some("estimated") | Some("estimated_partial")
+                )
+        });
+        if let Some(pricing) = self.pricing.as_ref().filter(|_| !has_provider_cost) {
+            if let Some((amount, estimator_status)) =
+                estimate_token_cost_usd(&json!(usage), pricing)
+            {
+                provider_events.push(BudgetEvent {
+                    run_id: self.run_id.clone(),
+                    source: "llm-wiki-cost-estimator".to_owned(),
+                    kind: "cost".to_owned(),
+                    amount,
+                    unit: "total_cost".to_owned(),
+                    scope: "run".to_owned(),
+                    ts_ms: Some(now_ms as i64),
+                    meta: JsonObject::from([
+                        (
+                            "cost_status".to_owned(),
+                            Value::from("estimated_from_tokens"),
+                        ),
+                        (
+                            "cost_provenance".to_owned(),
+                            Value::from("estimated_from_tokens"),
+                        ),
+                        ("estimator_status".to_owned(), Value::from(estimator_status)),
+                        (
+                            "cost_source".to_owned(),
+                            Value::from(pricing.source.clone()),
+                        ),
+                        (
+                            "input_cost_per_1k".to_owned(),
+                            option_number(&pricing.input_per_1k),
+                        ),
+                        (
+                            "cached_input_cost_per_1k".to_owned(),
+                            option_number(&pricing.cached_input_per_1k),
+                        ),
+                        (
+                            "output_cost_per_1k".to_owned(),
+                            option_number(&pricing.output_per_1k),
+                        ),
+                        ("provider_run_id".to_owned(), Value::from(run_id)),
+                    ]),
+                    event_id: Some(stable_event_id(self.run_id.as_str(), run_id, "total_cost")),
+                    attribution: Some(attribution.clone()),
+                });
+            }
+        }
+        let has_cost = provider_events
+            .iter()
+            .any(|event| event.kind == "cost" || event.unit == "total_cost");
+
+        let mut emitted = Vec::new();
+        for event in provider_events {
+            let is_estimate = event.source == "llm-wiki-cost-estimator";
+            let mut event = event;
+            event.run_id = self.run_id.clone();
+            event.ts_ms = Some(now_ms as i64);
+            event
+                .meta
+                .insert("provider_run_id".to_owned(), Value::from(run_id));
+            if event.kind == "cost" && !is_estimate {
+                event.meta.insert(
+                    "cost_provenance".to_owned(),
+                    Value::from("provider_reported"),
+                );
+                event
+                    .meta
+                    .insert("cost_status".to_owned(), Value::from("provider_reported"));
+            }
+            if let Some(provider_error) = provider_error {
+                event
+                    .meta
+                    .insert("provider_error".to_owned(), Value::from(provider_error));
+            }
+            event.event_id = Some(stable_event_id(
+                self.run_id.as_str(),
+                run_id,
+                event.unit.as_str(),
+            ));
+            event.attribution = event.attribution.or_else(|| Some(attribution.clone()));
+            self.ledger.ingest(event.clone())?;
+            if let Some(sink) = self.event_sink.as_mut() {
+                sink(&event);
+            }
+            emitted.push(event.clone());
+        }
+
+        if !has_cost {
+            let unavailable = BudgetEvent {
+                run_id: self.run_id.clone(),
+                source: "llm-wiki-cost-estimator".to_owned(),
+                kind: "cost".to_owned(),
+                amount: 0.0,
+                unit: "total_cost".to_owned(),
+                scope: "run".to_owned(),
+                ts_ms: Some(now_ms as i64),
+                meta: JsonObject::from([
+                    (
+                        "cost_status".to_owned(),
+                        Value::from("unavailable_missing_tokens"),
+                    ),
+                    (
+                        "cost_provenance".to_owned(),
+                        Value::from("unavailable_missing_tokens"),
+                    ),
+                    ("provider_run_id".to_owned(), Value::from(run_id)),
+                ]),
+                event_id: Some(stable_event_id(
+                    self.run_id.as_str(),
+                    run_id,
+                    "total_cost_unavailable",
+                )),
+                attribution: Some(attribution.clone()),
+            };
+            self.ledger.ingest(unavailable.clone())?;
+            if let Some(sink) = self.event_sink.as_mut() {
+                sink(&unavailable);
+            }
+            emitted.push(unavailable);
+        }
+
+        if let Some(started_at) = self.started_at.remove(run_id) {
+            let elapsed_ms = monotonic_ms.saturating_sub(started_at);
+            let mut meta = JsonObject::from([("provider_run_id".to_owned(), Value::from(run_id))]);
+            if let Some(provider_error) = provider_error {
+                meta.insert("provider_error".to_owned(), Value::from(provider_error));
+            }
+            let time_event = BudgetEvent {
+                run_id: self.run_id.clone(),
+                source: "langchain-provider".to_owned(),
+                kind: "time".to_owned(),
+                amount: elapsed_ms as f64,
+                unit: "ms".to_owned(),
+                scope: "run".to_owned(),
+                ts_ms: Some(now_ms as i64),
+                meta,
+                event_id: Some(stable_event_id(self.run_id.as_str(), run_id, "ms")),
+                attribution: Some(attribution),
+            };
+            self.ledger.ingest(time_event.clone())?;
+            if let Some(sink) = self.event_sink.as_mut() {
+                sink(&time_event);
+            }
+            emitted.push(time_event);
+        }
+        Ok(emitted)
+    }
+
+    pub fn on_llm_error(
+        &mut self,
+        error_type: &str,
+        run_id: &str,
+        now_ms: u64,
+        monotonic_ms: u64,
+    ) -> Result<Vec<BudgetEvent>, BudgetError> {
+        self.on_llm_end(
+            &Value::Object(Map::new()),
+            run_id,
+            now_ms,
+            monotonic_ms,
+            Some(error_type),
+        )
+    }
+}
+
+fn option_number(value: &Option<f64>) -> Value {
+    value.map(Value::from).unwrap_or(Value::Null)
 }
