@@ -84,8 +84,12 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   invalidation planning and queue payload contracts.
 - `kogwistar-llm-wiki-port::maintenance_profiles` mirrors maintenance profile
   decisions, windowed budgets, and provider/profile fallback ladders.
+- `kogwistar-llm-wiki-port::maintenance_reporting` mirrors maintenance cost
+  grouping by maintenance kind and model.
 - `kogwistar-llm-wiki-port::maintenance_status` mirrors patch status and intent
   classification into document graph lifecycle states.
+- `kogwistar-llm-wiki-port::maintenance_statistics` mirrors maintenance-kind
+  operation categories and append-only trace report aggregation.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
   maintenance-context guards and maintenance-job queue payload construction.
 - `kogwistar-llm-wiki-port::ingest::run` mirrors ingest operation branches,
