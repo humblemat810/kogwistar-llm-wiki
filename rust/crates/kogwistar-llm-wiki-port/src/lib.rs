@@ -1,4 +1,5 @@
 pub mod configuration;
+pub mod diagnostics;
 pub mod ids;
 pub mod ingest;
 pub mod layered;
