@@ -118,6 +118,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   collection, edge visibility, topic probes, and selection audit envelopes.
 - `kogwistar-llm-wiki-port::worker_runtime` mirrors budget terminalization,
   bounded selection replies, and acknowledgement trace contracts.
+- `kogwistar-llm-wiki-port::worker_observation` mirrors redacted observation
+  persistence and bounded same-job continuation decisions.
 - `kogwistar-llm-wiki-port::maintenance_state` mirrors workspace metadata
   guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - `kogwistar-llm-wiki-port::maintenance_selection` mirrors connected, semantic,
