@@ -42,6 +42,7 @@
 - [x] Connected, semantic, evidence/history candidate selection and seeded embedding probes.
 - [x] Maintenance control state, deployment defaults, and fail-closed corruption policy.
 - [x] Maintenance-kind normalization and workflow routing.
+- [x] Maintenance job lowering into typed review patches.
 
 ### Projection, Policy, And Usage
 
