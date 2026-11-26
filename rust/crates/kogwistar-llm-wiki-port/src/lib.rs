@@ -12,6 +12,7 @@ pub mod longrun;
 pub mod maintenance;
 pub mod maintenance_control;
 pub mod maintenance_dependency;
+pub mod maintenance_designs;
 pub mod maintenance_guards;
 pub mod maintenance_job_lowering;
 pub mod maintenance_lane;

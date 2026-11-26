@@ -110,6 +110,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   operation categories and append-only trace report aggregation.
 - `kogwistar-llm-wiki-port::maintenance_observation` mirrors bounded read-only
   observation frames and deterministic quality assessments.
+- `kogwistar-llm-wiki-port::maintenance_designs` mirrors durable workflow
+  design artifacts for maintenance, cross-link, and multimodal retrieval.
 - `kogwistar-llm-wiki-port::maintenance_state` mirrors workspace metadata
   guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - `kogwistar-llm-wiki-port::worker_selection` mirrors request-scoped seed
