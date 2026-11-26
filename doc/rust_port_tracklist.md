@@ -46,6 +46,7 @@
 - [x] Bounded structured maintenance continuation context and round append helpers.
 - [x] Workspace metadata guards, semantic fingerprints, edge endpoints, and budget-state helpers.
 - [x] Request-scoped seed collection, edge visibility, topic probes, and selection audit envelopes.
+- [x] Bounded cross-link proposal, critic, review, and atomic-replacement contracts.
 
 ### Projection, Policy, And Usage
 
