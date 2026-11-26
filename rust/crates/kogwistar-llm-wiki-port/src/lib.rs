@@ -7,6 +7,8 @@ pub mod ingest;
 pub mod layered;
 pub mod longrun;
 pub mod maintenance;
+pub mod maintenance_dependency;
+pub mod maintenance_guards;
 pub mod maintenance_lane;
 pub mod maintenance_lease;
 pub mod maintenance_queue;

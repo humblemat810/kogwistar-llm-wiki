@@ -78,6 +78,10 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   context.
 - `kogwistar-llm-wiki-port::maintenance_worker` mirrors queued revision fences
   and stable maintenance-run identity contracts.
+- `kogwistar-llm-wiki-port::maintenance_guards` mirrors source revision digests,
+  readiness IDs, CAS guards, and parse-session supersession.
+- `kogwistar-llm-wiki-port::maintenance_dependency` mirrors bounded dependency
+  invalidation planning and queue payload contracts.
 - `kogwistar-llm-wiki-port::ingest::queue_payloads` mirrors bounded
   maintenance-context guards and maintenance-job queue payload construction.
 - `kogwistar-llm-wiki-port::ingest::run` mirrors ingest operation branches,
