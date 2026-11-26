@@ -90,6 +90,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   normalization and workflow routing.
 - `kogwistar-llm-wiki-port::maintenance_job_lowering` mirrors maintenance job
   lowering into typed review patches.
+- `kogwistar-llm-wiki-port::crosslink_proposals` mirrors bounded cross-link
+  proposal, critic, review, and atomic-replacement contracts.
 - `kogwistar-llm-wiki-port::maintenance_profiles` mirrors maintenance profile
   decisions, windowed budgets, and provider/profile fallback ladders.
 - `kogwistar-llm-wiki-port::maintenance_reporting` mirrors maintenance cost
