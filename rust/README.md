@@ -93,6 +93,10 @@ cargo test --workspace
 PyO3 extension. Its first JSON ABI mirrors stable IDs, canonical JSON,
 evidence-pack hashing, and basic-sense evaluation.
 
+`src/kogwistar_llm_wiki/native.py` is the stable loader: use
+`KOGWISTAR_LLM_WIKI_RUST=native` to require the extension, `python` to force
+fallback, or `auto` (default) to use the extension when present.
+
 The port is incremental. Prefer one Python contract slice at a time, keep the
 wire names stable, and add a Rust test for each behavior before expanding
 another module.
