@@ -82,6 +82,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   readiness IDs, CAS guards, and parse-session supersession.
 - `kogwistar-llm-wiki-port::maintenance_dependency` mirrors bounded dependency
   invalidation planning and queue payload contracts.
+- `kogwistar-llm-wiki-port::maintenance_control` mirrors maintenance control
+  state, deployment defaults, and fail-closed corruption policy.
 - `kogwistar-llm-wiki-port::maintenance_profiles` mirrors maintenance profile
   decisions, windowed budgets, and provider/profile fallback ladders.
 - `kogwistar-llm-wiki-port::maintenance_reporting` mirrors maintenance cost
