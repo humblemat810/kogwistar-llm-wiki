@@ -7,6 +7,7 @@ pub mod longrun;
 pub mod maintenance;
 pub mod models;
 pub mod parse_quality;
+pub mod parse_statistics;
 pub mod parsing;
 pub mod policies;
 pub mod projections;
