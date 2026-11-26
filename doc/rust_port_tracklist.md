@@ -36,6 +36,7 @@
 - [x] Source revision digests, readiness IDs, CAS guards, and parse-session supersession.
 - [x] Bounded dependency invalidation planning and queue payload contracts.
 - [x] Maintenance profile decisions, windowed budgets, and provider/profile fallback ladders.
+- [x] Patch status and intent classification into document graph lifecycle states.
 
 ### Projection, Policy, And Usage
 
