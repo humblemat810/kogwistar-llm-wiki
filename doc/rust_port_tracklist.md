@@ -33,6 +33,8 @@
 - [x] Lease renewal, claim fencing, stale-work rejection, and reply idempotency keys.
 - [x] Lane-reply normalization, suppression, durable authority snapshots/identity, and runtime authority context.
 - [x] Queued revision fences and stable maintenance-run identity.
+- [x] Source revision digests, readiness IDs, CAS guards, and parse-session supersession.
+- [x] Bounded dependency invalidation planning and queue payload contracts.
 
 ### Projection, Policy, And Usage
 
@@ -53,7 +55,7 @@
 ### Immediate Contract Slices
 
 - [ ] Root native PyO3 facade ABI expansion beyond the first JSON seam.
-- [ ] Maintenance worker integration surfaces: guard evaluation, graph patch strategy inputs, and dependency invalidation payloads.
+- [ ] Maintenance worker graph-patch strategy inputs and accepted-candidate replacement contracts.
 - [ ] Recovery isolation: checkpoint fallback, service-health repair actions, and workspace-filtered run-history contracts.
 - [ ] Workbench: bounded lens projections, semantic-lens snapshots, cockpit action/patch proposal validation, and review artifacts.
 
