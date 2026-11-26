@@ -3,6 +3,7 @@ pub mod compose;
 pub mod configuration;
 pub mod crosslink_context;
 pub mod crosslink_proposals;
+pub mod crosslink_reviews;
 pub mod diagnostics;
 pub mod ids;
 pub mod ingest;
