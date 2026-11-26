@@ -33,3 +33,4 @@ pub mod provenance;
 pub mod providers;
 pub mod seeding;
 pub mod usage;
+pub mod worker_selection;
