@@ -6,6 +6,7 @@ pub mod layered;
 pub mod longrun;
 pub mod maintenance;
 pub mod models;
+pub mod parse_quality;
 pub mod parsing;
 pub mod policies;
 pub mod projections;

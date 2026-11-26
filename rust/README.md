@@ -68,6 +68,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
   durable-session selection, artifacts, runtime timing, and trace envelopes.
 - `kogwistar-llm-wiki-port::diagnostics` mirrors JSONL trace append, stage
   timing summaries/aggregation, and semantic-tree quality counts.
+- `kogwistar-llm-wiki-port::parse_quality` mirrors basic-sense graph evaluation,
+  span coverage, duplicate excerpts, fallback penalties, and verdicts.
 - `kogwistar-llm-wiki-port::ingest::maintenance_requests` also mirrors
   projection-request IDs and queue payloads.
 - `kogwistar-llm-wiki-port::ids` mirrors the Python stable-ID contract,
