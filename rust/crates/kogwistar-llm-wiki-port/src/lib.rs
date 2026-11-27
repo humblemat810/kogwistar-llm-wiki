@@ -45,6 +45,7 @@ pub mod projections;
 pub mod provenance;
 pub mod providers;
 pub mod seeding;
+pub mod semantic_lens;
 pub mod usage;
 pub mod worker_contacts;
 pub mod worker_derived;
