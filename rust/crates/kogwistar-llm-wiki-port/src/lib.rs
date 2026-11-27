@@ -60,6 +60,7 @@ pub mod reconciliation;
 pub mod runtime_contract;
 pub mod seeding;
 pub mod semantic_lens;
+pub mod service_ops;
 pub mod source_unit;
 pub mod usage;
 pub mod worker_contacts;

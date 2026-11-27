@@ -59,7 +59,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.5 Source-unit handling | source_unit.rs | Rust test: unit boundaries match Python | done
 - T5.6 Archive restore / event-chain | archive_restore.rs, event_chain.rs | Rust test: restore replay matches Python | done
 - T5.7 Disambiguation | disambiguation.rs | Rust test: disambiguation decision matches Python | done
-- T5.8 Service ops | service_ops.rs | Rust test: op classification matches Python | pending
+- T5.8 Service ops | service_ops.rs | Rust test: op classification matches Python | done
 - T5.9 Reconciliation | reconciliation.rs | Rust test: reconciliation result matches Python | done
 - T5.10 Patch policy | patch_policy.rs | Rust test: policy decision matches Python | done
 - T5.11 Codex bridge | codex_bridge.rs | Rust test: bridge payload matches Python | done
