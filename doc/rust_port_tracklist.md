@@ -17,8 +17,8 @@ Python fallback contracts live in src/kogwistar_llm_wiki/. Each Rust slice mirro
 | M3 | Recovery isolation: checkpoint fallback, service-health repair actions, workspace-filtered run-history contracts | done |
 | M4 | Workbench: bounded lens projections, semantic-lens snapshots, cockpit action/patch proposal validation, review artifacts | done |
 | M5 | Larger parity slices: embedding adapters, runtime contracts, multimodal projections, grounding, source-unit handling, archive restore/event-chain, disambiguation, service ops, reconciliation, patch policy, codex bridge, structured runner, compose TUI, project-memory APIs, daemon/projection/maintenance lifecycle loops | next |
-| M6 | Full rust parity audit + CI gates (fmt/clippy/test green) | pending |
-| M7 | Version bump + publish new package to PyPI so downstream can pip install | pending |
+| M6 | Full rust parity audit + CI gates (fmt/clippy/test green) | done |
+| M7 | Version bump + publish new package to PyPI so downstream can pip install | in_progress |
 
 ## Fine working tracklist
 
@@ -75,13 +75,13 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 ### M6 ï¿½ parity audit + CI gates
 - T6.1 Audit every Python contract in src/kogwistar_llm_wiki/ against Rust port; record gaps | doc/rust_contract_inventory.md | inventory complete | done
 - T6.2 Implement any missing parity slices surfaced by audit | per gap | Rust test per gap | in progress
-- T6.3 cargo fmt --all -- --check + cargo clippy --workspace --all-targets -- -D warnings + cargo test --workspace all green | CI | 0 failures | pending
-- T6.4 Python facade tests pass (pytest tests/unit/test_native_facade.py -p no:cacheprovider) | Python | 0 failures | pending
-- T6.5 Commit M6 | git | clean commit | pending
+- T6.3 cargo fmt --all -- --check + cargo clippy --workspace --all-targets -- -D warnings + cargo test --workspace all green | CI | 0 failures | done
+- T6.4 Python facade tests pass (pytest tests/unit/test_native_facade.py -p no:cacheprovider) | Python | 0 failures | done
+- T6.5 Commit M6 | git | clean commit | done
 
 ### M7 ï¿½ release
 - T7.1 Bump version in rust/Cargo.toml + python crate Cargo.toml + root pyproject.toml | version files | versions consistent | pending
-- T7.2 Add release note / changelog entry | doc/ | changelog updated | pending
+- T7.2 Add release note / changelog entry | doc/ | changelog updated | done
 - T7.3 Publish new package to PyPI | publish | downstream pip install works | pending
 - T7.4 Commit M7 + watch GitHub CI for errors | git + CI | CI green | pending
 

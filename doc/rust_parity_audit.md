@@ -45,7 +45,7 @@ CI baseline (from `rust/`): `cargo fmt --all -- --check`, `cargo clippy --worksp
 | T6.2 | Implement missing parity slices surfaced by audit | in progress (see `rust_contract_inventory.md`) |
 | T6.3 | `cargo fmt --all -- --check` + `cargo clippy ... -D warnings` + `cargo test --workspace` all green | done (current tree) |
 | T6.4 | Python facade tests pass | done | 7 passed, `tests/unit/test_native_facade.py -p no:cacheprovider` |
-| T6.5 | Commit M6 | pending |
+| T6.5 | Commit M6 | done |
 
 ## Gaps requiring contract discovery (no same-named Python contract)
 

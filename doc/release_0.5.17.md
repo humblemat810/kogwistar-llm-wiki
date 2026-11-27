@@ -19,10 +19,12 @@
   --all-targets -- -D warnings`, and `cargo test --workspace` all green; Python
   facade tests pass (7/7).
 - All T5.* and M5/M6 tasklets committed on branch `rustport`.
+- Add the backend registry and resource-authorizer contract slices plus
+  `.github/workflows/release-pypi.yml` for versioned trusted PyPI publishing.
 
 ## Release Gate
 
 Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 and `cargo test --workspace` from `rust/`; run `pytest tests/unit/test_native_facade.py
--p no:cacheprovider` from the repo root. Publish images only from the merged
-`v0.5.17` tag after release verification succeeds.
+-p no:cacheprovider` from the repo root. The `v0.5.17` tag also runs the PyPI
+release workflow; publish images only after release verification succeeds.
