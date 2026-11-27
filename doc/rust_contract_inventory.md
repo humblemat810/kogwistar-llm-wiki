@@ -14,6 +14,7 @@ provider orchestration has been mirrored.
 | `archiving.archive_contracts` | `archive_restore.rs`, `archiving.rs` | implemented | `tests/archiving.rs` |
 | `configuration.workspace` | `configuration/workspace.rs` | implemented | `tests/workspace.rs` |
 | `configuration.resource_authorizer` | `configuration/resource_authorizer.rs` | partial | `tests/resource_authorizer.rs`; explicit spec parsing and env selection are mirrored, Python dynamic import remains authoritative |
+| `configuration.identity` | `configuration/identity.rs` | partial | `tests/configuration_identity.rs`; scope, workspace ACL, disabled bypass, and runtime authority context are mirrored; bearer/JWT I/O remains Python-only |
 | `models` | `models.rs` | implemented | `tests/models.rs` |
 | `projections.snapshot` | `projections.rs` | implemented | `tests/projections.rs` |
 | `ingest.artifacts`, `ingest.source_lifecycle`, `ingest.source_parsing`, `ingest.maintenance_requests` | `ingest/*` | implemented | integration tests under `tests/` |
