@@ -8,6 +8,8 @@ historical `experiments/dual_language_seam_poc` proof of concept.
 
 - `kogwistar-llm-wiki-port::archiving` mirrors archive format/secret guards,
   safe artifact paths, restore reports, and embedding fingerprints.
+- `kogwistar-llm-wiki-port::app_contracts` mirrors application message
+  envelopes and the public DTO slice emitted for lane communication.
 - `kogwistar-llm-wiki-port::configuration::workspace` mirrors the app-level
   graph-space enum, workspace namespace helpers, namespace metadata, and
   workspace/graph-space metadata matcher from

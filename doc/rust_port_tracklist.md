@@ -69,6 +69,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.15 Daemon/projection/maintenance lifecycle loops | daemon_loop.rs | Rust test: loop termination/bound matches Python | done
 - T5.16 Commit M5 | git | clean commit, green | done
 - T5.17 Parse reconciliation | parse_reconciliation.rs | Rust test: additive/review/replacement/lower-confidence decisions mirror Python | done
+- T5.18 Application message envelope | app_contracts.rs | Rust test: public DTO slice excludes internal trace field | done
 
 ### M6 ï¿½ parity audit + CI gates
 - T6.1 Audit every Python contract in src/kogwistar_llm_wiki/ against Rust port; record gaps | doc/rust_parity_audit.md | audit doc complete | pending

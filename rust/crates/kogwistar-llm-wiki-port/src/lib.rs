@@ -1,3 +1,4 @@
+pub mod app_contracts;
 pub mod archive_restore;
 pub mod archiving;
 pub mod cockpit;
