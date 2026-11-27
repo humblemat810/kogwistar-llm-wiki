@@ -15,6 +15,7 @@ pub mod diagnostics;
 pub mod disambiguation;
 pub mod embedding_adapter;
 pub mod event_chain;
+pub mod gateway_protocol;
 pub mod grounding;
 pub mod ids;
 pub mod ingest;

@@ -31,6 +31,7 @@ provider orchestration has been mirrored.
 | `daemon`, `daemons.*` | `daemon_loop.rs` | partial | loop bounds are mirrored; process supervision is Python-only |
 | `workbench.*` | `lens_projection.rs`, `semantic_lens.rs`, `cockpit.rs`, `crosslink_*.rs` | partial | core projection and review contracts are tested; HTTP/API is Python-only |
 | `agent.source_tools` | `source_unit.rs` | implemented | `tests/source_unit.rs` |
+| `agent.gateway_protocol` | `gateway_protocol.rs` | implemented | `tests/gateway_protocol.rs`; job counts, answer extraction, A2A/task, JSON-RPC, and deterministic request IDs |
 | `embeddings.*` | `embedding_adapter.rs`, `multimodal_projection.rs`, `grounding.rs` | partial | pure contracts are tested; remote/provider I/O is Python-only |
 | `disambiguation.*`, `maintenance.reconciliation` | `disambiguation.rs`, `reconciliation.rs` | implemented | `tests/disambiguation.rs`, `tests/reconciliation.rs` |
 
