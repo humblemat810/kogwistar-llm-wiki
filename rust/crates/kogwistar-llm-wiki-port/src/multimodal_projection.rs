@@ -197,7 +197,7 @@ impl MultimodalProjectionStore for InMemoryMultimodalProjectionStore {
     fn pending_units(&self, workspace_id: Option<&str>) -> Vec<MultimodalSourceUnit> {
         self.embeddings
             .values()
-            .filter(|(unit, _, _)| workspace_id.map_or(true, |w| unit.workspace_id == w))
+            .filter(|(unit, _, _)| workspace_id.is_none_or(|w| unit.workspace_id == w))
             .map(|(unit, _, _)| unit.clone())
             .collect()
     }
@@ -211,7 +211,7 @@ impl MultimodalProjectionStore for InMemoryMultimodalProjectionStore {
         let mut hits: Vec<(String, f64)> = self
             .embeddings
             .iter()
-            .filter(|(_, (unit, _, _))| workspace_id.map_or(true, |w| unit.workspace_id == w))
+            .filter(|(_, (unit, _, _))| workspace_id.is_none_or(|w| unit.workspace_id == w))
             .map(|(view_id, (_, vectors, _))| {
                 // Simple cosine similarity against the first vector
                 let score = if let Some(vec) = vectors.first() {
@@ -260,7 +260,8 @@ impl MultimodalEncoder for FakeMultimodalEncoder {
             .iter()
             .map(|unit| {
                 let text = unit.view_id.as_bytes();
-                let checksum: f64 = (text.iter().map(|&b| b as usize).sum::<usize>() % 97 + 1) as f64;
+                let checksum: f64 =
+                    (text.iter().map(|&b| b as usize).sum::<usize>() % 97 + 1) as f64;
                 vec![vec![(unit.view_id.len() + 1) as f64, checksum]]
             })
             .collect())

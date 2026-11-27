@@ -295,13 +295,7 @@ pub fn resolve_embedding_functions(
     embedding_max_sequence_length: Option<usize>,
     embedding_crop_token_budget: Option<usize>,
     embedding_tokenizer_fingerprint: Option<&str>,
-) -> Result<
-    (
-        EmbeddingFunctionMap,
-        EmbeddingProviderConfigMap,
-    ),
-    EmbeddingError,
-> {
+) -> Result<(EmbeddingFunctionMap, EmbeddingProviderConfigMap), EmbeddingError> {
     let mut functions: EmbeddingFunctionMap = HashMap::new();
     let mut configs: EmbeddingProviderConfigMap = HashMap::new();
 

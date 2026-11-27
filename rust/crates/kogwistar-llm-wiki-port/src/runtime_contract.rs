@@ -115,6 +115,7 @@ pub trait ServiceRegistry: Send + Sync {
         host: Option<String>,
         pid: Option<u32>,
     );
+    #[allow(clippy::too_many_arguments)]
     fn heartbeat(
         &mut self,
         _service_id: &str,
@@ -193,6 +194,7 @@ impl ServiceRegistry for InMemoryServiceRegistry {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn heartbeat(
         &mut self,
         _service_id: &str,
@@ -253,6 +255,7 @@ pub fn service_id(workspace_id: &str, service_kind: &str) -> String {
 }
 
 /// Declare service health on a registry.
+#[allow(clippy::too_many_arguments)]
 pub fn declare_service_health(
     registry: &mut dyn ServiceRegistry,
     workspace_id: &str,

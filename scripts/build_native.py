@@ -83,10 +83,11 @@ def build_native(
     destination_dir: Path | None = None,
     cargo: str = "cargo",
     platform_name: str | None = None,
-    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> Path:
     """Run Cargo, then install the importable extension next to the package."""
 
+    runner = runner or subprocess.run
     selected_target = target_dir or DEFAULT_TARGET_DIR
     selected_destination = destination_dir or DEFAULT_DESTINATION
     command = [
