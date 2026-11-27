@@ -10,6 +10,7 @@ provider orchestration has been mirrored.
 |---|---|---|---|
 | `app_contracts.messaging` | `app_contracts.rs` | implemented | `tests/app_contracts.rs` |
 | `app_contracts.obsidian_source` | `app_contracts.rs` | implemented | `tests/obsidian_source.rs` |
+| `backends.registry` | `backends.rs` | partial | `tests/backends_registry.rs` |
 | `archiving.archive_contracts` | `archive_restore.rs`, `archiving.rs` | implemented | `tests/archiving.rs` |
 | `configuration.workspace` | `configuration/workspace.rs` | implemented | `tests/workspace.rs` |
 | `models` | `models.rs` | implemented | `tests/models.rs` |

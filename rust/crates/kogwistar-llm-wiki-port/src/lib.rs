@@ -1,6 +1,7 @@
 pub mod app_contracts;
 pub mod archive_restore;
 pub mod archiving;
+pub mod backends;
 pub mod cockpit;
 pub mod codex_bridge;
 pub mod compose;
