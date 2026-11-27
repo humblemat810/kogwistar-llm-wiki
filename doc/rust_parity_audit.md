@@ -33,6 +33,7 @@ CI baseline (from `rust/`): `cargo fmt --all -- --check`, `cargo clippy --worksp
 | T5.14 | Project-memory APIs | project_memory.rs | memory/service.py | done | committed 7f6773a |
 | T5.15 | Daemon/projection/maintenance loops | daemon_loop.rs | daemon.py, daemons/ | done | committed e43959e |
 | T5.16 | Commit M5 | git | done | M5 complete, all T5.* done |
+| T5.17 | Parse reconciliation | parse_reconciliation.rs | parsing/parse_reconciliation.py | done | TDD slice; decisions and confidence gate mirrored |
 
 ## M6 parity audit + CI gates
 

@@ -48,6 +48,7 @@ pub mod multimodal_projection;
 pub mod observation_critic;
 pub mod observation_evidence;
 pub mod parse_quality;
+pub mod parse_reconciliation;
 pub mod parse_statistics;
 pub mod parsing;
 pub mod patch_policy;
