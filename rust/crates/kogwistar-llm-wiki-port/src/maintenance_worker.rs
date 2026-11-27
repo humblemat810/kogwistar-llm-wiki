@@ -134,3 +134,110 @@ pub fn maintenance_run_identity(
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
 }
+
+// Graph-patch strategy inputs mirroring Python maintenance worker execution:
+// accepted-candidate lookup, graph_patch patch-payload extraction, and the
+// accepted-candidate replacement contract.
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AcceptedCandidate {
+    pub kind: String,
+    pub patch: Option<Value>,
+}
+
+#[must_use]
+pub fn accepted_candidate_from_payload(payload: &JsonObject) -> Option<AcceptedCandidate> {
+    let Value::Object(raw) = payload.get("accepted_candidate")? else {
+        return None;
+    };
+    let kind = raw.get("kind").and_then(Value::as_str)?.to_owned();
+    let patch = raw.get("patch").cloned();
+    Some(AcceptedCandidate { kind, patch })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphPatchStrategyInput {
+    pub workspace_id: String,
+    pub request_node_id: String,
+    pub job_id: String,
+    pub maintenance_kind: String,
+    pub worker_id: String,
+    pub claim_attempts: i64,
+    pub accepted_candidate: Option<AcceptedCandidate>,
+    pub patch_payload: Option<Value>,
+}
+
+#[must_use]
+pub fn graph_patch_strategy_input(
+    payload: &JsonObject,
+    context: &MaintenanceRunContext<'_>,
+) -> GraphPatchStrategyInput {
+    let accepted_candidate = accepted_candidate_from_payload(payload);
+    let patch_payload = accepted_candidate
+        .as_ref()
+        .filter(|candidate| candidate.kind == "graph_patch")
+        .and_then(|candidate| candidate.patch.clone());
+    GraphPatchStrategyInput {
+        workspace_id: context.workspace_id.to_owned(),
+        request_node_id: context.request_node_id.to_owned(),
+        job_id: context.job_id.to_owned(),
+        maintenance_kind: context.maintenance_kind.to_owned(),
+        worker_id: context.worker_id.to_owned(),
+        claim_attempts: context.claim_attempts,
+        accepted_candidate,
+        patch_payload,
+    }
+}
+
+pub const MAINTENANCE_ACCEPTED_CANDIDATE_REUSED: &str = "maintenance_accepted_candidate_reused";
+
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct ReplacementContract {
+    pub replacement_reason: String,
+    pub supersedes_edge_id: Option<String>,
+    pub preserve_endpoints: bool,
+    pub tombstone_source_native: bool,
+}
+
+impl ReplacementContract {
+    pub fn default_supersede() -> Self {
+        Self {
+            replacement_reason: "accepted crosslink replacement supersedes stale evidence"
+                .to_owned(),
+            supersedes_edge_id: None,
+            preserve_endpoints: true,
+            tombstone_source_native: false,
+        }
+    }
+}
+
+pub fn validate_graph_patch_replacement(
+    patch: &Value,
+    contract: &ReplacementContract,
+) -> Result<ReplacementContract, String> {
+    // Mirror Python worker_execution.py replacement rules:
+    // - replacement must target existing workspace edges
+    // - may supersede only a derived crosslink
+    // - must preserve the superseded edge endpoints
+    // - cannot tombstone a source-native edge
+    if contract.tombstone_source_native {
+        return Err("crosslink replacement cannot tombstone a source-native edge".to_owned());
+    }
+    if let Some(Value::Object(edges)) = patch.get("edges") {
+        for (_edge_id, edge) in edges {
+            if let Value::Object(edge) = edge {
+                if edge.get("tombstone").and_then(Value::as_bool) == Some(true) {
+                    return Err(
+                        "crosslink replacement cannot tombstone a source-native edge".to_owned(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(ReplacementContract {
+        replacement_reason: contract.replacement_reason.clone(),
+        supersedes_edge_id: contract.supersedes_edge_id.clone(),
+        preserve_endpoints: contract.preserve_endpoints,
+        tombstone_source_native: contract.tombstone_source_native,
+    })
+}
