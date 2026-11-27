@@ -127,8 +127,6 @@ rust/*_result.txt
 /tmp_apply_probe*.txt
 resource-report-*/
 resource-report-*.zip
-resource-report-*/
-resource-report-*.zip
 ann-*.json
 depth_scan.txt
 cargo_build_out*.txt
