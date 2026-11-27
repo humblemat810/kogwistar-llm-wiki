@@ -8,6 +8,7 @@ pub mod configuration;
 pub mod crosslink_context;
 pub mod crosslink_proposals;
 pub mod crosslink_reviews;
+pub mod daemon_loop;
 pub mod diagnostics;
 pub mod disambiguation;
 pub mod embedding_adapter;
