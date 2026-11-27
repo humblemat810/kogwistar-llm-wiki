@@ -6,6 +6,7 @@ pub mod crosslink_context;
 pub mod crosslink_proposals;
 pub mod crosslink_reviews;
 pub mod diagnostics;
+pub mod grounding;
 pub mod ids;
 pub mod ingest;
 pub mod layered;

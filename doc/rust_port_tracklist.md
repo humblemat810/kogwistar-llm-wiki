@@ -55,7 +55,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.1 Embedding adapters | embedding_adapter.rs | Rust test: adapter output matches Python | pending
 - T5.2 Runtime contracts | runtime_contract.rs | Rust test: wire shape matches Python | pending
 - T5.3 Multimodal projections | multimodal_projection.rs | Rust test: projection matches Python | pending
-- T5.4 Grounding | grounding.rs | Rust test: grounding digest matches Python | pending
+- T5.4 Grounding | grounding.rs | Rust test: grounding digest matches Python | done
 - T5.5 Source-unit handling | source_unit.rs | Rust test: unit boundaries match Python | pending
 - T5.6 Archive restore / event-chain | archive_restore.rs, event_chain.rs | Rust test: restore replay matches Python | pending
 - T5.7 Disambiguation | disambiguation.rs | Rust test: disambiguation decision matches Python | pending
