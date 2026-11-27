@@ -18,6 +18,7 @@ pub mod maintenance_job_lowering;
 pub mod maintenance_lane;
 pub mod maintenance_lease;
 pub mod maintenance_observation;
+pub mod maintenance_patch_validation;
 pub mod maintenance_patches;
 pub mod maintenance_policy;
 pub mod maintenance_profiles;
