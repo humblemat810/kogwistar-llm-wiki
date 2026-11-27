@@ -21,18 +21,18 @@ CI baseline (from `rust/`): `cargo fmt --all -- --check`, `cargo clippy --worksp
 | T5.2 | Runtime contracts | runtime_contract.rs | done | done |
 | T5.3 | Multimodal projections | multimodal_projection.rs | done | done |
 | T5.4 | Grounding | grounding.rs | done | done |
-| T5.5 | Source-unit handling | source_unit.rs | none found | pending | no same-named Python contract in `src/kogwistar_llm_wiki/` |
+| T5.5 | Source-unit handling | source_unit.rs | agent/source_tools.py | done | committed 47a71dc |
 | T5.6 | Archive restore / event-chain | archive_restore.rs, event_chain.rs | archiving/archive_contracts.py | done | committed 878771c |
 | T5.7 | Disambiguation | disambiguation.rs | done | done |
-| T5.8 | Service ops | service_ops.rs | service.py exists | pending | contract large; not yet mirrored |
+| T5.8 | Service ops | service_ops.rs | maintenance/maintenance_status.py | done | committed 1445e18 |
 | T5.9 | Reconciliation | reconciliation.rs | done | done |
 | T5.10 | Patch policy | patch_policy.rs | maintenance/maintenance_policy.py | done | committed c7a8ac0 |
 | T5.11 | Codex bridge | codex_bridge.rs | codex/codex_bridge.py | done | committed f898e2d |
-| T5.12 | Structured runner | structured_runner.rs | none found | pending | no same-named Python contract |
+| T5.12 | Structured runner | structured_runner.rs | codex/codex_workbench_agent.py | done | committed 7be7c55 |
 | T5.13 | Compose TUI | compose_tui.rs | codex/codex_compose_tui.py | done | committed 05e4020 |
-| T5.14 | Project-memory APIs | project_memory.rs | none found | pending | no same-named Python contract |
+| T5.14 | Project-memory APIs | project_memory.rs | memory/service.py | done | committed 7f6773a |
 | T5.15 | Daemon/projection/maintenance loops | daemon_loop.rs | daemon.py, daemons/ | done | committed e43959e |
-| T5.16 | Commit M5 | git | pending | M5 not fully complete (T5.5/8/12/14 pending) |
+| T5.16 | Commit M5 | git | done | M5 complete, all T5.* done |
 
 ## M6 parity audit + CI gates
 
@@ -41,15 +41,16 @@ CI baseline (from `rust/`): `cargo fmt --all -- --check`, `cargo clippy --worksp
 | T6.1 | Audit every Python contract in `src/kogwistar_llm_wiki/` against Rust port; record gaps | this doc |
 | T6.2 | Implement missing parity slices surfaced by audit | pending (T5.5/8/12/14 need contract discovery) |
 | T6.3 | `cargo fmt --all -- --check` + `cargo clippy ... -D warnings` + `cargo test --workspace` all green | done (current tree) |
-| T6.4 | Python facade tests pass | pending |
+| T6.4 | Python facade tests pass | done | 7 passed, `tests/unit/test_native_facade.py -p no:cacheprovider` |
 | T6.5 | Commit M6 | pending |
 
 ## Gaps requiring contract discovery (no same-named Python contract)
 
-- T5.5 source_unit: candidate Python surfaces `source_lifecycle.py`, `source_parsing.py`, `source_tools.py` — needs contract selection before mirroring.
-- T5.8 service_ops: `service.py` exists but is large; policy-decision surface not yet isolated.
-- T5.12 structured_runner: no same-named Python contract found.
-- T5.14 project_memory: no same-named Python contract found.
+None remaining. All T5.* slices have Rust modules with tests:
+- T5.5 source_unit → agent/source_tools.py (committed 47a71dc)
+- T5.8 service_ops → maintenance/maintenance_status.py (committed 1445e18)
+- T5.12 structured_runner → codex/codex_workbench_agent.py (committed 7be7c55)
+- T5.14 project_memory → memory/service.py (committed 7f6773a)
 
 ## Three-repo parity audit (kg-doc-parser, obsidian-source, obsidian-sink)
 
