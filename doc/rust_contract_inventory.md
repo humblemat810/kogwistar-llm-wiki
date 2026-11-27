@@ -13,6 +13,7 @@ provider orchestration has been mirrored.
 | `backends.registry` | `backends.rs` | partial | `tests/backends_registry.rs` |
 | `archiving.archive_contracts` | `archive_restore.rs`, `archiving.rs` | implemented | `tests/archiving.rs` |
 | `configuration.workspace` | `configuration/workspace.rs` | implemented | `tests/workspace.rs` |
+| `configuration.resource_authorizer` | `configuration/resource_authorizer.rs` | partial | `tests/resource_authorizer.rs`; explicit spec parsing and env selection are mirrored, Python dynamic import remains authoritative |
 | `models` | `models.rs` | implemented | `tests/models.rs` |
 | `projections.snapshot` | `projections.rs` | implemented | `tests/projections.rs` |
 | `ingest.artifacts`, `ingest.source_lifecycle`, `ingest.source_parsing`, `ingest.maintenance_requests` | `ingest/*` | implemented | integration tests under `tests/` |
