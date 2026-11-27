@@ -1,3 +1,4 @@
+﻿pub mod archive_restore;
 pub mod archiving;
 pub mod cockpit;
 pub mod codex_bridge;
@@ -9,6 +10,7 @@ pub mod crosslink_reviews;
 pub mod diagnostics;
 pub mod disambiguation;
 pub mod embedding_adapter;
+pub mod event_chain;
 pub mod grounding;
 pub mod ids;
 pub mod ingest;

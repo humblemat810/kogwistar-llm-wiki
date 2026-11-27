@@ -57,7 +57,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.3 Multimodal projections | multimodal_projection.rs | Rust test: projection matches Python | done
 - T5.4 Grounding | grounding.rs | Rust test: grounding digest matches Python | done
 - T5.5 Source-unit handling | source_unit.rs | Rust test: unit boundaries match Python | pending
-- T5.6 Archive restore / event-chain | archive_restore.rs, event_chain.rs | Rust test: restore replay matches Python | pending
+- T5.6 Archive restore / event-chain | archive_restore.rs, event_chain.rs | Rust test: restore replay matches Python | done
 - T5.7 Disambiguation | disambiguation.rs | Rust test: disambiguation decision matches Python | done
 - T5.8 Service ops | service_ops.rs | Rust test: op classification matches Python | pending
 - T5.9 Reconciliation | reconciliation.rs | Rust test: reconciliation result matches Python | done
@@ -86,5 +86,6 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - Mark a tasklet done only after its Rust test + cargo test passes.
 - Commit each milestone as one or more mini-milestones; never push-and-forget ï¿½ watch GitHub CI.
 - Keep wire names stable with Python; add a Rust test for each behavior before expanding the next module.
+
 
 
