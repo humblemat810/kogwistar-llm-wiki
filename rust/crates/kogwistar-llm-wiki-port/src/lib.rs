@@ -1,4 +1,5 @@
 pub mod archiving;
+pub mod cockpit;
 pub mod compose;
 pub mod configuration;
 pub mod crosslink_context;

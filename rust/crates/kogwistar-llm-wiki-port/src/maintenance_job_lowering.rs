@@ -1,7 +1,7 @@
-use serde_json::json;
-
 use crate::ids::stable_id;
-use crate::maintenance_patches::{MaintenancePatch, MaintenanceScope};
+use crate::maintenance_patches::{
+    MaintenanceOperationKind, MaintenancePatch, MaintenancePatchOperation, MaintenanceScope,
+};
 use crate::maintenance_policy::normalize_maintenance_kind;
 use crate::maintenance_status::MaintenanceIntent;
 
@@ -73,11 +73,22 @@ pub fn build_review_patch_for_maintenance_job(
             conversation_id: conversation_id.map(str::to_owned),
             thread_id: thread_id.map(str::to_owned),
         },
-        operations: vec![json!({
-            "operation_id": operation_id,
-            "kind": "REQUEST_REVIEW",
-            "reason": reason
-        })],
+        operations: vec![MaintenancePatchOperation {
+            operation_id,
+            kind: MaintenanceOperationKind::RequestReview,
+            target_id: None,
+            node_id: None,
+            edge_id: None,
+            from_node_id: None,
+            to_node_id: None,
+            relation: None,
+            label: None,
+            node_type: None,
+            properties: serde_json::json!({}),
+            supersedes_ids: Vec::new(),
+            provenance: None,
+            reason: Some(reason.to_owned()),
+        }],
         status: "proposed".to_owned(),
         rationale: Some(format!(
             "Maintenance job '{normalized}' requires proposal/review before graph application."

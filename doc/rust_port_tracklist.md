@@ -15,8 +15,8 @@ Python fallback contracts live in src/kogwistar_llm_wiki/. Each Rust slice mirro
 | M1 | Commit existing PyO3 seam + maintenance_patch_validation (graph_space_match, patch validation, port lib.rs/README wiring) | done |
 | M2 | Maintenance worker graph-patch strategy inputs & accepted-candidate replacement contracts (Rust + tests mirroring Python) | done |
 | M3 | Recovery isolation: checkpoint fallback, service-health repair actions, workspace-filtered run-history contracts | done |
-| M4 | Workbench: bounded lens projections, semantic-lens snapshots, cockpit action/patch proposal validation, review artifacts | next |
-| M5 | Larger parity slices: embedding adapters, runtime contracts, multimodal projections, grounding, source-unit handling, archive restore/event-chain, disambiguation, service ops, reconciliation, patch policy, codex bridge, structured runner, compose TUI, project-memory APIs, daemon/projection/maintenance lifecycle loops | pending |
+| M4 | Workbench: bounded lens projections, semantic-lens snapshots, cockpit action/patch proposal validation, review artifacts | done |
+| M5 | Larger parity slices: embedding adapters, runtime contracts, multimodal projections, grounding, source-unit handling, archive restore/event-chain, disambiguation, service ops, reconciliation, patch policy, codex bridge, structured runner, compose TUI, project-memory APIs, daemon/projection/maintenance lifecycle loops | next |
 | M6 | Full rust parity audit + CI gates (fmt/clippy/test green) | pending |
 | M7 | Version bump + publish new package to PyPI so downstream can pip install | pending |
 
@@ -45,9 +45,9 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T3.4 Commit M3 | git | clean commit, cargo test --workspace green | done
 
 ### M4 � workbench
-- T4.1 Bounded lens projections (project graph slice within lens bounds) | new module lens_projection.rs | Rust test: bound enforcement | pending
-- T4.2 Semantic-lens snapshots (deterministic snapshot id + restore) | semantic_lens.rs | Rust test: snapshot round-trip | pending
-- T4.3 Cockpit action/patch proposal validation (validate proposal before apply) | extend crosslink_proposals.rs or new cockpit.rs | Rust test: invalid proposal rejected | pending
+- T4.1 Bounded lens projections (project graph slice within lens bounds) | new module lens_projection.rs | Rust test: bound enforcement | done
+- T4.2 Semantic-lens snapshots (deterministic snapshot id + restore) | semantic_lens.rs | Rust test: snapshot round-trip | done
+- T4.3 Cockpit action/patch proposal validation (validate proposal before apply) | extend crosslink_proposals.rs or new cockpit.rs | Rust test: invalid proposal rejected | done
 - T4.4 Review artifacts (durable review batch, CAS outcome, decision metadata) | extend crosslink_reviews.rs | Rust test: review batch CAS | pending
 - T4.5 Commit M4 | git | clean commit, green | pending
 

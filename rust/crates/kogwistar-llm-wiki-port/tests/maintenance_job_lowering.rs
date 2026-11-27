@@ -29,7 +29,7 @@ fn graph_patch_job_kinds_lower_to_typed_review_patches() {
         assert_eq!(patch.scope.workspace_id, "demo");
         assert_eq!(patch.scope.scope_kind, "workspace");
         assert_eq!(patch.operations.len(), 1);
-        assert_eq!(patch.operations[0]["kind"], "REQUEST_REVIEW");
+        assert_eq!(patch.operations[0].kind.as_str(), "REQUEST_REVIEW");
     }
 }
 
@@ -62,8 +62,5 @@ fn job_lowering_uses_stable_ids() {
     );
     assert_eq!(patch.intent, MaintenanceIntent::RequestReview);
     assert!(patch.patch_id.starts_with("maintenance_job_review:"));
-    assert!(patch.operations[0]["operation_id"]
-        .as_str()
-        .unwrap()
-        .starts_with("review:"));
+    assert!(patch.operations[0].operation_id.starts_with("review:"));
 }
