@@ -1,4 +1,4 @@
-pub mod archiving;
+﻿pub mod archiving;
 pub mod cockpit;
 pub mod compose;
 pub mod configuration;
@@ -6,6 +6,7 @@ pub mod crosslink_context;
 pub mod crosslink_proposals;
 pub mod crosslink_reviews;
 pub mod diagnostics;
+pub mod disambiguation;
 pub mod embedding_adapter;
 pub mod grounding;
 pub mod ids;
