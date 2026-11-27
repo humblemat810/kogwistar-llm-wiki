@@ -8,6 +8,7 @@ pub mod diagnostics;
 pub mod ids;
 pub mod ingest;
 pub mod layered;
+pub mod lens_projection;
 pub mod longrun;
 pub mod maintenance;
 pub mod maintenance_checkpoint;
