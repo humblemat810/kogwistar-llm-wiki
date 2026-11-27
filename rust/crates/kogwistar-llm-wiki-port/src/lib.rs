@@ -38,6 +38,7 @@ pub mod maintenance_status;
 pub mod maintenance_strategies;
 pub mod maintenance_worker;
 pub mod models;
+pub mod multimodal_projection;
 pub mod observation_critic;
 pub mod observation_evidence;
 pub mod parse_quality;
