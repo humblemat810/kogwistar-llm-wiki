@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sys
@@ -80,3 +80,19 @@ def test_basic_sense_fallback_matches_python_contract() -> None:
     )
     assert result["basic_sense_verdict"] == "weak"
     assert result["fallback_used"] is True
+
+def test_graph_space_match_fallback_matches_python() -> None:
+    assert native.graph_space_match(
+        "ws:w1:g:source", {"workspace_id": "w1", "graph_space": "source"}
+    ) is True
+    assert native.graph_space_match(
+        "ws:w1:g:source:lane:fg",
+        {"workspace_id": "w1", "graph_space": "source", "graph_lane": "fg"},
+    ) is True
+    assert native.graph_space_match(
+        "ws:w1:g:source", {"workspace_id": "w2", "graph_space": "source"}
+    ) is False
+    assert native.graph_space_match(
+        "ws:w1:g:source", {"workspace_id": "w1", "graph_space": "review"}
+    ) is False
+    assert native.graph_space_match("not-a-namespace", {"workspace_id": "w1"}) is False

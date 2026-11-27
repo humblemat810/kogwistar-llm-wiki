@@ -1,4 +1,4 @@
-use serde_json::json;
+﻿use serde_json::json;
 
 #[test]
 fn stable_id_json_matches_python_facade_contract() {

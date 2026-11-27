@@ -1,4 +1,4 @@
-"""Root Rust facade loading and Python fallback contracts.
+﻿"""Root Rust facade loading and Python fallback contracts.
 
 The extension is optional.  The stable seam is this module: callers choose
 ``native``, ``python``, or the default ``auto`` implementation mode without
@@ -17,6 +17,7 @@ from typing import Any, Mapping
 from kogwistar.id_provider import stable_id
 from kogwistar.provenance import canonicalize_evidence_pack_digest, evidence_pack_digest_hash
 
+from .configuration.workspace import namespace_matches_graph_space_metadata
 from .parsing.parse_quality import basic_sense_eval_from_graph_payload
 
 NATIVE_MODULE_NAME = "_kogwistar_llm_wiki_rust"
@@ -122,6 +123,20 @@ def basic_sense_eval(graph_payload: Mapping[str, Any], diagnostics: Mapping[str,
     )
 
 
+def graph_space_match(namespace: str, metadata: Mapping[str, object]) -> bool:
+    """Return whether a namespace string matches graph-space metadata."""
+
+    module = native_module()
+    if module is not None and hasattr(module, "graph_space_match"):
+        payload_json = json.dumps(
+            {"namespace": namespace, "metadata": dict(metadata or {})},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return bool(module.graph_space_match(payload_json))
+    return namespace_matches_graph_space_metadata(namespace, dict(metadata or {}))
+
+
 def canonicalized_evidence_pack(digest: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize evidence-pack identifiers without choosing a hash backend."""
 
@@ -133,6 +148,8 @@ __all__ = [
     "NATIVE_MODULE_NAME",
     "RustFacadeError",
     "basic_sense_eval",
+    "graph_space_match",
+
     "canonical_json",
     "canonicalized_evidence_pack",
     "evidence_pack_digest",
@@ -143,3 +160,5 @@ __all__ = [
     "stable_id_json",
     "sys",
 ]
+
+
