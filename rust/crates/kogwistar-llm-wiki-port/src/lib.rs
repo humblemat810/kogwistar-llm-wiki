@@ -1,4 +1,4 @@
-﻿pub mod archive_restore;
+pub mod archive_restore;
 pub mod archiving;
 pub mod cockpit;
 pub mod codex_bridge;
@@ -50,6 +50,7 @@ pub mod observation_evidence;
 pub mod parse_quality;
 pub mod parse_statistics;
 pub mod parsing;
+pub mod patch_policy;
 pub mod policies;
 pub mod projections;
 pub mod provenance;

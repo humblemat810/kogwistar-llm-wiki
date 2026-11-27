@@ -61,7 +61,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.7 Disambiguation | disambiguation.rs | Rust test: disambiguation decision matches Python | done
 - T5.8 Service ops | service_ops.rs | Rust test: op classification matches Python | pending
 - T5.9 Reconciliation | reconciliation.rs | Rust test: reconciliation result matches Python | done
-- T5.10 Patch policy | patch_policy.rs | Rust test: policy decision matches Python | pending
+- T5.10 Patch policy | patch_policy.rs | Rust test: policy decision matches Python | done
 - T5.11 Codex bridge | codex_bridge.rs | Rust test: bridge payload matches Python | done
 - T5.12 Structured runner | structured_runner.rs | Rust test: runner envelope matches Python | pending
 - T5.13 Compose TUI | compose_tui.rs | Rust test: text validation matches Python | done
@@ -86,6 +86,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - Mark a tasklet done only after its Rust test + cargo test passes.
 - Commit each milestone as one or more mini-milestones; never push-and-forget ï¿½ watch GitHub CI.
 - Keep wire names stable with Python; add a Rust test for each behavior before expanding the next module.
+
 
 
 
