@@ -72,8 +72,8 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.18 Application message envelope | app_contracts.rs | Rust test: public DTO slice excludes internal trace field | done
 
 ### M6 ï¿½ parity audit + CI gates
-- T6.1 Audit every Python contract in src/kogwistar_llm_wiki/ against Rust port; record gaps | doc/rust_parity_audit.md | audit doc complete | pending
-- T6.2 Implement any missing parity slices surfaced by audit | per gap | Rust test per gap | pending
+- T6.1 Audit every Python contract in src/kogwistar_llm_wiki/ against Rust port; record gaps | doc/rust_contract_inventory.md | inventory complete | done
+- T6.2 Implement any missing parity slices surfaced by audit | per gap | Rust test per gap | in progress
 - T6.3 cargo fmt --all -- --check + cargo clippy --workspace --all-targets -- -D warnings + cargo test --workspace all green | CI | 0 failures | pending
 - T6.4 Python facade tests pass (pytest tests/unit/test_native_facade.py -p no:cacheprovider) | Python | 0 failures | pending
 - T6.5 Commit M6 | git | clean commit | pending

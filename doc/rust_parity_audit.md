@@ -41,7 +41,7 @@ CI baseline (from `rust/`): `cargo fmt --all -- --check`, `cargo clippy --worksp
 | ID | Work | Status |
 |----|------|--------|
 | T6.1 | Audit every Python contract in `src/kogwistar_llm_wiki/` against Rust port; record gaps | this doc |
-| T6.2 | Implement missing parity slices surfaced by audit | pending (T5.5/8/12/14 need contract discovery) |
+| T6.2 | Implement missing parity slices surfaced by audit | in progress (see `rust_contract_inventory.md`) |
 | T6.3 | `cargo fmt --all -- --check` + `cargo clippy ... -D warnings` + `cargo test --workspace` all green | done (current tree) |
 | T6.4 | Python facade tests pass | done | 7 passed, `tests/unit/test_native_facade.py -p no:cacheprovider` |
 | T6.5 | Commit M6 | pending |

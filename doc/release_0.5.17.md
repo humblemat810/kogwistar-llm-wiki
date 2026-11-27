@@ -13,9 +13,9 @@
   event chain, disambiguation, service ops, reconciliation, patch policy, codex
   bridge, structured runner, compose TUI, project-memory APIs, daemon/projection/
   maintenance lifecycle loops.
-- Complete M6 parity audit + CI gates: every Python contract in
-  `src/kogwistar_llm_wiki/` audited against the Rust port; gaps recorded and
-  implemented; `cargo fmt --all -- --check`, `cargo clippy --workspace
+- Complete M6 parity audit + CI gates: the Python-to-Rust contract inventory is
+  grounded in `doc/rust_contract_inventory.md`; selected gaps are implemented;
+  `cargo fmt --all -- --check`, `cargo clippy --workspace
   --all-targets -- -D warnings`, and `cargo test --workspace` all green; Python
   facade tests pass (7/7).
 - All T5.* and M5/M6 tasklets committed on branch `rustport`.
