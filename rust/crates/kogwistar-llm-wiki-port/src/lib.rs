@@ -52,6 +52,7 @@ pub mod parse_statistics;
 pub mod parsing;
 pub mod patch_policy;
 pub mod policies;
+pub mod project_memory;
 pub mod projections;
 pub mod provenance;
 pub mod providers;

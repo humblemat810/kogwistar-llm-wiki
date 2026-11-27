@@ -65,7 +65,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.11 Codex bridge | codex_bridge.rs | Rust test: bridge payload matches Python | done
 - T5.12 Structured runner | structured_runner.rs | Rust test: runner envelope matches Python | pending
 - T5.13 Compose TUI | compose_tui.rs | Rust test: text validation matches Python | done
-- T5.14 Project-memory APIs | project_memory.rs | Rust test: memory CRUD matches Python | pending
+- T5.14 Project-memory APIs | project_memory.rs | Rust test: memory CRUD matches Python | done
 - T5.15 Daemon/projection/maintenance lifecycle loops | daemon_loop.rs | Rust test: loop termination/bound matches Python | done
 - T5.16 Commit M5 | git | clean commit, green | pending
 
