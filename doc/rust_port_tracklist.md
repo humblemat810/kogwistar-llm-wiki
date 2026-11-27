@@ -70,6 +70,7 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T5.16 Commit M5 | git | clean commit, green | done
 - T5.17 Parse reconciliation | parse_reconciliation.rs | Rust test: additive/review/replacement/lower-confidence decisions mirror Python | done
 - T5.18 Application message envelope | app_contracts.rs | Rust test: public DTO slice excludes internal trace field | done
+- T5.19 Obsidian source request identity | app_contracts.rs | Rust test: identity values are strings, nonblank, and bounded | done
 
 ### M6 ï¿½ parity audit + CI gates
 - T6.1 Audit every Python contract in src/kogwistar_llm_wiki/ against Rust port; record gaps | doc/rust_contract_inventory.md | inventory complete | done
