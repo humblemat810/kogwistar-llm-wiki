@@ -1,4 +1,4 @@
-﻿pub mod archiving;
+pub mod archiving;
 pub mod cockpit;
 pub mod compose;
 pub mod configuration;
@@ -49,6 +49,7 @@ pub mod policies;
 pub mod projections;
 pub mod provenance;
 pub mod providers;
+pub mod reconciliation;
 pub mod runtime_contract;
 pub mod seeding;
 pub mod semantic_lens;
