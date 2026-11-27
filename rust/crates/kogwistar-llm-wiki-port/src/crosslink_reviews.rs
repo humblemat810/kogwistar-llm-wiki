@@ -29,6 +29,19 @@ pub struct CrosslinkReviewOutcome {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CrosslinkReviewCasRequest {
+    pub projection_ns: String,
+    pub projection_key: String,
+    pub payload: Value,
+    pub expected_last_authoritative_seq: Option<i64>,
+    pub expected_last_materialized_seq: Option<i64>,
+    pub last_authoritative_seq: i64,
+    pub last_materialized_seq: i64,
+    pub projection_schema_version: i64,
+    pub materialization_status: String,
+}
+
 fn normalized_decision(decision: &CrosslinkReviewDecision) -> Result<(), CrosslinkReviewError> {
     if decision.artifact_id.is_empty() {
         return Err(CrosslinkReviewError::Rejected(
@@ -125,6 +138,28 @@ pub fn review_outcome(
         status: "decided",
         decision: Some(decision.decision.clone()),
         error: None,
+    })
+}
+
+pub fn review_cas_request(
+    workspace_id: &str,
+    decision: &CrosslinkReviewDecision,
+    decision_version: i64,
+) -> Result<CrosslinkReviewCasRequest, CrosslinkReviewError> {
+    normalized_decision(decision)?;
+    if decision.expected_version != decision_version {
+        return Err(CrosslinkReviewError::Conflict);
+    }
+    Ok(CrosslinkReviewCasRequest {
+        projection_ns: format!("ws:{workspace_id}:projection_state"),
+        projection_key: format!("crosslink_review_decision:{}", decision.artifact_id),
+        payload: review_event(workspace_id, "reviewer", decision)?,
+        expected_last_authoritative_seq: None,
+        expected_last_materialized_seq: None,
+        last_authoritative_seq: decision.expected_version,
+        last_materialized_seq: decision.expected_version,
+        projection_schema_version: 1,
+        materialization_status: "ready".to_owned(),
     })
 }
 

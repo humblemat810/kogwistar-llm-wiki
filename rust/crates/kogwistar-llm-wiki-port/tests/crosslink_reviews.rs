@@ -1,6 +1,6 @@
 use kogwistar_llm_wiki_port::crosslink_proposals::CrosslinkReviewDecision;
 use kogwistar_llm_wiki_port::crosslink_reviews::{
-    normalize_review_batch, revalidation_payload, review_event, review_outcome,
+    normalize_review_batch, revalidation_payload, review_cas_request, review_event, review_outcome,
     CrosslinkReviewError,
 };
 use serde_json::{json, Value};
@@ -36,6 +36,35 @@ fn review_outcome_conflicts_on_opposite_decision() {
     let same: Value = json!({"decision": "approve"});
     let outcome = review_outcome(&decision, Some(&same)).unwrap();
     assert_eq!(outcome.status, "already_decided");
+}
+
+#[test]
+fn review_cas_request_rejects_stale_expected_version() {
+    let decision = decision("artifact-1", "approve", 2);
+    let request = review_cas_request("ws", &decision, 1);
+    assert!(matches!(
+        request.unwrap_err(),
+        CrosslinkReviewError::Conflict
+    ));
+}
+
+#[test]
+fn review_cas_request_uses_python_projection_contract() {
+    let decision = decision("artifact-1", "approve", 2);
+    let request = review_cas_request("ws", &decision, 2).unwrap();
+    assert_eq!(request.projection_ns, "ws:ws:projection_state");
+    assert_eq!(
+        request.projection_key,
+        "crosslink_review_decision:artifact-1"
+    );
+    assert_eq!(request.expected_last_authoritative_seq, None);
+    assert_eq!(request.expected_last_materialized_seq, None);
+    assert_eq!(request.last_authoritative_seq, 2);
+    assert_eq!(request.last_materialized_seq, 2);
+    assert_eq!(request.projection_schema_version, 1);
+    assert_eq!(request.materialization_status, "ready");
+    assert_eq!(request.payload["decision"], "approve");
+    assert_eq!(request.payload["expected_version"], 2);
 }
 
 #[test]

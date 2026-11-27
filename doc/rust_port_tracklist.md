@@ -48,8 +48,8 @@ Each tasklet: ID | description | Rust file(s) | test gate | status
 - T4.1 Bounded lens projections (project graph slice within lens bounds) | new module lens_projection.rs | Rust test: bound enforcement | done
 - T4.2 Semantic-lens snapshots (deterministic snapshot id + restore) | semantic_lens.rs | Rust test: snapshot round-trip | done
 - T4.3 Cockpit action/patch proposal validation (validate proposal before apply) | extend crosslink_proposals.rs or new cockpit.rs | Rust test: invalid proposal rejected | done
-- T4.4 Review artifacts (durable review batch, CAS outcome, decision metadata) | extend crosslink_reviews.rs | Rust test: review batch CAS | pending
-- T4.5 Commit M4 | git | clean commit, green | pending
+- T4.4 Review artifacts (durable review batch, CAS outcome, decision metadata) | extend crosslink_reviews.rs | Rust test: review batch CAS | done; cargo test --package kogwistar-llm-wiki-port --test crosslink_reviews 6 passed
+- T4.5 Commit M4 | git | clean commit, green | done
 
 ### M5 ï¿½ larger parity slices (one tasklet per slice, tests mirror Python)
 - T5.1 Embedding adapters | embedding_adapter.rs | Rust test: adapter output matches Python | done
