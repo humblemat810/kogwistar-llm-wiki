@@ -130,4 +130,4 @@ Normal Python entrypoints remain under `src/kogwistar_llm_wiki/cli/` and `src/ko
 | T9.10 | MCP SSE transport and session/event contract | src/mcp_server.rs | Rust tests cover session headers, event stream framing, disconnect behavior | done |
 | T9.11 | MCP runtime gateway seam into existing Rust services | src/mcp_runtime.rs | Rust tests execute representative tool end-to-end without Python | done |
 | T9.12 | Daemon/longrun/otel/projection-worker runtime support for CLI and MCP | src/cli_runtime.rs, src/daemon_loop.rs, src/otel.rs | Rust tests cover lifecycle startup, shutdown, trace/event export contract | in_progress |
-| T9.13 | End-to-end CLI + MCP Rust smoke tests and CI gate | tests/cli.rs, tests/mcp_server.rs | cargo fmt/clippy/test green; no Python invoked in Rust pathway | planned |
+| T9.13 | End-to-end CLI + MCP Rust smoke tests and CI gate | tests/end_to_end_rust_pathway.rs | cargo fmt/clippy/test green; no Python invoked in Rust pathway | done |
