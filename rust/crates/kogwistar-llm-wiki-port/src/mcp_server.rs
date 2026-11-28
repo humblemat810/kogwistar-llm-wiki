@@ -68,6 +68,81 @@ pub fn call_tool_result(result: Result<&Value, &McpServerError>, pretty: bool) -
     }
 }
 
+pub fn handle_stdio_message(
+    message: &Value,
+    gateway: &dyn McpGateway,
+) -> Result<Option<Value>, McpServerError> {
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let id = message.get("id").cloned();
+    if method.starts_with("notifications/") {
+        return Ok(None);
+    }
+    let response = match method {
+        "initialize" => crate::gateway_protocol::jsonrpc_result(
+            &id.unwrap_or(Value::Null),
+            &serde_json::json!({
+                "protocolVersion": "2025-03-26",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "llm-wiki", "version": "1.0.0"},
+            }),
+        ),
+        "tools/list" => crate::gateway_protocol::jsonrpc_result(
+            &id.unwrap_or(Value::Null),
+            &serde_json::json!({"tools": tool_specs().map_err(|error| McpServerError::Gateway(error.to_string()))?}),
+        ),
+        "tools/call" => {
+            let params = message.get("params").cloned().unwrap_or(Value::Null);
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or(Value::Object(Default::default()));
+            match dispatch(name, &arguments, gateway) {
+                Ok(result) => crate::gateway_protocol::jsonrpc_result(
+                    &id.unwrap_or(Value::Null),
+                    &call_tool_result(Ok(&result), true),
+                ),
+                Err(error) => crate::gateway_protocol::jsonrpc_result(
+                    &id.unwrap_or(Value::Null),
+                    &call_tool_result(Err(&error), true),
+                ),
+            }
+        }
+        _ => crate::gateway_protocol::jsonrpc_error(
+            &id.unwrap_or(Value::Null),
+            -32601,
+            &format!("unknown method: {method}"),
+            None,
+        ),
+    };
+    Ok(Some(response))
+}
+
+pub fn handle_http_request(
+    method: &str,
+    path: &str,
+    message: &Value,
+    gateway: &dyn McpGateway,
+) -> Result<(u16, Value), McpServerError> {
+    if path != "/mcp" {
+        return Ok((404, serde_json::json!({"error": "not found"})));
+    }
+    match method {
+        "POST" => Ok(match handle_stdio_message(message, gateway)? {
+            Some(response) => (200, response),
+            None => (202, serde_json::json!({})),
+        }),
+        "GET" => Ok((405, serde_json::json!({"error": "method not allowed"}))),
+        _ => Ok((405, serde_json::json!({"error": "method not allowed"}))),
+    }
+}
+
 pub fn tool_specs() -> Result<Vec<McpToolSpec>, serde_json::Error> {
     let raw_specs = [
         include_str!("mcp_tool_specs_1.json"),
