@@ -59,6 +59,13 @@ impl CliCommand {
             Self::Daemon => "daemon",
         }
     }
+
+    pub fn has_required_subcommand(self) -> bool {
+        matches!(
+            self,
+            Self::Archive | Self::Embeddings | Self::Compose | Self::Daemon
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,7 +136,41 @@ pub struct CliGlobalSettings {
 pub struct CliInvocation {
     pub settings: CliGlobalSettings,
     pub command: CliCommand,
-    pub arguments: BTreeMap<String, String>,
+    pub subcommand: Option<String>,
+    pub arguments: BTreeMap<String, Vec<String>>,
+}
+
+impl CliInvocation {
+    pub fn resolved_handler_name(&self) -> &'static str {
+        match (self.command, self.subcommand.as_deref()) {
+            (CliCommand::Archive, Some("create")) => "archive_create",
+            (CliCommand::Archive, Some("inspect")) => "archive_inspect",
+            (CliCommand::Archive, Some("restore")) => "archive_restore",
+            (CliCommand::Archive, Some("catalog")) => "archive_catalog",
+            (CliCommand::Archive, Some("verify")) => "archive_verify",
+            (CliCommand::Embeddings, Some("inspect")) => "embeddings_inspect",
+            (CliCommand::Embeddings, Some("adopt-legacy-profile")) => "embeddings_adopt_legacy",
+            (CliCommand::CodexMemory, _) => "codex_memory",
+            (CliCommand::CodexBridge, _) => "codex_bridge",
+            (CliCommand::CodexCompose, _) => "codex_compose",
+            (CliCommand::Compose, Some("generate")) => "compose_generate",
+            (CliCommand::Compose, Some("check")) => "compose_check",
+            (CliCommand::Daemon, Some("projection")) => "daemon_projection",
+            (CliCommand::Daemon, Some("maintenance")) => "daemon_maintenance",
+            (CliCommand::Daemon, Some("maintenance-control")) => "maintenance_control",
+            (command, _) => command.handler_name(),
+        }
+    }
+
+    pub fn first_argument(&self, name: &str) -> Option<&str> {
+        self.arguments
+            .get(name)
+            .and_then(|values| values.first().map(String::as_str))
+    }
+
+    pub fn argument_values(&self, name: &str) -> Option<&[String]> {
+        self.arguments.get(name).map(Vec::as_slice)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -138,6 +179,7 @@ pub enum CliError {
     UnknownCommand(String),
     InvalidChoice(String, String),
     MissingArgument(String),
+    MissingSubcommand(String),
 }
 
 pub struct CliArgumentSpec {
@@ -212,9 +254,18 @@ pub fn parse_cli_with_env(
         "daemon" => CliCommand::Daemon,
         _ => return Err(CliError::UnknownCommand(command_name.into())),
     };
-    let specs = argument_specs(command);
+    let mut cursor = index + 1;
+    let mut subcommand = None;
+    if command.has_required_subcommand() {
+        let Some(value) = arguments.get(cursor).cloned() else {
+            return Err(CliError::MissingSubcommand(command.as_str().to_string()));
+        };
+        subcommand = Some(value);
+        cursor += 1;
+    }
+    let specs = argument_specs(command, subcommand.as_deref());
     let mut parsed = BTreeMap::new();
-    let mut values = arguments[index + 1..].iter();
+    let mut values = arguments[cursor..].iter();
     while let Some(name) = values.next() {
         if !name.starts_with("--") {
             return Err(CliError::UnknownCommand(name.into()));
@@ -224,10 +275,10 @@ pub fn parse_cli_with_env(
             return Err(CliError::UnknownCommand(name.into()));
         };
         if spec.boolean {
-            parsed.insert(argument_name, "true".to_string());
+            parsed.insert(argument_name, vec!["true".to_string()]);
         } else {
             match values.next() {
-                Some(value) => parsed.insert(argument_name, value.clone()),
+                Some(value) => parsed.entry(argument_name).or_default().push(value.clone()),
                 None => return Err(CliError::UnknownCommand(name.into())),
             };
         }
@@ -243,11 +294,12 @@ pub fn parse_cli_with_env(
     Ok(CliInvocation {
         settings,
         command,
+        subcommand,
         arguments: parsed,
     })
 }
 
-fn argument_specs(command: CliCommand) -> &'static [CliArgumentSpec] {
+fn argument_specs(command: CliCommand, subcommand: Option<&str>) -> &'static [CliArgumentSpec] {
     match command {
         CliCommand::Demo => &[
             CliArgumentSpec {
@@ -584,13 +636,495 @@ fn argument_specs(command: CliCommand) -> &'static [CliArgumentSpec] {
                 boolean: false,
             },
         ],
-        CliCommand::Archive
-        | CliCommand::Embeddings
-        | CliCommand::CodexMemory
-        | CliCommand::CodexBridge
-        | CliCommand::CodexCompose
-        | CliCommand::Compose
-        | CliCommand::Daemon => &[],
+        CliCommand::Archive => match subcommand {
+            Some("create") => &[
+                CliArgumentSpec {
+                    name: "workspace",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "output",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "parent",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "include_backend_snapshot",
+                    required: false,
+                    boolean: true,
+                },
+            ],
+            Some("inspect") | Some("verify") => &[CliArgumentSpec {
+                name: "archive",
+                required: true,
+                boolean: false,
+            }],
+            Some("restore") => &[
+                CliArgumentSpec {
+                    name: "archive",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "parent",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "target_workspace",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "apply",
+                    required: false,
+                    boolean: true,
+                },
+                CliArgumentSpec {
+                    name: "use_backend_snapshot",
+                    required: false,
+                    boolean: true,
+                },
+                CliArgumentSpec {
+                    name: "embedding_fingerprint",
+                    required: false,
+                    boolean: false,
+                },
+            ],
+            Some("catalog") => &[
+                CliArgumentSpec {
+                    name: "directory",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "before_ms",
+                    required: false,
+                    boolean: false,
+                },
+            ],
+            _ => &[],
+        },
+        CliCommand::Embeddings => match subcommand {
+            Some("inspect") => &[CliArgumentSpec {
+                name: "workspace",
+                required: true,
+                boolean: false,
+            }],
+            Some("adopt-legacy-profile") => &[
+                CliArgumentSpec {
+                    name: "workspace",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "acknowledge_legacy_vectors",
+                    required: false,
+                    boolean: true,
+                },
+            ],
+            _ => &[],
+        },
+        CliCommand::CodexMemory => &[
+            CliArgumentSpec {
+                name: "workspace",
+                required: true,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "project_root",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "mcp_url",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "binding_file",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "check_only",
+                required: false,
+                boolean: true,
+            },
+        ],
+        CliCommand::CodexBridge => &[
+            CliArgumentSpec {
+                name: "host",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "port",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "token_env",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "env_file",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "no_env_file",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "codex_executable",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "codex_model",
+                required: false,
+                boolean: false,
+            },
+        ],
+        CliCommand::CodexCompose => &[
+            CliArgumentSpec {
+                name: "mode",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "project",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "configure",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "stack",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "embedding",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "maintenance_enabled",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "request_enabled",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "background_enabled",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "maintenance_profile",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "profile_ladder_json",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "profile_ladder_file",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "combined_memory",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "combined_cpu",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "embedding_dimension",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "max_model_len",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "crop_token_budget",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "env_file",
+                required: false,
+                boolean: false,
+            },
+            CliArgumentSpec {
+                name: "write_env",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "lxc",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "lxc_apply",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "build",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "login",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "dry_run",
+                required: false,
+                boolean: true,
+            },
+            CliArgumentSpec {
+                name: "execute",
+                required: false,
+                boolean: true,
+            },
+        ],
+        CliCommand::Compose => match subcommand {
+            Some("generate") => &[
+                CliArgumentSpec {
+                    name: "output",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "workspace",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "backend",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "project_name",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "mode",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "embedding_backend",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "auth_mode",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "with_otel",
+                    required: false,
+                    boolean: true,
+                },
+                CliArgumentSpec {
+                    name: "with_oauth",
+                    required: false,
+                    boolean: true,
+                },
+                CliArgumentSpec {
+                    name: "model_revision",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "embedding_dimension",
+                    required: false,
+                    boolean: false,
+                },
+            ],
+            Some("check") => &[CliArgumentSpec {
+                name: "file",
+                required: true,
+                boolean: false,
+            }],
+            _ => &[],
+        },
+        CliCommand::Daemon => match subcommand {
+            Some("projection") => &[
+                CliArgumentSpec {
+                    name: "workspace",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "vault",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "interval",
+                    required: false,
+                    boolean: false,
+                },
+            ],
+            Some("maintenance") => &[
+                CliArgumentSpec {
+                    name: "workspace",
+                    required: true,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "interval",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "background_interval",
+                    required: false,
+                    boolean: false,
+                },
+            ],
+            Some("maintenance-control") => &[
+                CliArgumentSpec {
+                    name: "request_enabled",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "background_enabled",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "enabled",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "profile",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "profile_ladder_json",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "budget_json",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "clear_budget",
+                    required: false,
+                    boolean: true,
+                },
+                CliArgumentSpec {
+                    name: "status",
+                    required: false,
+                    boolean: true,
+                },
+                CliArgumentSpec {
+                    name: "daily_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "daily_input_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "daily_output_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "daily_money",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "weekly_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "weekly_input_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "weekly_output_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "weekly_money",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "monthly_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "monthly_input_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "monthly_output_tokens",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "monthly_money",
+                    required: false,
+                    boolean: false,
+                },
+                CliArgumentSpec {
+                    name: "runtime_only",
+                    required: false,
+                    boolean: true,
+                },
+            ],
+            _ => &[],
+        },
     }
 }
 

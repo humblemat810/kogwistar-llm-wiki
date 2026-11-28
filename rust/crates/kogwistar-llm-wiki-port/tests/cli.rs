@@ -81,33 +81,12 @@ fn preserves_required_and_optional_arguments() {
         &environment,
     )
     .unwrap();
-    assert_eq!(
-        invocation.arguments.get("workspace").map(String::as_str),
-        Some("ws")
-    );
-    assert_eq!(
-        invocation.arguments.get("source").map(String::as_str),
-        Some("a.md")
-    );
-    assert_eq!(
-        invocation.arguments.get("vault").map(String::as_str),
-        Some("vault")
-    );
-    assert_eq!(
-        invocation.arguments.get("title").map(String::as_str),
-        Some("Title")
-    );
-    assert_eq!(
-        invocation
-            .arguments
-            .get("source_format")
-            .map(String::as_str),
-        Some("markdown")
-    );
-    assert_eq!(
-        invocation.arguments.get("parser_mode").map(String::as_str),
-        Some("heuristic")
-    );
+    assert_eq!(invocation.first_argument("workspace"), Some("ws"));
+    assert_eq!(invocation.first_argument("source"), Some("a.md"));
+    assert_eq!(invocation.first_argument("vault"), Some("vault"));
+    assert_eq!(invocation.first_argument("title"), Some("Title"));
+    assert_eq!(invocation.first_argument("source_format"), Some("markdown"));
+    assert_eq!(invocation.first_argument("parser_mode"), Some("heuristic"));
 }
 
 #[test]
@@ -148,10 +127,7 @@ fn parses_boolean_subcommand_flags_without_values() {
     )
     .unwrap();
     assert_eq!(
-        invocation
-            .arguments
-            .get("split_derived_knowledge")
-            .map(String::as_str),
+        invocation.first_argument("split_derived_knowledge"),
         Some("true")
     );
 }
@@ -193,10 +169,7 @@ fn parses_global_settings_from_explicit_flags() {
         ConversationPersistenceMode::TwoStage
     );
     assert_eq!(invocation.command.as_str(), "demo");
-    assert_eq!(
-        invocation.arguments.get("workspace").map(String::as_str),
-        Some("ws")
-    );
+    assert_eq!(invocation.first_argument("workspace"), Some("ws"));
 }
 
 #[test]
@@ -251,4 +224,87 @@ fn rejects_missing_or_unknown_command() {
     );
     let unknown = parse_cli_with_env(&arguments(&["unknown"]), &environment).unwrap_err();
     assert_eq!(unknown, CliError::UnknownCommand("unknown".to_string()));
+}
+
+#[test]
+fn routes_nested_commands_to_python_handler_names() {
+    let environment = BTreeMap::new();
+    let archive_create = parse_cli_with_env(
+        &arguments(&[
+            "archive",
+            "create",
+            "--workspace",
+            "ws",
+            "--output",
+            "out.tar.gz",
+        ]),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(archive_create.subcommand.as_deref(), Some("create"));
+    assert_eq!(archive_create.resolved_handler_name(), "archive_create");
+
+    let archive_restore = parse_cli_with_env(
+        &arguments(&[
+            "archive",
+            "restore",
+            "--archive",
+            "base.tar.gz",
+            "--parent",
+            "old.tar.gz",
+            "--parent",
+            "older.tar.gz",
+            "--apply",
+        ]),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(archive_restore.resolved_handler_name(), "archive_restore");
+    assert_eq!(
+        archive_restore.argument_values("parent").unwrap(),
+        &["old.tar.gz".to_string(), "older.tar.gz".to_string()]
+    );
+
+    let embeddings_adopt = parse_cli_with_env(
+        &arguments(&[
+            "embeddings",
+            "adopt-legacy-profile",
+            "--workspace",
+            "ws",
+            "--acknowledge-legacy-vectors",
+        ]),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(
+        embeddings_adopt.resolved_handler_name(),
+        "embeddings_adopt_legacy"
+    );
+    assert_eq!(
+        embeddings_adopt.first_argument("acknowledge_legacy_vectors"),
+        Some("true")
+    );
+
+    let compose_generate = parse_cli_with_env(
+        &arguments(&[
+            "compose",
+            "generate",
+            "--output",
+            "compose.yml",
+            "--with-otel",
+        ]),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(compose_generate.resolved_handler_name(), "compose_generate");
+    assert_eq!(compose_generate.first_argument("with_otel"), Some("true"));
+}
+
+#[test]
+fn rejects_missing_nested_subcommands() {
+    let environment = BTreeMap::new();
+    for command in ["archive", "embeddings", "compose", "daemon"] {
+        let error = parse_cli_with_env(&arguments(&[command]), &environment).unwrap_err();
+        assert_eq!(error, CliError::MissingSubcommand(command.to_string()));
+    }
 }
