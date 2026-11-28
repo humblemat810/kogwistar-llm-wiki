@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.pyd
@@ -137,3 +137,7 @@ tracklist_content.md
 
 # codex
 .codex
+
+# Rust port scratch files
+*.rs.tmp
+
