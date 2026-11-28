@@ -121,7 +121,7 @@ Normal Python entrypoints remain under `src/kogwistar_llm_wiki/cli/` and `src/ko
 | T9.1 | CLI global settings and parsed invocation contract (`--data-dir`, `--backend`, `--dsn`, split-derived, persistence mode) | src/cli.rs, tests/cli.rs | Rust tests accept valid flags, reject invalid backend/persistence, infer env defaults | done |
 | T9.2 | CLI command routing for demo, ingest, report, workbench, mcp, serve, embedding_service, seed_bundle | src/cli.rs | Rust test routes each command and preserves required/optional arguments | done |
 | T9.3 | Archive, embeddings migration, codex memory/bridge, compose command routing | src/cli.rs | Rust tests cover all subcommands and handler identities | done |
-| T9.4 | Daemon projection/maintenance and maintenance-control routing | src/cli.rs | Rust tests route lifecycle subcommands and payload fields | in_progress |
+| T9.4 | Daemon projection/maintenance and maintenance-control routing | src/cli.rs | Rust tests route lifecycle subcommands and payload fields | done |
 | T9.5 | CLI dispatch/runtime seam into existing Rust port services | src/cli.rs, existing service modules | Rust tests execute at least demo/report happy paths through Rust runtime | planned |
 | T9.6 | MCP tool registry parity with Python `_tool_specs()` | src/mcp_server.rs | Rust tests compare tool names, descriptions, schemas, and annotations | planned |
 | T9.7 | MCP call dispatch and JSON-RPC error contracts | src/mcp_server.rs | Rust tests cover list/call, unknown tool, payload decoding, success result shape | planned |

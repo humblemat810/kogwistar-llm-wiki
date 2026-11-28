@@ -308,3 +308,90 @@ fn rejects_missing_nested_subcommands() {
         assert_eq!(error, CliError::MissingSubcommand(command.to_string()));
     }
 }
+
+#[test]
+fn routes_daemon_lifecycle_commands_and_payloads() {
+    let environment = BTreeMap::new();
+    let projection = parse_cli_with_env(
+        &arguments(&[
+            "daemon",
+            "projection",
+            "--workspace",
+            "ws",
+            "--vault",
+            "vault",
+            "--interval",
+            "5",
+        ]),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(projection.resolved_handler_name(), "daemon_projection");
+    assert_eq!(projection.first_argument("workspace"), Some("ws"));
+    assert_eq!(projection.first_argument("vault"), Some("vault"));
+    assert_eq!(projection.first_argument("interval"), Some("5"));
+
+    let maintenance = parse_cli_with_env(
+        &arguments(&[
+            "daemon",
+            "maintenance",
+            "--workspace",
+            "ws",
+            "--interval",
+            "10",
+            "--background-interval",
+            "600",
+        ]),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(maintenance.resolved_handler_name(), "daemon_maintenance");
+    assert_eq!(
+        maintenance.first_argument("background_interval"),
+        Some("600")
+    );
+
+    let control = parse_cli_with_env(
+        &arguments(&[
+            "daemon",
+            "maintenance-control",
+            "--request-enabled",
+            "true",
+            "--background-enabled",
+            "false",
+            "--profile",
+            "balanced",
+            "--daily-output-tokens",
+            "20000",
+            "--status",
+        ]),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(control.resolved_handler_name(), "maintenance_control");
+    assert_eq!(control.first_argument("request_enabled"), Some("true"));
+    assert_eq!(control.first_argument("background_enabled"), Some("false"));
+    assert_eq!(control.first_argument("profile"), Some("balanced"));
+    assert_eq!(control.first_argument("daily_output_tokens"), Some("20000"));
+    assert_eq!(control.first_argument("status"), Some("true"));
+}
+
+#[test]
+fn rejects_missing_daemon_required_arguments() {
+    let environment = BTreeMap::new();
+    let projection = parse_cli_with_env(
+        &arguments(&["daemon", "projection", "--workspace", "ws"]),
+        &environment,
+    )
+    .unwrap_err();
+    assert_eq!(projection, CliError::MissingArgument("vault".to_string()));
+    let maintenance = parse_cli_with_env(
+        &arguments(&["daemon", "maintenance", "--interval", "10"]),
+        &environment,
+    )
+    .unwrap_err();
+    assert_eq!(
+        maintenance,
+        CliError::MissingArgument("workspace".to_string())
+    );
+}
