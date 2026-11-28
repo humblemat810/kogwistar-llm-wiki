@@ -1,4 +1,4 @@
-﻿# Rust Port Tracklist ï¿½ kogwistar-llm-wiki
+# Rust Port Tracklist ï¿½ kogwistar-llm-wiki
 
 Root repo: C:\Users\chanh\Documents\kogwistar-llm-wiki (branch rustport)
 Rust workspace: rust/
@@ -105,7 +105,7 @@ Scope mirrors Python fallback contracts under `src/kogwistar_llm_wiki/maintenanc
 |---|---|---|---|---|
 | T8.1.4 | Parsing session store: scope id, CAS save/activate, workspace + frontier pointer validation | src/parsing/session_store.rs, tests/session_store.rs | 10 tests pass; clippy clean | done |
 | T8.1.5 | Maintenance durable stores: and_where, belongs_to_workspace, metadata_mapping, semantic_fingerprint, persisted_budget_state, maintenance_budget_state, durable_maintenance_usage, edge_ids; converts src/maintenance.rs -> src/maintenance/mod.rs | src/maintenance/mod.rs, src/maintenance/durable_stores.rs, tests/durable_stores.rs | new Rust tests mirror Python maintenance/state.py; cargo test green | planned |
-| T8.1.6 | Embeddings remote I/O: EmbeddingServiceError/Unavailable/ProtocolError, HttpResponseLike, UrlOpener, EmbeddingServiceSettings, RemoteMultimodalEncoder over crate::multimodal_projection | src/embeddings/mod.rs, src/embeddings/remote.rs, tests/embeddings_remote.rs | deterministic fake-UrlOpener tests; cargo test green | planned |
-| T8.1.7 | Commit M8 mini-milestones; fmt/clippy/test green | git + CI | clean commits, workspace green | planned |
+| T8.1.6 | Embeddings remote I/O: EmbeddingServiceError/Unavailable/ProtocolError, HttpResponseLike, UrlOpener, EmbeddingServiceSettings, RemoteMultimodalEncoder over crate::multimodal_projection | src/embeddings/mod.rs, src/embeddings/remote.rs, tests/embeddings_remote.rs | deterministic fake-UrlOpener tests; cargo test green | done |
+| T8.1.7 | Commit M8 mini-milestones; fmt/clippy/test green | git + CI | clean commits, workspace green | in_progress |
 
 Progress conventions: mark done only after its Rust test + `cargo test --workspace` passes; one small commit per tasklet; watch CI after push.
