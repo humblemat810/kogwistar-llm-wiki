@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -197,6 +198,145 @@ pub fn bearer_from_headers(headers: &BTreeMap<String, String>) -> Option<String>
     }
 }
 
+fn jwt_scopes(claims: &BTreeMap<String, Value>) -> Vec<String> {
+    let mut scopes = Vec::new();
+    for key in ["scope", "scp"] {
+        let value = claims.get(key);
+        if let Some(Value::String(raw)) = value {
+            scopes.extend(raw.split_whitespace().map(str::to_owned));
+        } else if let Some(Value::Array(items)) = value {
+            for item in items {
+                if let Some(scope) = item.as_str() {
+                    if !scope.trim().is_empty() {
+                        scopes.push(scope.trim().to_owned());
+                    }
+                }
+            }
+        }
+    }
+    scopes
+        .into_iter()
+        .map(|scope| scope.trim().to_lowercase())
+        .filter(|scope| !scope.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn jwt_workspaces(claims: &BTreeMap<String, Value>) -> Vec<String> {
+    let raw = claims
+        .get("workspaces")
+        .or_else(|| claims.get("workspace_ids"))
+        .or_else(|| claims.get("allowed_workspaces"));
+    let mut values = Vec::new();
+    if let Some(Value::String(value)) = raw {
+        values.extend(value.split(',').map(str::trim).map(str::to_owned));
+    } else if let Some(Value::Array(items)) = raw {
+        for item in items {
+            if let Some(value) = item.as_str() {
+                if !value.trim().is_empty() {
+                    values.push(value.trim().to_owned());
+                }
+            } else if let Some(value) = item.as_i64() {
+                values.push(value.to_string());
+            }
+        }
+    }
+    values.retain(|value| !value.is_empty());
+    values
+}
+
+fn decode_jwt(
+    token: &str,
+    environment: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, Value>, McpAuthError> {
+    let secret = environment
+        .get("JWT_SECRET")
+        .map(String::as_str)
+        .unwrap_or_default();
+    if secret.trim().is_empty() {
+        return Err(McpAuthError::MissingJwtSecret);
+    }
+    let configured = environment
+        .get("JWT_ALG")
+        .map(String::as_str)
+        .unwrap_or("HS256")
+        .trim()
+        .to_uppercase();
+    let algorithm = match configured.as_str() {
+        "HS256" => Algorithm::HS256,
+        "RS256" => Algorithm::RS256,
+        _ => return Err(McpAuthError::InvalidBearer),
+    };
+    let decoding_key = if algorithm == Algorithm::RS256 {
+        DecodingKey::from_rsa_pem(secret.as_bytes()).map_err(|_| McpAuthError::InvalidBearer)?
+    } else {
+        DecodingKey::from_secret(secret.as_bytes())
+    };
+    let mut validation = Validation::new(algorithm);
+    validation.leeway = 0;
+    if let Some(audience) = environment
+        .get("JWT_AUD")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        validation.set_audience(&[audience]);
+    }
+    if let Some(issuer) = environment
+        .get("JWT_ISS")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        validation.set_issuer(&[issuer]);
+    }
+    let decoded =
+        jsonwebtoken::decode::<BTreeMap<String, Value>>(token, &decoding_key, &validation)
+            .map_err(|_| McpAuthError::InvalidBearer)?;
+    Ok(decoded.claims)
+}
+
+fn authenticate_jwt(
+    token: &str,
+    environment: &BTreeMap<String, String>,
+) -> Result<McpIdentity, McpAuthError> {
+    let claims = decode_jwt(token, environment)?;
+    let principal = ["sub", "client_id"]
+        .iter()
+        .find_map(|key| claims.get(*key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(McpAuthError::InvalidBearer)?
+        .to_owned();
+    let scopes = jwt_scopes(&claims);
+    let role = claims
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("ro")
+        .trim()
+        .to_lowercase();
+    let role = if role == "rw" { "rw" } else { "ro" };
+    let security_scope = ["security_scope", "tenant"]
+        .iter()
+        .find_map(|key| claims.get(*key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&principal)
+        .to_lowercase();
+    let mut workspaces = jwt_workspaces(&claims);
+    if workspaces.is_empty() {
+        workspaces.push(principal.clone());
+    }
+    Ok(McpIdentity {
+        principal_id: principal,
+        scopes,
+        role: role.to_owned(),
+        security_scope,
+        workspaces,
+    })
+}
+
 pub fn authenticate_bearer(
     value: Option<&str>,
     environment: &BTreeMap<String, String>,
@@ -222,6 +362,9 @@ pub fn authenticate_bearer(
     let matched_api = !api_expected.is_empty() && api_expected == supplied;
     let matched_mcp = !mcp_expected.is_empty() && mcp_expected == supplied;
     if !matched_api && !matched_mcp {
+        if auth_mode(environment) == "kogwistar_jwt" {
+            return authenticate_jwt(supplied, environment).map(Some);
+        }
         return Err(McpAuthError::InvalidBearer);
     }
     let scopes = if matched_mcp {
