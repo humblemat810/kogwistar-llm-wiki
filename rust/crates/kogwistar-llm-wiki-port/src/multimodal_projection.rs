@@ -6,6 +6,7 @@
 /// changing the graph schema. Self-contained: no external engine or embedding contract
 /// crates required; all types defined within this port.
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 /// Modality of a multimodal source unit.
@@ -85,6 +86,8 @@ pub struct MultimodalSourceUnit {
     pub modality: SourceModality,
     pub content_ref: Option<String>,
     pub asset_sha256: Option<String>,
+    pub text: Option<String>,
+    pub metadata: serde_json::Map<String, Value>,
     pub embedding_profile: Option<String>,
 }
 
@@ -98,6 +101,8 @@ impl MultimodalSourceUnit {
             content_ref: None,
             asset_sha256: None,
             embedding_profile: None,
+            text: None,
+            metadata: Map::new(),
         }
     }
 }

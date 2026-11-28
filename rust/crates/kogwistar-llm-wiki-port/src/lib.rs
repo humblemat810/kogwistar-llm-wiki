@@ -14,6 +14,7 @@ pub mod daemon_loop;
 pub mod diagnostics;
 pub mod disambiguation;
 pub mod embedding_adapter;
+pub mod embeddings;
 pub mod event_chain;
 pub mod gateway_protocol;
 pub mod grounding;
