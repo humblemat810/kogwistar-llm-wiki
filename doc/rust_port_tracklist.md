@@ -19,7 +19,7 @@ Python fallback contracts live in src/kogwistar_llm_wiki/. Each Rust slice mirro
 | M5 | Larger parity slices: embedding adapters, runtime contracts, multimodal projections, grounding, source-unit handling, archive restore/event-chain, disambiguation, service ops, reconciliation, patch policy, codex bridge, structured runner, compose TUI, project-memory APIs, daemon/projection/maintenance lifecycle loops | next |
 | M6 | Full rust parity audit + CI gates (fmt/clippy/test green) | done |
 | M7 | Version bump + publish new package to PyPI so downstream can pip install | pending |
-| M9 | End-to-end Rust CLI + MCP server pathway: command parser, dispatch contracts, MCP tool registry/auth/transport, daemon/longrun/otel support | in_progress |
+| M9 | End-to-end Rust CLI + MCP server pathway: command parser, dispatch contracts, MCP tool registry/auth/transport, daemon/longrun/otel support | done |
 
 ## Fine working tracklist
 
