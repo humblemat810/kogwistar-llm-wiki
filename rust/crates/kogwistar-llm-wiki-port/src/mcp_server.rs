@@ -9,6 +9,60 @@ pub struct McpToolSpec {
     pub input_schema: Value,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum McpServerError {
+    UnknownTool(String),
+    Gateway(String),
+}
+
+impl std::fmt::Display for McpServerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownTool(name) => write!(formatter, "unknown tool: {name}"),
+            Self::Gateway(message) => write!(formatter, "gateway error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for McpServerError {}
+
+pub trait McpGateway {
+    fn call_mcp_tool(&self, name: &str, arguments: &Value) -> Result<Value, McpServerError>;
+}
+
+pub fn dispatch(
+    name: &str,
+    arguments: &Value,
+    gateway: &dyn McpGateway,
+) -> Result<Value, McpServerError> {
+    let specs = tool_specs().map_err(|error| McpServerError::Gateway(error.to_string()))?;
+    if !specs.iter().any(|spec| spec.name == name) {
+        return Err(McpServerError::UnknownTool(name.to_owned()));
+    }
+    gateway.call_mcp_tool(name, arguments)
+}
+
+pub fn call_tool_result(result: Result<&Value, &McpServerError>, pretty: bool) -> Value {
+    match result {
+        Ok(value) => {
+            let text = if pretty {
+                serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+            } else {
+                value.to_string()
+            };
+            serde_json::json!({
+                "content": [{"type": "text", "text": text}],
+                "isError": false,
+                "structuredContent": value,
+            })
+        }
+        Err(error) => serde_json::json!({
+            "content": [{"type": "text", "text": error.to_string()}],
+            "isError": true,
+        }),
+    }
+}
+
 pub fn tool_specs() -> Result<Vec<McpToolSpec>, serde_json::Error> {
     let raw_specs = [
         include_str!("mcp_tool_specs_1.json"),
