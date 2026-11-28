@@ -18,7 +18,8 @@ Python fallback contracts live in src/kogwistar_llm_wiki/. Each Rust slice mirro
 | M4 | Workbench: bounded lens projections, semantic-lens snapshots, cockpit action/patch proposal validation, review artifacts | done |
 | M5 | Larger parity slices: embedding adapters, runtime contracts, multimodal projections, grounding, source-unit handling, archive restore/event-chain, disambiguation, service ops, reconciliation, patch policy, codex bridge, structured runner, compose TUI, project-memory APIs, daemon/projection/maintenance lifecycle loops | next |
 | M6 | Full rust parity audit + CI gates (fmt/clippy/test green) | done |
-| M7 | Version bump + publish new package to PyPI so downstream can pip install | in_progress |
+| M7 | Version bump + publish new package to PyPI so downstream can pip install | pending |
+| M9 | End-to-end Rust CLI + MCP server pathway: command parser, dispatch contracts, MCP tool registry/auth/transport, daemon/longrun/otel support | in_progress |
 
 ## Fine working tracklist
 
@@ -109,3 +110,24 @@ Scope mirrors Python fallback contracts under `src/kogwistar_llm_wiki/maintenanc
 | T8.1.7 | Commit M8 mini-milestones; fmt/clippy/test green | git + CI | clean commits, workspace green | done |
 
 Progress conventions: mark done only after its Rust test + `cargo test --workspace` passes; one small commit per tasklet; watch CI after push.
+
+
+## M9 → end-to-end Rust CLI + MCP server pathway
+
+Normal Python entrypoints remain under `src/kogwistar_llm_wiki/cli/` and `src/kogwistar_llm_wiki/agent/mcp_server.py`. This milestone adds Rust equivalents without changing llm-wiki Python contracts.
+
+| Tasklet | Description | Rust file(s) | Test gate | Status |
+|---|---|---|---|---|
+| T9.1 | CLI global settings and parsed invocation contract (`--data-dir`, `--backend`, `--dsn`, split-derived, persistence mode) | src/cli.rs, tests/cli.rs | Rust tests accept valid flags, reject invalid backend/persistence, infer env defaults | done |
+| T9.2 | CLI command routing for demo, ingest, report, workbench, mcp, serve, embedding_service, seed_bundle | src/cli.rs | Rust test routes each command and preserves required/optional arguments | done |
+| T9.3 | Archive, embeddings migration, codex memory/bridge, compose command routing | src/cli.rs | Rust tests cover all subcommands and handler identities | planned |
+| T9.4 | Daemon projection/maintenance and maintenance-control routing | src/cli.rs | Rust tests route lifecycle subcommands and payload fields | planned |
+| T9.5 | CLI dispatch/runtime seam into existing Rust port services | src/cli.rs, existing service modules | Rust tests execute at least demo/report happy paths through Rust runtime | planned |
+| T9.6 | MCP tool registry parity with Python `_tool_specs()` | src/mcp_server.rs | Rust tests compare tool names, descriptions, schemas, and annotations | planned |
+| T9.7 | MCP call dispatch and JSON-RPC error contracts | src/mcp_server.rs | Rust tests cover list/call, unknown tool, payload decoding, success result shape | planned |
+| T9.8 | MCP auth settings, header/identity extraction, request-header propagation | src/mcp_server.rs | Rust tests cover env fallback, bearer identity, forbidden headers | planned |
+| T9.9 | MCP stdio transport and streamable HTTP ASGI-equivalent contract | src/mcp_server.rs | Rust tests cover initialized request, notification handling, HTTP method/path dispatch | planned |
+| T9.10 | MCP SSE transport and session/event contract | src/mcp_server.rs | Rust tests cover session headers, event stream framing, disconnect behavior | planned |
+| T9.11 | MCP runtime gateway seam into existing Rust services | src/mcp_server.rs, service modules | Rust tests execute representative tool end-to-end without Python | planned |
+| T9.12 | Daemon/longrun/otel/projection-worker runtime support for CLI and MCP | daemon/longrun/otel modules | Rust tests cover lifecycle startup, shutdown, trace/event export contract | planned |
+| T9.13 | End-to-end CLI + MCP Rust smoke tests and CI gate | tests/cli.rs, tests/mcp_server.rs | cargo fmt/clippy/test green; no Python invoked in Rust pathway | planned |
