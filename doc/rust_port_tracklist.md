@@ -123,7 +123,7 @@ Normal Python entrypoints remain under `src/kogwistar_llm_wiki/cli/` and `src/ko
 | T9.3 | Archive, embeddings migration, codex memory/bridge, compose command routing | src/cli.rs | Rust tests cover all subcommands and handler identities | done |
 | T9.4 | Daemon projection/maintenance and maintenance-control routing | src/cli.rs | Rust tests route lifecycle subcommands and payload fields | done |
 | T9.5 | CLI dispatch/runtime seam into existing Rust port services | src/cli.rs, src/cli_runtime.rs | Rust tests execute at least demo/report happy paths through Rust runtime | done |
-| T9.6 | MCP tool registry parity with Python `_tool_specs()` | src/mcp_server.rs | Rust tests compare tool names, descriptions, schemas, and annotations | planned |
+| T9.6 | MCP tool registry parity with Python `_tool_specs()` | src/mcp_server.rs, src/mcp_tool_specs_1.json, src/mcp_tool_specs_2.json, src/mcp_tool_specs_3.json, src/mcp_tool_specs_4.json | Rust tests compare tool names, descriptions, schemas, and annotations | done |
 | T9.7 | MCP call dispatch and JSON-RPC error contracts | src/mcp_server.rs | Rust tests cover list/call, unknown tool, payload decoding, success result shape | planned |
 | T9.8 | MCP auth settings, header/identity extraction, request-header propagation | src/mcp_server.rs | Rust tests cover env fallback, bearer identity, forbidden headers | planned |
 | T9.9 | MCP stdio transport and streamable HTTP ASGI-equivalent contract | src/mcp_server.rs | Rust tests cover initialized request, notification handling, HTTP method/path dispatch | planned |

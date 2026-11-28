@@ -49,6 +49,7 @@ pub mod maintenance_statistics;
 pub mod maintenance_status;
 pub mod maintenance_strategies;
 pub mod maintenance_worker;
+pub mod mcp_server;
 pub mod models;
 pub mod multimodal_projection;
 pub mod observation_critic;
