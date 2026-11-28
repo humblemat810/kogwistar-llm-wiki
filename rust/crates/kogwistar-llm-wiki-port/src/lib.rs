@@ -50,6 +50,7 @@ pub mod maintenance_status;
 pub mod maintenance_strategies;
 pub mod maintenance_worker;
 pub mod mcp_auth;
+pub mod mcp_runtime;
 pub mod mcp_server;
 pub mod models;
 pub mod multimodal_projection;
