@@ -127,7 +127,7 @@ Normal Python entrypoints remain under `src/kogwistar_llm_wiki/cli/` and `src/ko
 | T9.7 | MCP call dispatch and JSON-RPC error contracts | src/mcp_server.rs | Rust tests cover list/call, unknown tool, payload decoding, success result shape | done |
 | T9.8 | MCP auth settings, header/identity extraction, request-header propagation | src/mcp_auth.rs, src/mcp_server.rs | Rust tests cover env fallback, bearer identity, forbidden headers | in_progress |
 | T9.9 | MCP stdio transport and streamable HTTP ASGI-equivalent contract | src/mcp_server.rs | Rust tests cover initialized request, notification handling, HTTP method/path dispatch | done |
-| T9.10 | MCP SSE transport and session/event contract | src/mcp_server.rs | Rust tests cover session headers, event stream framing, disconnect behavior | planned |
+| T9.10 | MCP SSE transport and session/event contract | src/mcp_server.rs | Rust tests cover session headers, event stream framing, disconnect behavior | done |
 | T9.11 | MCP runtime gateway seam into existing Rust services | src/mcp_server.rs, service modules | Rust tests execute representative tool end-to-end without Python | planned |
 | T9.12 | Daemon/longrun/otel/projection-worker runtime support for CLI and MCP | daemon/longrun/otel modules | Rust tests cover lifecycle startup, shutdown, trace/event export contract | planned |
 | T9.13 | End-to-end CLI + MCP Rust smoke tests and CI gate | tests/cli.rs, tests/mcp_server.rs | cargo fmt/clippy/test green; no Python invoked in Rust pathway | planned |

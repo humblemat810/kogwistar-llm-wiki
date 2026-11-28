@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub type McpSseResponse = (u16, Vec<(String, String)>, Value);
+
 pub use crate::mcp_auth::{
     auth_mode, authenticate_bearer, bearer_from_headers, build_mcp_auth, headers_from_scope,
     McpAuthSettings,
@@ -141,6 +143,51 @@ pub fn handle_http_request(
         "GET" => Ok((405, serde_json::json!({"error": "method not allowed"}))),
         _ => Ok((405, serde_json::json!({"error": "method not allowed"}))),
     }
+}
+
+pub fn handle_sse_request(
+    method: &str,
+    path: &str,
+    session_id: &str,
+    message: &Value,
+    gateway: &dyn McpGateway,
+) -> Result<McpSseResponse, McpServerError> {
+    if path == "/mcp" {
+        if method == "GET" {
+            return Ok((
+                200,
+                vec![
+                    ("content-type".to_owned(), "text/event-stream".to_owned()),
+                    ("mcp-session-id".to_owned(), session_id.to_owned()),
+                ],
+                Value::String("event: connected\n\n".to_owned()),
+            ));
+        }
+        return Ok((
+            405,
+            Vec::new(),
+            serde_json::json!({"error": "method not allowed"}),
+        ));
+    }
+    if path == "/mcp/messages" {
+        if method != "POST" {
+            return Ok((
+                405,
+                Vec::new(),
+                serde_json::json!({"error": "method not allowed"}),
+            ));
+        }
+        let (_status, response) = match handle_stdio_message(message, gateway)? {
+            Some(response) => (200, response),
+            None => (202, serde_json::json!({})),
+        };
+        return Ok((
+            202,
+            vec![("mcp-session-id".to_owned(), session_id.to_owned())],
+            response,
+        ));
+    }
+    Ok((404, Vec::new(), Value::String("Not Found".to_owned())))
 }
 
 pub fn tool_specs() -> Result<Vec<McpToolSpec>, serde_json::Error> {
