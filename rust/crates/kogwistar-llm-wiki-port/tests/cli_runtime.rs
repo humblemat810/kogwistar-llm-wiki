@@ -136,3 +136,77 @@ fn dispatches_file_demo_and_report_happy_paths() {
     assert_eq!(report["graph_spaces"][0]["node_count"], 1);
     assert_eq!(report["maintenance_patch_report"]["patch_count"], 0);
 }
+
+#[test]
+fn dispatches_daemon_lifecycle_commands_to_rust_loops() {
+    let mut runtime = InMemoryCliRuntime::default();
+    let environment = BTreeMap::new();
+    let strings = |values: &[&str]| {
+        values
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+    };
+
+    let projection = run_cli(
+        &parse_cli_with_env(
+            &strings(&[
+                "daemon",
+                "projection",
+                "--workspace",
+                "ws",
+                "--vault",
+                "vault",
+                "--interval",
+                "5",
+            ]),
+            &environment,
+        )
+        .unwrap(),
+        &mut runtime,
+    )
+    .unwrap();
+    assert_eq!(projection["workspace_id"], "ws");
+    assert_eq!(projection["vault"], "vault");
+    assert_eq!(projection["interval"], 5.0);
+    assert_eq!(projection["status"], "stopped");
+
+    let maintenance = run_cli(
+        &parse_cli_with_env(
+            &strings(&[
+                "daemon",
+                "maintenance",
+                "--workspace",
+                "ws",
+                "--interval",
+                "10",
+                "--background-interval",
+                "600",
+            ]),
+            &environment,
+        )
+        .unwrap(),
+        &mut runtime,
+    )
+    .unwrap();
+    assert_eq!(maintenance["background_interval"], 600.0);
+    assert_eq!(maintenance["status"], "stopped");
+
+    let control = run_cli(
+        &parse_cli_with_env(
+            &strings(&[
+                "daemon",
+                "maintenance-control",
+                "--request-enabled",
+                "true",
+                "--status",
+            ]),
+            &environment,
+        )
+        .unwrap(),
+        &mut runtime,
+    )
+    .unwrap();
+    assert_eq!(control["request_enabled"], "true");
+    assert_eq!(control["status"], "true");
+}

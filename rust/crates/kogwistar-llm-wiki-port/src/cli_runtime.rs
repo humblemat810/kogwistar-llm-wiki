@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::cli::CliInvocation;
+use crate::daemon_loop::{MaintenanceDaemon, ProjectionDaemon};
 use crate::ids::stable_id;
 use crate::ingest::artifacts::{artifact_node, ArtifactNode};
 use crate::ingest::run::{ingest_run_plan, parsed_artifacts};
@@ -237,6 +238,7 @@ pub fn run_cli<R: CliRuntime>(
         crate::cli::CliCommand::Demo => run_content_command(invocation, runtime, true),
         crate::cli::CliCommand::Ingest => run_content_command(invocation, runtime, false),
         crate::cli::CliCommand::Report => run_report_command(invocation, runtime),
+        crate::cli::CliCommand::Daemon => run_daemon_command(invocation),
         _ => Err(CliRuntimeError::UnsupportedCommand),
     }
 }
@@ -275,6 +277,63 @@ fn run_content_command<R: CliRuntime>(
     } else {
         Ok(json!({"workspace_id": workspace_id, "source": source, "artifacts": artifact_value}))
     }
+}
+
+fn run_daemon_command(invocation: &CliInvocation) -> Result<Value, CliRuntimeError> {
+    let Some(subcommand) = invocation.subcommand.as_deref() else {
+        return Err(CliRuntimeError::MissingArgument("daemon_type"));
+    };
+    match subcommand {
+        "projection" => {
+            let workspace_id = required_string(invocation, "workspace")?;
+            let vault = required_string(invocation, "vault")?;
+            let interval = interval_value(invocation, "interval", 5.0)?;
+            let daemon = ProjectionDaemon::new(interval);
+            let iterations = daemon.inner.with_max_iterations(1).run_pass(|| true);
+            Ok(json!({
+                "workspace_id": workspace_id,
+                "vault": vault,
+                "interval": interval,
+                "iterations": iterations,
+                "status": "stopped",
+            }))
+        }
+        "maintenance" => {
+            let workspace_id = required_string(invocation, "workspace")?;
+            let interval = interval_value(invocation, "interval", 10.0)?;
+            let background_interval = interval_value(invocation, "background_interval", 600.0)?;
+            let daemon = MaintenanceDaemon::new(interval);
+            let iterations = daemon.inner.with_max_iterations(1).run_pass(|| true);
+            Ok(json!({
+                "workspace_id": workspace_id,
+                "interval": interval,
+                "background_interval": background_interval,
+                "iterations": iterations,
+                "status": "stopped",
+            }))
+        }
+        "maintenance-control" => Ok(json!({
+            "request_enabled": invocation.first_argument("request_enabled"),
+            "background_enabled": invocation.first_argument("background_enabled"),
+            "enabled": invocation.first_argument("enabled"),
+            "profile": invocation.first_argument("profile"),
+            "status": invocation.first_argument("status").unwrap_or("false"),
+        })),
+        _ => Err(CliRuntimeError::UnsupportedCommand),
+    }
+}
+
+fn interval_value(
+    invocation: &CliInvocation,
+    name: &'static str,
+    default: f64,
+) -> Result<f64, CliRuntimeError> {
+    let Some(value) = invocation.first_argument(name) else {
+        return Ok(default);
+    };
+    value
+        .parse::<f64>()
+        .map_err(|_| CliRuntimeError::InvalidChoice(name, value.to_owned()))
 }
 
 fn run_report_command<R: CliRuntime>(
