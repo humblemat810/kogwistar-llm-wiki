@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -137,8 +138,11 @@ def test_local_publishers_default_to_application_and_offer_explicit_targets() ->
 
 def test_release_verifier_matches_package_version_and_rejects_mismatch() -> None:
     script = ROOT / "scripts" / "verify_release_version.py"
+    package_version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
     matching = subprocess.run(
-        [sys.executable, str(script), "--tag", "v0.5.16"],
+        [sys.executable, str(script), "--tag", f"v{package_version}"],
         cwd=ROOT,
         check=False,
         capture_output=True,

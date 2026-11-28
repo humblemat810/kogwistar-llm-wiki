@@ -25,8 +25,8 @@ jobs:
       # Keep this validation aligned with the exact source revisions used by
       # the release image. The adapter source revisions are immutable merged
       # main commits and are installed directly by the release build.
-  KOGWISTAR_REVISION: 9f36d88a8148e7a643fa72ca49f955228f17308d
-  KG_DOC_PARSER_REVISION: 76f38f9002b47ef07fda315e5cfa15d50d2eee45
+      KOGWISTAR_REVISION: 9f36d88a8148e7a643fa72ca49f955228f17308d
+      KG_DOC_PARSER_REVISION: 76f38f9002b47ef07fda315e5cfa15d50d2eee45
       OBSIDIAN_SINK_REVISION: 38591e3155e522845cb3c05c1c2db94665ac26ab
       PINECONE_REVISION: f66f6bc9755f55ab0411a52838e0aae7c241f62c
       QDRANT_REVISION: af16f6864c1839add7e74f87d29b0d5503d626fc

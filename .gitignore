@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.pyd
@@ -88,3 +88,56 @@ Thumbs.db
 
 # rust builds
 rust/target-api-loopback/
+rust/target/
+rust/cargo_*out*.txt
+rust/clippy*.txt
+rust/*_result.txt
+
+# Local task diagnostics and reports
+.serena/
+/*apply_*.py
+/*apply_fixes.py
+/*build_copy*.py
+/*check_*.py
+/*ccheck*.py
+/*env_check.py
+/*env_quick.py
+/*filter_depth.py
+/*find_*.py
+/*fix_*.py
+/*gen_*.py
+/*insert_*.py
+/*inspect_*.py
+/*maturin_dev*.py
+/*patch_*.py
+/*scan_*.py
+/*show_*.py
+/*tail4.py
+/*update_*.py
+/*view_*.py
+/*write_*.py
+/kogwistar-email-plugin/
+/kogwistar-obsidian-source/
+/fix_lib.ps1
+/maturin_develop_out*.txt
+/rust/crates/kogwistar-llm-wiki-port/src/write_disambig.py
+/rust/crates/kogwistar-llm-wiki-python/Cargo.lock
+/rust/crates/kogwistar-llm-wiki-python/target/
+/rust/fmt_out.txt
+/tmp_apply_probe*.txt
+resource-report-*/
+resource-report-*.zip
+ann-*.json
+depth_scan.txt
+cargo_build_out*.txt
+cargo_check_out*.txt
+pytest_native_out.txt
+pytest_sqlite_out2.txt
+tracklist_content.md
+
+# codex
+.codex
+
+# Rust port scratch files
+*.rs.tmp
+

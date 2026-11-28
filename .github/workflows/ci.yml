@@ -375,20 +375,12 @@ jobs:
           fi
 
   rust:
-    name: Kogwistar Rust checks
+    name: Root Rust port checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Checkout application
         uses: actions/checkout@v7
-
-      - name: Checkout pinned Kogwistar
-        uses: actions/checkout@v7
-        with:
-          repository: humblemat810/kogwistar
-          ref: ${{ env.KOGWISTAR_REVISION }}
-          path: kogwistar
-          persist-credentials: false
 
       - name: Set up pinned Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -397,13 +389,13 @@ jobs:
           components: clippy,rustfmt
 
       - name: Check formatting
-        working-directory: kogwistar/rust
+        working-directory: rust
         run: cargo fmt --all -- --check
 
       - name: Test Rust workspace
-        working-directory: kogwistar/rust
+        working-directory: rust
         run: cargo test --workspace --all-targets --locked
 
       - name: Deny Clippy warnings
-        working-directory: kogwistar/rust
+        working-directory: rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

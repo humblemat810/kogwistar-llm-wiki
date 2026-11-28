@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kogwistar-llm-wiki"
-version = "0.5.16"
+version = "0.5.18"
 description = "LLM-Wiki: a continuously-learning knowledge system built on Kogwistar"
 readme = "README.md"
 license = { text = "MIT" }
@@ -151,6 +151,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+kogwistar_llm_wiki = ["_kogwistar_llm_wiki_rust.pyd", "_kogwistar_llm_wiki_rust*.so"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

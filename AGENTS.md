@@ -17,6 +17,28 @@
 
 ## Testing
 
+### Fixed-Batch TDD For Existing Goals
+
+- For each existing goal item, first enumerate its complete, bounded set of
+  required executable tests and record the exact selectors. Run or record the
+  baseline before implementation; do not inflate checklist denominators.
+- Add the whole test batch first. Once implementation begins, do not add tests
+  merely to defer closure. Add a test later only for a reproduced regression or
+  an explicitly approved contract change, and document why.
+- Implement against the frozen batch, then run in order: focused unit tests,
+  followed by the smallest relevant integration batch. Fix failures without
+  broadening scope.
+- When every frozen applicable test passes, mark that existing goal item PASS
+  immediately and record selector/backend/evidence. If a required case is
+  missing, say so explicitly; never imply the batch is complete.
+- Keep existing goal/checklist IDs and denominators authoritative. Do not
+  reopen completed items without concrete regression, invalid prior evidence,
+  or approved contract change.
+- For each slice, report tests and results, compatibility evidence, completion
+  state, remaining blockers, and coarse/fine checklist percentages. Commit
+  tested slices; batch pushes rather than pushing every commit, and inspect CI
+  after each push.
+
 - Before treating a pytest timeout-after-success as an application failure,
   check the pytest cache path. On this Windows workspace, unwritable cache
   directories have repeatedly caused commands to reach `100% passed` and then
