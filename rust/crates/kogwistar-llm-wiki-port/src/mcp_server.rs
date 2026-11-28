@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use crate::mcp_auth::{
+    auth_mode, authenticate_bearer, bearer_from_headers, build_mcp_auth, headers_from_scope,
+    McpAuthSettings,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct McpToolSpec {
     pub name: String,

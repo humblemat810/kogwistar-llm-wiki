@@ -125,7 +125,7 @@ Normal Python entrypoints remain under `src/kogwistar_llm_wiki/cli/` and `src/ko
 | T9.5 | CLI dispatch/runtime seam into existing Rust port services | src/cli.rs, src/cli_runtime.rs | Rust tests execute at least demo/report happy paths through Rust runtime | done |
 | T9.6 | MCP tool registry parity with Python `_tool_specs()` | src/mcp_server.rs, src/mcp_tool_specs_1.json, src/mcp_tool_specs_2.json, src/mcp_tool_specs_3.json, src/mcp_tool_specs_4.json | Rust tests compare tool names, descriptions, schemas, and annotations | done |
 | T9.7 | MCP call dispatch and JSON-RPC error contracts | src/mcp_server.rs | Rust tests cover list/call, unknown tool, payload decoding, success result shape | done |
-| T9.8 | MCP auth settings, header/identity extraction, request-header propagation | src/mcp_server.rs | Rust tests cover env fallback, bearer identity, forbidden headers | planned |
+| T9.8 | MCP auth settings, header/identity extraction, request-header propagation | src/mcp_auth.rs, src/mcp_server.rs | Rust tests cover env fallback, bearer identity, forbidden headers | in_progress |
 | T9.9 | MCP stdio transport and streamable HTTP ASGI-equivalent contract | src/mcp_server.rs | Rust tests cover initialized request, notification handling, HTTP method/path dispatch | planned |
 | T9.10 | MCP SSE transport and session/event contract | src/mcp_server.rs | Rust tests cover session headers, event stream framing, disconnect behavior | planned |
 | T9.11 | MCP runtime gateway seam into existing Rust services | src/mcp_server.rs, service modules | Rust tests execute representative tool end-to-end without Python | planned |
